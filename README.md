@@ -4,6 +4,55 @@ A Hermes Desktop plugin that docks a live remote-desktop thumbnail on the right.
 
 Plugin id: `computer-viewer` (folder name must match).
 
+## Connect any computer
+
+The plugin talks to two kinds of computer:
+
+- **Cloud** — the machine already speaks the plugin's protocol. Paste a websocket URL, a noVNC page, a session API URL, or an API key (Orgo, a TLS-fronted VPS, a Docker desktop box). Detection is automatic; you do not pick a mode.
+- **Local** — a Mac, Windows PC, or Linux box on your LAN or Tailscale. Run the one-paste script **on that machine**. It binds VNC to localhost and publishes a WebSocket on port **6080**. Paste the printed `ws://…/websockify` address into **Computer address**, plus the VNC password (and on a Mac, your username).
+
+The scripts are idempotent and print the exact paste address when they finish. Tailscale MagicDNS names and `.local` hostnames both work. websockify is pinned (`websockify==0.13.0` on Mac/Windows; distro package on Linux). LAN / Tailscale only — never the public internet.
+
+### macOS
+
+On the Mac you want to view:
+
+1. **System Settings → General → Sharing → enable Screen Sharing** → Screen Sharing **(i)** → **VNC viewers may control screen with password** → set a password of **at most 8 characters** (classic VNC DES truncates longer secrets).
+2. In Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/connect-mac.sh | bash
+```
+
+3. In the plugin: paste the printed address, your Mac username (Advanced → Username), and that VNC password.
+
+The script does **not** turn Screen Sharing on (kickstart needs sudo and drops live sessions). It installs pinned websockify in `~/.hermes-cv/venv` and a LaunchAgent that survives login.
+
+### Windows (Administrator PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/connect-windows.ps1 | iex
+```
+
+Run in **Administrator** PowerShell (the script self-elevates). It installs TightVNC (loopback-only) + websockify as a SYSTEM scheduled task and prints the address plus a generated 8-character VNC password.
+
+### Linux (X11; wlroots-Wayland best-effort)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/connect-linux.sh | bash
+```
+
+X11 uses `x11vnc`. wlroots compositors (Sway, Hyprland, …) use `wayvnc` (less battle-tested; noVNC may not speak wayvnc's RSA-AES). **GNOME/KDE Wayland is not supported** — log into an Xorg session. The script prints the address and the VNC password it stored.
+
+## Security
+
+- **Never expose VNC or the websocket port to the internet.** These scripts bind VNC (`:5900`) to localhost and only publish websockify (`:6080`) on the private network. Use Tailscale or LAN. No router port-forward, no public IP, no `0.0.0.0` on 5900.
+- **August 2026 macOS Screen Sharing CVE (CVE-2026-65400).** Unpatched Screen Sharing can authenticate an attacker on the network **without valid credentials**. Apple patched this in macOS **Sonoma 14.8.9**, **Sequoia 15.7.9**, and **Tahoe 26.6.1**. Update before enabling Screen Sharing. `connect-mac.sh` warns if `sw_vers` is below those builds. Never publish port 5900.
+- **VNC passwords are weak.** Classic VNC authentication is DES with an **8-character** secret (longer passwords are truncated). Treat it as a LAN PIN, not an account password.
+- **`ws://` is unencrypted.** That is fine on a private net (this machine, LAN, Tailscale). Public hosts need `wss://` with a trusted certificate; self-signed certs fail *silently* at the websocket layer.
+
+Passwords stored by the plugin live in plugin storage **in plain text** (`hermes.plugin.computer-viewer.*`). Prefer a token in the WebSocket URL or a session endpoint for anything sensitive.
+
 ## Install
 
 Copy this file to Hermes's desktop-plugin directory. The folder name **must** be `computer-viewer`.
@@ -12,8 +61,8 @@ Copy this file to Hermes's desktop-plugin directory. The folder name **must** be
 # macOS / Linux (default profile)
 mkdir -p ~/.hermes/desktop-plugins/computer-viewer
 cp plugin.js ~/.hermes/desktop-plugins/computer-viewer/plugin.js
-cp connect-mac.sh ~/.hermes/desktop-plugins/computer-viewer/connect-mac.sh
-chmod +x ~/.hermes/desktop-plugins/computer-viewer/connect-mac.sh
+cp connect-mac.sh connect-linux.sh ~/.hermes/desktop-plugins/computer-viewer/
+chmod +x ~/.hermes/desktop-plugins/computer-viewer/connect-*.sh
 ```
 
 Named Hermes profile:
@@ -21,14 +70,15 @@ Named Hermes profile:
 ```bash
 mkdir -p ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer
 cp plugin.js ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/plugin.js
-cp connect-mac.sh ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-mac.sh
-chmod +x ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-mac.sh
+cp connect-mac.sh connect-linux.sh ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/
+chmod +x ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-*.sh
 ```
 
 Windows (typical):
 
 ```text
 %LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\plugin.js
+%LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\connect-windows.ps1
 ```
 
 Then:
@@ -77,27 +127,55 @@ Paste `ws://localhost:6080/websockify` into **Computer address**, plus your VNC 
 
 ### 2. Use a spare Mac as your computer
 
-1. **Enable Screen Sharing** (manual): System Settings → General → Sharing → Screen Sharing.
-2. **Run `connect-mac.sh`** (one paste in Terminal — no sudo). From this folder, or after install:
+1. **Enable Screen Sharing** (manual — the script will not do this): System Settings → General → Sharing → enable Screen Sharing → Screen Sharing **(i)** → **VNC viewers may control screen with password** → set an **8-character-max** password (classic VNC DES truncates longer secrets). Do not use `kickstart`; it needs sudo and drops live sessions.
+2. **Run `connect-mac.sh`** (one paste in Terminal — no sudo):
 
    ```bash
-   bash connect-mac.sh
+   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/connect-mac.sh | bash
    ```
 
-   The script installs `websockify` via `python3 -m pip install --user websockify` (falling back to `pipx` or `brew` if present), writes a LaunchAgent at `~/Library/LaunchAgents/com.computer-viewer.websockify.plist` that runs `websockify 6080 localhost:5900` at login, loads it, and prints an address like `ws://<hostname>.local:6080/websockify`. Tailscale names work too (`ws://<tailscale-name>:6080/websockify`).
-3. In the plugin: paste that address, then under **Advanced** fill **Username** (your Mac login) and **Password**.
+   Or from this folder: `bash connect-mac.sh`.
+
+   The script creates `~/.hermes-cv/venv`, installs pinned `websockify==0.13.0`, and writes a LaunchAgent at `~/Library/LaunchAgents/com.computer-viewer.websockify.plist` (`RunAtLoad` + `KeepAlive`, `ThrottleInterval` 10) whose `ProgramArguments` use the **absolute** venv `websockify` (launchd has a bare PATH — `pip --user` is not visible). Mapping is `6080 → localhost:5900`. Logs: `~/.hermes-cv/websockify.log`. It prints `ws://<LocalHostName>.local:6080/websockify`. Tailscale names work too.
+3. In the plugin: paste that address, then **Username** (your Mac login) and **Password** (the Screen Sharing VNC password). Update macOS past the Aug-2026 Screen Sharing CVE before exposing anything (see **Security**).
 
 `ws://` is allowed only for private-network hosts (this Mac, LAN, `.local`, Tailscale `100.64.0.0/10` / `*.ts.net`). Public hosts need `wss://`.
 
 Retina Macs report a large framebuffer. Keep **Fit** scale (the default) so the view shrinks into the pane; **Native** will scroll.
 
-### 3. Grok-Bot-style local Docker box
+### 3. Use a Windows PC as your computer
+
+In an **Administrator** PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/connect-windows.ps1 | iex
+```
+
+The script self-elevates, installs TightVNC Server from official `tightvnc.com` (service + SAS/CAD + VNC auth), forces **loopback-only** via `HKLM\SOFTWARE\TightVNC\Server` (`AllowLoopback=1`, `LoopbackOnly=1`), installs Python 3.12 if needed (`winget … Python.Python.3.12 --scope machine`), pins `websockify==0.13.0`, and registers a SYSTEM scheduled task at startup with `RestartCount 3` / `RestartInterval 1min` and **`ExecutionTimeLimit` zero** (the default would kill the task after 72 hours). Command: `python -m websockify 0.0.0.0:6080 127.0.0.1:5900`. Firewall: inbound TCP 6080 on the **Private** profile only.
+
+It prints `ws://<COMPUTERNAME>:6080/websockify` and the generated 8-character VNC password. UAC prompts are visible in TightVNC service mode (expected). Defender may flag VNC — allow it.
+
+### 4. Use a Linux machine as your computer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/connect-linux.sh | bash
+```
+
+Branches on `$XDG_SESSION_TYPE`:
+
+- **X11** — installs `x11vnc` + `websockify` (apt/dnf/pacman; `novnc` optional), stores a VNC password with `x11vnc -storepasswd` in `~/.hermes-cv/vncpwd`, and enables systemd **user** units `computer-viewer-x11vnc.service` (`x11vnc -localhost -forever -shared -noxdamage -rfbauth … -rfbport 5900`) and `computer-viewer-websockify.service` (`6080 → localhost:5900`, `Restart=always`). `loginctl enable-linger` keeps them up without a login.
+- **wlroots Wayland** (Sway, Hyprland, …) — `wayvnc` on localhost with RSA-AES / `relax_encryption`, websockify in front. Best-effort; noVNC may still reject wayvnc's security types.
+- **GNOME/KDE Wayland** — refuses with guidance to log into an Xorg session.
+
+Paste the printed `ws://<hostname>:6080/websockify` and the VNC password the script set.
+
+### 5. Grok-Bot-style local Docker box
 
 Containers like grokbot-shim expose a full noVNC page at `http://127.0.0.1:6080/vnc.html`.
 
 Paste `http://127.0.0.1:6080/vnc.html` to embed that page (Reload / Open in browser). Or paste `ws://127.0.0.1:6080/websockify` for scale, view-only, clipboard, and Ctrl+Alt+Del.
 
-### 4. Remote VPS
+### 6. Remote VPS
 
 Public hosts **must** be `wss://` behind TLS (nginx, Caddy, …). Example endpoint: `wss://host/websockify`.
 
@@ -145,7 +223,7 @@ desktop.example.com {
 }
 ```
 
-### 5. Rotating APIs (Orgo, Modal, …)
+### 7. Rotating APIs (Orgo, Modal, …)
 
 Paste the session API URL into **Computer address** when the desktop URL is minted per session instead of being stable. (Advanced: Session JSON.)
 
