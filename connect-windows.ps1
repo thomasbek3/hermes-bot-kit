@@ -6,7 +6,7 @@
 
 .NOTES
   Must run elevated (Administrator). Self-elevates via Start-Process -Verb RunAs.
-  Idempotent. LAN / Tailscale only — VNC is loopback-only; only TCP 6080 is opened
+  Idempotent. LAN / Tailscale only - VNC is loopback-only; only TCP 6080 is opened
   on the Private firewall profile.
 
   TightVNC MSI SET_PASSWORD / VALUE_OF_PASSWORD is historically unreliable
@@ -63,8 +63,8 @@ if (-not (Test-IsAdmin)) {
     }
 }
 
-Write-Host 'Computer viewer — Windows TightVNC + websockify bridge'
-Write-Host "LAN / Tailscale only — VNC stays on 127.0.0.1:$VncPort; websocket on 0.0.0.0:$ListenPort."
+Write-Host 'Computer viewer - Windows TightVNC + websockify bridge'
+Write-Host "LAN / Tailscale only - VNC stays on 127.0.0.1:$VncPort; websocket on 0.0.0.0:$ListenPort."
 Write-Host ''
 
 function New-VncPassword8 {
@@ -107,7 +107,7 @@ function Get-OrCreateVncPassword {
     } catch {
         # Best-effort ACL harden; the file still exists.
     }
-    Write-Step "Generated 8-char VNC password (DES limit) → $PasswordFile"
+    Write-Step "Generated 8-char VNC password (DES limit) -> $PasswordFile"
     return $pw
 }
 
@@ -165,7 +165,7 @@ if (-not $tvnInstalled) {
     $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest -Uri $TightVncUrl -OutFile $msi -UseBasicParsing
     Write-Step 'Installing TightVNC Server (service, SAS/CAD, VNC auth)'
-    # MSI password properties are unreliable — see header comment. Print $vncPassword later regardless.
+    # MSI password properties are unreliable - see header comment. Print $vncPassword later regardless.
     $msiArgs = @(
         '/i', $msi,
         '/quiet', '/norestart',
@@ -182,7 +182,7 @@ if (-not $tvnInstalled) {
         Write-Warning "msiexec exited $($p.ExitCode). TightVNC may already be present; continuing."
     }
 } else {
-    Write-Step 'TightVNC Server already installed — skipping MSI'
+    Write-Step 'TightVNC Server already installed - skipping MSI'
 }
 
 Write-Step 'Hardening TightVNC to loopback-only (registry, best-effort)'
@@ -237,7 +237,7 @@ Write-Step "Using Python: $python"
 if ($python -match '\\Users\\') {
     Write-Warning "Python looks like a per-user install. The SYSTEM scheduled task may not see it. Prefer: winget install -e --id Python.Python.3.12 --scope machine"
 }
-Write-Step "Installing $WebsockifyPin (machine site-packages — SYSTEM scheduled task has no user PATH)"
+Write-Step "Installing $WebsockifyPin (machine site-packages - SYSTEM scheduled task has no user PATH)"
 & $python -m pip install --upgrade pip | Out-Null
 & $python -m pip install $WebsockifyPin
 if ($LASTEXITCODE -ne 0) {
@@ -247,7 +247,7 @@ if ($LASTEXITCODE -ne 0) {
 # --- Scheduled Task (SYSTEM, at startup, no 72h kill) ----------------------
 
 Write-Step "Registering scheduled task $TaskName (SYSTEM, AtStartup, ExecutionTimeLimit=0)"
-# Default ExecutionTimeLimit is 72 hours — the task would be killed. Zero = unlimited.
+# Default ExecutionTimeLimit is 72 hours - the task would be killed. Zero = unlimited.
 $action = New-ScheduledTaskAction -Execute $python -Argument "-m websockify 0.0.0.0:$ListenPort 127.0.0.1:$VncPort"
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -308,7 +308,7 @@ Write-Host 'Notes:'
 Write-Host '  - Run in Administrator PowerShell (this script self-elevates).'
 Write-Host '  - LAN / Tailscale only. Do not port-forward 5900 or 6080.'
 Write-Host '  - TightVNC is loopback-only; only the websocket port is on the LAN.'
-Write-Host '  - UAC prompts show only in TightVNC service mode — they will. That is expected.'
+Write-Host '  - UAC prompts show only in TightVNC service mode - they will. That is expected.'
 Write-Host '  - Defender may flag VNC. Allow TightVNC / tvnserver if it quarantines it.'
 Write-Host '  - Tailscale names work too: ws://<tailscale-name>:6080/websockify'
 Write-Host '  - .local / MagicDNS both work on a private net.'

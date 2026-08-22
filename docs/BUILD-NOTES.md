@@ -121,3 +121,13 @@ Cross-OS setup scripts + README (no `plugin.js` changes). Shared design: idempot
 - **README.** Top-of-file **Connect any computer** (Cloud vs Local + one-paste `curl`/`irm` from `RAW_REPO_URL` master) and **Security** (no internet exposure, CVE-2026-65400, 8-char DES, `ws://` unencrypted / `wss://` needs certs). Existing recipes kept and expanded with Windows/Linux.
 
 Validate: `bash -n build/connect-mac.sh && bash -n build/connect-linux.sh` pass. `connect-windows.ps1` cannot be lint-checked on this Mac (no `pwsh` syntax gate in the workspace). `node --check build/plugin.js` still passes; plugin.js untouched.
+
+## Fix round 17
+
+Live test of `build/connect-windows.ps1` on a real Windows 11 box (Windows PowerShell 5.1) failed to parse: BOM-less `.ps1` is read as the system ANSI codepage (Windows-1252), so UTF-8 em-dashes (`—`, bytes `E2 80 94`) decoded as `â€"` — the embedded double-quote corrupted string parsing and cascaded into "Unexpected token" errors. A UTF-8 BOM unblocked file-run in that test, but it is not a reliable fix for `irm <url> | iex` (piped execution). Canonical fix: make the setup scripts **pure ASCII** so they parse under any codepage.
+
+- `build/connect-windows.ps1`: replaced every byte > 0x7F (`—`/`–` → `-`, `→` → `->`, and any smart quotes / ellipsis) in comments and `Write-Host` strings only. Logic, commands, and structure unchanged. Live test had already proven TightVNC + websockify + plugin VNC auth end-to-end once the file parsed.
+- `build/connect-mac.sh` and `build/connect-linux.sh`: same ASCII scrub for consistency / locale safety; logic unchanged.
+- `build/README.md`: setup-script sections and fenced command/code blocks ASCII-cleaned; Windows recipe notes the script is ASCII-only so `irm ... | iex` works on Windows PowerShell 5.1.
+
+Validate: `bash -n build/connect-mac.sh && bash -n build/connect-linux.sh` pass. `LC_ALL=C grep -nP "[^\x00-\x7F]"` on the three connect scripts returns nothing. `node --check build/plugin.js` still passes; plugin.js untouched.

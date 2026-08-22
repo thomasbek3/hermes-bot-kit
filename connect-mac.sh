@@ -2,7 +2,7 @@
 # Bridge this Mac's Screen Sharing (VNC :5900) to a WebSocket the Computer
 # plugin can paste: ws://<LocalHostName>.local:6080/websockify
 #
-# Patterns: dedicated venv + absolute LaunchAgent path (launchd has a bare PATH —
+# Patterns: dedicated venv + absolute LaunchAgent path (launchd has a bare PATH -
 # do not rely on `pip --user`). Idempotent, no sudo. LAN / Tailscale only.
 #
 # Does NOT enable Screen Sharing or set the VNC password (kickstart needs sudo
@@ -30,9 +30,9 @@ SONOMA_PATCHED='14.8.9'
 SEQUOIA_PATCHED='15.7.9'
 TAHOE_PATCHED='26.6.1'
 
-echo "Computer viewer — Mac Screen Sharing bridge"
+echo "Computer viewer - Mac Screen Sharing bridge"
 echo "websockify ${WEBSOCKIFY_PIN}, pinned in ${VENV_DIR}"
-echo "LAN / Tailscale only — VNC stays on localhost:5900; websocket on :${LISTEN_PORT}."
+echo "LAN / Tailscale only - VNC stays on localhost:5900; websocket on :${LISTEN_PORT}."
 echo
 
 xml_escape() {
@@ -105,7 +105,7 @@ warn_screen_sharing_cve() {
     echo "macOS ${v}: at or above the CVE-2026-65400 Screen Sharing patch."
     echo "  Still: never expose port 5900 or 6080 to the internet (LAN/Tailscale only)."
   elif [ "$unsure" -eq 1 ]; then
-    echo "WARNING: macOS ${v} — could not map this build to a known patched release."
+    echo "WARNING: macOS ${v} - could not map this build to a known patched release."
     echo "  CVE-2026-65400: unpatched Screen Sharing may authenticate an attacker"
     echo "  on the network WITHOUT valid credentials."
     echo "  Known patched builds: Sonoma ${SONOMA_PATCHED}, Sequoia ${SEQUOIA_PATCHED},"
@@ -115,7 +115,7 @@ warn_screen_sharing_cve() {
     echo "WARNING: macOS ${v} is BELOW the CVE-2026-65400 Screen Sharing patch."
     echo "  An attacker on the network may authenticate to Screen Sharing"
     echo "  WITHOUT valid credentials."
-    echo "  Update now: System Settings → General → Software Update"
+    echo "  Update now: System Settings -> General -> Software Update"
     echo "  Patched builds: Sonoma ${SONOMA_PATCHED} / Sequoia ${SEQUOIA_PATCHED} / Tahoe ${TAHOE_PATCHED}"
     echo "  NEVER expose port 5900 or 6080 to the internet (LAN/Tailscale only)."
   fi
@@ -234,32 +234,32 @@ if command -v launchctl >/dev/null 2>&1; then
   launchctl enable "${DOMAIN}/${LABEL}" >/dev/null 2>&1 || true
   launchctl kickstart -k "${DOMAIN}/${LABEL}" >/dev/null 2>&1 || \
     launchctl start "${LABEL}" >/dev/null 2>&1 || true
-  echo "    Loaded ${LABEL} (websockify ${LISTEN_PORT} → ${VNC_TARGET}, RunAtLoad + KeepAlive)."
+  echo "    Loaded ${LABEL} (websockify ${LISTEN_PORT} -> ${VNC_TARGET}, RunAtLoad + KeepAlive)."
 else
   echo "launchctl not found; plist is in place but was not loaded." >&2
 fi
 
 echo
-echo "==> Screen Sharing (manual — this script will not enable it)"
-echo "    1. System Settings → General → Sharing → enable Screen Sharing"
+echo "==> Screen Sharing (manual - this script will not enable it)"
+echo "    1. System Settings -> General -> Sharing -> enable Screen Sharing"
 echo "    2. Click Screen Sharing (i)"
 echo "    3. Turn on \"VNC viewers may control screen with password\""
 echo "    4. Set a password of at most 8 characters"
 echo "       (classic VNC auth is DES; longer secrets are truncated to 8.)"
-echo "    Do not use kickstart / ARDAgent from the terminal — that needs sudo"
+echo "    Do not use kickstart / ARDAgent from the terminal - that needs sudo"
 echo "    and drops live Screen Sharing sessions."
 echo
 
 if port_listening 5900; then
-  echo "==> Port 5900 is listening — Screen Sharing looks enabled."
+  echo "==> Port 5900 is listening - Screen Sharing looks enabled."
 else
   echo "==> Port 5900 is NOT listening."
   echo "    Screen Sharing is not on yet (or hasn't bound). Finish the steps"
-  echo "    above, then come back — websockify is already set to start at login."
+  echo "    above, then come back - websockify is already set to start at login."
 fi
 
 if port_listening "${LISTEN_PORT}"; then
-  echo "==> Port ${LISTEN_PORT} is listening — websockify is up."
+  echo "==> Port ${LISTEN_PORT} is listening - websockify is up."
 else
   echo "==> Port ${LISTEN_PORT} is not listening yet. Check ${LOG_PATH}"
   echo "    launchd PATH is bare; the agent uses ${WEBSOCKIFY_BIN}."
@@ -274,7 +274,7 @@ echo "Paste this address in Computer:"
 echo "  ws://${HOST}:${LISTEN_PORT}/websockify"
 echo
 echo "The plugin also needs:"
-echo "  Username  ${MAC_USER}   (your Mac login, Advanced → Username)"
+echo "  Username  ${MAC_USER}   (your Mac login, Advanced -> Username)"
 echo "  Password  the 8-char VNC password you set in Screen Sharing"
 echo
 echo "Tailscale names work too (ws://<tailscale-name>:${LISTEN_PORT}/websockify)."

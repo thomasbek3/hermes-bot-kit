@@ -3,7 +3,7 @@
 # WebSocket the Computer plugin can paste: ws://<hostname>:6080/websockify
 #
 # Idempotent. VNC binds localhost:5900; only websocket :6080 is on the LAN.
-# LAN / Tailscale only. GNOME/KDE Wayland is not supported — log into Xorg.
+# LAN / Tailscale only. GNOME/KDE Wayland is not supported - log into Xorg.
 
 set -euo pipefail
 
@@ -26,8 +26,8 @@ VNC_PORT=5900
 WEBSOCKIFY_PIN='websockify==0.13.0'
 VENV_DIR="${HERMES_CV}/venv"
 
-echo "Computer viewer — Linux desktop bridge"
-echo "LAN / Tailscale only — VNC stays on localhost:${VNC_PORT}; websocket on :${LISTEN_PORT}."
+echo "Computer viewer - Linux desktop bridge"
+echo "LAN / Tailscale only - VNC stays on localhost:${VNC_PORT}; websocket on :${LISTEN_PORT}."
 echo
 
 umask 077
@@ -152,7 +152,7 @@ ensure_vnc_password() {
     pw="$(generate_password)"
     printf '%s\n' "$pw" > "${VNC_PWD_TEXT}"
     chmod 600 "${VNC_PWD_TEXT}"
-    echo "==> Generated 8-char VNC password (DES limit) → ${VNC_PWD_TEXT}" >&2
+    echo "==> Generated 8-char VNC password (DES limit) -> ${VNC_PWD_TEXT}" >&2
   fi
   printf '%s' "$pw"
 }
@@ -161,7 +161,7 @@ write_websockify_unit() {
   local ws_bin="$1"
   cat > "${WS_UNIT}" <<EOF
 [Unit]
-Description=Computer viewer websockify (6080 → localhost:5900)
+Description=Computer viewer websockify (6080 -> localhost:5900)
 After=network.target
 
 [Service]
@@ -200,7 +200,7 @@ note_linger() {
   echo "==> linger (so user services run without an active graphical login)"
   if command -v loginctl >/dev/null 2>&1; then
     if loginctl enable-linger "${USER}" >/dev/null 2>&1; then
-      echo "    loginctl enable-linger ${USER} — ok."
+      echo "    loginctl enable-linger ${USER} - ok."
     else
       echo "    Could not enable linger. If the bridge dies at logout, run:"
       echo "      loginctl enable-linger ${USER}"
@@ -287,7 +287,7 @@ print_paste() {
 }
 
 setup_x11() {
-  echo "==> Session: X11 — using x11vnc"
+  echo "==> Session: X11 - using x11vnc"
   local need=0
   command -v x11vnc >/dev/null 2>&1 || need=1
   command -v websockify >/dev/null 2>&1 || command -v websockify3 >/dev/null 2>&1 || need=1
@@ -346,7 +346,7 @@ EOF
 }
 
 setup_wayvnc() {
-  echo "==> Session: Wayland / wlroots — wayvnc (best-effort, less battle-tested)"
+  echo "==> Session: Wayland / wlroots - wayvnc (best-effort, less battle-tested)"
   echo "    noVNC compatibility caveat: wayvnc's default RSA-AES (security type 262)"
   echo "    is not what classic VNC auth expects. This config uses RSA-AES *or*"
   echo "    relax_encryption so noVNC 1.7 may connect; if the plugin shows"
@@ -433,12 +433,12 @@ refuse_gnome_kde_wayland() {
   echo "GNOME/KDE Wayland is not supported yet (no x11vnc; wayvnc needs wlroots)." >&2
   echo >&2
   echo "Log into an Xorg / X11 session and re-run:" >&2
-  echo "  - GDM: gear menu on the login screen → GNOME on Xorg / Ubuntu on Xorg" >&2
-  echo "  - SDDM: Session → Plasma (X11)" >&2
+  echo "  - GDM: gear menu on the login screen -> GNOME on Xorg / Ubuntu on Xorg" >&2
+  echo "  - SDDM: Session -> Plasma (X11)" >&2
   echo "  - Or: sudo mkdir -p /etc/gdm/ && then disable Wayland in custom.conf" >&2
   echo >&2
   echo "wlroots compositors (Sway, Hyprland, Wayfire, river, labwc) can use the" >&2
-  echo "experimental wayvnc path — this desktop is not one of those." >&2
+  echo "experimental wayvnc path - this desktop is not one of those." >&2
   exit 1
 }
 
