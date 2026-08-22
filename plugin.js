@@ -2119,7 +2119,9 @@ const hiperf = {
   raf: 0,
   qualityMutated: false,
   intentionalClose: false,
-  lastErrorCode: null
+  lastErrorCode: null,
+  resetting: false,
+  configureInFlight: false
 }
 
 function hiperfIsStreaming() {
@@ -2424,6 +2426,8 @@ function hiperfTeardown(opts) {
   hiperf.framesWindow = 0
   hiperf.url = ''
   hiperf.lastErrorCode = null
+  hiperf.resetting = false
+  hiperf.configureInFlight = false
   if (!keepAtom) hiperfPatch({ ...HIPERF_IDLE })
 }
 
@@ -2639,23 +2643,31 @@ async function hiperfConfigureDecoder(gen) {
 
 function hiperfOnDecoderError(gen, _err) {
   if (gen !== hiperf.generation) return
-  void hiperfHandleDecodeFailure(gen)
+  if (hiperf.resetting) return
+  hiperfSoftRecover()
+}
+
+function hiperfSoftRecover() {
+  // A bad P-frame or decoder.reset() must not kill the websocket.
+  // Hide HD, keep VNC, wait for the next keyframe.
+  hiperf.decoderReady = false
+  hiperf.waitKey = true
+  if (hiperf.canvas) hiperf.canvas.style.visibility = 'hidden'
+  hiperf.resetting = true
+  try {
+    hiperf.decoder && hiperf.decoder.reset()
+  } catch {
+    /* ignore */
+  }
+  hiperf.resetting = false
+  if ($hiperf.get().phase === 'streaming') {
+    hiperfPatch({ phase: 'connecting', code: null })
+  }
 }
 
 async function hiperfHandleDecodeFailure(gen) {
   if (gen !== hiperf.generation) return
-  if (!hiperf.decoderRetried) {
-    hiperf.decoderRetried = true
-    hiperf.decoderReady = false
-    hiperf.waitKey = true
-    if (!hiperf.useAvcc && hiperf.sps && hiperf.pps) {
-      hiperf.useAvcc = true
-      hiperf.avccAttempted = true
-    }
-    const ok = await hiperfConfigureDecoder(gen)
-    if (ok) return
-  }
-  hiperfFallback('decode-failed')
+  hiperfSoftRecover()
 }
 
 function hiperfPayloadForDecode(au) {
@@ -2679,36 +2691,23 @@ async function hiperfOnBinary(gen, data) {
   if (isKey && hiperf.sps && !hiperf.codec) hiperf.codec = hiperfCodecFromSps(hiperf.sps)
   if (!hiperf.decoderReady) {
     if (!isKey || !hiperf.sps) return
+    if (hiperf.configureInFlight) return
     if (!hiperf.codec) hiperf.codec = hiperfCodecFromSps(hiperf.sps)
-    // Chromium VideoDecoder is far more reliable with AVCC + description
-    // than raw Annex-B, especially for VideoToolbox streams.
     if (hiperf.sps && hiperf.pps) {
       hiperf.useAvcc = true
       hiperf.avccAttempted = true
     }
+    hiperf.configureInFlight = true
     const ok = await hiperfConfigureDecoder(gen)
+    hiperf.configureInFlight = false
     if (gen !== hiperf.generation) return
-    if (!ok) {
-      hiperfFallback('codec-unsupported')
-      return
-    }
+    if (!ok) return
   }
   const decoder = hiperf.decoder
-  if (!decoder || decoder.state === 'closed') return
+  if (!decoder || decoder.state === 'closed' || decoder.state === 'unconfigured') return
   if (decoder.decodeQueueSize > 10) {
-    hiperf.waitKey = true
-    hiperf.decoderReady = false
-    try {
-      decoder.reset()
-    } catch {
-      /* ignore */
-    }
-    const ok = await hiperfConfigureDecoder(gen)
-    if (!ok) {
-      hiperfFallback('decode-failed')
-      return
-    }
-    if (!isKey) return
+    hiperfSoftRecover()
+    return
   }
   hiperf.waitKey = false
   const payload = hiperfPayloadForDecode(au)
@@ -2737,17 +2736,8 @@ function hiperfOnHello(gen, _msg) {
     }
     return
   }
-  hiperf.waitKey = true
-  hiperf.decoderReady = false
-  hiperf.codec = ''
-  hiperf.blackSince = 0
-  if (hiperf.decoder) {
-    try {
-      hiperf.decoder.reset()
-    } catch {
-      /* ignore */
-    }
-  }
+  // Post-spawn hello is informational. Do not reset a live decoder —
+  // that fires error → fallback → VNC every few seconds.
 }
 
 function hiperfOnControl(gen, msg) {
