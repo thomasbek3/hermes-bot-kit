@@ -13,8 +13,10 @@ import hmac
 import json
 import logging
 import os
+import re
 import signal
 import struct
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -33,7 +35,8 @@ def import_serve():
 LOG = logging.getLogger('hiperf')
 CREATE_NO_WINDOW = 0x08000000
 RESTART_WINDOW_S = 60.0
-DRY_RUN_TIMEOUT_S = 12.0
+STALL_TIMEOUT_S = 10.0
+DRY_RUN_TIMEOUT_S = STALL_TIMEOUT_S
 QUEUE_MAX = 30
 MAX_MESSAGE = 2**20
 GOP_DIV = 2
@@ -125,20 +128,13 @@ class Candidate:
         self.argv = argv
 
 
-def discover_mac_screen_index(ffmpeg: str) -> int:
-    """Parse avfoundation -list_devices stderr for 'Capture screen'."""
-    try:
-        proc = __import__('subprocess').run(
-            [ffmpeg, '-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', ''],
-            capture_output=True,
-            timeout=8,
-            check=False,
-        )
-    except Exception as exc:
-        LOG.warning('avfoundation list_devices failed: %s', exc)
-        return 0
-    text = (proc.stderr or b'').decode('utf-8', 'replace') + (proc.stdout or b'').decode('utf-8', 'replace')
-    # Typical: "[1] Capture screen 0"  -- stop at audio section.
+def parse_mac_capture_screen_index(text: str) -> tuple[int, str]:
+    """Parse avfoundation -list_devices text for a Capture screen device.
+
+    Prefer the LAST [N] bracket immediately preceding 'capture screen' on that
+    line so a leading '[AVFoundation indev @ 0x...]' is not treated as the
+    device index. Returns (index, matched_line); index 0 and '' if none.
+    """
     in_video = False
     for line in text.splitlines():
         lower = line.lower()
@@ -150,18 +146,108 @@ def discover_mac_screen_index(ffmpeg: str) -> int:
             continue
         if not in_video and 'capture screen' not in lower:
             continue
-        if 'capture screen' in lower:
-            # "[1] Capture screen 0" or "Capture screen 0"
-            bracket = None
-            if '[' in line and ']' in line:
-                inner = line[line.find('[') + 1 : line.find(']')]
-                if inner.isdigit():
-                    bracket = int(inner)
-            if bracket is not None:
-                LOG.info('avfoundation capture screen index %s', bracket)
-                return bracket
+        if 'capture screen' not in lower:
+            continue
+        pos = lower.find('capture screen')
+        found = re.findall(r'\[(\d+)\]', line[:pos])
+        if found:
+            return int(found[-1]), line
+    return 0, ''
+
+
+def discover_mac_screen_index(ffmpeg: str) -> int:
+    """Parse avfoundation -list_devices stderr for 'Capture screen'."""
+    try:
+        proc = subprocess.run(
+            [ffmpeg, '-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', ''],
+            capture_output=True,
+            timeout=8,
+            check=False,
+        )
+    except Exception as exc:
+        LOG.warning('avfoundation list_devices failed: %s', exc)
+        return 0
+    text = (proc.stderr or b'').decode('utf-8', 'replace') + (proc.stdout or b'').decode('utf-8', 'replace')
+    idx, line = parse_mac_capture_screen_index(text)
+    if line:
+        LOG.info('avfoundation capture screen index %s from line: %s', idx, line.strip())
+        return idx
     LOG.warning('no Capture screen device parsed; defaulting to 0')
     return 0
+
+
+def mac_capture_prefix(idx: int, fps: int, pixel_format: str) -> list[str]:
+    """avfoundation input options. -pixel_format must come before -i."""
+    return [
+        '-f',
+        'avfoundation',
+        '-capture_cursor',
+        '0',
+        '-framerate',
+        str(fps),
+        '-pixel_format',
+        pixel_format,
+        '-i',
+        f'{idx}:none',
+    ]
+
+
+def log_capture_stall(stage: str, name: str) -> None:
+    LOG.warning(
+        '%s stall (no output bytes in %ss): %s. '
+        'On macOS this is almost certainly missing Screen Recording permission '
+        '(capture hangs with no error exit). '
+        'Grant it MANUALLY: System Settings -> Privacy & Security -> Screen Recording '
+        '-> add/enable BOTH the venv python (~/.hermes-cv/hiperf/venv/bin/python) '
+        'AND the ffmpeg binary in use. A launchd-started agent cannot show the TCC prompt. '
+        'If frames arrive but show the lock screen, the Mac is not logged in.',
+        stage,
+        int(STALL_TIMEOUT_S),
+        name,
+    )
+
+
+def _darwin_candidates(ffmpeg: str, fps: int, bitrate: int, idx: int) -> list[Candidate]:
+    rate = bitrate_flags(bitrate)
+    cap_nv12 = mac_capture_prefix(idx, fps, 'nv12')
+    cap_uyvy = mac_capture_prefix(idx, fps, 'uyvy422')
+    vt = ['-c:v', 'h264_videotoolbox', '-realtime', '1']
+    x264 = ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency']
+    out: list[Candidate] = [
+        Candidate(
+            'h264_videotoolbox',
+            prefix_ffmpeg(ffmpeg) + cap_nv12 + vt + ['-allow_sw', '0'] + rate + encode_tail(fps),
+        ),
+        Candidate(
+            'h264_videotoolbox_sw',
+            prefix_ffmpeg(ffmpeg) + cap_nv12 + vt + ['-allow_sw', '1'] + rate + encode_tail(fps),
+        ),
+        Candidate(
+            'h264_videotoolbox_uyvy422',
+            prefix_ffmpeg(ffmpeg) + cap_uyvy + vt + ['-allow_sw', '0'] + rate + encode_tail(fps),
+        ),
+        Candidate(
+            'h264_videotoolbox_sw_uyvy422',
+            prefix_ffmpeg(ffmpeg) + cap_uyvy + vt + ['-allow_sw', '1'] + rate + encode_tail(fps),
+        ),
+        Candidate(
+            'libx264',
+            prefix_ffmpeg(ffmpeg)
+            + cap_nv12
+            + x264
+            + rate
+            + encode_tail(fps, 'yuv420p'),
+        ),
+        Candidate(
+            'libx264_uyvy422',
+            prefix_ffmpeg(ffmpeg)
+            + cap_uyvy
+            + x264
+            + rate
+            + encode_tail(fps, 'yuv420p'),
+        ),
+    ]
+    return out
 
 
 def linux_render_nodes() -> list[str]:
@@ -279,47 +365,7 @@ def build_candidates(ffmpeg: str, fps: int, bitrate: int, display: str) -> list[
 
     if plat == 'darwin':
         idx = discover_mac_screen_index(ffmpeg)
-        cap = [
-            '-f',
-            'avfoundation',
-            '-capture_cursor',
-            '0',
-            '-framerate',
-            str(fps),
-            '-i',
-            f'{idx}:none',
-        ]
-        out.append(
-            Candidate(
-                'h264_videotoolbox',
-                prefix_ffmpeg(ffmpeg)
-                + cap
-                + ['-c:v', 'h264_videotoolbox', '-realtime', '1', '-allow_sw', '0']
-                + rate
-                + encode_tail(fps),
-            )
-        )
-        out.append(
-            Candidate(
-                'h264_videotoolbox_sw',
-                prefix_ffmpeg(ffmpeg)
-                + cap
-                + ['-c:v', 'h264_videotoolbox', '-realtime', '1', '-allow_sw', '1']
-                + rate
-                + encode_tail(fps),
-            )
-        )
-        out.append(
-            Candidate(
-                'libx264',
-                prefix_ffmpeg(ffmpeg)
-                + cap
-                + ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency']
-                + rate
-                + encode_tail(fps, 'yuv420p'),
-            )
-        )
-        return out
+        return _darwin_candidates(ffmpeg, fps, bitrate, idx)
 
     # linux: X11 only
     cap = ['-f', 'x11grab', '-draw_mouse', '0', '-framerate', str(fps), '-i', display]
@@ -380,10 +426,21 @@ def build_candidates(ffmpeg: str, fps: int, bitrate: int, display: str) -> list[
 
 
 def dry_run_argv(argv: list[str]) -> list[str]:
+    """Keep Annex-B stdout so a stall is 'no output bytes', not a null sink."""
     out = list(argv)
     if len(out) >= 3 and out[-3:] == ['-f', 'h264', '-']:
-        out[-3:] = ['-t', '1', '-f', 'null', '-']
+        out[-3:] = ['-t', '1', '-f', 'h264', '-']
     return out
+
+
+async def read_stdout_once(proc: asyncio.subprocess.Process, timeout: float) -> bytes:
+    if proc.stdout is None:
+        return b''
+    try:
+        chunk = await asyncio.wait_for(proc.stdout.read(65536), timeout=timeout)
+    except (asyncio.TimeoutError, Exception):
+        return b''
+    return chunk or b''
 
 
 def subprocess_kwargs(stdout=asyncio.subprocess.PIPE) -> dict:
@@ -639,12 +696,25 @@ class Agent:
         self.cached = None
         return None
 
+    async def _reap(self, proc: asyncio.subprocess.Process, stderr_task: Optional[asyncio.Task] = None) -> None:
+        if proc.returncode is None:
+            kill_process(proc, force=True)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2)
+            except Exception:
+                pass
+        if stderr_task is not None:
+            try:
+                await asyncio.wait_for(stderr_task, timeout=1)
+            except Exception:
+                stderr_task.cancel()
+
     async def _dry_run(self, cand: Candidate) -> bool:
         argv = dry_run_argv(cand.argv)
         LOG.info('dry-run: %s', ' '.join(argv))
         try:
             proc = await asyncio.create_subprocess_exec(
-                *argv, **subprocess_kwargs(stdout=asyncio.subprocess.DEVNULL)
+                *argv, **subprocess_kwargs(stdout=asyncio.subprocess.PIPE)
             )
         except FileNotFoundError:
             LOG.warning('ffmpeg not found at %s', self.ffmpeg)
@@ -653,21 +723,19 @@ class Agent:
             LOG.warning('spawn failed (%s): %s', cand.name, exc)
             return False
         stderr_task = asyncio.create_task(self._drain_stderr(proc, tag='dry-run'))
-        try:
-            rc = await asyncio.wait_for(proc.wait(), timeout=DRY_RUN_TIMEOUT_S)
-        except asyncio.TimeoutError:
-            kill_process(proc, force=True)
+        chunk = await read_stdout_once(proc, STALL_TIMEOUT_S)
+        if chunk:
+            await self._reap(proc, stderr_task)
+            return True
+        if proc.returncode is None:
             try:
-                await asyncio.wait_for(proc.wait(), timeout=2)
-            except Exception:
+                await asyncio.wait_for(proc.wait(), timeout=0.2)
+            except asyncio.TimeoutError:
                 pass
-            LOG.info('dry-run timeout: %s', cand.name)
-            rc = -1
-        try:
-            await asyncio.wait_for(stderr_task, timeout=1)
-        except Exception:
-            stderr_task.cancel()
-        return rc == 0
+        if proc.returncode is None:
+            log_capture_stall('dry-run', cand.name)
+        await self._reap(proc, stderr_task)
+        return False
 
     async def _drain_stderr(self, proc: asyncio.subprocess.Process, tag: str = 'ffmpeg') -> None:
         if proc.stderr is None:
@@ -749,8 +817,30 @@ class Agent:
             await self.probe_from(0)
         if self.cached is None:
             return 'capture-failed'
+        tried = 0
+        while self.cached is not None and tried < max(len(self.candidates), 1):
+            tried += 1
+            err = await self._spawn_pipeline(ws)
+            if err is None:
+                return None
+            if err in ('no-encoder', 'capture-failed'):
+                return err
+            # 'stall' -> try the next candidate instead of hanging forever
+            nxt = self.cursor + 1
+            if nxt >= len(self.candidates):
+                self.cursor = 0
+                self.cached = None
+                return 'capture-failed'
+            self.cursor = nxt
+            self.cached = self.candidates[nxt]
+        return 'capture-failed'
+
+    async def _spawn_pipeline(self, ws) -> Optional[str]:
+        """None on success; 'stall' to try the next candidate; other codes are fatal."""
         await self.stop_ffmpeg()
         cand = self.cached
+        if cand is None:
+            return 'capture-failed'
         self.last_stderr = ''
         LOG.info('starting ffmpeg (%s)', cand.name)
         try:
@@ -762,22 +852,37 @@ class Agent:
             return 'capture-failed'
         self.proc = proc
         self.spawn_mono = time.monotonic()
+        stderr_task = asyncio.create_task(self._drain_stderr(proc), name='stderr')
+        self.tasks = [stderr_task]
+        first = await read_stdout_once(proc, STALL_TIMEOUT_S)
+        if not first:
+            if proc.returncode is None:
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=0.2)
+                except asyncio.TimeoutError:
+                    pass
+            if proc.returncode is None:
+                log_capture_stall('capture', cand.name)
+            await self.stop_ffmpeg()
+            return 'stall'
         self.queue = asyncio.Queue(maxsize=QUEUE_MAX)
         self.drop_until_key = False
         assembler = AuAssembler()
         t0 = time.monotonic()
-        self.tasks = [
-            asyncio.create_task(self._drain_stderr(proc), name='stderr'),
-            asyncio.create_task(self._read_stdout(ws, proc, assembler, t0), name='stdout'),
-            asyncio.create_task(self._writer(ws, self.queue), name='writer'),
-            asyncio.create_task(self._watch_proc(ws, proc), name='watch'),
-        ]
         try:
             await self.send_json(ws, self.hello_payload())
         except Exception as exc:
             LOG.warning('hello after spawn failed: %s', exc)
             await self.stop_ffmpeg()
             return 'capture-failed'
+        self.tasks = [
+            stderr_task,
+            asyncio.create_task(
+                self._read_stdout(ws, proc, assembler, t0, initial=first), name='stdout'
+            ),
+            asyncio.create_task(self._writer(ws, self.queue), name='writer'),
+            asyncio.create_task(self._watch_proc(ws, proc), name='watch'),
+        ]
         return None
 
     async def _read_stdout(
@@ -786,16 +891,13 @@ class Agent:
         proc: asyncio.subprocess.Process,
         assembler: AuAssembler,
         t0: float,
+        initial: bytes = b'',
     ) -> None:
-        if proc.stdout is None:
+        if proc.stdout is None and not initial:
             return
-        buf = b''
+        buf = initial or b''
         try:
             while True:
-                chunk = await proc.stdout.read(65536)
-                if not chunk:
-                    break
-                buf += chunk
                 nals, buf = split_annexb(buf)
                 now = time.monotonic()
                 ts = int((now - t0) * 1_000_000)
@@ -807,6 +909,12 @@ class Agent:
                         continue
                     au_bytes, is_key = emitted
                     await self._enqueue(au_bytes, is_key, ts)
+                if proc.stdout is None:
+                    break
+                chunk = await proc.stdout.read(65536)
+                if not chunk:
+                    break
+                buf += chunk
             if assembler._picture_has_vcl():
                 flushed = assembler._emit(assembler.picture)
                 assembler.reset()

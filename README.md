@@ -28,6 +28,8 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/m
 
 The script does **not** turn Screen Sharing on (kickstart needs sudo and drops live sessions). It installs pinned websockify in `~/.hermes-cv/venv` and a LaunchAgent that survives login.
 
+Optional HD stream on the same Mac: after VNC works, run `hiperf-mac.sh` (see **High-performance mode** below). The Mac must be logged in, and Screen Recording must be granted by hand.
+
 ### Windows (Administrator PowerShell)
 
 ```powershell
@@ -46,13 +48,7 @@ X11 uses `x11vnc`. wlroots compositors (Sway, Hyprland, ...) use `wayvnc` (less 
 
 ## High-performance mode (optional)
 
-An optional, per-endpoint upgrade for machines with a real GPU: hardware screen capture + hardware H.264 encode on the host, hardware decode in the plugin (WebCodecs). Target is 30–60 fps smooth motion. **VNC stays mandatory** — it carries mouse/keyboard, is the instant fallback surface, and remains the pane's state machine. hiperf is a video overlay (`pointer-events: none`) on websocket-mode endpoints only. iframe and Session JSON endpoints ignore it.
-
-It pays off on boxes with a hardware encoder (NVENC / AMF / QSV / VideoToolbox / MediaFoundation). No-GPU hosts fall back to `libx264 -preset ultrafast`; expect CPU cost, not Parsec-class smoothness.
-
-### Install the host agent
-
-Run this **on the machine you want to view**, after the VNC `connect-*` script. Scripts are idempotent and print a 32-hex token plus paste-ready `ws://host:6090/stream` URLs (hostname, MagicDNS `.ts.net`, and Tailscale `100.x` if `tailscale ip -4` works).
+An optional H.264 overlay on top of the VNC session (port **6090**, path `/stream`). VNC stays mandatory: it carries mouse/keyboard and is the fallback. Install the host agent **on the machine you want to view**, after the `connect-*` script.
 
 macOS:
 
@@ -60,50 +56,22 @@ macOS:
 curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/hiperf-mac.sh | bash
 ```
 
-Windows (Administrator PowerShell; the script self-elevates):
+`hiperf-mac.sh` looks for ffmpeg at `~/.hermes-cv/bin/ffmpeg` and Python 3.10+ at `~/.hermes-cv/python/bin/python3` before PATH / Homebrew. A static arm64 ffmpeg or a python-build-standalone tree can be dropped in those locations when Homebrew is unavailable. The script does not download them.
 
-```powershell
-irm https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/hiperf-windows.ps1 | iex
-```
+### macOS Screen Recording (TCC)
 
-Linux (X11):
+Live finding on a real Apple-silicon Mac: a launchd-started agent **cannot** trigger the interactive TCC prompt, and `launchctl asuser` requires root, so the installer **cannot** obtain permission for you. Missing permission is **not an error exit** -- ffmpeg capture simply **hangs with no output**. If the Mac is sitting at the lock screen, capture yields only the lock screen.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/hiperf-linux.sh | bash
-```
+- The Mac must be **LOGGED IN** (not at the lock screen) for capture to show the desktop.
+- Screen Recording must be granted **MANUALLY**: System Settings -> Privacy & Security -> Screen Recording -> add/enable **BOTH** the venv python (`~/.hermes-cv/hiperf/venv/bin/python`) **and** the ffmpeg binary in use.
+- If the machine is headless, grant that through the plugin's own VNC view of that Mac (the working VNC path is how you enable the fast path).
 
-Default listen port is **6090** (path `/stream`). ffmpeg is resolved at install time and baked into the service as `--ffmpeg` (launchd / systemd-user / Scheduled Task PATH is too bare for brew/winget/apt). Encode fps/bitrate are **agent CLI flags**, not plugin settings: `--fps 30 --bitrate 8M` (edit the LaunchAgent / systemd unit / scheduled-task arguments to change them, then restart the service).
+Symptoms:
 
-### Turn it on in the plugin
+- capture hangs / port 6090 never listens -> almost certainly missing Screen Recording permission
+- frames arrive but are the lock screen -> not logged in
 
-1. Connect the computer over VNC as usual (websocket mode).
-2. Click **HD** in the pane header (next to the computer switcher). If no token and no stream URL are saved yet, that click opens the endpoint editor scrolled to **High-performance stream (HD)** so you can paste the token.
-3. Or: endpoint editor → Advanced → **High-performance stream (HD)** switch, **HD token**, optional **HD stream URL**. Leave the URL empty to derive `ws://<vnc-host>:6090/stream` from the *resolved* VNC websocket after connect (probe rewrites included). If the URL already has `?token=`, that wins over the token field.
-
-When HD is streaming, the header toggle shows an active state, the switcher shows an **HD** badge, and the expanded bar shows `{fps}fps · {mbps}Mbps · {rtt}ms`. If the stream dies you keep live VNC (at most a quality dip) plus a quiet status line and **Retry**. Enabling or disabling HD does not reconnect VNC.
-
-### Security & privacy
-
-- The agent serves an **unencrypted** H.264 stream of the screen to anyone with the token, on whatever interface it binds. Designed for localhost/Tailscale/LAN only; the plugin refuses public hosts. Do not port-forward 6090.
-- Token file is the secret; plaintext on disk like the VNC password files, and `hiperfToken` sits in `ctx.storage` plaintext like the VNC password — same documented caveat. Rotate = rewrite file + restart agent + re-paste.
-- macOS Screen Recording TCC: the installer runs the agent once in the foreground (Terminal context) to trigger the prompt before loading the LaunchAgent. If frames are black under launchd afterwards (TCC attribution is per-responsible-process), grant Screen Recording to the relevant binary in System Settings; the client's black-frame guard guarantees this manifests as `capture-failed` + VNC, never a covered pane.
-- Agent attack surface: no filesystem/exec beyond its fixed ffmpeg argv; constant-time token compare; single path `/stream`; 4404 anything else.
-- Windows: the scheduled task `ComputerViewerHiperf` runs as the **interactive installing user** (not SYSTEM) — desktop capture cannot see the user session otherwise. Firewall allows TCP 6090 on the **Private** profile. Tailscale's adapter often registers as Public; if the stream is unreachable over Tailscale, also allow it:
-
-```powershell
-New-NetFirewallRule -DisplayName "Computer Viewer hiperf (6090 Public)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 6090 -Profile Public
-```
-
-- **Headless Windows / virtual displays: DXGI desktop duplication is broken there — GDI capture is the rule.** Verified live on a headless box (RTX 2060 SUPER + Amyuni usbmmidd virtual display): ffmpeg's `ddagrab` hangs producing no frames, and TightVNC's DXGI capture returns an all-zero framebuffer — the whole desktop-duplication family fails against IDD virtual displays, while GDI paths (gdigrab for ffmpeg, UltraVNC PollFullScreen+EnableHook for VNC) work fine. Only the capture stage breaks; the GPU encoder is unaffected. The agent's candidate list already handles this: it falls through to `h264_nvenc-gdi` (gdigrab capture + NVENC hardware encode), which is the right shape for any headless-with-virtual-display box. If `hello.encoder` reports `libx264` on a machine with a real GPU, read `hiperf.log` — the hardware candidates' dry-run output will say why.
-
-### Limitations (hiperf)
-
-- Websocket-mode endpoints only. iframe / Session JSON: no socket, no errors, no status line.
-- Linux is X11 only. Wayland dry-runs fail; the agent stays up and answers `capture-failed` (it does not crash-loop).
-- No audio, no WebRTC/UDP, no TLS on the agent, no NAT traversal, no multi-monitor picker in the plugin (primary/whole desktop; `ddagrab` `output_idx` is a manual agent flag).
-- No client-driven bitrate/fps. Cursor is captured by nobody (`draw_mouse=0` / `-capture_cursor 0`) so you do not get a second lagged pointer; the local cursor is already visible over the overlay.
-- If capture resolution and VNC framebuffer differ by more than 1% (DPI / Retina mismatches are real), HD does not cover the VNC canvas (`resolution-mismatch`) — click accuracy beats smoothness.
-- One viewer: a new authenticated client supersedes the old one (close 4409). The displaced client does not retry.
+Then in the plugin: open the computer endpoint (Advanced -> High-performance stream), paste the printed token, turn on HD.
 
 ## Security
 
@@ -122,7 +90,7 @@ Copy this file to Hermes's desktop-plugin directory. The folder name **must** be
 # macOS / Linux (default profile)
 mkdir -p ~/.hermes/desktop-plugins/computer-viewer
 cp plugin.js ~/.hermes/desktop-plugins/computer-viewer/plugin.js
-cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-linux.sh hiperf-agent.py ~/.hermes/desktop-plugins/computer-viewer/
+cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-agent.py ~/.hermes/desktop-plugins/computer-viewer/
 chmod +x ~/.hermes/desktop-plugins/computer-viewer/connect-*.sh ~/.hermes/desktop-plugins/computer-viewer/hiperf-*.sh
 ```
 
@@ -131,7 +99,7 @@ Named Hermes profile:
 ```bash
 mkdir -p ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer
 cp plugin.js ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/plugin.js
-cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-linux.sh hiperf-agent.py ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/
+cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-agent.py ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/
 chmod +x ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-*.sh ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/hiperf-*.sh
 ```
 
@@ -140,8 +108,6 @@ Windows (typical):
 ```text
 %LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\plugin.js
 %LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\connect-windows.ps1
-%LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\hiperf-windows.ps1
-%LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\hiperf-agent.py
 ```
 
 Then:
@@ -151,52 +117,6 @@ Then:
 3. A **Computer** pane docks on the right (320px). The status bar shows a Computer chip on the right.
 
 Disable the plugin from Settings → Plugins to tear down the pane, status-bar item, palette commands, keybind, and any live RFB / iframe session.
-
-## Give your bots hands (agent plugin)
-
-The desktop plugin above is the live viewer. This repo also ships an agent plugin (`agent-plugin/orgo-computer`) so each Hermes bot can drive the same Orgo cloud computer: delegated GUI tasks (`orgo_computer_run`) and a direct shell (`orgo_computer_bash`).
-
-**Rotate the Orgo API key that was exposed in chat on 2026-08-22 before you configure this plugin.**
-
-### Install into Hermes profiles
-
-Hermes profiles do not share plugins or `.env` files. Each profile is its own `HERMES_HOME` (`~/.hermes` for the default profile, `~/.hermes/profiles/<name>/` for named bots). The installer symlinks this repo's plugin into every selected profile, enables it in that profile's `config.yaml`, and writes `ORGO_API_KEY` into that profile's `.env`.
-
-```bash
-bash install-agent-plugin.sh
-# or: bash install-agent-plugin.sh --profiles default,ava
-# or: bash install-agent-plugin.sh --all --yes --api-key "$ORGO_API_KEY"
-```
-
-The script is idempotent. Hermes never auto-installs `python_dependencies`. If `httpx` is missing from the Hermes venv the installer prints the exact command:
-
-```text
-pip install 'httpx>=0.27,<1'
-```
-
-### After install
-
-1. Restart Hermes (CLI / gateway / desktop).
-2. In each bot, run `/computer` (alias `/orgo-computer`) and pin that bot's machine by unique name substring or UUID. The pin is stored on that profile as `plugins.entries.orgo-computer.settings.computer_id` and survives restart. CLI: `hermes orgo-computer list` and `hermes orgo-computer set <profile> <uuid>`. `set` writes the **target** profile's `config.yaml` directly; it does not use the current process's plugin settings.
-3. In the Computer viewer pane, pick the **same** computer as a per-bot endpoint. Viewer pairing is a configuration convention, not a runtime link: pin the same machine in `/computer` and in the viewer's per-bot endpoint.
-
-A profile whose `.env` has no `ORGO_API_KEY` does not load these tools (Hermes' standard missing-env disable). A second profile is not pinned just because the first one is.
-
-### What the bot can do
-
-- `orgo_computer_bash` -- cheap, deterministic shell on the pinned VM. Prefer this when you do not need vision or a GUI. Orgo returns one combined `output` stream (no stdout/stderr split).
-- `orgo_computer_run` -- bounded multi-step GUI/browser work via Orgo's hosted computer-use agent. It uses plan credits, holds the mouse for the whole run (a second run fails after about 5 seconds), and is not idempotent.
-
-Both tools change external state. Hermes does not treat plugin tools as terminal commands, so this plugin registers a `pre_tool_call` hook that routes them through the same human-approval gate as dangerous shell (`[o]nce` / `[s]ession` / `[a]lways` / `[d]eny`). `--yolo` still auto-approves, as with other tools. Do not enable this plugin on an untrusted profile.
-
-Remote output is wrapped `untrusted: true` with a treat-as-data note. Success JSON from a delegated run does not include `computer_id`.
-
-Default delegated-run timeout is 420 seconds to match Hermes' sequential tool deadline (`timeouts.tools.sequential_call` / `concurrent_batch`). Raise both that host setting and `timeout_seconds` if you need longer CUA runs.
-
-### Limits (v1)
-
-No pixel-level loop inside Hermes, no non-Orgo machines, no automatic viewer-to-agent pin sync, no screenshot tool, no file transfer, one computer per profile.
-
 
 ## First-run setup
 
@@ -411,7 +331,6 @@ If noVNC cannot be loaded from the CDN (network or CSP), the pane shows **Couldn
 | Thumbnail | Always view-only. Click to expand. Pointer events are disabled on the live surface so a 320px desktop is not an input target. Optional top-panel crop is **off by default** (see below). |
 | Status dot | Connection state (idle / connecting / connected / error). |
 | Gear | Opens the settings dialog. |
-| HD (websocket endpoints) | One-click toggle for high-performance H.264 overlay. Active while streaming. If no token/URL is saved, opens the editor at the HD section. |
 | Expand (or ⌘⇧D / Ctrl+Shift+D) | Fullscreen overlay. Same RFB/iframe node — no reconnect. |
 | Connect / Reconnect | Shown when idle, disconnected, or on error. |
 | Reload / Open in browser | Iframe mode only. |
@@ -432,9 +351,8 @@ Mouse-move shows the bar; it auto-fades after 2s idle. Escape collapses (Escape 
 | Reconnect | Full `connect()` (re-fetches session JSON). |
 | Disconnect | Clean disconnect; does not auto-retry. |
 | Collapse | Leave fullscreen. |
-| HD stats (when streaming) | `{fps}fps · {mbps}Mbps · {rtt}ms` at the trailing end of the bar. |
 
-Iframe expanded controls are Reload, Open in browser, and Collapse. HD is websocket-only.
+Iframe expanded controls are Reload, Open in browser, and Collapse.
 
 ### Command palette and keybind
 
@@ -473,4 +391,3 @@ Old nginx/websockify backends that require the legacy `binary` WebSocket subprot
 - One connection at a time; thumbnails of *multiple* bots' computers simultaneously is a future version.
 - No `resizeSession` control, no clipboard *file* transfer, no audio, no session recording.
 - Desktop-only plugin — no agent-side `plugin.yaml`.
-- High-performance mode is optional and private-network-only (see that section). It does not replace VNC.

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # High-performance H.264 stream agent for the Computer plugin (macOS).
-# Installs ffmpeg (brew), a dedicated venv, hiperf-agent.py, and a LaunchAgent.
+# Installs ffmpeg (brew or ~/.hermes-cv/bin/ffmpeg), a dedicated venv,
+# hiperf-agent.py, and a LaunchAgent.
 # Idempotent, no sudo. LAN / Tailscale only. Port 6090.
 #
-# Runs the agent once in the foreground first so macOS can prompt for Screen
-# Recording (TCC) before the LaunchAgent is loaded.
+# A launchd-started agent CANNOT show the Screen Recording (TCC) prompt.
+# Permission must be granted manually (see the footer). The Mac must be
+# logged in; a lock screen yields only the lock-screen image.
 
 set -euo pipefail
 
@@ -79,7 +81,9 @@ ensure_token() {
     fi
   fi
   local tok=""
-  if command -v python3 >/dev/null 2>&1; then
+  if [ -n "${PYTHON_CMD:-}" ] && [ -x "${PYTHON_CMD}" ]; then
+    tok="$("${PYTHON_CMD}" -c 'import secrets; print(secrets.token_hex(16))')"
+  elif command -v python3 >/dev/null 2>&1; then
     tok="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
   else
     tok="$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
@@ -90,27 +94,47 @@ ensure_token() {
   printf '%s' "$tok"
 }
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 not found. Install Python 3 (Xcode Command Line Tools or python.org) and re-run." >&2
+pick_python() {
+  local cand
+  for cand in "${HERMES_CV}/python/bin/python3" "$(command -v python3 2>/dev/null || true)"; do
+    if [ -n "$cand" ] && [ -x "$cand" ]; then
+      if "$cand" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+        printf '%s' "$cand"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+PYTHON_CMD="$(pick_python || true)"
+if [ -z "${PYTHON_CMD}" ]; then
+  echo "python3 3.10+ not found on PATH and ${HERMES_CV}/python/bin/python3 is missing or too old." >&2
+  echo "Install Python 3.10+ (Xcode Command Line Tools or python.org) and re-run." >&2
   echo "  xcode-select --install" >&2
+  echo "Or drop a python-build-standalone tree at ${HERMES_CV}/python so that" >&2
+  echo "  ${HERMES_CV}/python/bin/python3" >&2
+  echo "exists (this script does not download Python), then re-run." >&2
   exit 1
 fi
 
-if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
-  echo "Python 3.10+ is required (found $(python3 --version 2>&1))." >&2
-  exit 1
-fi
-
-echo "==> Python: $(python3 -c 'import sys; print(sys.executable)') ($(python3 --version 2>&1))"
+echo "==> Python: ${PYTHON_CMD} ($("${PYTHON_CMD}" --version 2>&1))"
 
 FFMPEG_BIN=""
-if command -v ffmpeg >/dev/null 2>&1; then
+if [ -x "${HERMES_CV}/bin/ffmpeg" ]; then
+  FFMPEG_BIN="${HERMES_CV}/bin/ffmpeg"
+  echo "==> ffmpeg at ${FFMPEG_BIN} (Hermes-cv drop-in)"
+elif command -v ffmpeg >/dev/null 2>&1; then
   FFMPEG_BIN="$(command -v ffmpeg)"
   echo "==> ffmpeg already on PATH: ${FFMPEG_BIN}"
 else
   if ! command -v brew >/dev/null 2>&1; then
-    echo "ffmpeg not found and Homebrew is missing. Install ffmpeg, then re-run." >&2
+    echo "ffmpeg not found on PATH, ${HERMES_CV}/bin/ffmpeg is missing, and Homebrew is missing." >&2
+    echo "Install ffmpeg, then re-run:" >&2
     echo "  brew install ffmpeg" >&2
+    echo "Or drop a static ffmpeg binary at" >&2
+    echo "  ${HERMES_CV}/bin/ffmpeg" >&2
+    echo "(this script does not download ffmpeg) and re-run." >&2
     exit 1
   fi
   echo "==> Installing ffmpeg via Homebrew"
@@ -120,9 +144,10 @@ fi
 
 if [ -z "${FFMPEG_BIN}" ] || [ ! -x "${FFMPEG_BIN}" ]; then
   echo "ffmpeg binary not found after install." >&2
+  echo "Drop a static ffmpeg binary at ${HERMES_CV}/bin/ffmpeg if Homebrew is unavailable." >&2
   exit 1
 fi
-FFMPEG_BIN="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${FFMPEG_BIN}")"
+FFMPEG_BIN="$("${PYTHON_CMD}" -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${FFMPEG_BIN}")"
 echo "    ${FFMPEG_BIN}"
 
 umask 077
@@ -132,8 +157,9 @@ TOKEN="$(ensure_token)"
 
 if [ ! -x "${VENV_DIR}/bin/python" ]; then
   echo "==> Creating dedicated venv at ${VENV_DIR}"
-  if ! python3 -m venv "${VENV_DIR}"; then
-    echo "python3 -m venv failed. Install Python 3 from python.org or run: xcode-select --install" >&2
+  if ! "${PYTHON_CMD}" -m venv "${VENV_DIR}"; then
+    echo "python3 -m venv failed. Install Python 3.10+ from python.org or run: xcode-select --install" >&2
+    echo "Or drop a python-build-standalone tree at ${HERMES_CV}/python and re-run." >&2
     exit 1
   fi
 else
@@ -178,10 +204,12 @@ if [ -z "${BREW_PREFIX}" ]; then
     BREW_PREFIX=/usr/local
   fi
 fi
-PATH_VALUE="${BREW_PREFIX:+${BREW_PREFIX}/bin:}/usr/local/bin:/usr/bin:/bin"
+PATH_VALUE="${HERMES_CV}/bin:${BREW_PREFIX:+${BREW_PREFIX}/bin:}/usr/local/bin:/usr/bin:/bin"
 
-echo "==> Foreground capture probe (macOS Screen Recording prompt may appear)"
-echo "    If macOS asks to record this Terminal's screen, click Allow, then wait."
+echo "==> Capture probe (will not obtain Screen Recording permission by itself)"
+echo "    A launchd-started agent cannot show the TCC prompt, and launchctl asuser"
+echo "    requires root, so this script cannot grant Screen Recording for you."
+echo "    Grant it MANUALLY before expecting :${LISTEN_PORT} to stream (see footer)."
 set +e
 "${PYTHON_BIN}" "${AGENT_PATH}" \
   --port "${LISTEN_PORT}" \
@@ -280,7 +308,7 @@ TS_IP=""
 TS_DNS=""
 if command -v tailscale >/dev/null 2>&1; then
   TS_IP="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
-  TS_DNS="$(tailscale status --json 2>/dev/null | python3 -c 'import sys,json
+  TS_DNS="$(tailscale status --json 2>/dev/null | "${PYTHON_CMD}" -c 'import sys,json
 try:
     d=json.load(sys.stdin)
     n=(d.get("Self") or {}).get("DNSName") or ""
@@ -311,8 +339,21 @@ if [ -n "${TS_IP}" ]; then
 fi
 echo
 echo "LAN / Tailscale only. Do not port-forward ${LISTEN_PORT}."
-echo "If frames stay black after launchd starts, grant Screen Recording to"
-echo "Terminal (the probe) AND to ${PYTHON_BIN} in System Settings ->"
-echo "Privacy & Security -> Screen Recording, then re-run this script."
+echo
+echo "The Mac must be LOGGED IN (not at the lock screen) or capture shows only"
+echo "the lock screen."
+echo
+echo "Screen Recording must be granted MANUALLY (a launchd agent cannot show the"
+echo "TCC prompt, and launchctl asuser requires root, so this script cannot do it):"
+echo "  System Settings -> Privacy & Security -> Screen Recording"
+echo "  add/enable BOTH:"
+echo "    ${PYTHON_BIN}"
+echo "    ${FFMPEG_BIN}"
+echo "If this Mac is headless, grant that through the plugin's own VNC view of"
+echo "the Mac (the working VNC path is how you enable the fast path)."
+echo
+echo "Symptoms:"
+echo "  capture hangs / port ${LISTEN_PORT} never listens -> missing Screen Recording permission"
+echo "  frames arrive but are the lock screen -> not logged in"
 echo "Logs: ${LOG_PATH}"
 echo "===================================================================="

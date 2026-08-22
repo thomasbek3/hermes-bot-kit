@@ -146,10 +146,37 @@ Black screen on a **real physically headless** Windows 11 Home box, live over SS
 
 Validate: `LC_ALL=C grep -nP "[^\x00-\x7F]" build/connect-windows.ps1` returns nothing. `node --check build/plugin.js` still passes; plugin.js untouched.
 
-## Round 19 (2026-08-22) - High-performance streaming mode (hiperf)
+## Fix round 21
 
-Spec docs/SPEC-HIPERF.md (Grok-xhigh-reviewed, 26 findings incorporated), built by Grok 4.6 xhigh, verified by Claude. Optional per-endpoint "HD" mode: ffmpeg hardware capture/encode on the host -> Annex-B H.264 over WebSocket :6090 -> WebCodecs hardware decode in the plugin, layered pointer-events:none over the live RFB canvas (VNC keeps input + instant fallback). One-click HD toggle in the pane header. New: hiperf-agent.py + hiperf-{mac,windows,linux} installers. Live-verified on the Windows box: pipeline h264_nvenc-gdi, Main-profile 1920x1080, session-1 capture proven via SPS. Details: docs/BUILD-NOTES-HIPERF.md (incl. two post-build patches: dry-run timeout 12s, gdigrab+NVENC candidate).
+Live install of the hiperf agent on a real Apple-silicon Mac (M4 mini, macOS 26.3.1, arm64). Three findings; plugin.js untouched.
 
-## Round 20 (2026-08-22) - orgo-computer agent plugin (control plane)
+**Bug 1 -- avfoundation input pixel format (blocking).** The darwin capture prefix was `-f avfoundation -capture_cursor 0 -framerate <fps> -i <idx>:none`. ffmpeg then auto-selected yuv420p for the INPUT and macOS rejected it. Verbatim from the live dry-run log:
 
-Spec docs/SPEC-CONTROL.md (Grok-xhigh-reviewed against live Orgo API + Hermes plugin docs, 24 findings incorporated), built by Grok 4.6 xhigh, verified by Claude. Hermes agent plugin giving every bot hands on its Orgo computer, Korgo-style: orgo_computer_run (delegated hosted CUA, ported from Korgo orgo_agent_mcp.py) + orgo_computer_bash (direct shell), /computer pin per profile, multi-profile installer (per-profile HERMES_HOME: symlink + plugins.enabled + .env). E2E-verified live: hermes -z one-shot ran bash (exit 0 marker echo) and a delegated CUA run (opened Thunar on Hermes Computer, described screen). Details: docs/BUILD-NOTES-CONTROL.md.
+```
+[avfoundation @ ...] Selected pixel format (yuv420p) is not supported by the input device.
+[avfoundation @ ...] Supported pixel formats:
+[avfoundation @ ...]   uyvy422
+[avfoundation @ ...]   yuyv422
+[avfoundation @ ...]   nv12
+[avfoundation @ ...]   0rgb
+[avfoundation @ ...]   bgr0
+```
+
+Every darwin candidate now passes `-pixel_format nv12` as an INPUT option (before `-i`). nv12 is on that supported list and is the natural input for h264_videotoolbox. libx264 still has `-pix_fmt yuv420p` on the OUTPUT side. A second candidate set uses `-pixel_format uyvy422` (after the nv12 videotoolbox candidates, before libx264) in case a given Mac/display does not offer nv12.
+
+**Bug 2 -- device index parse.** On this machine `ffmpeg -f avfoundation -list_devices true -i ""` reports:
+
+```
+[AVFoundation indev @ ...] AVFoundation video devices:
+[AVFoundation indev @ ...] [0] Capture screen 0
+```
+
+The screen is index 0, but every line is prefixed by `[AVFoundation indev @ 0x...]`. A naive first-bracketed-int parse would take garbage from that pointer/indev bracket (the previous parser skipped the line entirely when the first bracket was not digits, then defaulted to 0 -- correct on this box, wrong if the screen were not 0). Parse now prefers the LAST `[N]` immediately preceding "capture screen" on that line, keeps the default-0 fallback, and logs the exact parsed line.
+
+**Bug 3 -- TCC / lock screen.** A launchd-started agent CANNOT trigger the interactive TCC prompt, and `launchctl asuser` requires root, so the automated probe cannot obtain permission. The capture call simply HANGS with no error when permission is missing (not an error exit -- a hang). If the Mac is sitting at the LOCK SCREEN, screen capture yields only the lock screen.
+
+`hiperf-mac.sh` footer and the README macOS hiperf section now state: the Mac must be LOGGED IN; Screen Recording must be granted MANUALLY to BOTH the venv python (`~/.hermes-cv/hiperf/venv/bin/python`) and the ffmpeg binary; headless boxes can do that through the plugin's own VNC view. Symptom mapping: capture hangs / port 6090 never listens => missing Screen Recording permission; frames arrive but are the lock screen => not logged in. The agent treats a candidate with no output bytes within 10s as a stall, logs Screen Recording as the likely cause, and moves on instead of hanging forever.
+
+**Bonus.** `hiperf-mac.sh` checks `~/.hermes-cv/bin/ffmpeg` and `~/.hermes-cv/python/bin/python3` before PATH/Homebrew. Error text mentions dropping a static ffmpeg or python-build-standalone there. No auto-download.
+
+Validate: `python3 -m py_compile build/hiperf-agent.py` passes; `bash -n build/hiperf-mac.sh` passes; both remain pure ASCII. plugin.js untouched.
