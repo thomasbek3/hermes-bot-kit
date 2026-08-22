@@ -66,7 +66,7 @@ const HIPERF_LINES = {
   'hiperf-unreachable': 'HD agent not reachable on {hiperfUrl} — using VNC.',
   'resolution-mismatch': "HD stream resolution doesn't match VNC — using VNC.",
   'capture-failed': 'HD capture failed on the host (permissions?) — using VNC.',
-  'decode-failed': 'HD stream failed (decode-failed) — using VNC.',
+  'decode-failed': 'HD unavailable — using VNC.',
   'ffmpeg-died': 'HD stream failed (ffmpeg-died) — using VNC.',
   'no-encoder': 'HD stream failed (no-encoder) — using VNC.',
   'mixed-public': MIXED_CONTENT_HINT
@@ -2089,7 +2089,7 @@ function formatHiperfMbps(n) {
 }
 
 function hiperfRetryable(code) {
-  return code === 'hiperf-unreachable' || code === 'ffmpeg-died'
+  return code === 'hiperf-unreachable' || code === 'ffmpeg-died' || code === 'decode-failed'
 }
 
 const hiperf = {
@@ -2283,11 +2283,16 @@ function hiperfToAvcc(au) {
   const nals = hiperfSplitNals(au)
   const parts = []
   for (const nal of nals) {
+    if (!nal.length) continue
+    const ntype = nal[0] & 0x1f
+    // AVCC samples should be VCL-only. SPS/PPS live in the description;
+    // SEI/AUD make Electron's VideoDecoder throw EncodingError.
+    if (ntype !== 1 && ntype !== 5) continue
     const len = new Uint8Array(4)
     new DataView(len.buffer).setUint32(0, nal.length)
     parts.push(len, nal)
   }
-  return hiperfConcat(parts)
+  return parts.length ? hiperfConcat(parts) : new Uint8Array(0)
 }
 
 function hiperfAvcC(sps, pps) {
@@ -2584,12 +2589,13 @@ function hiperfStripAuxNals(au) {
 function hiperfMakeConfig() {
   const codec = hiperf.codec
   if (!codec) return null
+  const config = { codec, optimizeForLatency: true, hardwareAcceleration: 'prefer-software' }
   if (hiperf.useAvcc) {
     const description = hiperfAvcC(hiperf.sps, hiperf.pps)
     if (!description) return null
-    return { codec, description, optimizeForLatency: true }
+    config.description = description
   }
-  return { codec, optimizeForLatency: true }
+  return config
 }
 
 async function hiperfConfigureDecoder(gen) {
@@ -2705,12 +2711,14 @@ async function hiperfOnBinary(gen, data) {
     if (!isKey) return
   }
   hiperf.waitKey = false
+  const payload = hiperfPayloadForDecode(au)
+  if (!payload.length) return
   try {
     decoder.decode(
       new EncodedVideoChunk({
         type: isKey ? 'key' : 'delta',
         timestamp,
-        data: hiperfPayloadForDecode(au)
+        data: payload
       })
     )
   } catch {

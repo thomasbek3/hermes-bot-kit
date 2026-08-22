@@ -238,6 +238,10 @@ def _darwin_candidates(ffmpeg: str, fps: int, bitrate: int, idx: int) -> list[Ca
     ]
     out: list[Candidate] = [
         Candidate(
+            'libx264',
+            prefix_ffmpeg(ffmpeg) + cap_nv12 + x264 + rate + encode_tail(fps, 'yuv420p'),
+        ),
+        Candidate(
             'h264_videotoolbox',
             prefix_ffmpeg(ffmpeg) + cap_nv12 + vt + ['-allow_sw', '0'] + rate + encode_tail(fps, 'yuv420p'),
         ),
@@ -246,20 +250,16 @@ def _darwin_candidates(ffmpeg: str, fps: int, bitrate: int, idx: int) -> list[Ca
             prefix_ffmpeg(ffmpeg) + cap_nv12 + vt + ['-allow_sw', '1'] + rate + encode_tail(fps, 'yuv420p'),
         ),
         Candidate(
+            'libx264_uyvy422',
+            prefix_ffmpeg(ffmpeg) + cap_uyvy + x264 + rate + encode_tail(fps, 'yuv420p'),
+        ),
+        Candidate(
             'h264_videotoolbox_uyvy422',
             prefix_ffmpeg(ffmpeg) + cap_uyvy + vt + ['-allow_sw', '0'] + rate + encode_tail(fps, 'yuv420p'),
         ),
         Candidate(
             'h264_videotoolbox_sw_uyvy422',
             prefix_ffmpeg(ffmpeg) + cap_uyvy + vt + ['-allow_sw', '1'] + rate + encode_tail(fps, 'yuv420p'),
-        ),
-        Candidate(
-            'libx264',
-            prefix_ffmpeg(ffmpeg) + cap_nv12 + x264 + rate + encode_tail(fps, 'yuv420p'),
-        ),
-        Candidate(
-            'libx264_uyvy422',
-            prefix_ffmpeg(ffmpeg) + cap_uyvy + x264 + rate + encode_tail(fps, 'yuv420p'),
         ),
     ]
     return out
