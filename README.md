@@ -94,6 +94,8 @@ When HD is streaming, the header toggle shows an active state, the switcher show
 New-NetFirewallRule -DisplayName "Computer Viewer hiperf (6090 Public)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 6090 -Profile Public
 ```
 
+- **Headless Windows / virtual displays: DXGI desktop duplication is broken there — GDI capture is the rule.** Verified live on a headless box (RTX 2060 SUPER + Amyuni usbmmidd virtual display): ffmpeg's `ddagrab` hangs producing no frames, and TightVNC's DXGI capture returns an all-zero framebuffer — the whole desktop-duplication family fails against IDD virtual displays, while GDI paths (gdigrab for ffmpeg, UltraVNC PollFullScreen+EnableHook for VNC) work fine. Only the capture stage breaks; the GPU encoder is unaffected. The agent's candidate list already handles this: it falls through to `h264_nvenc-gdi` (gdigrab capture + NVENC hardware encode), which is the right shape for any headless-with-virtual-display box. If `hello.encoder` reports `libx264` on a machine with a real GPU, read `hiperf.log` — the hardware candidates' dry-run output will say why.
+
 ### Limitations (hiperf)
 
 - Websocket-mode endpoints only. iframe / Session JSON: no socket, no errors, no status line.
