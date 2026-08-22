@@ -32,6 +32,14 @@ def register(ctx) -> None:
 
     ctx.register_hook("pre_tool_call", tools.pre_tool_call)
 
+    # Frozen into every new session prompt: tells the bot it HAS its own
+    # cloud computer, by name. Empty string (nothing pinned) renders as an
+    # omitted section -- verified against render_system_prompt_sections.
+    ctx.register_system_prompt_section(
+        id="orgo-computer-identity",
+        content=lambda _session_info: tools.computer_identity_section(),
+    )
+
     ctx.register_command(
         "computer",
         handler=tools.handle_computer_command_async,

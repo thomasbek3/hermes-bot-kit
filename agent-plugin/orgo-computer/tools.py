@@ -199,6 +199,36 @@ def _require_computer_id() -> str:
     return computer_id
 
 
+def computer_identity_section() -> str:
+    """Rendered into each session prompt: this bot's own cloud computer.
+
+    Local config only -- never touches the network at prompt-render time.
+    Returns an empty string when nothing is pinned so Hermes omits the
+    section entirely.
+    """
+    computer_id = _resolve_computer_id()
+    if not computer_id:
+        return ""
+    raw_name = _ctx_get("computer_name", default="")
+    name = raw_name.strip() if isinstance(raw_name, str) else ""
+    label = f"{name} ({computer_id})" if name else computer_id
+    return (
+        "## Your cloud computer\n"
+        f"You have a dedicated Orgo cloud computer: {label}. "
+        "It is YOUR computer, provisioned for you -- your own machine, the "
+        "same way every computer-use agent has one. It is ready to use; no "
+        "setup or permission needed.\n"
+        "- orgo_computer_run: delegate a GUI/browser task to it. It clicks, "
+        "types, and browses on your behalf. Uses Orgo plan credits and holds "
+        "the computer's single control lock while running.\n"
+        "- orgo_computer_bash: run a shell command directly inside its VM.\n"
+        "Use them whenever a task needs a desktop, a browser, or a machine "
+        "other than the one you are running on. The user can watch this "
+        "computer's screen live in the computer-viewer pane and can re-pin a "
+        "different computer with /computer <name|uuid>."
+    )
+
+
 def _require_api_key() -> str:
     key = _api_key()
     if not key:
@@ -817,6 +847,14 @@ async def _handle_computer_command_async(raw_args: str) -> str:
         listing_error = "Could not list Orgo computers."
         listing_failed = True
 
+    def _pin_with_name(record: dict[str, str]) -> None:
+        """Persist id + display name (name feeds the prompt identity section)."""
+        pin_computer(record["id"])
+        try:
+            _ctx_set("computer_name", str(record.get("name", "")).strip()[:200])
+        except Exception:
+            logger.warning("Could not save computer_name; identity section will use the UUID")
+
     if not arg:
         if listing_failed:
             extra = f" ({listing_error})" if listing_error else ""
@@ -849,7 +887,7 @@ async def _handle_computer_command_async(raw_args: str) -> str:
                         "Pair the computer-viewer pane to the same machine."
                     )
                 return f"No computer matching '{arg}'."
-        pin_computer(record["id"])
+        _pin_with_name(record)
         return (
             f"Pinned computer: {record['name']} ({record['id']}). "
             "Pair the computer-viewer pane to the same machine."
@@ -871,7 +909,7 @@ async def _handle_computer_command_async(raw_args: str) -> str:
             "Use a more specific name or the UUID."
         )
     record = matches[0]
-    pin_computer(record["id"])
+    _pin_with_name(record)
     return (
         f"Pinned computer: {record['name']} ({record['id']}). "
         "Pair the computer-viewer pane to the same machine."
@@ -950,7 +988,11 @@ def merge_plugin_enabled(config: dict[str, Any]) -> None:
     plugins["enabled"] = enabled
 
 
-def merge_computer_id(config: dict[str, Any], computer_id: str) -> None:
+def merge_computer_id(
+    config: dict[str, Any],
+    computer_id: str,
+    computer_name: Optional[str] = None,
+) -> None:
     plugins = config.get("plugins")
     if not isinstance(plugins, dict):
         plugins = {}
@@ -968,9 +1010,15 @@ def merge_computer_id(config: dict[str, Any], computer_id: str) -> None:
         settings = {}
         entry["settings"] = settings
     settings["computer_id"] = computer_id
+    if computer_name:
+        settings["computer_name"] = str(computer_name).strip()[:200]
 
 
-def write_profile_computer_id(profile: str, computer_id: str) -> Path:
+def write_profile_computer_id(
+    profile: str,
+    computer_id: str,
+    computer_name: Optional[str] = None,
+) -> Path:
     home = _profile_home(profile)
     if not home.is_dir():
         raise OrgoAgentRequestError(
@@ -982,7 +1030,7 @@ def write_profile_computer_id(profile: str, computer_id: str) -> Path:
         )
     path = home / "config.yaml"
     data = _load_yaml(path)
-    merge_computer_id(data, computer_id)
+    merge_computer_id(data, computer_id, computer_name)
     _atomic_write_text(path, _dump_yaml(data))
     return path
 
