@@ -213,6 +213,21 @@ function isTailscaleIpv4(hostName) {
   )
 }
 
+function isPrivateIpv4(hostName) {
+  const octets = String(hostName || '').split('.').map(Number)
+  if (
+    octets.length !== 4 ||
+    octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  ) {
+    return false
+  }
+  if (octets[0] === 10) return true
+  if (octets[0] === 192 && octets[1] === 168) return true
+  if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return true
+  if (octets[0] === 169 && octets[1] === 254) return true
+  return isTailscaleIpv4(hostName)
+}
+
 function isPrivateWsHost(hostName) {
   const host = String(hostName || '')
     .trim()
@@ -220,8 +235,8 @@ function isPrivateWsHost(hostName) {
     .replace(/^\[|\]$/g, '')
   if (!host) return false
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
-  if (host.endsWith('.ts.net')) return true
-  return isTailscaleIpv4(host)
+  if (host.endsWith('.ts.net') || host.endsWith('.local') || host.endsWith('.localhost')) return true
+  return isPrivateIpv4(host)
 }
 
 function isInsecurePublicWs(wsUrl) {
@@ -233,16 +248,201 @@ function isInsecurePublicWs(wsUrl) {
   }
 }
 
+const DEFAULT_ENDPOINT_NAME = 'My computer'
+const ADDRESS_EMPTY_HELP =
+  "Works with a wss:// address, a noVNC web page, a cloud API key, or just host:port — paste it and I'll figure out which."
+const ADDRESS_INVALID_LINE = "Hmm — that doesn't look like an address or key."
+const SK_KEY_RE = /^sk[_-][A-Za-z0-9_-]{8,}$/
+
+function isDefaultishName(name) {
+  const n = String(name || '').trim()
+  return n === '' || n === DEFAULT_ENDPOINT_NAME || n === 'Local box' || n === 'Untitled'
+}
+
+function formatHostForUrl(host) {
+  const h = String(host || '').replace(/^\[|\]$/g, '')
+  return h.includes(':') ? `[${h}]` : h
+}
+
+function isPlausibleHostname(host) {
+  const h = String(host || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+  if (!h || h.length > 253) return false
+  if (h === 'localhost' || h === '::1') return true
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(h)) {
+    return h.split('.').every(part => {
+      const n = Number(part)
+      return Number.isInteger(n) && n >= 0 && n <= 255
+    })
+  }
+  if (/^[0-9a-f:]+$/.test(h) && h.includes(':')) return true
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$/.test(h)
+}
+
+function parseHostPort(value) {
+  const text = String(value || '').trim()
+  if (!text || /[\s/\\@?#]/.test(text)) return null
+  let host = ''
+  let portStr = ''
+  const bracketed = /^\[([0-9a-fA-F:]+)\](?::(\d{1,5}))?$/.exec(text)
+  if (bracketed) {
+    host = bracketed[1]
+    portStr = bracketed[2] || ''
+  } else if ((text.match(/:/g) || []).length > 1) {
+    if (/^[0-9a-fA-F:]+$/.test(text)) host = text
+    else return null
+  } else {
+    const colon = text.lastIndexOf(':')
+    if (colon > 0 && /^\d{1,5}$/.test(text.slice(colon + 1))) {
+      host = text.slice(0, colon)
+      portStr = text.slice(colon + 1)
+    } else if (colon === -1) {
+      host = text
+    } else {
+      return null
+    }
+  }
+  if (!isPlausibleHostname(host)) return null
+  const port = portStr ? Number(portStr) : 6080
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+  return { host, port }
+}
+
+function probeUrlsFromHostPort(parsed) {
+  const host = formatHostForUrl(parsed.host)
+  const scheme = isPrivateWsHost(parsed.host) ? 'ws' : 'wss'
+  return {
+    wsUrl: `${scheme}://${host}:${parsed.port}/websockify`,
+    iframeUrl: `http://${host}:${parsed.port}/vnc.html`
+  }
+}
+
+function looksLikeApiKey(value) {
+  const text = String(value || '').trim()
+  if (!text) return false
+  if (SK_KEY_RE.test(text)) return true
+  if (text.length < 16) return false
+  if (/[./\\:@]/.test(text)) return false
+  if (!/^[A-Za-z0-9_-]+$/.test(text)) return false
+  return /[A-Za-z]/.test(text) && /[0-9]/.test(text)
+}
+
+function isNovncPageUrl(href) {
+  let parsed
+  try {
+    parsed = new URL(String(href || '').trim())
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+  const path = parsed.pathname || '/'
+  if (/vnc\.html/i.test(path) || /vnc_lite\.html/i.test(path)) return true
+  const withoutQuery = `${parsed.origin}${path}`
+  if (/:\d+\/$/.test(withoutQuery)) return true
+  if ((path === '/' || path === '') && parsed.port) return true
+  return false
+}
+
+function classifyAddress(raw) {
+  const address = String(raw || '').trim()
+  if (!address) {
+    return { kind: 'empty', line: ADDRESS_EMPTY_HELP, connectEnabled: false, patch: { probe: false } }
+  }
+  const lower = address.toLowerCase()
+  if (lower.startsWith('ws://') || lower.startsWith('wss://')) {
+    return {
+      kind: 'websocket',
+      line: '✓ VNC address — ready to connect',
+      connectEnabled: true,
+      patch: { mode: 'websocket', wsUrl: address, probe: false }
+    }
+  }
+  if (lower.startsWith('http://') || lower.startsWith('https://')) {
+    try {
+      const parsed = new URL(address)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { kind: 'invalid', line: ADDRESS_INVALID_LINE, connectEnabled: false, patch: { probe: false } }
+      }
+    } catch {
+      return { kind: 'invalid', line: ADDRESS_INVALID_LINE, connectEnabled: false, patch: { probe: false } }
+    }
+    if (isNovncPageUrl(address)) {
+      return {
+        kind: 'iframe',
+        line: '✓ Web viewer page — will be embedded',
+        connectEnabled: true,
+        patch: { mode: 'iframe', iframeUrl: address, probe: false }
+      }
+    }
+    return {
+      kind: 'session-json',
+      line: "✓ API address — I'll fetch the connection from it",
+      connectEnabled: true,
+      patch: { mode: 'session-json', sessionUrl: address, probe: false }
+    }
+  }
+  if (looksLikeApiKey(address)) {
+    return {
+      kind: 'api-key',
+      line: "✓ API key — I'll find your computers",
+      connectEnabled: true,
+      patch: { mode: 'session-json', sessionBearer: address, probe: false }
+    }
+  }
+  const hostPort = parseHostPort(address)
+  if (hostPort) {
+    const urls = probeUrlsFromHostPort(hostPort)
+    return {
+      kind: 'probe',
+      line: "I'll probe this and figure out the connection",
+      connectEnabled: true,
+      patch: { mode: 'websocket', wsUrl: urls.wsUrl, iframeUrl: urls.iframeUrl, probe: true }
+    }
+  }
+  return { kind: 'invalid', line: ADDRESS_INVALID_LINE, connectEnabled: false, patch: { probe: false } }
+}
+
+function withClassifiedAddress(draft, address) {
+  const classified = classifyAddress(address)
+  return { ...draft, address, ...classified.patch }
+}
+
+function synthesizeAddress(raw) {
+  const stored = raw && raw.address != null ? String(raw.address) : ''
+  if (stored.trim()) return stored
+  const mode = raw && (raw.mode === 'iframe' || raw.mode === 'session-json') ? raw.mode : 'websocket'
+  if (mode === 'iframe') return String((raw && raw.iframeUrl) || '')
+  if (mode === 'session-json') return String((raw && raw.sessionUrl) || '')
+  return String((raw && raw.wsUrl) || '')
+}
+
+function rfbConstructorCredentials(username, password) {
+  const user = String(username || '')
+  const pass = String(password || '')
+  if (user) return { username: user, password: pass }
+  if (pass) return { password: pass }
+  return undefined
+}
+
+function isProbeEndpoint(endpoint) {
+  return Boolean(endpoint && endpoint.probe)
+}
+
 function blankEndpoint() {
   return {
     id: newId(),
-    name: 'Local box',
+    name: DEFAULT_ENDPOINT_NAME,
+    address: '',
     mode: 'websocket',
-    wsUrl: 'ws://localhost:6080/websockify',
+    wsUrl: '',
     iframeUrl: '',
     sessionUrl: '',
     sessionBearer: '',
+    username: '',
     password: '',
+    probe: false,
     viewOnlyDefault: false,
     scaleMode: 'fit',
     autoConnect: true,
@@ -258,12 +458,15 @@ function normalizeEndpoint(raw) {
   return {
     id: String(raw.id || newId()),
     name: String(raw.name || 'Untitled'),
+    address: synthesizeAddress(raw),
     mode,
     wsUrl: String(raw.wsUrl || ''),
     iframeUrl: String(raw.iframeUrl || ''),
     sessionUrl: String(raw.sessionUrl || ''),
     sessionBearer: String(raw.sessionBearer || ''),
+    username: String(raw.username || ''),
     password: String(raw.password || ''),
+    probe: raw.probe === true,
     viewOnlyDefault: Boolean(raw.viewOnlyDefault),
     scaleMode: raw.scaleMode === 'native' ? 'native' : 'fit',
     autoConnect: raw.autoConnect !== false,
@@ -278,11 +481,14 @@ function fingerprint(endpoint) {
   return [
     endpoint.id,
     endpoint.mode,
+    endpoint.address || '',
     endpoint.wsUrl,
     endpoint.iframeUrl,
     endpoint.sessionUrl,
     endpoint.sessionBearer,
+    endpoint.username || '',
     endpoint.password,
+    endpoint.probe ? '1' : '0',
     endpoint.qualityLevel,
     endpoint.compressionLevel,
     endpoint.autoConnect ? '1' : '0'
@@ -754,6 +960,16 @@ function persistSettings(next) {
   pluginCtx.storage.set('globalEndpointId', next.globalEndpointId)
   pluginCtx.storage.set('perBotEndpoint', next.perBotEndpoint)
   pluginCtx.storage.set('ui', next.ui)
+}
+
+function persistEndpointFields(endpoint) {
+  if (!endpoint || !endpoint.id) return
+  const next = normalizeEndpoint(endpoint)
+  engine.endpoint = next
+  engine.endpointFingerprint = fingerprint(next)
+  const settings = $settings.get()
+  const endpoints = settings.endpoints.map(item => (item.id === next.id ? next : item))
+  persistSettings({ ...settings, endpoints })
 }
 
 function persistUiFlags(partial) {
@@ -1252,7 +1468,8 @@ async function connect(endpoint) {
   if (engine.currentEndpointId !== endpoint.id) engine.reconnectAttempt = 0
   engine.currentEndpointId = endpoint.id
 
-  if (endpoint.mode === 'iframe') {
+  const probing = isProbeEndpoint(endpoint)
+  if (!probing && endpoint.mode === 'iframe') {
     await connectIframe(endpoint, gen)
     return
   }
@@ -1261,8 +1478,19 @@ async function connect(endpoint) {
 
   let wsUrl = endpoint.wsUrl
   let password = endpoint.password || ''
+  const username = String(endpoint.username || '')
+  let iframeFallbackUrl = ''
 
-  if (endpoint.mode === 'session-json') {
+  if (probing) {
+    const parsed = parseHostPort(String(endpoint.address || '').trim())
+    if (!parsed) {
+      setError('unconfigured', ERRORS.unconfigured.body)
+      return
+    }
+    const urls = probeUrlsFromHostPort(parsed)
+    wsUrl = urls.wsUrl
+    iframeFallbackUrl = urls.iframeUrl
+  } else if (endpoint.mode === 'session-json') {
     if (!endpoint.sessionUrl) {
       setError('session-failed', `GET ${endpoint.sessionUrl || '(empty)'} → HTTP network.`)
       return
@@ -1290,6 +1518,17 @@ async function connect(endpoint) {
 
   if (isInsecurePublicWs(wsUrl)) {
     if (!still(gen)) return
+    if (iframeFallbackUrl) {
+      const next = normalizeEndpoint({
+        ...endpoint,
+        mode: 'iframe',
+        iframeUrl: iframeFallbackUrl,
+        probe: false
+      })
+      persistEndpointFields(next)
+      await connectIframe(next, gen)
+      return
+    }
     setError('mixed-content', ERRORS['mixed-content'].body)
     return
   }
@@ -1327,7 +1566,7 @@ async function connect(endpoint) {
 
     const options = {
       shared: true,
-      credentials: password ? { password } : undefined
+      credentials: rfbConstructorCredentials(username, password)
     }
     if (variant === 'binary') options.wsProtocols = ['binary']
 
@@ -1336,6 +1575,24 @@ async function connect(endpoint) {
       rfb = new RfbCtor(target, wsUrl, options)
     } catch {
       if (!still(gen)) return
+      if (!triedAlternate) {
+        triedAlternate = true
+        openRfb(otherWsProtocol(variant))
+        return
+      }
+      if (iframeFallbackUrl) {
+        const fallback = iframeFallbackUrl
+        iframeFallbackUrl = ''
+        const next = normalizeEndpoint({
+          ...endpoint,
+          mode: 'iframe',
+          iframeUrl: fallback,
+          probe: false
+        })
+        persistEndpointFields(next)
+        void connectIframe(next, gen)
+        return
+      }
       const body = ERRORS.unreachable.body.replace('{wsUrl}', wsUrl || endpoint.wsUrl || '')
       setError('unreachable', body)
       return
@@ -1353,6 +1610,16 @@ async function connect(endpoint) {
       sawConnect = true
       persistWsProtocol(endpoint.id, variant)
       engine.reconnectAttempt = 0
+      if (probing) {
+        persistEndpointFields(
+          normalizeEndpoint({
+            ...endpoint,
+            mode: 'websocket',
+            wsUrl,
+            probe: false
+          })
+        )
+      }
       patchState({ phase: 'connected', code: null, detail: null, attempt: 0 })
       measureScreen()
       attachCanvasObserver()
@@ -1360,9 +1627,12 @@ async function connect(endpoint) {
 
     rfb.addEventListener('credentialsrequired', () => {
       if (!still(gen) || engine.rfb !== rfb) return
-      if (password) {
+      if (username || password) {
+        const creds = {}
+        if (username) creds.username = username
+        if (password) creds.password = password
         try {
-          rfb.sendCredentials({ password })
+          rfb.sendCredentials(creds)
         } catch {
           /* sendCredentials can throw if the socket already dropped */
         }
@@ -1418,6 +1688,19 @@ async function connect(endpoint) {
           if (!still(gen)) return
           openRfb(otherWsProtocol(variant))
         })
+        return
+      }
+      if (!sawConnect && iframeFallbackUrl) {
+        const fallback = iframeFallbackUrl
+        iframeFallbackUrl = ''
+        const next = normalizeEndpoint({
+          ...endpoint,
+          mode: 'iframe',
+          iframeUrl: fallback,
+          probe: false
+        })
+        persistEndpointFields(next)
+        void connectIframe(next, gen)
         return
       }
       const visible = engine.paneVisible || $ui.get().expanded
@@ -1622,14 +1905,14 @@ function OrgoComputerFinder({ bearer, sessionUrl, onPick }) {
         const n = found && typeof found.workspaceCount === 'number' ? found.workspaceCount : 0
         setError(
           n === 0
-            ? 'Orgo returned no workspaces for this key.'
+            ? 'No workspaces for this key.'
             : `Found ${n} workspace(s) but no computers.`
         )
       }
     } catch (err) {
       if (gen !== genRef.current) return
-      if (err && err.kind === 'auth') setError('Orgo rejected the API key.')
-      else setError("Couldn't reach Orgo from the app — enter the Session URL manually.")
+      if (err && err.kind === 'auth') setError('This API key was rejected.')
+      else setError("Couldn't reach the API from the app — set the API address in Advanced.")
     } finally {
       if (gen === genRef.current) setLoading(false)
     }
@@ -1649,7 +1932,7 @@ function OrgoComputerFinder({ bearer, sessionUrl, onPick }) {
         disabled: !tokenReady || loading,
         onClick: () => void findComputers()
       },
-      'Find my Orgo computer'
+      'Find my computers'
     ),
     error
       ? el('p', { className: 'text-[0.64rem] leading-4 text-(--ui-text-secondary)' }, error)
@@ -1657,7 +1940,7 @@ function OrgoComputerFinder({ bearer, sessionUrl, onPick }) {
     computers.length > 0
       ? el(
           Field,
-          { label: 'Orgo computer' },
+          { label: 'Computer' },
           el(
             Select,
             {
@@ -1686,6 +1969,236 @@ function OrgoComputerFinder({ bearer, sessionUrl, onPick }) {
   )
 }
 
+function EndpointEditor({ draft, setDraft, highlight, onBack, onConnect }) {
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const advancedTouchedRef = useRef(false)
+  const classified = classifyAddress(draft.address)
+  const mixed =
+    (draft.mode === 'websocket' || classified.kind === 'websocket') && isInsecurePublicWs(draft.wsUrl)
+
+  function touchAdvanced(patch) {
+    advancedTouchedRef.current = true
+    const next = { ...draft, ...patch }
+    if (
+      patch.mode != null ||
+      patch.wsUrl != null ||
+      patch.iframeUrl != null ||
+      patch.sessionUrl != null
+    ) {
+      next.probe = false
+    }
+    setDraft(next)
+  }
+
+  function pickComputer(computer) {
+    setDraft(current => {
+      if (!current) return current
+      return {
+        ...current,
+        sessionUrl: `${orgoApiOrigin(current.sessionUrl)}/api/computers/${computer.computerId}`,
+        name: isDefaultishName(current.name) ? computer.computerName : current.name
+      }
+    })
+  }
+
+  function submit() {
+    const address = String(draft.address || '').trim()
+    const next =
+      !advancedTouchedRef.current && classified.connectEnabled
+        ? { ...draft, address, ...classified.patch }
+        : { ...draft, address }
+    onConnect(next)
+  }
+
+  return el(
+    'div',
+    { className: 'grid gap-3' },
+    el(Field, { label: 'Name' },
+      el(Input, {
+        value: draft.name,
+        onChange: event => setDraft({ ...draft, name: event.target.value })
+      })
+    ),
+    el(Field, {
+      label: 'Computer address',
+      hint: classified.line,
+      warn: mixed ? MIXED_CONTENT_HINT : null
+    },
+      el(Input, {
+        value: draft.address || '',
+        placeholder: "Paste your computer's address or API key",
+        onChange: event => {
+          advancedTouchedRef.current = false
+          setDraft(withClassifiedAddress(draft, event.target.value))
+        }
+      })
+    ),
+    el(Field, { label: 'Password', hint: PASSWORD_CAVEAT },
+      el(Input, {
+        type: 'password',
+        value: draft.password,
+        className: highlight ? 'ring-2 ring-(--ui-accent)' : undefined,
+        onChange: event => setDraft({ ...draft, password: event.target.value })
+      })
+    ),
+    classified.kind === 'api-key'
+      ? el(OrgoComputerFinder, {
+          bearer: draft.sessionBearer,
+          sessionUrl: draft.sessionUrl,
+          onPick: pickComputer
+        })
+      : null,
+    el(
+      'div',
+      { className: 'flex justify-end gap-2' },
+      el(Button, { type: 'button', variant: 'ghost', onClick: onBack }, 'Back'),
+      el(
+        Button,
+        { type: 'button', disabled: !classified.connectEnabled, onClick: submit },
+        'Connect'
+      )
+    ),
+    el(
+      'div',
+      { className: 'grid gap-3' },
+      el(
+        'button',
+        {
+          type: 'button',
+          className:
+            'flex w-fit items-center gap-1 border-0 bg-transparent p-0 text-[0.7rem] font-medium text-(--ui-text-secondary)',
+          'aria-expanded': advancedOpen,
+          onClick: () => setAdvancedOpen(open => !open)
+        },
+        advancedOpen ? '▾ Advanced' : '▸ Advanced'
+      ),
+      advancedOpen
+        ? el(
+            'div',
+            { className: 'grid gap-3' },
+            el(Field, { label: 'Mode' },
+              el(SegmentedControl, {
+                className: 'w-full',
+                options: MODE_OPTIONS,
+                value: draft.mode,
+                onChange: id => touchAdvanced({ mode: id })
+              })
+            ),
+            el(Field, {
+              label: 'WebSocket URL',
+              hint: 'e.g. ws://localhost:6080/websockify',
+              warn: mixed ? MIXED_CONTENT_HINT : null
+            },
+              el(Input, {
+                value: draft.wsUrl,
+                placeholder: 'ws://localhost:6080/websockify',
+                onChange: event => touchAdvanced({ wsUrl: event.target.value })
+              })
+            ),
+            el(Field, { label: 'noVNC page URL', hint: 'e.g. http://127.0.0.1:6080/vnc.html' },
+              el(Input, {
+                value: draft.iframeUrl,
+                placeholder: 'http://127.0.0.1:6080/vnc.html',
+                onChange: event => touchAdvanced({ iframeUrl: event.target.value })
+              })
+            ),
+            el(Field, {
+              label: 'Session URL',
+              hint: 'GET must return { "websocketUrl": "wss://…", "password": "…" }'
+            },
+              el(Input, {
+                value: draft.sessionUrl,
+                placeholder: 'https://example/api/session',
+                onChange: event => touchAdvanced({ sessionUrl: event.target.value })
+              })
+            ),
+            el(Field, { label: 'Bearer token (optional)' },
+              el(Input, {
+                type: 'password',
+                value: draft.sessionBearer,
+                onChange: event => touchAdvanced({ sessionBearer: event.target.value })
+              })
+            ),
+            el(Field, { label: 'Username (some computers, like Macs, need your login)' },
+              el(Input, {
+                value: draft.username || '',
+                onChange: event => touchAdvanced({ username: event.target.value })
+              })
+            ),
+            el(
+              'div',
+              { className: 'flex items-center justify-between gap-3' },
+              el('span', { className: 'text-[0.7rem] text-(--ui-text-secondary)' }, 'View only by default'),
+              el(Switch, {
+                size: 'xs',
+                checked: Boolean(draft.viewOnlyDefault),
+                onCheckedChange: value => touchAdvanced({ viewOnlyDefault: value })
+              })
+            ),
+            el(
+              'div',
+              { className: 'flex items-center justify-between gap-3' },
+              el('span', { className: 'text-[0.7rem] text-(--ui-text-secondary)' }, 'Connect when pane is visible'),
+              el(Switch, {
+                size: 'xs',
+                checked: draft.autoConnect !== false,
+                onCheckedChange: value => touchAdvanced({ autoConnect: value })
+              })
+            ),
+            el(
+              'div',
+              { className: 'grid gap-1' },
+              el(
+                'div',
+                { className: 'flex items-center justify-between gap-3' },
+                el('span', { className: 'text-[0.7rem] text-(--ui-text-secondary)' }, 'Crop remote panel bar in thumbnail'),
+                el(Switch, {
+                  size: 'xs',
+                  checked: draft.cropPanel === true,
+                  onCheckedChange: value => touchAdvanced({ cropPanel: value })
+                })
+              ),
+              el('p', { className: 'text-[0.64rem] leading-4 text-(--ui-text-quaternary)' }, 'Off by default. Prefer hiding the panel in the VM; crop can clip dock icons.')
+            ),
+            el(Field, { label: 'Scale' },
+              el(SegmentedControl, {
+                options: SCALE_OPTIONS,
+                value: draft.scaleMode === 'native' ? 'native' : 'fit',
+                onChange: id => touchAdvanced({ scaleMode: id })
+              })
+            ),
+            draft.mode !== 'iframe'
+              ? el(
+                  'div',
+                  { className: 'grid grid-cols-2 gap-2' },
+                  el(Field, { label: 'Quality (0–9)' },
+                    el(Input, {
+                      type: 'number',
+                      min: 0,
+                      max: 9,
+                      value: String(draft.qualityLevel),
+                      onChange: event =>
+                        touchAdvanced({ qualityLevel: clampInt(event.target.value, 0, 9, 7) })
+                    })
+                  ),
+                  el(Field, { label: 'Compression (0–9)' },
+                    el(Input, {
+                      type: 'number',
+                      min: 0,
+                      max: 9,
+                      value: String(draft.compressionLevel),
+                      onChange: event =>
+                        touchAdvanced({ compressionLevel: clampInt(event.target.value, 0, 9, 2) })
+                    })
+                  )
+                )
+              : null
+          )
+        : null
+    )
+  )
+}
+
 function SettingsDialog({ profileName }) {
   const settings = useValue($settings)
   const ui = useValue($ui)
@@ -1703,21 +2216,19 @@ function SettingsDialog({ profileName }) {
 
   const editing = draft
   const perBotValue = settings.perBotEndpoint[profileName] || '__global__'
-  const mixed = editing && editing.mode === 'websocket' && isInsecurePublicWs(editing.wsUrl)
 
-  function saveDraft() {
-    if (!draft) return
-    const nextEp = normalizeEndpoint(draft)
+  function saveAndConnect(nextDraft) {
+    if (!nextDraft) return
+    const nextEp = normalizeEndpoint(nextDraft)
     const endpoints = settings.endpoints.some(item => item.id === nextEp.id)
       ? settings.endpoints.map(item => (item.id === nextEp.id ? nextEp : item))
       : [...settings.endpoints, nextEp]
     const globalEndpointId = settings.globalEndpointId || nextEp.id
     persistSettings({ ...settings, endpoints, globalEndpointId })
     setDraft(null)
-    if (engine.currentEndpointId === nextEp.id || !engine.currentEndpointId) {
-      engine.reconnectAttempt = 0
-      if (engine.paneVisible || $ui.get().expanded) void connect(resolveEndpoint() || nextEp)
-    }
+    setUi({ settingsOpen: false, highlightPassword: false })
+    engine.reconnectAttempt = 0
+    void connect(nextEp)
   }
 
   function removeEndpoint(id) {
@@ -1745,7 +2256,7 @@ function SettingsDialog({ profileName }) {
         DialogHeader,
         {},
         el(DialogTitle, {}, 'Computer endpoints'),
-        el(DialogDescription, {}, 'Pick a VNC target for this bot. Passwords stay in plugin storage.')
+        el(DialogDescription, {}, 'Paste a computer address to connect. Passwords stay in plugin storage.')
       ),
       el(Field, { label: `Endpoint for ${profileName}` },
         el(
@@ -1772,174 +2283,20 @@ function SettingsDialog({ profileName }) {
       ),
       el(Separator, {}),
       editing
-        ? el(
-            'div',
-            { className: 'grid gap-3' },
-            el(Field, { label: 'Name' },
-              el(Input, {
-                value: draft.name,
-                onChange: event => setDraft({ ...draft, name: event.target.value })
-              })
-            ),
-            el(Field, { label: 'Mode' },
-              el(SegmentedControl, {
-                className: 'w-full',
-                options: MODE_OPTIONS,
-                value: draft.mode,
-                onChange: id => setDraft({ ...draft, mode: id })
-              })
-            ),
-            draft.mode === 'websocket'
-              ? el(Field, {
-                  label: 'WebSocket URL',
-                  hint: 'e.g. ws://localhost:6080/websockify',
-                  warn: mixed ? MIXED_CONTENT_HINT : null
-                },
-                  el(Input, {
-                    value: draft.wsUrl,
-                    placeholder: 'ws://localhost:6080/websockify',
-                    onChange: event => setDraft({ ...draft, wsUrl: event.target.value })
-                  })
-                )
-              : null,
-            draft.mode === 'iframe'
-              ? el(Field, { label: 'noVNC page URL', hint: 'e.g. http://127.0.0.1:6080/vnc.html' },
-                  el(Input, {
-                    value: draft.iframeUrl,
-                    placeholder: 'http://127.0.0.1:6080/vnc.html',
-                    onChange: event => setDraft({ ...draft, iframeUrl: event.target.value })
-                  })
-                )
-              : null,
-            draft.mode === 'session-json'
-              ? [
-                  el(Field, {
-                    key: 'session-url',
-                    label: 'Session URL',
-                    hint: 'GET must return { "websocketUrl": "wss://…", "password": "…" }'
-                  },
-                    el(Input, {
-                      value: draft.sessionUrl,
-                      placeholder: 'https://example/api/session',
-                      onChange: event => setDraft({ ...draft, sessionUrl: event.target.value })
-                    })
-                  ),
-                  el(Field, { key: 'session-bearer', label: 'Bearer token (optional)' },
-                    el(Input, {
-                      type: 'password',
-                      value: draft.sessionBearer,
-                      onChange: event => setDraft({ ...draft, sessionBearer: event.target.value })
-                    })
-                  ),
-                  el(OrgoComputerFinder, {
-                    key: 'orgo-finder',
-                    bearer: draft.sessionBearer,
-                    sessionUrl: draft.sessionUrl,
-                    onPick: computer => {
-                      setDraft(current => {
-                        if (!current) return current
-                        const name = String(current.name || '').trim()
-                        const defaultish = name === '' || name === 'Local box' || name === 'Untitled'
-                        return {
-                          ...current,
-                          sessionUrl: `${orgoApiOrigin(current.sessionUrl)}/api/computers/${computer.computerId}`,
-                          name: defaultish ? computer.computerName : current.name
-                        }
-                      })
-                    }
-                  })
-                ]
-              : null,
-            draft.mode !== 'iframe'
-              ? el(Field, { label: 'VNC password', hint: PASSWORD_CAVEAT },
-                  el(Input, {
-                    type: 'password',
-                    value: draft.password,
-                    className: highlight ? 'ring-2 ring-(--ui-accent)' : undefined,
-                    onChange: event => setDraft({ ...draft, password: event.target.value })
-                  })
-                )
-              : null,
-            el(
-              'div',
-              { className: 'flex items-center justify-between gap-3' },
-              el('span', { className: 'text-[0.7rem] text-(--ui-text-secondary)' }, 'View only by default'),
-              el(Switch, {
-                size: 'xs',
-                checked: Boolean(draft.viewOnlyDefault),
-                onCheckedChange: value => setDraft({ ...draft, viewOnlyDefault: value })
-              })
-            ),
-            el(
-              'div',
-              { className: 'flex items-center justify-between gap-3' },
-              el('span', { className: 'text-[0.7rem] text-(--ui-text-secondary)' }, 'Connect when pane is visible'),
-              el(Switch, {
-                size: 'xs',
-                checked: draft.autoConnect !== false,
-                onCheckedChange: value => setDraft({ ...draft, autoConnect: value })
-              })
-            ),
-            el(
-              'div',
-              { className: 'grid gap-1' },
-              el(
-                'div',
-                { className: 'flex items-center justify-between gap-3' },
-                el('span', { className: 'text-[0.7rem] text-(--ui-text-secondary)' }, 'Crop remote panel bar in thumbnail'),
-                el(Switch, {
-                  size: 'xs',
-                  checked: draft.cropPanel === true,
-                  onCheckedChange: value => setDraft({ ...draft, cropPanel: value })
-                })
-              ),
-              el('p', { className: 'text-[0.64rem] leading-4 text-(--ui-text-quaternary)' }, 'Off by default. Prefer hiding the panel in the VM; crop can clip dock icons.')
-            ),
-            el(Field, { label: 'Scale' },
-              el(SegmentedControl, {
-                options: SCALE_OPTIONS,
-                value: draft.scaleMode === 'native' ? 'native' : 'fit',
-                onChange: id => setDraft({ ...draft, scaleMode: id })
-              })
-            ),
-            draft.mode !== 'iframe'
-              ? el(
-                  'div',
-                  { className: 'grid grid-cols-2 gap-2' },
-                  el(Field, { label: 'Quality (0–9)' },
-                    el(Input, {
-                      type: 'number',
-                      min: 0,
-                      max: 9,
-                      value: String(draft.qualityLevel),
-                      onChange: event => setDraft({ ...draft, qualityLevel: clampInt(event.target.value, 0, 9, 7) })
-                    })
-                  ),
-                  el(Field, { label: 'Compression (0–9)' },
-                    el(Input, {
-                      type: 'number',
-                      min: 0,
-                      max: 9,
-                      value: String(draft.compressionLevel),
-                      onChange: event =>
-                        setDraft({ ...draft, compressionLevel: clampInt(event.target.value, 0, 9, 2) })
-                    })
-                  )
-                )
-              : null,
-            el(
-              DialogFooter,
-              {},
-              el(Button, { type: 'button', variant: 'ghost', onClick: () => setDraft(null) }, 'Back'),
-              el(Button, { type: 'button', onClick: saveDraft }, 'Save')
-            )
-          )
+        ? el(EndpointEditor, {
+            key: draft.id,
+            draft,
+            setDraft,
+            highlight,
+            onBack: () => setDraft(null),
+            onConnect: saveAndConnect
+          })
         : el(
             'div',
             { className: 'grid gap-2' },
             el('div', { className: 'text-[0.65rem] font-medium uppercase tracking-wide text-(--ui-text-quaternary)' }, 'Endpoints'),
             settings.endpoints.length === 0
-              ? el('p', { className: 'text-[0.68rem] text-(--ui-text-tertiary)' }, 'None yet. Add a VNC endpoint to get started.')
+              ? el('p', { className: 'text-[0.68rem] text-(--ui-text-tertiary)' }, 'None yet. Add a computer to get started.')
               : settings.endpoints.map(item =>
                   el(
                     'div',

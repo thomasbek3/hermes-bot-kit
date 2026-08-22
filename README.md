@@ -12,6 +12,8 @@ Copy this file to Hermes's desktop-plugin directory. The folder name **must** be
 # macOS / Linux (default profile)
 mkdir -p ~/.hermes/desktop-plugins/computer-viewer
 cp plugin.js ~/.hermes/desktop-plugins/computer-viewer/plugin.js
+cp connect-mac.sh ~/.hermes/desktop-plugins/computer-viewer/connect-mac.sh
+chmod +x ~/.hermes/desktop-plugins/computer-viewer/connect-mac.sh
 ```
 
 Named Hermes profile:
@@ -19,6 +21,8 @@ Named Hermes profile:
 ```bash
 mkdir -p ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer
 cp plugin.js ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/plugin.js
+cp connect-mac.sh ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-mac.sh
+chmod +x ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-mac.sh
 ```
 
 Windows (typical):
@@ -37,12 +41,22 @@ Disable the plugin from Settings → Plugins to tear down the pane, status-bar i
 
 ## First-run setup
 
-The pane starts empty until you add an endpoint:
+The pane starts empty until you add a computer:
 
 1. Click the gear in the pane header (or **Add endpoint**).
-2. Choose a mode: **WebSocket**, **Iframe**, or **Session JSON**.
-3. Fill the URL(s) from a recipe below. Save.
-4. **Default** marks the global endpoint. Optionally pick a per-bot override at the top of the dialog (bound to the focused chat's profile).
+2. Paste into **Computer address**. The field accepts any of the shapes below — you do not pick a mode.
+3. Optional password. **Connect**.
+4. **Default** marks the global computer. Optionally pick a per-bot override at the top of the dialog (bound to the focused chat's profile).
+
+| You paste | What happens |
+|---|---|
+| `wss://host/websockify` (or `ws://` on a private host) | Treated as a VNC address. |
+| `http://127.0.0.1:6080/vnc.html` (a noVNC page) | Embedded as a web viewer. |
+| `https://api.example/computers/id` | Fetches the connection from that API. |
+| An API key (`sk-…` / `sk_…`, or a similar bare key) | **Find my computers**, then pick one. |
+| `host:port` or a hostname (`macbook.local:6080`) | Probes WebSocket `/websockify`, then `http://host:port/vnc.html`. |
+
+Power fields (explicit mode, raw URLs, username, scale, quality, …) live under **Advanced**.
 
 Passwords are stored locally in plugin storage **in plain text** (`hermes.plugin.computer-viewer.*`). Prefer a token in the WebSocket URL or a session endpoint for anything sensitive. There is no secret-grade credential store.
 
@@ -56,30 +70,39 @@ Bridge a local VNC server (for example `:5900`) through websockify:
 websockify 6080 localhost:5900
 ```
 
-Add a **WebSocket** endpoint:
-
-| Field | Value |
-|---|---|
-| Mode | WebSocket |
-| WebSocket URL | `ws://localhost:6080/websockify` |
-| Password | your VNC password |
+Paste `ws://localhost:6080/websockify` into **Computer address**, plus your VNC password.
 
 `/websockify` is noVNC's conventional default path.
 
-### 2. Grok-Bot-style local Docker box
+### 2. Use a spare Mac as your computer
+
+1. **Enable Screen Sharing** (manual): System Settings → General → Sharing → Screen Sharing.
+2. **Run `connect-mac.sh`** (one paste in Terminal — no sudo). From this folder, or after install:
+
+   ```bash
+   bash connect-mac.sh
+   ```
+
+   The script installs `websockify` via `python3 -m pip install --user websockify` (falling back to `pipx` or `brew` if present), writes a LaunchAgent at `~/Library/LaunchAgents/com.computer-viewer.websockify.plist` that runs `websockify 6080 localhost:5900` at login, loads it, and prints an address like `ws://<hostname>.local:6080/websockify`. Tailscale names work too (`ws://<tailscale-name>:6080/websockify`).
+3. In the plugin: paste that address, then under **Advanced** fill **Username** (your Mac login) and **Password**.
+
+`ws://` is allowed only for private-network hosts (this Mac, LAN, `.local`, Tailscale `100.64.0.0/10` / `*.ts.net`). Public hosts need `wss://`.
+
+Retina Macs report a large framebuffer. Keep **Fit** scale (the default) so the view shrinks into the pane; **Native** will scroll.
+
+### 3. Grok-Bot-style local Docker box
 
 Containers like grokbot-shim expose a full noVNC page at `http://127.0.0.1:6080/vnc.html`.
 
-- **Iframe mode** with that URL — identical to Grok Bot's own webview approach. No CDN, no RFB API; controls are Reload, Open in browser, Expand/Collapse.
-- **WebSocket mode** against the same origin's `/websockify` (typically `ws://127.0.0.1:6080/websockify`) if you want scale, view-only, clipboard, and Ctrl+Alt+Del.
+Paste `http://127.0.0.1:6080/vnc.html` to embed that page (Reload / Open in browser). Or paste `ws://127.0.0.1:6080/websockify` for scale, view-only, clipboard, and Ctrl+Alt+Del.
 
-### 3. Remote VPS
+### 4. Remote VPS
 
 Public hosts **must** be `wss://` behind TLS (nginx, Caddy, …). Example endpoint: `wss://host/websockify`.
 
 Self-signed certificates fail *silently* at the websocket layer. Visit the `https://` origin once in a browser (or the desktop webview) and trust the cert, then reconnect.
 
-Plain `ws://` to a non-private host is blocked before connect (mixed content). `ws://` is allowed only for `localhost`, `127.0.0.1`, Tailscale `100.64.0.0/10`, and `*.ts.net`.
+Plain `ws://` to a non-private host is blocked before connect (mixed content). `ws://` is allowed only for `localhost`, `127.0.0.1`, RFC1918 / link-local IPs, `*.local`, Tailscale `100.64.0.0/10`, and `*.ts.net`.
 
 nginx snippet (websocket upgrade + a long read timeout; idle proxies like nginx's 60s default make unclean drops routine):
 
@@ -121,9 +144,9 @@ desktop.example.com {
 }
 ```
 
-### 4. Rotating APIs (Orgo, Modal, …)
+### 5. Rotating APIs (Orgo, Modal, …)
 
-Use **Session JSON** mode when the desktop URL is minted per session instead of being stable.
+Paste the session API URL into **Computer address** when the desktop URL is minted per session instead of being stable. (Advanced: Session JSON.)
 
 `GET` `sessionUrl` (optional `Authorization: Bearer <sessionBearer>`) must return JSON of this shape:
 
@@ -142,12 +165,12 @@ Non-2xx responses or a body without a usable `websocketUrl` (and without an Orgo
 
 #### Orgo
 
-In **Session JSON** mode: paste your Orgo API key into **Bearer token**, click **Find my Orgo computer**, pick a workspace/computer, then **Save**. The plugin fills Session URL as `https://www.orgo.ai/api/computers/<computer-id>` (and names the endpoint after the computer if it was still "Local box", "Untitled", or empty).
+Paste your API key into **Computer address**, click **Find my computers**, pick a workspace/computer, then **Connect**. The plugin fills the session URL as `https://www.orgo.ai/api/computers/<computer-id>` (and names the computer after the pick if it was still "My computer", "Local box", "Untitled", or empty). Discovery origin defaults to `https://www.orgo.ai`; override it with **Session URL** under Advanced.
 
-If discovery can't reach Orgo from the app, paste the Session URL by hand:
+If discovery can't reach the API from the app, paste the session URL by hand (Computer address or Advanced):
 
 - **Session URL:** `https://www.orgo.ai/api/computers/<computer-id>`
-- **Bearer:** Orgo API key (from orgo.ai settings)
+- **Bearer:** API key (from orgo.ai settings) — or paste the key into Computer address.
 
 The official computer document has no `websocketUrl`; Session JSON mode constructs it.
 
@@ -163,17 +186,19 @@ Workspace discovery follows the live list shape `{ projects: [{ desktops: [...] 
 
 If `status` is a non-running lifecycle value (`stopped`, `stopping`, `creating`, `starting`, `restarting`, `deleting`, `error`), the pane shows **Session request failed** with `Computer status: {status}. Start it in Orgo first.`
 
-Official Orgo docs say API keys are meant to be server-side. If Orgo rejects browser-origin requests, switch to **WebSocket** mode: paste the constructed `wss://` URL directly plus the current VNC password (valid until the computer restarts).
+Official Orgo docs say API keys are meant to be server-side. If the API rejects browser-origin requests, paste the constructed `wss://` URL directly plus the current VNC password (valid until the computer restarts).
 
 ## Viewer modes
+
+The address field picks a mode for you. These names only appear under **Advanced**.
 
 | Mode | How it connects | When to use |
 |---|---|---|
 | **WebSocket** (default) | Dynamically loads noVNC 1.7.0 (`RFB`) from jsDelivr, then `esm.sh` if that import throws. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
 | **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. | CSP blocks the noVNC module, you're offline, or you already have `vnc.html`. |
-| **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Orgo-style rotating desktops. |
+| **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Rotating desktops (paste the API URL or an API key). |
 
-If noVNC cannot be loaded from the CDN (network or CSP), the pane shows **Couldn't load the viewer** and tells you to switch the endpoint to iframe mode. Iframe endpoints keep working in that situation.
+If noVNC cannot be loaded from the CDN (network or CSP), the pane shows **Couldn't load the viewer** and tells you to switch the endpoint to iframe mode (Advanced, or paste a `vnc.html` URL). Iframe endpoints keep working in that situation.
 
 ## Controls
 
