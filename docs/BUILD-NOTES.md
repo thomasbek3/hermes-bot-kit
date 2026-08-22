@@ -131,3 +131,17 @@ Live test of `build/connect-windows.ps1` on a real Windows 11 box (Windows Power
 - `build/README.md`: setup-script sections and fenced command/code blocks ASCII-cleaned; Windows recipe notes the script is ASCII-only so `irm ... | iex` works on Windows PowerShell 5.1.
 
 Validate: `bash -n build/connect-mac.sh && bash -n build/connect-linux.sh` pass. `LC_ALL=C grep -nP "[^\x00-\x7F]"` on the three connect scripts returns nothing. `node --check build/plugin.js` still passes; plugin.js untouched.
+
+## Fix round 18
+
+Black screen on a **real physically headless** Windows 11 Home box, live over SSH: `user@<windows-host>`, build **10.0.26200.8973** (25H2-era). TightVNC 2.8.88 + websockify 0.13.0 were already up (loopback `:5900`, `0.0.0.0:6080`, VNC DES auth `REDACTED` succeeded). Session 0 (OpenSSH) always reports `VirtualScreen=1024x768`; the console is session 1 (`explorer` / `dwm` running). `Screen.AllScreens` in session 0 is `WinDisc` at 1024x768 with `BitsPerPixel=0`.
+
+**usbmmidd_v2 (Amyuni) on 26200: signature ACCEPTED.** `deviceinstaller64.exe install usbmmidd.inf usbmmidd` printed "Drivers installed successfully." then `enableidd 1` exit 0. PnP `USB Mobile Monitor Virtual Display` at `ROOT\DISPLAY\0001`. Did **not** enable test-signing and did **not** import certificates. `enableidd` is not persistent; scheduled task `ComputerViewerVirtualDisplay` (SYSTEM, AtStartup, `enableidd 1`) registered. Calling `enableidd 1` twice created two 1024x768 virtual monitors (2048x768 desktop); one `enableidd 0` plus `ChangeDisplaySettingsEx` on `\\.\DISPLAY21` made a single **1920x1080** primary (working area 1920x1032 -- taskbar present). Parsec VDA and DisplayFusion were already on the machine; they were not required for the fix.
+
+**TightVNC still black after the virtual display was the desktop.** RFB 3.8 over `ws://<windows-ip>:6080/websockify`, DES auth OK, ServerInit **1920x1080**, one raw rect 1920x1080 = 8,294,400 bytes, **min=max=0, allZero=true**. `UseD3D=0` / `UseMirrorDriver=0` / `GrabTransparentWindows=1` did not change that (Win11 DXGI/IDD capture; TightVNC bugs #1486 / #1574).
+
+**UltraVNC 1.8.2.4 hook/poll fixed the pixels.** Stopped `tvnserver` (Manual). Zip from `https://uvnc.eu/download/1800/UltraVNC_1824.zip`, `winvnc.exe -install`, service `uvnc_service`. Ini must live in `%ProgramData%\UltraVNC\ultravnc.ini` (1.8 moved it off Program Files). `passwd=` is the TightVNC 8-byte obfuscated blob as 16 hex chars **plus two checksum hex chars** (`0F1D551CB815719000`); 16 hex chars alone yields nTypes=0 "This server does not have a valid password enabled." Capture: `PollFullScreen=1 EnableHook=1 EnableDriver=0 LoopbackOnly=1`. Second RFB proof: ServerInit **1920x1080**, name `thomas (... ) - service mode`, raw 8,294,400 bytes, **uniqueByteValues=256, nonzeroBytes=8,232,248, allZero=false**, first pixels `bca078ff...` (real wallpaper, not black).
+
+`build/connect-windows.ps1`: after the existing TightVNC + websockify setup, detect headless (1024x768 / WinDisc / existing USB Mobile Monitor), install usbmmidd idempotently (do not `enableidd` again if already attached), persist the startup task, then switch capture to UltraVNC on `:5900`. Download or signature failure is non-fatal and prints the **HDMI/DisplayPort dummy-plug (~$8)** fallback. Machines with a real monitor keep TightVNC. Script remains pure ASCII.
+
+Validate: `LC_ALL=C grep -nP "[^\x00-\x7F]" build/connect-windows.ps1` returns nothing. `node --check build/plugin.js` still passes; plugin.js untouched.

@@ -34,7 +34,7 @@ The script does **not** turn Screen Sharing on (kickstart needs sudo and drops l
 irm https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master/connect-windows.ps1 | iex
 ```
 
-Run in **Administrator** PowerShell (the script self-elevates). It installs TightVNC (loopback-only) + websockify as a SYSTEM scheduled task and prints the address plus a generated 8-character VNC password. The script is ASCII-only so `irm ... | iex` works on Windows PowerShell 5.1.
+Run in **Administrator** PowerShell (the script self-elevates). It installs TightVNC (loopback-only) + websockify as a SYSTEM scheduled task and prints the address plus a generated 8-character VNC password. The script is ASCII-only so `irm ... | iex` works on Windows PowerShell 5.1. Physically headless PCs (no monitor) get a virtual display + UltraVNC capture fallback; see **Headless Windows** below.
 
 ### Linux (X11; wlroots-Wayland best-effort)
 
@@ -156,6 +156,18 @@ The script is ASCII-only so `irm ... | iex` works on Windows PowerShell 5.1.
 The script self-elevates, installs TightVNC Server from official `tightvnc.com` (service + SAS/CAD + VNC auth), forces **loopback-only** via `HKLM\SOFTWARE\TightVNC\Server` (`AllowLoopback=1`, `LoopbackOnly=1`), installs Python 3.12 if needed (`winget ... Python.Python.3.12 --scope machine`), pins `websockify==0.13.0`, and registers a SYSTEM scheduled task at startup with `RestartCount 3` / `RestartInterval 1min` and **`ExecutionTimeLimit` zero** (the default would kill the task after 72 hours). Command: `python -m websockify 0.0.0.0:6080 127.0.0.1:5900`. Firewall: inbound TCP 6080 on the **Private** profile only.
 
 It prints `ws://<COMPUTERNAME>:6080/websockify` and the generated 8-character VNC password. UAC prompts are visible in TightVNC service mode (expected). Defender may flag VNC - allow it.
+
+#### Headless Windows
+
+A PC with **no monitor attached** has no display target. Windows then serves a 1024x768 `WinDisc` stub; VNC authenticates but the framebuffer is **black**. Cloud Windows VMs (Hyper-V, ESXi, cloud GPU/display) are fine because the hypervisor already provides a virtual display.
+
+`connect-windows.ps1` detects that stub (`MonitorCount` 1 / `VirtualScreen` 1024x768, or `WinDisc`, or an existing Amyuni device) and then:
+
+1. Installs **Amyuni usbmmidd_v2** (signed Indirect Display driver, no test-signing, no third-party root CA, works on Windows 11 Home) to `C:\usbmmidd_v2`, runs `deviceinstaller64.exe install usbmmidd.inf usbmmidd` then `enableidd 1`, and registers a SYSTEM startup task `ComputerViewerVirtualDisplay` because `enableidd` does not survive reboot. Default mode is 1920x1080.
+2. TightVNC 2.8.x on Windows 11 still captures that IDD as all-black (DXGI / SourceForge #1486 / #1574). The script switches **capture** to UltraVNC in service mode (loopback `:5900`, `PollFullScreen` + `EnableHook`), keeps websockify pointed at `127.0.0.1:5900`, and leaves TightVNC installed but Manual.
+3. If the usbmmidd signature is rejected (publisher trust / `0xE0000242`), the script does **not** enable test-signing and does **not** import certificates. It prints the fallback: an HDMI or DisplayPort **dummy plug** (~$8). That is also the right fix if UltraVNC still cannot grab pixels.
+
+Re-run is idempotent: an already-attached USB Mobile Monitor is not `enableidd`'d again (that would add a second virtual monitor).
 
 ### 4. Use a Linux machine as your computer
 
