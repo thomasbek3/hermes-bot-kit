@@ -235,6 +235,10 @@ def _darwin_candidates(ffmpeg: str, fps: int, bitrate: int, idx: int) -> list[Ca
         'baseline',
         '-level',
         '4.0',
+        '-slices',
+        '1',
+        '-x264-params',
+        'sliced-threads=0:sync-lookahead=0:rc-lookahead=0:scenecut=0',
     ]
     out: list[Candidate] = [
         Candidate(
