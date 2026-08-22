@@ -2593,7 +2593,7 @@ function hiperfStripAuxNals(au) {
 function hiperfMakeConfig() {
   const codec = hiperf.codec
   if (!codec) return null
-  const config = { codec, optimizeForLatency: true, hardwareAcceleration: 'prefer-software' }
+  const config = { codec, optimizeForLatency: true }
   if (hiperf.useAvcc) {
     const description = hiperfAvcC(hiperf.sps, hiperf.pps)
     if (!description) return null
