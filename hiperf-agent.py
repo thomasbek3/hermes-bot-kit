@@ -211,40 +211,55 @@ def _darwin_candidates(ffmpeg: str, fps: int, bitrate: int, idx: int) -> list[Ca
     rate = bitrate_flags(bitrate)
     cap_nv12 = mac_capture_prefix(idx, fps, 'nv12')
     cap_uyvy = mac_capture_prefix(idx, fps, 'uyvy422')
-    vt = ['-c:v', 'h264_videotoolbox', '-realtime', '1']
-    x264 = ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency']
+    # Constrained Baseline + yuv420p is what Chromium VideoDecoder
+    # actually accepts. Default VideoToolbox High@L4.0 annex-B fails
+    # as decode-failed in Hermes/Electron.
+    vt = [
+        '-c:v',
+        'h264_videotoolbox',
+        '-realtime',
+        '1',
+        '-profile:v',
+        'constrained_baseline',
+        '-level',
+        '4.0',
+    ]
+    x264 = [
+        '-c:v',
+        'libx264',
+        '-preset',
+        'ultrafast',
+        '-tune',
+        'zerolatency',
+        '-profile:v',
+        'baseline',
+        '-level',
+        '4.0',
+    ]
     out: list[Candidate] = [
         Candidate(
             'h264_videotoolbox',
-            prefix_ffmpeg(ffmpeg) + cap_nv12 + vt + ['-allow_sw', '0'] + rate + encode_tail(fps),
+            prefix_ffmpeg(ffmpeg) + cap_nv12 + vt + ['-allow_sw', '0'] + rate + encode_tail(fps, 'yuv420p'),
         ),
         Candidate(
             'h264_videotoolbox_sw',
-            prefix_ffmpeg(ffmpeg) + cap_nv12 + vt + ['-allow_sw', '1'] + rate + encode_tail(fps),
+            prefix_ffmpeg(ffmpeg) + cap_nv12 + vt + ['-allow_sw', '1'] + rate + encode_tail(fps, 'yuv420p'),
         ),
         Candidate(
             'h264_videotoolbox_uyvy422',
-            prefix_ffmpeg(ffmpeg) + cap_uyvy + vt + ['-allow_sw', '0'] + rate + encode_tail(fps),
+            prefix_ffmpeg(ffmpeg) + cap_uyvy + vt + ['-allow_sw', '0'] + rate + encode_tail(fps, 'yuv420p'),
         ),
         Candidate(
             'h264_videotoolbox_sw_uyvy422',
-            prefix_ffmpeg(ffmpeg) + cap_uyvy + vt + ['-allow_sw', '1'] + rate + encode_tail(fps),
+            prefix_ffmpeg(ffmpeg) + cap_uyvy + vt + ['-allow_sw', '1'] + rate + encode_tail(fps, 'yuv420p'),
         ),
         Candidate(
             'libx264',
-            prefix_ffmpeg(ffmpeg)
-            + cap_nv12
-            + x264
-            + rate
-            + encode_tail(fps, 'yuv420p'),
+            prefix_ffmpeg(ffmpeg) + cap_nv12 + x264 + rate + encode_tail(fps, 'yuv420p'),
         ),
         Candidate(
             'libx264_uyvy422',
-            prefix_ffmpeg(ffmpeg)
-            + cap_uyvy
-            + x264
-            + rate
-            + encode_tail(fps, 'yuv420p'),
+            prefix_ffmpeg(ffmpeg) + cap_uyvy + x264 + rate + encode_tail(fps, 'yuv420p'),
         ),
     ]
     return out

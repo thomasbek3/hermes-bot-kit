@@ -2564,6 +2564,23 @@ async function hiperfIsConfigSupported(config) {
   return Boolean(result && result.supported)
 }
 
+function hiperfStripAuxNals(au) {
+  const nals = hiperfSplitNals(au)
+  const kept = []
+  for (const nal of nals) {
+    if (!nal.length) continue
+    const ntype = nal[0] & 0x1f
+    if (ntype === 6 || ntype === 9 || ntype === 12) continue
+    kept.push(nal)
+  }
+  if (!kept.length) return au
+  const parts = []
+  for (const nal of kept) {
+    parts.push(new Uint8Array([0, 0, 0, 1]), nal)
+  }
+  return hiperfConcat(parts)
+}
+
 function hiperfMakeConfig() {
   const codec = hiperf.codec
   if (!codec) return null
@@ -2636,7 +2653,8 @@ async function hiperfHandleDecodeFailure(gen) {
 }
 
 function hiperfPayloadForDecode(au) {
-  return hiperf.useAvcc ? hiperfToAvcc(au) : au
+  const cleaned = hiperfStripAuxNals(au)
+  return hiperf.useAvcc ? hiperfToAvcc(cleaned) : cleaned
 }
 
 async function hiperfOnBinary(gen, data) {
@@ -2656,6 +2674,12 @@ async function hiperfOnBinary(gen, data) {
   if (!hiperf.decoderReady) {
     if (!isKey || !hiperf.sps) return
     if (!hiperf.codec) hiperf.codec = hiperfCodecFromSps(hiperf.sps)
+    // Chromium VideoDecoder is far more reliable with AVCC + description
+    // than raw Annex-B, especially for VideoToolbox streams.
+    if (hiperf.sps && hiperf.pps) {
+      hiperf.useAvcc = true
+      hiperf.avccAttempted = true
+    }
     const ok = await hiperfConfigureDecoder(gen)
     if (gen !== hiperf.generation) return
     if (!ok) {
