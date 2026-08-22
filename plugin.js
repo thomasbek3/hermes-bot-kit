@@ -56,6 +56,21 @@ const PASSWORD_CAVEAT =
 const MIXED_CONTENT_HINT = 'Insecure ws:// to a public host will likely be blocked. Use wss://.'
 const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master'
 const SNAPSHOT_CAP = 8
+const HIPERF_BACKOFF_MS = [2000, 4000, 8000]
+const HIPERF_IDLE = { phase: 'off', code: null, fps: 0, mbps: 0, rtt: 0, url: '' }
+const HIPERF_LINES = {
+  'webcodecs-unsupported': 'HD mode needs WebCodecs (not available in this build) — using VNC.',
+  'codec-unsupported': "This machine can't decode the host's H.264 profile — using VNC.",
+  'hiperf-auth': 'HD stream rejected the token — check endpoint settings. Using VNC.',
+  superseded: 'HD stream taken by another viewer — using VNC.',
+  'hiperf-unreachable': 'HD agent not reachable on {hiperfUrl} — using VNC.',
+  'resolution-mismatch': "HD stream resolution doesn't match VNC — using VNC.",
+  'capture-failed': 'HD capture failed on the host (permissions?) — using VNC.',
+  'decode-failed': 'HD stream failed (decode-failed) — using VNC.',
+  'ffmpeg-died': 'HD stream failed (ffmpeg-died) — using VNC.',
+  'no-encoder': 'HD stream failed (no-encoder) — using VNC.',
+  'mixed-public': MIXED_CONTENT_HINT
+}
 
 const KIND_OPTIONS = [
   { id: 'cloud', label: 'Cloud' },
@@ -467,7 +482,10 @@ function blankEndpoint() {
     autoConnect: true,
     cropPanel: false,
     qualityLevel: 7,
-    compressionLevel: 2
+    compressionLevel: 2,
+    hiperfEnabled: false,
+    hiperfUrl: '',
+    hiperfToken: ''
   }
 }
 
@@ -491,7 +509,10 @@ function normalizeEndpoint(raw) {
     autoConnect: raw.autoConnect !== false,
     cropPanel: raw.cropPanel === true,
     qualityLevel: clampInt(raw.qualityLevel, 0, 9, 7),
-    compressionLevel: clampInt(raw.compressionLevel, 0, 9, 2)
+    compressionLevel: clampInt(raw.compressionLevel, 0, 9, 2),
+    hiperfEnabled: raw.hiperfEnabled === true,
+    hiperfUrl: String(raw.hiperfUrl || ''),
+    hiperfToken: String(raw.hiperfToken || '')
   }
 }
 
@@ -903,6 +924,7 @@ const $ui = atom({
 })
 
 const $placeTick = atom(0)
+const $hiperf = atom({ ...HIPERF_IDLE })
 
 let RFB = null
 let pluginCtx = null
@@ -1043,6 +1065,13 @@ function rememberLastFrame(endpointId, rfb) {
   if (!endpointId) return
   const endpoint = engine.endpoint
   if (endpoint && endpoint.mode === 'iframe') return
+  if (hiperfIsStreaming()) {
+    const dataUrl = hiperfToDataURL()
+    if (dataUrl) {
+      storeLastFrame(endpointId, dataUrl)
+      return
+    }
+  }
   const target = rfb || engine.rfb
   if (!target || typeof target.toDataURL !== 'function') return
   if (!rfb && engine.state.get().phase !== 'connected') return
@@ -1124,11 +1153,12 @@ function togglePane() {
 }
 
 function openSettings(opts = {}) {
+  const intent = opts.intent === 'add' ? 'add' : opts.intent === 'edit-hiperf' ? 'edit-hiperf' : 'list'
   $ui.set({
     ...$ui.get(),
     expanded: false,
     settingsOpen: true,
-    settingsIntent: opts.intent === 'add' ? 'add' : 'list',
+    settingsIntent: intent,
     highlightPassword: Boolean(opts.highlightPassword),
     chromeOn: true
   })
@@ -1144,6 +1174,10 @@ function openAddComputer() {
 
 function openManageComputers() {
   openSettings({ intent: 'list' })
+}
+
+function openHiperfEditor() {
+  openSettings({ intent: 'edit-hiperf' })
 }
 
 function switchComputer(id) {
@@ -1183,6 +1217,7 @@ function ensureSurfaceEl() {
   if (engine.surfaceEl) return engine.surfaceEl
   const elNode = document.createElement('div')
   elNode.setAttribute('data-computer-surface', '')
+  elNode.style.position = 'relative'
   elNode.style.width = '100%'
   elNode.style.height = '100%'
   elNode.style.minHeight = '0'
@@ -1239,7 +1274,7 @@ function thumbnailPanelCrop() {
 
 function resetLiveCropStyles(node) {
   if (!node) return
-  node.style.position = ''
+  node.style.position = node === engine.surfaceEl ? 'relative' : ''
   node.style.left = ''
   node.style.right = ''
   node.style.top = ''
@@ -1288,6 +1323,7 @@ function placeLive() {
   if (parent && live.parentNode !== parent) parent.appendChild(live)
   syncSurfacePointer()
   applyPanelCrop()
+  hiperfSyncGeometry()
 }
 
 function applyRfbDisplay() {
@@ -1309,10 +1345,11 @@ function applyRfbDisplay() {
     engine.overlayMountEl.style.overflow = expanded && scaleMode === 'native' ? 'auto' : 'hidden'
   }
   applyPanelCrop()
+  hiperfSyncGeometry()
 }
 
 function measureScreen() {
-  const canvas = engine.surfaceEl && engine.surfaceEl.querySelector('canvas')
+  const canvas = engine.surfaceEl && engine.surfaceEl.querySelector('canvas:not([data-hiperf-canvas])')
   if (!canvas || !canvas.width || !canvas.height) return
   const cur = engine.state.get()
   if (cur.fbW === canvas.width && cur.fbH === canvas.height) return
@@ -1343,6 +1380,7 @@ function attachCanvasObserver() {
 }
 
 function teardownRfb() {
+  hiperfTeardown()
   detachCanvasObserver()
   const rfb = engine.rfb
   engine.rfb = null
@@ -1700,6 +1738,7 @@ async function connect(endpoint) {
       patchState({ phase: 'connected', code: null, detail: null, attempt: 0 })
       measureScreen()
       attachCanvasObserver()
+      hiperfOnRfbConnected()
     })
 
     rfb.addEventListener('credentialsrequired', () => {
@@ -1838,6 +1877,7 @@ function syncConnection() {
     void connect(endpoint)
     return
   }
+  hiperfSyncFromSettings()
   if (!engine.paneVisible && !$ui.get().expanded) return
   if (endpoint.autoConnect && (phase === 'idle' || phase === 'disconnected')) void connect(endpoint)
 }
@@ -1861,6 +1901,33 @@ async function pasteClipboard() {
 }
 
 function takeScreenshot() {
+  if (hiperfIsStreaming()) {
+    const canvas = hiperfGetCanvas()
+    if (canvas && typeof canvas.toBlob === 'function') {
+      canvas.toBlob(async blob => {
+        if (!blob) return
+        try {
+          if (navigator.clipboard && typeof ClipboardItem === 'function') {
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+            host.notify({ kind: 'info', message: 'Screenshot copied to clipboard' })
+            return
+          }
+        } catch {
+          /* fall through to download */
+        }
+        const url = URL.createObjectURL(blob)
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = `computer-${Date.now()}.png`
+        anchor.click()
+        URL.revokeObjectURL(url)
+        if (pluginCtx && pluginCtx.os && pluginCtx.os.notify) {
+          pluginCtx.os.notify({ title: 'Screenshot saved', body: 'Downloaded a PNG of the remote screen.' })
+        }
+      }, 'image/png')
+      return
+    }
+  }
   const rfb = engine.rfb
   if (!rfb || typeof rfb.toBlob !== 'function') return
   rfb.toBlob(async blob => {
@@ -1947,6 +2014,951 @@ function attachEngine(ctx) {
   }
   if (typeof ctx.onDispose === 'function') ctx.onDispose(dispose)
 }
+
+function hiperfApplies(endpoint) {
+  return Boolean(endpoint && endpoint.hiperfEnabled && endpoint.mode === 'websocket')
+}
+
+function hiperfConfigured(endpoint) {
+  if (!endpoint) return false
+  if (String(endpoint.hiperfToken || '').trim()) return true
+  return String(endpoint.hiperfUrl || '').trim() !== ''
+}
+
+function hiperfConfigKey(endpoint) {
+  if (!endpoint) return ''
+  return [endpoint.id, endpoint.hiperfEnabled ? '1' : '0', endpoint.hiperfUrl || '', endpoint.hiperfToken || ''].join('\0')
+}
+
+function hiperfStatusLine(h) {
+  if (!h || h.phase === 'off') return ''
+  if (h.phase === 'connecting') return 'Starting HD stream…'
+  if (h.phase === 'streaming') {
+    return `HD ${h.fps}fps · ${formatHiperfMbps(h.mbps)}Mbps · ${h.rtt}ms`
+  }
+  if (h.code === 'mixed-public') return MIXED_CONTENT_HINT
+  if (h.code === 'hiperf-unreachable') {
+    return String(HIPERF_LINES['hiperf-unreachable'] || '').replace('{hiperfUrl}', h.url || '')
+  }
+  if (h.code === 'decode-failed' || h.code === 'ffmpeg-died') {
+    return `HD stream failed (${h.code}) — using VNC.`
+  }
+  return HIPERF_LINES[h.code] || (h.code ? `HD stream failed (${h.code}) — using VNC.` : '')
+}
+
+function formatHiperfMbps(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0.0'
+  return n >= 10 ? String(Math.round(n)) : n.toFixed(1)
+}
+
+function hiperfRetryable(code) {
+  return code === 'hiperf-unreachable' || code === 'ffmpeg-died'
+}
+
+const hiperf = {
+  generation: 0,
+  ws: null,
+  decoder: null,
+  canvas: null,
+  ctx2d: null,
+  runningKey: '',
+  url: '',
+  started: false,
+  waitKey: true,
+  useAvcc: false,
+  sps: null,
+  pps: null,
+  codec: '',
+  decoderReady: false,
+  avccAttempted: false,
+  decoderRetried: false,
+  blackSince: 0,
+  bytesWindow: 0,
+  framesWindow: 0,
+  statsTimer: null,
+  pingTimer: null,
+  retryTimer: null,
+  retryAttempt: 0,
+  raf: 0,
+  qualityMutated: false,
+  intentionalClose: false,
+  lastErrorCode: null
+}
+
+function hiperfIsStreaming() {
+  return $hiperf.get().phase === 'streaming' && hiperf.canvas
+}
+
+function hiperfGetCanvas() {
+  return hiperf.canvas
+}
+
+function hiperfToDataURL() {
+  if (!hiperf.canvas) return null
+  try {
+    const url = hiperf.canvas.toDataURL('image/png')
+    return typeof url === 'string' && url.startsWith('data:') ? url : null
+  } catch {
+    return null
+  }
+}
+
+function hiperfPatch(partial) {
+  $hiperf.set({ ...$hiperf.get(), ...partial })
+}
+
+function hiperfBuildUrl(endpoint) {
+  let raw = String((endpoint && endpoint.hiperfUrl) || '').trim()
+  if (!raw) {
+    const resolved = engine.resolvedWsUrl
+    if (!resolved) return { error: 'hiperf-unreachable', url: '' }
+    try {
+      const u = new URL(resolved)
+      raw = `ws://${formatHostForUrl(u.hostname)}:6090/stream`
+    } catch {
+      return { error: 'hiperf-unreachable', url: '' }
+    }
+  }
+  let parsed
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return { error: 'hiperf-unreachable', url: raw }
+  }
+  if (isInsecurePublicWs(parsed.toString())) {
+    return { error: 'mixed-public', url: parsed.toString() }
+  }
+  if (!parsed.searchParams.get('token')) {
+    const token = String((endpoint && endpoint.hiperfToken) || '').trim()
+    if (token) parsed.searchParams.set('token', token)
+  }
+  return { url: parsed.toString() }
+}
+
+function hiperfFindStartCodes(data) {
+  const found = []
+  const n = data.length
+  for (let i = 0; i < n - 2; i++) {
+    if (data[i] !== 0 || data[i + 1] !== 0) continue
+    if (i + 3 < n && data[i + 2] === 0 && data[i + 3] === 1) {
+      found.push({ index: i, len: 4 })
+      i += 3
+    } else if (data[i + 2] === 1) {
+      found.push({ index: i, len: 3 })
+      i += 2
+    }
+  }
+  return found
+}
+
+function hiperfSplitNals(data) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
+  const sc = hiperfFindStartCodes(bytes)
+  const nals = []
+  for (let i = 0; i < sc.length; i++) {
+    const start = sc[i].index + sc[i].len
+    const end = i + 1 < sc.length ? sc[i + 1].index : bytes.length
+    if (end > start) nals.push(bytes.subarray(start, end))
+  }
+  return nals
+}
+
+function hiperfReadUe(data, bitpos) {
+  let zeros = 0
+  const nbits = data.length * 8
+  while (bitpos < nbits) {
+    const byteI = bitpos >> 3
+    const bitI = 7 - (bitpos & 7)
+    const bit = (data[byteI] >> bitI) & 1
+    bitpos += 1
+    if (bit === 1) break
+    zeros += 1
+    if (zeros > 31) return { value: null, bitpos }
+  }
+  if (bitpos > nbits && zeros) return { value: null, bitpos }
+  let val = (1 << zeros) - 1
+  for (let k = 0; k < zeros; k++) {
+    if (bitpos >= nbits) return { value: null, bitpos }
+    const byteI = bitpos >> 3
+    const bitI = 7 - (bitpos & 7)
+    const bit = (data[byteI] >> bitI) & 1
+    bitpos += 1
+    val = (val << 1) | bit
+  }
+  return { value: val, bitpos }
+}
+
+function hiperfIsISlice(nal) {
+  if (!nal || nal.length < 2) return false
+  const ntype = nal[0] & 0x1f
+  if (ntype === 5) return true
+  if (ntype !== 1) return false
+  const payload = nal.subarray(1)
+  const first = hiperfReadUe(payload, 0)
+  if (first.value == null) return false
+  const st = hiperfReadUe(payload, first.bitpos)
+  if (st.value == null) return false
+  return st.value === 2 || st.value === 4 || st.value === 7 || st.value === 9
+}
+
+function hiperfAuIsKey(au) {
+  const nals = hiperfSplitNals(au)
+  for (const nal of nals) {
+    if (!nal.length) continue
+    const ntype = nal[0] & 0x1f
+    if (ntype === 5) return true
+    if (ntype === 1 && hiperfIsISlice(nal)) return true
+  }
+  return false
+}
+
+function hiperfFindSpsPps(au) {
+  let sps = null
+  let pps = null
+  for (const nal of hiperfSplitNals(au)) {
+    if (!nal.length) continue
+    const ntype = nal[0] & 0x1f
+    if (ntype === 7) sps = nal.slice()
+    else if (ntype === 8) pps = nal.slice()
+  }
+  return { sps, pps }
+}
+
+function hiperfCodecFromSps(sps) {
+  if (!sps || sps.length < 4) return ''
+  const hex = [sps[1], sps[2], sps[3]].map(b => b.toString(16).padStart(2, '0')).join('')
+  return `avc1.${hex}`
+}
+
+function hiperfConcat(parts) {
+  let len = 0
+  for (const p of parts) len += p.length
+  const out = new Uint8Array(len)
+  let o = 0
+  for (const p of parts) {
+    out.set(p, o)
+    o += p.length
+  }
+  return out
+}
+
+function hiperfToAvcc(au) {
+  const nals = hiperfSplitNals(au)
+  const parts = []
+  for (const nal of nals) {
+    const len = new Uint8Array(4)
+    new DataView(len.buffer).setUint32(0, nal.length)
+    parts.push(len, nal)
+  }
+  return hiperfConcat(parts)
+}
+
+function hiperfAvcC(sps, pps) {
+  if (!sps || !pps) return null
+  const out = new Uint8Array(11 + sps.length + pps.length)
+  let i = 0
+  out[i++] = 1
+  out[i++] = sps[1]
+  out[i++] = sps[2]
+  out[i++] = sps[3]
+  out[i++] = 0xff
+  out[i++] = 0xe1
+  out[i++] = (sps.length >> 8) & 0xff
+  out[i++] = sps.length & 0xff
+  out.set(sps, i)
+  i += sps.length
+  out[i++] = 1
+  out[i++] = (pps.length >> 8) & 0xff
+  out[i++] = pps.length & 0xff
+  out.set(pps, i)
+  return out
+}
+
+function hiperfRestoreQuality() {
+  if (!hiperf.qualityMutated) return
+  hiperf.qualityMutated = false
+  const rfb = engine.rfb
+  const ep = engine.endpoint
+  if (!rfb || !ep) return
+  try {
+    rfb.qualityLevel = clampInt(ep.qualityLevel, 0, 9, 7)
+    rfb.compressionLevel = clampInt(ep.compressionLevel, 0, 9, 2)
+  } catch {
+    /* rfb already dead */
+  }
+}
+
+function hiperfEnterStreaming() {
+  const rfb = engine.rfb
+  if (rfb && !hiperf.qualityMutated) {
+    try {
+      rfb.qualityLevel = 0
+      rfb.compressionLevel = 9
+      hiperf.qualityMutated = true
+    } catch {
+      /* ignore */
+    }
+  }
+  hiperf.retryAttempt = 0
+  hiperfPatch({ phase: 'streaming', code: null })
+}
+
+function hiperfClearTimers(opts) {
+  if (hiperf.statsTimer != null) {
+    clearInterval(hiperf.statsTimer)
+    hiperf.statsTimer = null
+  }
+  if (hiperf.pingTimer != null) {
+    clearInterval(hiperf.pingTimer)
+    hiperf.pingTimer = null
+  }
+  if (!(opts && opts.keepRetry) && hiperf.retryTimer != null) {
+    clearTimeout(hiperf.retryTimer)
+    hiperf.retryTimer = null
+  }
+  if (hiperf.raf) {
+    cancelAnimationFrame(hiperf.raf)
+    hiperf.raf = 0
+  }
+}
+
+function hiperfCloseDecoder() {
+  const dec = hiperf.decoder
+  hiperf.decoder = null
+  hiperf.decoderReady = false
+  if (dec) {
+    try {
+      dec.close()
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
+function hiperfRemoveCanvas() {
+  const canvas = hiperf.canvas
+  hiperf.canvas = null
+  hiperf.ctx2d = null
+  if (canvas && canvas.parentNode) {
+    try {
+      canvas.parentNode.removeChild(canvas)
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+function hiperfCloseSocket() {
+  const ws = hiperf.ws
+  hiperf.ws = null
+  if (!ws) return
+  hiperf.intentionalClose = true
+  try {
+    ws.close(1000)
+  } catch {
+    /* already closed */
+  }
+}
+
+function hiperfTeardown(opts) {
+  const keepAtom = opts && opts.keepAtom
+  hiperf.generation += 1
+  hiperf.runningKey = keepAtom ? hiperf.runningKey : ''
+  hiperfClearTimers()
+  hiperfRestoreQuality()
+  hiperfCloseDecoder()
+  hiperfCloseSocket()
+  hiperfRemoveCanvas()
+  hiperf.started = false
+  hiperf.waitKey = true
+  hiperf.useAvcc = false
+  hiperf.sps = null
+  hiperf.pps = null
+  hiperf.codec = ''
+  hiperf.avccAttempted = false
+  hiperf.decoderRetried = false
+  hiperf.blackSince = 0
+  hiperf.bytesWindow = 0
+  hiperf.framesWindow = 0
+  hiperf.url = ''
+  hiperf.lastErrorCode = null
+  if (!keepAtom) hiperfPatch({ ...HIPERF_IDLE })
+}
+
+function hiperfEnsureCanvas() {
+  const surface = engine.surfaceEl
+  if (!surface) return null
+  let canvas = hiperf.canvas
+  if (!canvas) {
+    canvas = document.createElement('canvas')
+    canvas.setAttribute('data-hiperf-canvas', '')
+    canvas.style.position = 'absolute'
+    canvas.style.pointerEvents = 'none'
+    canvas.style.zIndex = '2'
+    canvas.style.visibility = 'hidden'
+    canvas.style.left = '0'
+    canvas.style.top = '0'
+    hiperf.canvas = canvas
+    try {
+      hiperf.ctx2d = canvas.getContext('2d', { alpha: false, desynchronized: true })
+    } catch {
+      hiperf.ctx2d = canvas.getContext('2d')
+    }
+  }
+  if (canvas.parentNode !== surface || surface.lastElementChild !== canvas) {
+    surface.appendChild(canvas)
+  }
+  hiperfSyncGeometry()
+  if (!hiperf.raf) hiperfLoopGeometry()
+  return canvas
+}
+
+function hiperfSyncGeometry() {
+  const canvas = hiperf.canvas
+  const surface = engine.surfaceEl
+  if (!canvas || !surface) return
+  if (surface.lastElementChild !== canvas) surface.appendChild(canvas)
+  const rfbC = surface.querySelector('canvas:not([data-hiperf-canvas])')
+  if (!rfbC) return
+  const sr = surface.getBoundingClientRect()
+  const cr = rfbC.getBoundingClientRect()
+  if (!(sr.width > 0 && sr.height > 0)) return
+  const sx = surface.clientWidth / sr.width
+  const sy = surface.clientHeight / sr.height
+  canvas.style.left = `${(cr.left - sr.left) * sx}px`
+  canvas.style.top = `${(cr.top - sr.top) * sy}px`
+  canvas.style.width = `${cr.width * sx}px`
+  canvas.style.height = `${cr.height * sy}px`
+}
+
+function hiperfLoopGeometry() {
+  const tick = () => {
+    if (!hiperf.canvas) {
+      hiperf.raf = 0
+      return
+    }
+    hiperfSyncGeometry()
+    hiperf.raf = requestAnimationFrame(tick)
+  }
+  hiperf.raf = requestAnimationFrame(tick)
+}
+
+function hiperfSampleLuma(ctx, w, h) {
+  const sw = Math.min(32, w)
+  const sh = Math.min(32, h)
+  if (!(sw > 0 && sh > 0)) return 255
+  const sx = Math.max(0, Math.floor((w - sw) / 2))
+  const sy = Math.max(0, Math.floor((h - sh) / 2))
+  let img
+  try {
+    img = ctx.getImageData(sx, sy, sw, sh)
+  } catch {
+    return 255
+  }
+  const d = img.data
+  let sum = 0
+  let n = 0
+  for (let i = 0; i < d.length; i += 16) {
+    sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
+    n += 1
+  }
+  return n ? sum / n : 255
+}
+
+function hiperfResolutionMismatch(dw, dh) {
+  const { fbW, fbH } = engine.state.get()
+  if (!(fbW > 0 && fbH > 0)) return false
+  return Math.abs(dw - fbW) / fbW > 0.01 || Math.abs(dh - fbH) / fbH > 0.01
+}
+
+function hiperfOnFrame(gen, frame) {
+  try {
+    if (gen !== hiperf.generation) return
+    const dw = frame.displayWidth
+    const dh = frame.displayHeight
+    if (hiperfResolutionMismatch(dw, dh)) {
+      hiperfFallback('resolution-mismatch')
+      return
+    }
+    const canvas = hiperfEnsureCanvas()
+    const ctx = hiperf.ctx2d
+    if (!canvas || !ctx) return
+    if (canvas.width !== dw || canvas.height !== dh) {
+      canvas.width = dw
+      canvas.height = dh
+    }
+    ctx.drawImage(frame, 0, 0, dw, dh)
+    hiperf.framesWindow += 1
+    if (canvas.style.visibility !== 'visible') {
+      const luma = hiperfSampleLuma(ctx, dw, dh)
+      if (luma < 8) {
+        if (!hiperf.blackSince) hiperf.blackSince = Date.now()
+        else if (Date.now() - hiperf.blackSince > 2000) {
+          hiperfFallback('capture-failed')
+          return
+        }
+      } else {
+        hiperf.blackSince = 0
+        canvas.style.visibility = 'visible'
+        if ($hiperf.get().phase !== 'streaming') hiperfEnterStreaming()
+      }
+    } else if ($hiperf.get().phase !== 'streaming') {
+      hiperfEnterStreaming()
+    }
+  } finally {
+    try {
+      frame.close()
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
+async function hiperfIsConfigSupported(config) {
+  if (typeof VideoDecoder.isConfigSupported !== 'function') return true
+  const result = await VideoDecoder.isConfigSupported(config)
+  return Boolean(result && result.supported)
+}
+
+function hiperfMakeConfig() {
+  const codec = hiperf.codec
+  if (!codec) return null
+  if (hiperf.useAvcc) {
+    const description = hiperfAvcC(hiperf.sps, hiperf.pps)
+    if (!description) return null
+    return { codec, description, optimizeForLatency: true }
+  }
+  return { codec, optimizeForLatency: true }
+}
+
+async function hiperfConfigureDecoder(gen) {
+  if (gen !== hiperf.generation) return false
+  const config = hiperfMakeConfig()
+  if (!config) return false
+  let supported = false
+  try {
+    supported = await hiperfIsConfigSupported(config)
+  } catch {
+    supported = false
+  }
+  if (gen !== hiperf.generation) return false
+  if (!supported) {
+    if (!hiperf.useAvcc && hiperf.sps && hiperf.pps) {
+      hiperf.useAvcc = true
+      hiperf.avccAttempted = true
+      return hiperfConfigureDecoder(gen)
+    }
+    return false
+  }
+  hiperfCloseDecoder()
+  const decoder = new VideoDecoder({
+    output: frame => hiperfOnFrame(gen, frame),
+    error: err => hiperfOnDecoderError(gen, err)
+  })
+  try {
+    decoder.configure(config)
+  } catch {
+    if (!hiperf.useAvcc && hiperf.sps && hiperf.pps) {
+      hiperf.useAvcc = true
+      hiperf.avccAttempted = true
+      return hiperfConfigureDecoder(gen)
+    }
+    return false
+  }
+  hiperf.decoder = decoder
+  hiperf.decoderReady = true
+  return true
+}
+
+function hiperfOnDecoderError(gen, _err) {
+  if (gen !== hiperf.generation) return
+  void hiperfHandleDecodeFailure(gen)
+}
+
+async function hiperfHandleDecodeFailure(gen) {
+  if (gen !== hiperf.generation) return
+  if (!hiperf.decoderRetried) {
+    hiperf.decoderRetried = true
+    hiperf.decoderReady = false
+    hiperf.waitKey = true
+    if (!hiperf.useAvcc && hiperf.sps && hiperf.pps) {
+      hiperf.useAvcc = true
+      hiperf.avccAttempted = true
+    }
+    const ok = await hiperfConfigureDecoder(gen)
+    if (ok) return
+  }
+  hiperfFallback('decode-failed')
+}
+
+function hiperfPayloadForDecode(au) {
+  return hiperf.useAvcc ? hiperfToAvcc(au) : au
+}
+
+async function hiperfOnBinary(gen, data) {
+  if (gen !== hiperf.generation) return
+  if (!(data instanceof ArrayBuffer) || data.byteLength < 10) return
+  hiperf.bytesWindow += data.byteLength
+  const view = new DataView(data)
+  const flags = view.getUint8(0)
+  const timestamp = Number(view.getBigUint64(1, false))
+  const au = new Uint8Array(data.slice(9))
+  const isKey = (flags & 1) === 1 || hiperfAuIsKey(au)
+  if (hiperf.waitKey && !isKey) return
+  const headers = hiperfFindSpsPps(au)
+  if (headers.sps) hiperf.sps = headers.sps
+  if (headers.pps) hiperf.pps = headers.pps
+  if (isKey && hiperf.sps && !hiperf.codec) hiperf.codec = hiperfCodecFromSps(hiperf.sps)
+  if (!hiperf.decoderReady) {
+    if (!isKey || !hiperf.sps) return
+    if (!hiperf.codec) hiperf.codec = hiperfCodecFromSps(hiperf.sps)
+    const ok = await hiperfConfigureDecoder(gen)
+    if (gen !== hiperf.generation) return
+    if (!ok) {
+      hiperfFallback('codec-unsupported')
+      return
+    }
+  }
+  const decoder = hiperf.decoder
+  if (!decoder || decoder.state === 'closed') return
+  if (decoder.decodeQueueSize > 10) {
+    hiperf.waitKey = true
+    hiperf.decoderReady = false
+    try {
+      decoder.reset()
+    } catch {
+      /* ignore */
+    }
+    const ok = await hiperfConfigureDecoder(gen)
+    if (!ok) {
+      hiperfFallback('decode-failed')
+      return
+    }
+    if (!isKey) return
+  }
+  hiperf.waitKey = false
+  try {
+    decoder.decode(
+      new EncodedVideoChunk({
+        type: isKey ? 'key' : 'delta',
+        timestamp,
+        data: hiperfPayloadForDecode(au)
+      })
+    )
+  } catch {
+    void hiperfHandleDecodeFailure(gen)
+  }
+}
+
+function hiperfOnHello(gen, _msg) {
+  if (gen !== hiperf.generation) return
+  if (!hiperf.started) {
+    hiperf.started = true
+    try {
+      hiperf.ws && hiperf.ws.send(JSON.stringify({ type: 'start' }))
+    } catch {
+      /* socket dying */
+    }
+    return
+  }
+  hiperf.waitKey = true
+  hiperf.decoderReady = false
+  hiperf.codec = ''
+  hiperf.blackSince = 0
+  if (hiperf.decoder) {
+    try {
+      hiperf.decoder.reset()
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function hiperfOnControl(gen, msg) {
+  if (gen !== hiperf.generation || !msg || typeof msg !== 'object') return
+  if (msg.type === 'hello') {
+    hiperfOnHello(gen, msg)
+    return
+  }
+  if (msg.type === 'pong') {
+    const t = Number(msg.t)
+    if (Number.isFinite(t)) hiperfPatch({ rtt: Math.max(0, Math.round(Date.now() - t)) })
+    return
+  }
+  if (msg.type === 'error') {
+    const code = String(msg.code || 'ffmpeg-died')
+    hiperf.lastErrorCode = code
+    if (code === 'capture-failed' || code === 'no-encoder') hiperfFallback(code)
+    else hiperfFallback(code === 'ffmpeg-died' ? 'ffmpeg-died' : code)
+  }
+}
+
+function hiperfStartStats(gen) {
+  hiperf.bytesWindow = 0
+  hiperf.framesWindow = 0
+  hiperf.statsTimer = setInterval(() => {
+    if (gen !== hiperf.generation) return
+    const fps = hiperf.framesWindow
+    const mbps = (hiperf.bytesWindow * 8) / 1e6
+    hiperf.framesWindow = 0
+    hiperf.bytesWindow = 0
+    if ($hiperf.get().phase === 'streaming') hiperfPatch({ fps, mbps })
+  }, 1000)
+  hiperf.pingTimer = setInterval(() => {
+    if (gen !== hiperf.generation || !hiperf.ws || hiperf.ws.readyState !== 1) return
+    try {
+      hiperf.ws.send(JSON.stringify({ type: 'ping', t: Date.now() }))
+    } catch {
+      /* ignore */
+    }
+  }, 5000)
+}
+
+function hiperfFallback(code, opts) {
+  const genAtCall = hiperf.generation
+  const fromClose = opts && opts.fromClose
+  hiperfRestoreQuality()
+  if (hiperf.canvas) hiperf.canvas.style.visibility = 'hidden'
+  hiperfCloseDecoder()
+  if (!fromClose) hiperfCloseSocket()
+  hiperfClearTimers({ keepRetry: hiperfRetryable(code) })
+  hiperfRemoveCanvas()
+  hiperf.started = false
+  hiperf.waitKey = true
+  hiperf.decoderReady = false
+  const url = hiperf.url
+  hiperfPatch({ phase: 'fallback', code, fps: 0, mbps: 0, url })
+  if (!hiperfRetryable(code)) return
+  if (hiperf.retryTimer != null) return
+  if (hiperf.retryAttempt >= HIPERF_BACKOFF_MS.length) return
+  const delay = HIPERF_BACKOFF_MS[hiperf.retryAttempt]
+  hiperf.retryAttempt += 1
+  hiperf.retryTimer = setTimeout(() => {
+    hiperf.retryTimer = null
+    if (hiperf.generation !== genAtCall) return
+    if ($hiperf.get().phase !== 'fallback') return
+    const ep = engine.endpoint
+    if (engine.state.get().phase === 'connected' && hiperfApplies(ep)) {
+      hiperfStart(ep, { fromRetry: true })
+    }
+  }, delay)
+}
+
+function hiperfOnClose(gen, event) {
+  if (gen !== hiperf.generation) return
+  if (hiperf.intentionalClose) {
+    hiperf.intentionalClose = false
+    return
+  }
+  const code = event && event.code
+  if (code === 4401) {
+    hiperfFallback('hiperf-auth', { fromClose: true })
+    return
+  }
+  if (code === 4409) {
+    hiperfFallback('superseded', { fromClose: true })
+    return
+  }
+  if (hiperf.lastErrorCode === 'capture-failed' || hiperf.lastErrorCode === 'no-encoder') {
+    hiperfFallback(hiperf.lastErrorCode, { fromClose: true })
+    return
+  }
+  if (hiperf.lastErrorCode === 'ffmpeg-died' || code === 1011) {
+    hiperfFallback('ffmpeg-died', { fromClose: true })
+    return
+  }
+  hiperfFallback('hiperf-unreachable', { fromClose: true })
+}
+
+function hiperfStart(endpoint, opts) {
+  const fromRetry = Boolean(opts && opts.fromRetry)
+  if (!fromRetry) hiperf.retryAttempt = 0
+  if (!hiperfApplies(endpoint) || engine.state.get().phase !== 'connected') {
+    if ($hiperf.get().phase !== 'off') hiperfTeardown()
+    return
+  }
+  const key = hiperfConfigKey(endpoint)
+  const phase = $hiperf.get().phase
+  if (
+    !fromRetry &&
+    hiperf.runningKey === key &&
+    (phase === 'connecting' || phase === 'streaming' || phase === 'fallback')
+  ) {
+    return
+  }
+  if (!('VideoDecoder' in window)) {
+    hiperfTeardown({ keepAtom: true })
+    hiperf.runningKey = key
+    hiperfPatch({ phase: 'fallback', code: 'webcodecs-unsupported', fps: 0, mbps: 0, rtt: 0, url: '' })
+    return
+  }
+  const built = hiperfBuildUrl(endpoint)
+  if (built.error) {
+    hiperfTeardown({ keepAtom: true })
+    hiperf.runningKey = key
+    hiperf.url = built.url || ''
+    hiperfPatch({ phase: 'fallback', code: built.error, fps: 0, mbps: 0, rtt: 0, url: hiperf.url })
+    return
+  }
+
+  hiperfTeardown({ keepAtom: true })
+  const gen = hiperf.generation
+  hiperf.runningKey = key
+  hiperf.url = built.url
+  hiperf.intentionalClose = false
+  hiperf.lastErrorCode = null
+  hiperfPatch({ phase: 'connecting', code: null, fps: 0, mbps: 0, rtt: 0, url: built.url })
+
+  let ws
+  try {
+    ws = new WebSocket(built.url)
+  } catch {
+    hiperfFallback('hiperf-unreachable')
+    return
+  }
+  ws.binaryType = 'arraybuffer'
+  hiperf.ws = ws
+  ws.onopen = () => {
+    if (gen !== hiperf.generation) return
+    hiperfStartStats(gen)
+  }
+  ws.onmessage = event => {
+    if (gen !== hiperf.generation) return
+    if (event.data instanceof ArrayBuffer) {
+      void hiperfOnBinary(gen, event.data)
+      return
+    }
+    if (typeof event.data === 'string') {
+      let msg
+      try {
+        msg = JSON.parse(event.data)
+      } catch {
+        return
+      }
+      hiperfOnControl(gen, msg)
+    }
+  }
+  ws.onclose = event => hiperfOnClose(gen, event)
+  ws.onerror = () => {
+    /* onclose follows */
+  }
+}
+
+function hiperfStopQuiet() {
+  if ($hiperf.get().phase === 'off' && !hiperf.ws && !hiperf.canvas) return
+  hiperfTeardown()
+}
+
+function hiperfOnRfbConnected() {
+  const endpoint = engine.endpoint
+  if (!hiperfApplies(endpoint)) {
+    hiperfStopQuiet()
+    return
+  }
+  hiperfStart(endpoint)
+}
+
+function hiperfSyncFromSettings() {
+  const endpoint = engine.endpoint
+  const phase = engine.state.get().phase
+  if (phase !== 'connected' || !hiperfApplies(endpoint)) {
+    hiperfStopQuiet()
+    return
+  }
+  hiperfStart(endpoint)
+}
+
+function hiperfManualRetry() {
+  hiperf.retryAttempt = 0
+  const endpoint = engine.endpoint
+  if (engine.state.get().phase === 'connected' && hiperfApplies(endpoint)) {
+    hiperfStart(endpoint, { fromRetry: true })
+  }
+}
+
+function persistHiperfFields(endpoint) {
+  const next = normalizeEndpoint(endpoint)
+  if (!next || !next.id) return
+  const settings = $settings.get()
+  if (!settings.endpoints.some(item => item.id === next.id)) return
+  const endpoints = settings.endpoints.map(item => (item.id === next.id ? next : item))
+  persistSettings({ ...settings, endpoints })
+  if (engine.currentEndpointId === next.id) engine.endpoint = next
+}
+
+function toggleHiperfEnabled(endpoint) {
+  if (!endpoint || endpoint.mode !== 'websocket') return
+  if (!hiperfConfigured(endpoint) && !endpoint.hiperfEnabled) {
+    openHiperfEditor()
+    return
+  }
+  persistHiperfFields({ ...endpoint, hiperfEnabled: !endpoint.hiperfEnabled })
+}
+
+function hiperfSetupCommand(os) {
+  if (os === 'windows') return `irm ${RAW_REPO_URL}/hiperf-windows.ps1 | iex`
+  if (os === 'linux') return `curl -fsSL ${RAW_REPO_URL}/hiperf-linux.sh | bash`
+  return `curl -fsSL ${RAW_REPO_URL}/hiperf-mac.sh | bash`
+}
+
+function HiperfSetupHint({ os }) {
+  const command = hiperfSetupCommand(os)
+  const intro =
+    os === 'windows'
+      ? 'On that PC (Administrator PowerShell):'
+      : os === 'linux'
+        ? 'On that Linux machine:'
+        : 'On that Mac:'
+  return el(
+    'div',
+    { className: 'grid gap-1.5' },
+    el('p', { className: 'text-[0.64rem] leading-4 text-(--ui-text-secondary)' }, intro),
+    el(
+      'div',
+      {
+        className: 'flex items-center gap-1 rounded-md border border-(--ui-stroke-secondary) px-1.5 py-1'
+      },
+      el(
+        'code',
+        { className: 'min-w-0 flex-1 truncate font-mono text-[0.62rem] text-(--ui-text-secondary)' },
+        command
+      ),
+      el(CopyButton, { appearance: 'icon', buttonSize: 'icon-xs', text: command })
+    ),
+    el(
+      'p',
+      { className: 'text-[0.64rem] leading-4 text-(--ui-text-secondary)' },
+      'The script prints a token — paste it above. Leave Stream URL empty unless you need an override.'
+    )
+  )
+}
+
+function HiperfHdToggle({ endpoint }) {
+  const hiperfState = useValue($hiperf)
+  if (!endpoint || endpoint.mode !== 'websocket') return null
+  const streaming = hiperfState.phase === 'streaming'
+  const enabled = Boolean(endpoint.hiperfEnabled)
+  return el(
+    'button',
+    {
+      type: 'button',
+      title: enabled ? 'Disable HD stream' : 'Enable HD stream',
+      'aria-label': 'HD',
+      'aria-pressed': streaming || enabled,
+      className: cn(
+        'shrink-0 rounded-sm border-0 px-1.5 py-0.5 text-[0.72rem] font-medium',
+        streaming
+          ? 'bg-(--ui-accent) text-white'
+          : enabled
+            ? 'bg-(--ui-surface-hover) text-(--ui-text-secondary)'
+            : 'bg-transparent text-(--ui-text-secondary) hover:bg-(--ui-surface-hover)'
+      ),
+      onClick: () => toggleHiperfEnabled(endpoint)
+    },
+    'HD'
+  )
+}
+
 
 function Field({ label, hint, warn, children }) {
   return el(
@@ -2098,10 +3110,23 @@ function EndpointEditor({
   addKind,
   setAddKind,
   addOs,
-  setAddOs
+  setAddOs,
+  focusHiperf
 }) {
-  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(Boolean(focusHiperf))
+  const [hiperfOs, setHiperfOs] = useState(addOs === 'windows' || addOs === 'linux' ? addOs : 'mac')
+  const hiperfSectionRef = useRef(null)
   const advancedTouchedRef = useRef(false)
+
+  useLayoutEffect(() => {
+    if (!focusHiperf) return undefined
+    setAdvancedOpen(true)
+    const t = setTimeout(() => {
+      const node = hiperfSectionRef.current
+      if (node && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest' })
+    }, 0)
+    return () => clearTimeout(t)
+  }, [focusHiperf])
   const classified = classifyAddress(draft.address)
   const mixed =
     (draft.mode === 'websocket' || classified.kind === 'websocket') && isInsecurePublicWs(draft.wsUrl)
@@ -2119,6 +3144,12 @@ function EndpointEditor({
       next.probe = false
     }
     setDraft(next)
+  }
+
+  function touchHiperf(patch) {
+    touchAdvanced(patch)
+    const next = { ...draft, ...patch }
+    if ($settings.get().endpoints.some(item => item.id === next.id)) persistHiperfFields(next)
   }
 
   function pickComputer(computer) {
@@ -2374,7 +3405,59 @@ function EndpointEditor({
                     })
                   )
                 )
-              : null
+              : null,
+            el(
+              'div',
+              { ref: hiperfSectionRef, className: 'grid gap-3', 'data-hiperf-section': '' },
+              el(
+                'div',
+                { className: 'flex items-center justify-between gap-3' },
+                el('span', { className: 'text-[0.7rem] text-(--ui-text-secondary)' }, 'High-performance stream (HD)'),
+                el(Switch, {
+                  size: 'xs',
+                  checked: Boolean(draft.hiperfEnabled),
+                  onCheckedChange: value => touchHiperf({ hiperfEnabled: value })
+                })
+              ),
+              el(
+                'p',
+                { className: 'text-[0.64rem] leading-4 text-(--ui-text-quaternary)' },
+                'WebSocket endpoints only. VNC stays connected underneath and keeps input. iframe and Session JSON ignore this.'
+              ),
+              el(Field, {
+                label: 'HD stream URL (optional)',
+                hint: 'Leave empty to use ws://<vnc-host>:6090/stream after connect.',
+                warn:
+                  draft.hiperfUrl && isInsecurePublicWs(draft.hiperfUrl) ? MIXED_CONTENT_HINT : null
+              },
+                el(Input, {
+                  value: draft.hiperfUrl || '',
+                  placeholder: 'ws://host:6090/stream',
+                  onChange: event => touchHiperf({ hiperfUrl: event.target.value })
+                })
+              ),
+              el(Field, {
+                label: 'HD token',
+                hint: 'Pasted from the hiperf installer. If the URL already has ?token=, that wins.'
+              },
+                el(Input, {
+                  type: 'password',
+                  value: draft.hiperfToken || '',
+                  onChange: event => touchHiperf({ hiperfToken: event.target.value })
+                })
+              ),
+              el(
+                'div',
+                { className: 'grid gap-2' },
+                el(SegmentedControl, {
+                  className: 'w-full',
+                  options: OS_OPTIONS,
+                  value: hiperfOs,
+                  onChange: id => setHiperfOs(id)
+                }),
+                el(HiperfSetupHint, { os: hiperfOs })
+              )
+            )
           )
         : null
     )
@@ -2401,6 +3484,14 @@ function SettingsDialog({ profileName }) {
     }
     if (ui.settingsIntent === 'add') {
       setDraft(blankEndpoint())
+      setAddKind(null)
+      setAddOs('mac')
+      setDeleteId(null)
+      return
+    }
+    if (ui.settingsIntent === 'edit-hiperf') {
+      const ep = resolveEndpoint()
+      setDraft(ep ? { ...ep } : blankEndpoint())
       setAddKind(null)
       setAddOs('mac')
       setDeleteId(null)
@@ -2504,7 +3595,8 @@ function SettingsDialog({ profileName }) {
             addKind,
             setAddKind,
             addOs,
-            setAddOs
+            setAddOs,
+            focusHiperf: ui.settingsIntent === 'edit-hiperf'
           })
         : el(
             'div',
@@ -2622,6 +3714,7 @@ function CollapsePill() {
 
 function OverlayBar({ iframeMode, connected, viewOnly }) {
   const ui = useValue($ui)
+  const hiperfState = useValue($hiperf)
   if (iframeMode) {
     return el(
       'div',
@@ -2713,7 +3806,14 @@ function OverlayBar({ iframeMode, connected, viewOnly }) {
       variant: 'ghost',
       className: 'text-white hover:bg-white/15 hover:text-white',
       onClick: () => setExpanded(false)
-    }, el(icons.X, { className: 'size-3.5' }), 'Collapse')
+    }, el(icons.X, { className: 'size-3.5' }), 'Collapse'),
+    hiperfState.phase === 'streaming'
+      ? el(
+          'span',
+          { className: 'px-1 text-[0.68rem] text-white/80' },
+          `${hiperfState.fps}fps · ${formatHiperfMbps(hiperfState.mbps)}Mbps · ${hiperfState.rtt}ms`
+        )
+      : null
   )
 }
 
@@ -2846,6 +3946,7 @@ function checkIcon() {
 }
 
 function ComputerSwitcher({ endpoints, current, conn }) {
+  const hiperfState = useValue($hiperf)
   const nameLabel = current ? current.name : 'Computer'
   return el(
     DropdownMenu,
@@ -2861,6 +3962,7 @@ function ComputerSwitcher({ endpoints, current, conn }) {
       },
       el(StatusDot, { tone: toneFor(conn.phase, conn.attempt) }),
       el('span', { className: 'min-w-0 truncate font-medium' }, nameLabel),
+      hiperfState.phase === 'streaming' ? el(Badge, { variant: 'muted', className: 'shrink-0' }, 'HD') : null,
       chevronDownIcon()
     ),
     el(
@@ -2908,6 +4010,7 @@ function ComputerPane() {
   const settings = useValue($settings)
   const ui = useValue($ui)
   const conn = useValue(engine.state)
+  const hiperfState = useValue($hiperf)
   const lastFrames = useValue($lastFrames)
   const placeTick = useValue($placeTick)
   const focused = useValue(safeAtom(host.state.focusedSessionProfile))
@@ -2948,6 +4051,7 @@ function ComputerPane() {
   const showError = conn.phase === 'error'
   const snapshot = endpoint && lastFrames[endpoint.id]
   const showSnapshot = Boolean(snapshot && conn.phase !== 'connected' && !unconfigured)
+  const hiperfLine = hiperfStatusLine(hiperfState)
 
   return el(
     'div',
@@ -2959,7 +4063,8 @@ function ComputerPane() {
         endpoints: settings.endpoints,
         current: endpoint,
         conn
-      })
+      }),
+      el(HiperfHdToggle, { endpoint })
     ),
     el(
       'div',
@@ -3043,6 +4148,16 @@ function ComputerPane() {
           : null
       ),
       el('p', { className: 'mt-1.5 truncate text-center text-[0.68rem] text-(--ui-text-tertiary)' }, phaseLine(conn)),
+      hiperfLine
+        ? el(
+            'div',
+            { className: 'mt-0.5 flex items-center justify-center gap-1.5' },
+            el('p', { className: 'truncate text-center text-[0.64rem] text-(--ui-text-tertiary)' }, hiperfLine),
+            hiperfState.phase === 'fallback'
+              ? el(Button, { size: 'xs', variant: 'ghost', onClick: hiperfManualRetry }, 'Retry')
+              : null
+          )
+        : null,
       showError ? el(PaneError, { code: conn.code, detail: conn.detail }) : null,
       iframeMode && !unconfigured
         ? el(

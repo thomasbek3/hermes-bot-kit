@@ -145,3 +145,11 @@ Black screen on a **real physically headless** Windows 11 Home box, live over SS
 `build/connect-windows.ps1`: after the existing TightVNC + websockify setup, detect headless (1024x768 / WinDisc / existing USB Mobile Monitor), install usbmmidd idempotently (do not `enableidd` again if already attached), persist the startup task, then switch capture to UltraVNC on `:5900`. Download or signature failure is non-fatal and prints the **HDMI/DisplayPort dummy-plug (~$8)** fallback. Machines with a real monitor keep TightVNC. Script remains pure ASCII.
 
 Validate: `LC_ALL=C grep -nP "[^\x00-\x7F]" build/connect-windows.ps1` returns nothing. `node --check build/plugin.js` still passes; plugin.js untouched.
+
+## Round 19 (2026-08-22) - High-performance streaming mode (hiperf)
+
+Spec docs/SPEC-HIPERF.md (Grok-xhigh-reviewed, 26 findings incorporated), built by Grok 4.6 xhigh, verified by Claude. Optional per-endpoint "HD" mode: ffmpeg hardware capture/encode on the host -> Annex-B H.264 over WebSocket :6090 -> WebCodecs hardware decode in the plugin, layered pointer-events:none over the live RFB canvas (VNC keeps input + instant fallback). One-click HD toggle in the pane header. New: hiperf-agent.py + hiperf-{mac,windows,linux} installers. Live-verified on the Windows box: pipeline h264_nvenc-gdi, Main-profile 1920x1080, session-1 capture proven via SPS. Details: docs/BUILD-NOTES-HIPERF.md (incl. two post-build patches: dry-run timeout 12s, gdigrab+NVENC candidate).
+
+## Round 20 (2026-08-22) - orgo-computer agent plugin (control plane)
+
+Spec docs/SPEC-CONTROL.md (Grok-xhigh-reviewed against live Orgo API + Hermes plugin docs, 24 findings incorporated), built by Grok 4.6 xhigh, verified by Claude. Hermes agent plugin giving every bot hands on its Orgo computer, Korgo-style: orgo_computer_run (delegated hosted CUA, ported from Korgo orgo_agent_mcp.py) + orgo_computer_bash (direct shell), /computer pin per profile, multi-profile installer (per-profile HERMES_HOME: symlink + plugins.enabled + .env). E2E-verified live: hermes -z one-shot ran bash (exit 0 marker echo) and a delegated CUA run (opened Thunar on Hermes Computer, described screen). Details: docs/BUILD-NOTES-CONTROL.md.
