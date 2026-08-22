@@ -43,10 +43,11 @@ Disable the plugin from Settings → Plugins to tear down the pane, status-bar i
 
 The pane starts empty until you add a computer:
 
-1. Click the gear in the pane header (or **Add endpoint**).
-2. Paste into **Computer address**. The field accepts any of the shapes below — you do not pick a mode.
-3. Optional password. **Connect**.
-4. **Default** marks the global computer. Optionally pick a per-bot override at the top of the dialog (bound to the focused chat's profile).
+1. Click **Add a computer** on the empty pane, or **＋ Add computer** in the header menu.
+2. Pick **Cloud** or **Local**. Cloud is the paste-address / API key form. Local shows a Mac / Windows / Linux setup one-liner, then the same address field.
+3. Paste into **Computer address**. The field accepts any of the shapes below — you do not pick a mode.
+4. Optional password. **Connect**.
+5. The header names the current computer — open it to switch. **Manage computers…** is the list editor (add / edit / delete / default). Optionally pick a per-bot override at the top of that dialog (bound to the focused chat's profile). **Default** marks the global computer.
 
 | You paste | What happens |
 |---|---|

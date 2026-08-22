@@ -2,12 +2,18 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  CopyButton,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   EmptyState,
   ErrorState,
   Input,
@@ -48,6 +54,19 @@ const SCREEN_PANEL_PX = 28
 const PASSWORD_CAVEAT =
   'Stored locally in plugin storage (plain text). Prefer token-in-URL or session endpoints for anything sensitive.'
 const MIXED_CONTENT_HINT = 'Insecure ws:// to a public host will likely be blocked. Use wss://.'
+const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master'
+const SNAPSHOT_CAP = 8
+
+const KIND_OPTIONS = [
+  { id: 'cloud', label: 'Cloud' },
+  { id: 'local', label: 'Local' }
+]
+
+const OS_OPTIONS = [
+  { id: 'mac', label: 'Mac' },
+  { id: 'windows', label: 'Windows' },
+  { id: 'linux', label: 'Linux' }
+]
 
 const ERRORS = {
   unconfigured: {
@@ -875,6 +894,7 @@ const $settings = atom({
 const $ui = atom({
   expanded: false,
   settingsOpen: false,
+  settingsIntent: 'list',
   highlightPassword: false,
   viewOnly: false,
   scaleMode: 'fit',
@@ -887,6 +907,8 @@ const $placeTick = atom(0)
 let RFB = null
 let pluginCtx = null
 const wsProtocolByEndpoint = new Map()
+const lastFrameByEndpoint = new Map()
+const $lastFrames = atom({})
 
 const engine = {
   state: atom({ ...IDLE_STATE }),
@@ -1002,6 +1024,37 @@ function persistWsProtocol(endpointId, variant) {
   pluginCtx.storage.set('wsProtocolByEndpoint', Object.fromEntries(wsProtocolByEndpoint))
 }
 
+function publishLastFrames() {
+  $lastFrames.set(Object.fromEntries(lastFrameByEndpoint))
+}
+
+function storeLastFrame(endpointId, dataUrl) {
+  if (!endpointId || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:') || dataUrl.length < 32) return
+  if (lastFrameByEndpoint.has(endpointId)) lastFrameByEndpoint.delete(endpointId)
+  lastFrameByEndpoint.set(endpointId, dataUrl)
+  while (lastFrameByEndpoint.size > SNAPSHOT_CAP) {
+    const oldest = lastFrameByEndpoint.keys().next().value
+    lastFrameByEndpoint.delete(oldest)
+  }
+  publishLastFrames()
+}
+
+function rememberLastFrame(endpointId, rfb) {
+  if (!endpointId) return
+  const endpoint = engine.endpoint
+  if (endpoint && endpoint.mode === 'iframe') return
+  const target = rfb || engine.rfb
+  if (!target || typeof target.toDataURL !== 'function') return
+  if (!rfb && engine.state.get().phase !== 'connected') return
+  let dataUrl
+  try {
+    dataUrl = target.toDataURL()
+  } catch {
+    return
+  }
+  storeLastFrame(endpointId, dataUrl)
+}
+
 function loadSettingsFrom(ctx) {
   const endpoints = ctx.storage.get('endpoints', [])
   const list = Array.isArray(endpoints) ? endpoints.map(normalizeEndpoint).filter(Boolean) : []
@@ -1075,6 +1128,7 @@ function openSettings(opts = {}) {
     ...$ui.get(),
     expanded: false,
     settingsOpen: true,
+    settingsIntent: opts.intent === 'add' ? 'add' : 'list',
     highlightPassword: Boolean(opts.highlightPassword),
     chromeOn: true
   })
@@ -1082,6 +1136,28 @@ function openSettings(opts = {}) {
   syncSurfacePointer()
   bumpPlace()
   placeLive()
+}
+
+function openAddComputer() {
+  openSettings({ intent: 'add' })
+}
+
+function openManageComputers() {
+  openSettings({ intent: 'list' })
+}
+
+function switchComputer(id) {
+  const settings = $settings.get()
+  const next = settings.endpoints.find(item => item.id === id)
+  if (!next) return
+  const alreadyGlobal = settings.globalEndpointId === id
+  if (!alreadyGlobal) persistSettings({ ...settings, globalEndpointId: id })
+  const resolved = resolveEndpoint()
+  if (!resolved || resolved.id !== id) return
+  if (!alreadyGlobal) return
+  const phase = engine.state.get().phase
+  if (phase === 'connected' || phase === 'connecting' || phase === 'resolving' || phase === 'loading-novnc') return
+  void connect(next)
 }
 
 async function loadRFB() {
@@ -1444,6 +1520,7 @@ async function connectIframe(endpoint, gen) {
 }
 
 async function connect(endpoint) {
+  rememberLastFrame(engine.currentEndpointId)
   const gen = bumpGen()
   engine.intentionalDisconnect = false
   engine.authLock = false
@@ -1674,6 +1751,7 @@ async function connect(endpoint) {
 
     rfb.addEventListener('disconnect', event => {
       if (!still(gen) || engine.rfb !== rfb) return
+      if (sawConnect) rememberLastFrame(endpoint.id, rfb)
       engine.rfb = null
       detachCanvasObserver()
       const clean = Boolean(event && event.detail && event.detail.clean) || engine.intentionalDisconnect
@@ -1713,6 +1791,7 @@ async function connect(endpoint) {
 }
 
 function disconnect() {
+  rememberLastFrame(engine.currentEndpointId)
   bumpGen()
   engine.intentionalDisconnect = true
   engine.authLock = false
@@ -1812,6 +1891,7 @@ function sendCtrlAltDel() {
 }
 
 function teardownEngine() {
+  rememberLastFrame(engine.currentEndpointId)
   bumpGen()
   teardownRfb()
   teardownIframe(true)
@@ -1969,12 +2049,63 @@ function OrgoComputerFinder({ bearer, sessionUrl, onPick }) {
   )
 }
 
-function EndpointEditor({ draft, setDraft, highlight, onBack, onConnect }) {
+function localSetupCommand(os) {
+  if (os === 'windows') return `irm ${RAW_REPO_URL}/connect-windows.ps1 | iex`
+  if (os === 'linux') return `curl -fsSL ${RAW_REPO_URL}/connect-linux.sh | bash`
+  return `curl -fsSL ${RAW_REPO_URL}/connect-mac.sh | bash`
+}
+
+function LocalSetupHint({ os }) {
+  const command = localSetupCommand(os)
+  const intro =
+    os === 'windows'
+      ? 'On that PC: run our setup script in an Administrator PowerShell:'
+      : os === 'linux'
+        ? 'On that Linux machine: run our setup script:'
+        : "On that Mac: System Settings → Sharing → turn on Screen Sharing, and enable 'VNC viewers may control screen with password'. Then run our setup script:"
+  return el(
+    'div',
+    { className: 'grid gap-1.5' },
+    el('p', { className: 'text-[0.64rem] leading-4 text-(--ui-text-secondary)' }, intro),
+    el(
+      'div',
+      {
+        className:
+          'flex items-center gap-1 rounded-md border border-(--ui-stroke-secondary) px-1.5 py-1'
+      },
+      el(
+        'code',
+        { className: 'min-w-0 flex-1 truncate font-mono text-[0.62rem] text-(--ui-text-secondary)' },
+        command
+      ),
+      el(CopyButton, { appearance: 'icon', buttonSize: 'icon-xs', text: command })
+    ),
+    el(
+      'p',
+      { className: 'text-[0.64rem] leading-4 text-(--ui-text-secondary)' },
+      'The script prints an address — paste it below.'
+    )
+  )
+}
+
+function EndpointEditor({
+  draft,
+  setDraft,
+  highlight,
+  onBack,
+  onConnect,
+  isNew,
+  addKind,
+  setAddKind,
+  addOs,
+  setAddOs
+}) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const advancedTouchedRef = useRef(false)
   const classified = classifyAddress(draft.address)
   const mixed =
     (draft.mode === 'websocket' || classified.kind === 'websocket') && isInsecurePublicWs(draft.wsUrl)
+  const localOs = addOs === 'windows' || addOs === 'linux' ? addOs : 'mac'
 
   function touchAdvanced(patch) {
     advancedTouchedRef.current = true
@@ -2010,6 +2141,34 @@ function EndpointEditor({ draft, setDraft, highlight, onBack, onConnect }) {
     onConnect(next)
   }
 
+  function goBack() {
+    if (isNew && addKind) setAddKind(null)
+    else onBack()
+  }
+
+  if (isNew && !addKind) {
+    return el(
+      'div',
+      { className: 'grid gap-3' },
+      el(
+        'p',
+        { className: 'text-[0.68rem] leading-4 text-(--ui-text-secondary)' },
+        'Where is this computer?'
+      ),
+      el(SegmentedControl, {
+        className: 'w-full',
+        options: KIND_OPTIONS,
+        value: '__pick__',
+        onChange: id => setAddKind(id)
+      }),
+      el(
+        'div',
+        { className: 'flex justify-end gap-2' },
+        el(Button, { type: 'button', variant: 'ghost', onClick: onBack }, 'Back')
+      )
+    )
+  }
+
   return el(
     'div',
     { className: 'grid gap-3' },
@@ -2019,6 +2178,19 @@ function EndpointEditor({ draft, setDraft, highlight, onBack, onConnect }) {
         onChange: event => setDraft({ ...draft, name: event.target.value })
       })
     ),
+    isNew && addKind === 'local'
+      ? el(
+          'div',
+          { className: 'grid gap-2' },
+          el(SegmentedControl, {
+            className: 'w-full',
+            options: OS_OPTIONS,
+            value: localOs,
+            onChange: id => setAddOs(id)
+          }),
+          el(LocalSetupHint, { os: localOs })
+        )
+      : null,
     el(Field, {
       label: 'Computer address',
       hint: classified.line,
@@ -2041,6 +2213,16 @@ function EndpointEditor({ draft, setDraft, highlight, onBack, onConnect }) {
         onChange: event => setDraft({ ...draft, password: event.target.value })
       })
     ),
+    isNew && addKind === 'local' && localOs === 'mac'
+      ? el(
+          Field,
+          { label: 'Username', hint: 'Your Mac login name' },
+          el(Input, {
+            value: draft.username || '',
+            onChange: event => setDraft({ ...draft, username: event.target.value })
+          })
+        )
+      : null,
     classified.kind === 'api-key'
       ? el(OrgoComputerFinder, {
           bearer: draft.sessionBearer,
@@ -2051,7 +2233,7 @@ function EndpointEditor({ draft, setDraft, highlight, onBack, onConnect }) {
     el(
       'div',
       { className: 'flex justify-end gap-2' },
-      el(Button, { type: 'button', variant: 'ghost', onClick: onBack }, 'Back'),
+      el(Button, { type: 'button', variant: 'ghost', onClick: goBack }, 'Back'),
       el(
         Button,
         { type: 'button', disabled: !classified.connectEnabled, onClick: submit },
@@ -2205,14 +2387,31 @@ function SettingsDialog({ profileName }) {
   const conn = useValue(engine.state)
   const [draft, setDraft] = useState(null)
   const [deleteId, setDeleteId] = useState(null)
+  const [addKind, setAddKind] = useState(null)
+  const [addOs, setAddOs] = useState('mac')
   const highlight = ui.highlightPassword || conn.code === 'password-required'
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ui.settingsOpen) {
       setDraft(null)
       setDeleteId(null)
+      setAddKind(null)
+      setAddOs('mac')
+      return
     }
-  }, [ui.settingsOpen])
+    if (ui.settingsIntent === 'add') {
+      setDraft(blankEndpoint())
+      setAddKind(null)
+      setAddOs('mac')
+      setDeleteId(null)
+      return
+    }
+    setDraft(current => {
+      if (!current) return current
+      return settings.endpoints.some(item => item.id === current.id) ? current : null
+    })
+    setAddKind(null)
+  }, [ui.settingsOpen, ui.settingsIntent])
 
   const editing = draft
   const perBotValue = settings.perBotEndpoint[profileName] || '__global__'
@@ -2226,7 +2425,9 @@ function SettingsDialog({ profileName }) {
     const globalEndpointId = settings.globalEndpointId || nextEp.id
     persistSettings({ ...settings, endpoints, globalEndpointId })
     setDraft(null)
-    setUi({ settingsOpen: false, highlightPassword: false })
+    setAddKind(null)
+    setAddOs('mac')
+    setUi({ settingsOpen: false, settingsIntent: 'list', highlightPassword: false })
     engine.reconnectAttempt = 0
     void connect(nextEp)
   }
@@ -2247,7 +2448,12 @@ function SettingsDialog({ profileName }) {
     Dialog,
     {
       open: ui.settingsOpen,
-      onOpenChange: open => setUi({ settingsOpen: open, highlightPassword: open ? ui.highlightPassword : false })
+      onOpenChange: open =>
+        setUi({
+          settingsOpen: open,
+          settingsIntent: open ? ui.settingsIntent : 'list',
+          highlightPassword: open ? ui.highlightPassword : false
+        })
     },
     el(
       DialogContent,
@@ -2288,8 +2494,17 @@ function SettingsDialog({ profileName }) {
             draft,
             setDraft,
             highlight,
-            onBack: () => setDraft(null),
-            onConnect: saveAndConnect
+            onBack: () => {
+              setDraft(null)
+              setAddKind(null)
+              setAddOs('mac')
+            },
+            onConnect: saveAndConnect,
+            isNew: !settings.endpoints.some(item => item.id === draft.id),
+            addKind,
+            setAddKind,
+            addOs,
+            setAddOs
           })
         : el(
             'div',
@@ -2343,7 +2558,11 @@ function SettingsDialog({ profileName }) {
               type: 'button',
               size: 'sm',
               variant: 'secondary',
-              onClick: () => setDraft(blankEndpoint())
+              onClick: () => {
+                setDraft(blankEndpoint())
+                setAddKind(null)
+                setAddOs('mac')
+              }
             }, el(icons.Plus, { className: 'size-3.5' }), 'Add endpoint')
           ),
       el(ConfirmDialog, {
@@ -2614,6 +2833,59 @@ function ComputerOverlay({ iframeMode }) {
   return portal ? portal(overlay, document.body) : overlay
 }
 
+function chevronDownIcon() {
+  const Icon = icons.ChevronDown || icons.ChevronsUpDown
+  if (Icon) return el(Icon, { className: 'size-3 shrink-0 text-(--ui-text-tertiary)', 'aria-hidden': true })
+  return el('span', { className: 'shrink-0 text-[0.65rem] text-(--ui-text-tertiary)', 'aria-hidden': true }, '▾')
+}
+
+function checkIcon() {
+  const Icon = icons.Check
+  if (Icon) return el(Icon, { className: 'ml-auto size-3.5 shrink-0', 'aria-hidden': true })
+  return el('span', { className: 'ml-auto text-[0.62rem] text-(--ui-text-tertiary)' }, 'Active')
+}
+
+function ComputerSwitcher({ endpoints, current, conn }) {
+  const nameLabel = current ? current.name : 'Computer'
+  return el(
+    DropdownMenu,
+    {},
+    el(
+      DropdownMenuTrigger,
+      {
+        type: 'button',
+        title: conn.desktopName || undefined,
+        'aria-label': 'Switch computer',
+        className:
+          'flex min-w-0 flex-1 items-center gap-1 rounded-sm border-0 bg-transparent py-0.5 pl-0.5 pr-1 text-left text-[0.72rem] hover:bg-(--ui-surface-hover)'
+      },
+      el(StatusDot, { tone: toneFor(conn.phase, conn.attempt) }),
+      el('span', { className: 'min-w-0 truncate font-medium' }, nameLabel),
+      chevronDownIcon()
+    ),
+    el(
+      DropdownMenuContent,
+      { align: 'start', className: 'min-w-44' },
+      endpoints.map(item => {
+        const active = Boolean(current && item.id === current.id)
+        return el(
+          DropdownMenuItem,
+          {
+            key: item.id,
+            onSelect: () => switchComputer(item.id)
+          },
+          el(StatusDot, { tone: active ? toneFor(conn.phase, conn.attempt) : 'muted' }),
+          el('span', { className: 'min-w-0 flex-1 truncate' }, item.name || 'Untitled'),
+          active ? checkIcon() : null
+        )
+      }),
+      endpoints.length > 0 ? el(DropdownMenuSeparator) : null,
+      el(DropdownMenuItem, { onSelect: () => openAddComputer() }, '＋ Add computer'),
+      el(DropdownMenuItem, { onSelect: () => openManageComputers() }, 'Manage computers…')
+    )
+  )
+}
+
 function PaneError({ code, detail }) {
   return el(
     ErrorState,
@@ -2636,6 +2908,7 @@ function ComputerPane() {
   const settings = useValue($settings)
   const ui = useValue($ui)
   const conn = useValue(engine.state)
+  const lastFrames = useValue($lastFrames)
   const placeTick = useValue($placeTick)
   const focused = useValue(safeAtom(host.state.focusedSessionProfile))
   const profile = useValue(safeAtom(host.state.profile))
@@ -2673,31 +2946,20 @@ function ComputerPane() {
 
   const unconfigured = !endpoint || conn.phase === 'unconfigured'
   const showError = conn.phase === 'error'
-
-  const nameLabel = endpoint ? endpoint.name : 'Computer'
-  const nameEl = el('span', { className: 'font-medium' }, nameLabel)
+  const snapshot = endpoint && lastFrames[endpoint.id]
+  const showSnapshot = Boolean(snapshot && conn.phase !== 'connected' && !unconfigured)
 
   return el(
     'div',
     { className: 'relative flex h-full min-h-0 flex-col overflow-auto' },
     el(
       'header',
-      { className: 'flex h-8 shrink-0 items-center gap-1.5 px-2' },
-      el(StatusDot, { tone: toneFor(conn.phase, conn.attempt) }),
-      el(
-        'div',
-        { className: 'min-w-0 flex-1 truncate text-[0.72rem]' },
-        conn.desktopName ? el(Tip, { label: conn.desktopName }, nameEl) : nameEl
-      ),
-      el(Tip, { label: 'Settings' },
-        el(Button, {
-          type: 'button',
-          size: 'icon-xs',
-          variant: 'ghost',
-          'aria-label': 'Settings',
-          onClick: () => openSettings()
-        }, el(icons.Settings, { className: 'size-3.5' }))
-      )
+      { className: 'flex h-8 shrink-0 items-center gap-1 px-2' },
+      el(ComputerSwitcher, {
+        endpoints: settings.endpoints,
+        current: endpoint,
+        conn
+      })
     ),
     el(
       'div',
@@ -2709,6 +2971,29 @@ function ComputerPane() {
           style: { aspectRatio: aspect }
         },
         el('div', { ref: slotRef, className: 'absolute inset-0 bg-black' }),
+        showSnapshot
+          ? el(
+              'div',
+              { className: 'pointer-events-none absolute inset-0' },
+              el('img', {
+                src: snapshot,
+                alt: '',
+                className: 'h-full w-full object-contain opacity-40'
+              }),
+              el(
+                'div',
+                { className: 'absolute inset-x-0 bottom-1.5 flex justify-center' },
+                el(
+                  'span',
+                  {
+                    className:
+                      'rounded-full bg-black/55 px-2 py-0.5 text-[0.62rem] text-white'
+                  },
+                  'last seen'
+                )
+              )
+            )
+          : null,
         busy
           ? el(
               'div',
@@ -2725,10 +3010,10 @@ function ComputerPane() {
                 title: 'No computer endpoint configured',
                 description: ERRORS.unconfigured.body
               }),
-              el(Button, { size: 'xs', onClick: () => openSettings() }, 'Add endpoint')
+              el(Button, { size: 'xs', onClick: () => openAddComputer() }, 'Add a computer')
             )
           : null,
-        !unconfigured && !busy && conn.phase !== 'connected' && !showError
+        !unconfigured && !busy && conn.phase !== 'connected' && !showError && !showSnapshot
           ? el(
               'div',
               { className: 'pointer-events-none absolute inset-0 grid place-items-center' },
