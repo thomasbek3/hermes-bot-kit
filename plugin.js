@@ -2480,26 +2480,33 @@ function hiperfLoopGeometry() {
   hiperf.raf = requestAnimationFrame(tick)
 }
 
-function hiperfSampleLuma(ctx, w, h) {
-  const sw = Math.min(32, w)
-  const sh = Math.min(32, h)
-  if (!(sw > 0 && sh > 0)) return 255
+function hiperfSampleStats(ctx, w, h) {
+  const sw = Math.min(48, w)
+  const sh = Math.min(48, h)
+  if (!(sw > 0 && sh > 0)) return { luma: 255, variance: 255 }
   const sx = Math.max(0, Math.floor((w - sw) / 2))
   const sy = Math.max(0, Math.floor((h - sh) / 2))
   let img
   try {
     img = ctx.getImageData(sx, sy, sw, sh)
   } catch {
-    return 255
+    return { luma: 255, variance: 255 }
   }
   const d = img.data
-  let sum = 0
-  let n = 0
+  const values = []
   for (let i = 0; i < d.length; i += 16) {
-    sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
-    n += 1
+    values.push(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2])
   }
-  return n ? sum / n : 255
+  if (!values.length) return { luma: 255, variance: 255 }
+  let sum = 0
+  for (const v of values) sum += v
+  const luma = sum / values.length
+  let acc = 0
+  for (const v of values) {
+    const dlt = v - luma
+    acc += dlt * dlt
+  }
+  return { luma, variance: acc / values.length }
 }
 
 function hiperfResolutionMismatch(dw, dh) {
@@ -2527,17 +2534,17 @@ function hiperfOnFrame(gen, frame) {
     ctx.drawImage(frame, 0, 0, dw, dh)
     hiperf.framesWindow += 1
     if (canvas.style.visibility !== 'visible') {
-      const luma = hiperfSampleLuma(ctx, dw, dh)
-      if (luma < 8) {
-        if (!hiperf.blackSince) hiperf.blackSince = Date.now()
-        else if (Date.now() - hiperf.blackSince > 2000) {
-          hiperfFallback('capture-failed')
-          return
-        }
-      } else {
+      const { luma, variance } = hiperfSampleStats(ctx, dw, dh)
+      // Dark real desktops (Hermes, Windows dark mode) are not capture
+      // failures. Only keep HD hidden while the frame is essentially
+      // uniform black; never abort the stream on a luma heuristic.
+      const looksReal = luma >= 8 || variance >= 40
+      if (looksReal) {
         hiperf.blackSince = 0
         canvas.style.visibility = 'visible'
         if ($hiperf.get().phase !== 'streaming') hiperfEnterStreaming()
+      } else if (!hiperf.blackSince) {
+        hiperf.blackSince = Date.now()
       }
     } else if ($hiperf.get().phase !== 'streaming') {
       hiperfEnterStreaming()
@@ -3929,10 +3936,10 @@ function ComputerOverlay({ iframeMode }) {
       ref: overlayRef,
       'data-overlay-surface': ui.expanded ? '' : undefined,
       className: cn(
-        'fixed right-0 bottom-0 left-0 z-[100] flex flex-col bg-black',
+        'fixed right-0 bottom-0 left-0 z-[9999] flex flex-col bg-black',
         ui.expanded ? 'pointer-events-auto' : 'hidden pointer-events-none'
       ),
-      style: { top: `${ui.overlayTop || 40}px` },
+      style: { top: `${ui.overlayTop || 40}px`, zIndex: 9999, background: '#000' },
       onMouseMove: () => {
         if (!ui.expanded) return
         setUi({ chromeOn: true })
