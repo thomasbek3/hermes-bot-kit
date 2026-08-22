@@ -931,6 +931,8 @@ let pluginCtx = null
 const wsProtocolByEndpoint = new Map()
 const lastFrameByEndpoint = new Map()
 const $lastFrames = atom({})
+/** In-memory only: explicit disconnect survives pane collapse, not app restart. */
+const userDisconnectIds = new Set()
 
 const engine = {
   state: atom({ ...IDLE_STATE }),
@@ -1180,6 +1182,14 @@ function openHiperfEditor() {
   openSettings({ intent: 'edit-hiperf' })
 }
 
+function isHeldDisconnect(endpointId) {
+  return Boolean(endpointId && userDisconnectIds.has(endpointId))
+}
+
+function releaseDisconnect(endpointId) {
+  if (endpointId) userDisconnectIds.delete(endpointId)
+}
+
 function switchComputer(id) {
   const settings = $settings.get()
   const next = settings.endpoints.find(item => item.id === id)
@@ -1188,6 +1198,7 @@ function switchComputer(id) {
   if (!alreadyGlobal) persistSettings({ ...settings, globalEndpointId: id })
   const resolved = resolveEndpoint()
   if (!resolved || resolved.id !== id) return
+  if (isHeldDisconnect(id)) return
   if (!alreadyGlobal) return
   const phase = engine.state.get().phase
   if (phase === 'connected' || phase === 'connecting' || phase === 'resolving' || phase === 'loading-novnc') return
@@ -1562,6 +1573,7 @@ async function connect(endpoint) {
   const gen = bumpGen()
   engine.intentionalDisconnect = false
   engine.authLock = false
+  if (endpoint) releaseDisconnect(endpoint.id)
   engine.endpoint = endpoint || null
   engine.endpointFingerprint = fingerprint(endpoint)
 
@@ -1846,6 +1858,13 @@ function disconnect() {
   })
 }
 
+function userDisconnect(endpointId) {
+  const id =
+    endpointId || (engine.endpoint && engine.endpoint.id) || engine.currentEndpointId
+  if (id) userDisconnectIds.add(id)
+  disconnect()
+}
+
 function reconnect() {
   engine.reconnectAttempt = 0
   const endpoint = engine.endpoint || resolveEndpoint()
@@ -1861,6 +1880,23 @@ function syncConnection() {
   const phase = engine.state.get().phase
   if (!endpoint) {
     if (phase !== 'unconfigured') void connect(null)
+    return
+  }
+  if (isHeldDisconnect(endpoint.id)) {
+    const live =
+      phase === 'connected' ||
+      phase === 'connecting' ||
+      phase === 'resolving' ||
+      phase === 'loading-novnc' ||
+      (phase === 'disconnected' && engine.reconnectAttempt > 0)
+    if (live) disconnect()
+    const fp = fingerprint(endpoint)
+    if (fp !== engine.endpointFingerprint || engine.currentEndpointId !== endpoint.id) {
+      engine.endpoint = endpoint
+      engine.endpointFingerprint = fp
+      engine.currentEndpointId = endpoint.id
+    }
+    if (!live) hiperfSyncFromSettings()
     return
   }
   const fp = fingerprint(endpoint)
@@ -1885,6 +1921,7 @@ function syncConnection() {
 function reloadIframe() {
   const frame = engine.iframeEl
   if (!frame) return
+  if (engine.endpoint) releaseDisconnect(engine.endpoint.id)
   const src = engine.endpoint && engine.endpoint.iframeUrl ? engine.endpoint.iframeUrl : frame.src
   frame.src = src
 }
@@ -3799,7 +3836,7 @@ function OverlayBar({ iframeMode, connected, viewOnly }) {
       size: 'xs',
       variant: 'ghost',
       className: 'text-white hover:bg-white/15 hover:text-white',
-      onClick: disconnect
+      onClick: () => userDisconnect()
     }, 'Disconnect'),
     el(Button, {
       size: 'xs',
@@ -3981,7 +4018,10 @@ function ComputerSwitcher({ endpoints, current, conn }) {
           active ? checkIcon() : null
         )
       }),
-      endpoints.length > 0 ? el(DropdownMenuSeparator) : null,
+      current
+        ? el(DropdownMenuItem, { onSelect: () => userDisconnect(current.id) }, 'Disconnect')
+        : null,
+      endpoints.length > 0 || current ? el(DropdownMenuSeparator) : null,
       el(DropdownMenuItem, { onSelect: () => openAddComputer() }, '＋ Add computer'),
       el(DropdownMenuItem, { onSelect: () => openManageComputers() }, 'Manage computers…')
     )
@@ -4064,7 +4104,25 @@ function ComputerPane() {
         current: endpoint,
         conn
       }),
-      el(HiperfHdToggle, { endpoint })
+      el(HiperfHdToggle, { endpoint }),
+      endpoint &&
+        conn.phase !== 'unconfigured' &&
+        conn.phase !== 'idle' &&
+        !(conn.phase === 'disconnected' && !conn.attempt)
+        ? el(
+            Button,
+            {
+              type: 'button',
+              size: 'xs',
+              variant: 'ghost',
+              className: 'shrink-0',
+              title: 'Disconnect',
+              'aria-label': 'Disconnect',
+              onClick: () => userDisconnect(endpoint.id)
+            },
+            'Disconnect'
+          )
+        : null
     ),
     el(
       'div',
@@ -4174,7 +4232,7 @@ function ComputerPane() {
             el(Button, { size: 'xs', variant: 'secondary', onClick: toggleExpanded }, 'Expand')
           )
         : null,
-      !iframeMode && !unconfigured && (conn.phase === 'idle' || conn.phase === 'disconnected')
+      !unconfigured && (conn.phase === 'idle' || conn.phase === 'disconnected')
         ? el(
             'div',
             { className: 'mt-2 flex justify-center' },
@@ -4246,6 +4304,16 @@ export default {
           label: 'Computer: Reconnect',
           keywords: ['computer', 'reconnect', 'vnc'],
           run: () => reconnect()
+        }
+      },
+      {
+        id: 'palette-disconnect',
+        area: PALETTE_AREA,
+        data: {
+          id: 'computer-viewer.disconnect',
+          label: 'Computer Viewer: Disconnect current',
+          keywords: ['computer', 'disconnect', 'vnc', 'viewer'],
+          run: () => userDisconnect()
         }
       },
       {

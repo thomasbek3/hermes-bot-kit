@@ -333,9 +333,14 @@ If noVNC cannot be loaded from the CDN (network or CSP), the pane shows **Couldn
 | Gear | Opens the settings dialog. |
 | Expand (or ⌘⇧D / Ctrl+Shift+D) | Fullscreen overlay. Same RFB/iframe node — no reconnect. |
 | Connect / Reconnect | Shown when idle, disconnected, or on error. |
+| Disconnect | In the computer switcher (and as a small header action). Drops the current session. |
 | Reload / Open in browser | Iframe mode only. |
 
 The collapsed thumbnail can crop a top panel strip (XFCE-style, `min(12%, 28px/fbH)`). **`cropPanel` defaults to off** — stored endpoints that omit the field do not crop. Turn it on per endpoint in settings if you want the thumbnail to hide a top panel; hiding the panel in the VM is the recommended approach, because crop can clip bottom dock icons. Fullscreen is never cropped.
+
+### Disconnecting
+
+**Disconnect** in the computer switcher drops the current computer on purpose (palette: **Computer Viewer: Disconnect current**). That stops the noVNC session and the HD stream together, and it cancels reconnect backoff. The pane stays **Disconnected** with a **Connect** button. Collapsing and reopening the pane does not auto-connect that computer until you click **Connect**. A full Hermes app restart returns to the usual auto-connect behavior. The hold is in-memory only; nothing extra is written to plugin storage.
 
 ### Expanded overlay
 
@@ -349,7 +354,7 @@ Mouse-move shows the bar; it auto-fades after 2s idle. Escape collapses (Escape 
 | Ctrl+Alt+Del | `rfb.sendCtrlAltDel()`. |
 | Screenshot | `rfb.toBlob` → PNG on the clipboard when possible; otherwise a PNG download. |
 | Reconnect | Full `connect()` (re-fetches session JSON). |
-| Disconnect | Clean disconnect; does not auto-retry. |
+| Disconnect | Clean disconnect; HD stream stops with it. Reconnect is manual until app restart. |
 | Collapse | Leave fullscreen. |
 
 Iframe expanded controls are Reload, Open in browser, and Collapse.
@@ -360,13 +365,14 @@ Iframe expanded controls are Reload, Open in browser, and Collapse.
 |---|---|
 | Computer: Toggle Pane | Palette. Toggles pane visibility when the host atom is writable; otherwise expands/collapses the overlay. |
 | Computer: Reconnect | Palette. |
+| Computer Viewer: Disconnect current | Palette. Explicit disconnect of the selected computer. |
 | Expand computer view | `mod+shift+d` (rebindable in Settings). |
 
 ### Per-bot endpoints
 
 Effective endpoint = `perBotEndpoint[focusedProfile] ?? globalEndpointId`. Switching the focused chat to a profile that resolves to a **different** endpoint disconnects and reconnects. The same endpoint is left alone.
 
-`autoConnect` (default on) connects when the pane becomes visible and disconnects when it is hidden or the plugin is disabled. Connection state is not persisted; `lastExpanded` is.
+`autoConnect` (default on) connects when the pane becomes visible and disconnects when it is hidden or the plugin is disabled. An explicit Disconnect is the exception (see Disconnecting). Connection state is not persisted; `lastExpanded` is.
 
 ## Auto-reconnect
 
