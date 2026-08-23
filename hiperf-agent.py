@@ -355,6 +355,8 @@ def build_candidates(ffmpeg: str, fps: int, bitrate: int, display: str) -> list[
                     '0',
                     '-rc',
                     'cbr',
+                    '-profile:v',
+                    'baseline',
                 ]
                 + rate
                 + encode_tail(fps, 'yuv420p'),
@@ -375,7 +377,22 @@ def build_candidates(ffmpeg: str, fps: int, bitrate: int, display: str) -> list[
                 'libx264',
                 prefix_ffmpeg(ffmpeg)
                 + gdi
-                + ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency']
+                + [
+                    '-c:v',
+                    'libx264',
+                    '-preset',
+                    'ultrafast',
+                    '-tune',
+                    'zerolatency',
+                    '-profile:v',
+                    'baseline',
+                    '-level',
+                    '4.0',
+                    '-slices',
+                    '1',
+                    '-x264-params',
+                    'sliced-threads=0:sync-lookahead=0:rc-lookahead=0:scenecut=0',
+                ]
                 + rate
                 + encode_tail(fps, 'yuv420p'),
             )
