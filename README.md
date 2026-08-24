@@ -39,6 +39,9 @@ watchable from one pane, like a KVM switch for your agent fleet.
   path. One **HD** toggle; VNC is the silent safety net.
 - **Multi-bot aware.** Per-bot computer bindings — each of your profiles can
   have its own machine, and the pane follows the focused chat.
+- **Bots with hands, not just eyes.** The optional `orgo-computer` agent
+  plugin lets your bots run shell commands and delegate GUI tasks on their
+  pinned computer. Watch the pane while the bot works inside it.
 - **Stays inside the plugin system.** One `plugin.js`, the three allowed
   imports, official contribution points (pane, status bar, palette,
   keybinds). Hot-reloadable, no build step, no core patches.
@@ -58,7 +61,8 @@ hiperf-agent.py        optional HD streaming agent (H.264 over WebSocket)
 hiperf-mac.sh          HD agent installer, macOS (VideoToolbox)
 hiperf-windows.ps1     HD agent installer, Windows (NVENC / x264)
 hiperf-linux.sh        HD agent installer, Linux (VAAPI / x264)
-install-agent-plugin.sh  optional agent-side plugin (lets bots use the computer)
+agent-plugin/          orgo-computer: gives bots hands on their computer (shell + GUI tools)
+install-agent-plugin.sh  install the agent plugin into one or every Hermes profile
 docs/                  specs, build notes, known issues
 ```
 
@@ -131,6 +135,39 @@ X11 uses `x11vnc`. wlroots compositors (Sway, Hyprland, ...) use `wayvnc`
 (less battle-tested; noVNC may not speak wayvnc's RSA-AES). **GNOME/KDE
 Wayland is not supported** - log into an Xorg session. The script prints the
 address and the VNC password it stored.
+
+## Give your bot hands: the agent plugin
+
+The desktop pane gives **you** eyes on the computer. The optional
+**orgo-computer agent plugin** gives your **bot** hands on it — so Hermes can
+actually drive the machine, not just display it.
+
+With both halves installed, a bot in any chat can:
+
+- `orgo_computer_bash` — run shell commands on the pinned computer (files,
+  packages, git — anything that doesn't need a screen)
+- `orgo_computer_run` — delegate a bounded GUI/browser task (clicks, typing)
+  to Orgo's hosted computer-use agent
+
+Install into one or every Hermes profile:
+
+```bash
+bash install-agent-plugin.sh            # all profiles, prompts once for the key
+bash install-agent-plugin.sh --profiles default,parker --yes --api-key sk_live_xxx
+```
+
+Then pin a computer per profile with `/computer` in that chat. The plugin is
+per-profile on purpose: parker's bot can drive one Orgo box while alfred's
+drives another. Pair each profile with the same machine in the viewer's
+per-bot endpoint and you get the full picture — watch the pane while the bot
+works inside it.
+
+Architecture note: like Grok Bot, the brain does not live on the computer.
+Hermes (the brain) reaches out to the box (the hands) through Orgo's API;
+the pane is only the window. Because the pieces are decoupled, the viewer
+can run from a different Mac than the gateway doing the driving. And if you
+launch your Orgo computer from the **Hermes Agent template**, a full Hermes
+brain can live *on* the computer itself — Grok Bot can't do that part.
 
 ## High-performance mode (optional)
 
