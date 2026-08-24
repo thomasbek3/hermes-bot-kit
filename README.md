@@ -70,6 +70,7 @@ hiperf-linux.sh        HD agent installer, Linux (VAAPI / x264)
 agent-plugin/          orgo-computer: gives bots hands on their computer (shell + GUI tools)
 install-agent-plugin.sh  install the agent plugin into one or every Hermes profile
 docs/                  specs, build notes, known issues
+NOTICE.md              licensing + attribution (parts adapted from Korgo Bot, MIT)
 ```
 
 Plugin id: `computer-viewer` (folder name must match).
@@ -167,6 +168,10 @@ per-profile on purpose: parker's bot can drive one Orgo box while alfred's
 drives another. Pair each profile with the same machine in the viewer's
 per-bot endpoint and you get the full picture — watch the pane while the bot
 works inside it.
+
+> Attribution: parts of this agent plugin are adapted from
+> [Korgo Bot](https://github.com/nickvasilescu/korgo-bot) (MIT) — see
+> [NOTICE.md](NOTICE.md).
 
 Architecture note: like Grok Bot, the brain does not live on the computer.
 Hermes (the brain) reaches out to the box (the hands) through Orgo's API;
