@@ -20,6 +20,12 @@ watchable from one pane, like a KVM switch for your agent fleet.
 └──────────────────────────┴──────────────────────┘
 ```
 
+<p align="center">
+  <img src="screenshots/live-view.png" alt="Live remote desktop view" width="640">
+</p>
+<p align="center"><em>A real capture from the plugin's pipeline: a live macOS machine,
+viewed through the pane's noVNC connection.</em></p>
+
 ## Highlights
 
 - **One pane, every computer.** Cloud (Orgo, TLS-fronted VPS, Docker boxes)

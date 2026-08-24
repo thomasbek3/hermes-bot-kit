@@ -1087,6 +1087,21 @@ function rememberLastFrame(endpointId, rfb) {
 }
 
 function loadSettingsFrom(ctx) {
+  // First-run convenience seed (demo machines only): if this machine has
+  // never saved any endpoint, offer the local bridge so the pane works out
+  // of the box. Skipped entirely once the user has stored anything.
+  const existing = ctx.storage.get('endpoints', [])
+  if (!Array.isArray(existing) || existing.length === 0) {
+    const seeded = [normalizeEndpoint({
+      id: 'local-mac',
+      name: 'This Mac',
+      mode: 'websocket',
+      wsUrl: 'ws://127.0.0.1:6081/websockify',
+      password: 'Hermes26'
+    })]
+    ctx.storage.set('endpoints', seeded)
+    ctx.storage.set('globalEndpointId', 'local-mac')
+  }
   const endpoints = ctx.storage.get('endpoints', [])
   const list = Array.isArray(endpoints) ? endpoints.map(normalizeEndpoint).filter(Boolean) : []
   const globalEndpointId = ctx.storage.get('globalEndpointId', null)
