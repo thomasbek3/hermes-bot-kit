@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""orgo-term: root terminal on the Orgo box via Orgo's WebSocket PTY.
+
+Usage: orgo-term "command1 && command2"
+"""
+import sys, os, json, time, re
+import websocket
+
+START = '___ORGO_START___'
+END = '___ORGO_END___'
+
+def get_token():
+    import urllib.request
+    key = [l.split('=',1)[1].strip() for l in open(os.path.expanduser('~/.hermes/.env')) if l.startswith('ORGO_API_KEY')][0]
+    req = urllib.request.Request('https://www.orgo.ai/api/computers/fa37972e-1ee8-448b-89b6-1a6fc35c528e/vnc-password',
+                                 headers={'Authorization': f'Bearer {key}'})
+    return json.load(urllib.request.urlopen(req, timeout=15))['password']
+
+token = get_token()
+ws = websocket.create_connection(
+    f'wss://www.orgo.ai/desktops/555e118f/ws/terminal?token={token}&cols=120&rows=30', timeout=10)
+
+def drain(dur):
+    out = ''
+    end = time.time() + dur
+    while time.time() < end:
+        try:
+            m = json.loads(ws.recv())
+            if m.get('type') == 'output':
+                out += m['data']
+        except websocket.WebSocketTimeoutException:
+            pass
+    return out
+
+drain(0.8)  # banner
+
+cmd = sys.argv[1] if len(sys.argv) > 1 else 'echo "pass a command"'
+wrapped = f'{cmd} ; echo {START} ; echo {END}'
+ws.send(json.dumps({"type":"input","data": wrapped + '\n'}))
+
+out = ''
+started = False
+done = False
+end = time.time() + 20
+while time.time() < end:
+    try:
+        m = json.loads(ws.recv())
+        if m.get('type') == 'output':
+            chunk = m['data']
+            if not started:
+                buf = out + chunk
+                idx = buf.find(START)
+                if idx >= 0:
+                    started = True
+                    out = ''
+            else:
+                if END in (out + chunk):
+                    done = True
+                    break
+                out += chunk
+    except websocket.WebSocketTimeoutException:
+        if started:
+            break
+
+clean = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', out)
+clean = re.sub(r'\r', '', clean)
+print(clean.split(END)[0].strip())
+ws.close()
