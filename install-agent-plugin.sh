@@ -398,10 +398,10 @@ fi
 
 echo
 echo "Next steps:"
-echo "  1. Rotate the Orgo API key exposed in chat on 2026-08-22 if you have not already."
-echo "  2. Restart Hermes (CLI, gateway, desktop)."
-echo "  3. In each bot run /computer and pin that bot's machine."
-echo "  4. In the Computer viewer pane, pick the same machine as the per-bot endpoint."
+echo "  1. Restart Hermes (CLI, gateway, desktop)."
+echo "  2. In each bot run /computer and pin that bot's machine."
+echo "  3. In the Computer viewer pane, pick the same machine as the per-bot endpoint."
+echo "  No key yet? Get one at https://www.orgo.ai -> API keys."
 echo
 echo "CLI: hermes orgo-computer list"
 echo "     hermes orgo-computer set <profile> <uuid>"

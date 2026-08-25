@@ -267,7 +267,14 @@ session endpoint for anything sensitive.
 
 ## Install
 
-Copy this file to Hermes's desktop-plugin directory. The folder name **must**
+Get the repo first:
+
+```bash
+git clone https://github.com/thomasbek3/hermes-computer-viewer.git
+cd hermes-computer-viewer
+```
+
+Copy the plugin to Hermes's desktop-plugin directory. The folder name **must**
 be `computer-viewer`.
 
 ```bash
@@ -532,8 +539,8 @@ desktop.example.com {
 Paste the session API URL into **Computer address** when the desktop URL is
 minted per session instead of being stable. (Advanced: Session JSON.)
 
-`GET` `sessionUrl` (optional `Authorization: Bearer *** must return JSON of
-this shape:
+`GET sessionUrl` (optional header: `Authorization: Bearer YOUR_TOKEN`) must
+return JSON of this shape:
 
 ```json
 {
@@ -754,3 +761,4 @@ the other variant and the working choice is remembered per endpoint.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
