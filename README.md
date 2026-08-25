@@ -75,6 +75,7 @@ hiperf-windows.ps1     HD agent installer, Windows (NVENC / x264)
 hiperf-linux.sh        HD agent installer, Linux (VAAPI / x264)
 agent-plugin/          orgo-computer: gives bots hands on their computer (shell + GUI tools)
 install-agent-plugin.sh  install the agent plugin into one or every Hermes profile
+orgo-term              one-shot root shell on an Orgo box (WebSocket PTY, no AI credits)
 docs/                  specs, build notes, known issues
 NOTICE.md              licensing + attribution (parts adapted from Korgo Bot, MIT)
 ```
@@ -178,6 +179,49 @@ works inside it.
 > Attribution: parts of this agent plugin are adapted from
 > [Korgo Bot](https://github.com/nickvasilescu/korgo-bot) (MIT) — see
 > [NOTICE.md](NOTICE.md).
+
+### Costs: bash is free, GUI clicks are not
+
+Orgo meters only one thing: its **hosted computer-use AI** (`orgo_computer_run`),
+which burns your plan's AI credits (~1¢/step). Everything else —
+`orgo_computer_bash`, screenshots, direct API calls, the WebSocket terminal —
+is included in your monthly plan. So:
+
+- **Default to `orgo_computer_bash`.** Opening Chrome to a URL is one command
+  (`google-chrome --no-sandbox --disable-gpu URL &`), not eight GUI steps.
+- **Reach for `orgo_computer_run` only when eyes are required** — visual
+  verification, unfamiliar UI, no CLI path.
+- Measured on real hardware: Chrome + news site = 8 GUI steps / ~90s / ~12¢
+  vs 1 bash command / ~5s / $0.
+
+### Direct terminal access: `orgo-term`
+
+For humans (and Mac-side agents), `orgo-term` is a one-shot terminal on any
+Orgo computer over Orgo's official WebSocket PTY — no SSH needed (Orgo boxes
+don't accept inbound SSH by design), no credits burned:
+
+```bash
+ORGO_COMPUTER_ID=<your-computer-uuid> ./orgo-term "whoami && hostname"
+```
+
+`ORGO_API_KEY` comes from the environment or `~/.hermes/.env`. You can also
+drop both values in `~/.hermes-cv/orgo.env` so you don't have to export them
+every time. Precedence: already-set environment variables win, then
+`~/.hermes-cv/orgo.env`, then `~/.hermes/.env`. Optional: `ORGO_INSTANCE_ID`
+if auto-detect from the computer record fails.
+
+Works from macOS or Linux. Needs `websocket-client`
+(`python3 -m pip install --user websocket-client`; the script installs it
+on first run if missing).
+
+Chrome-on-Orgo tips learned the hard way: launch with `--no-sandbox
+--disable-gpu` (root + software rendering), dismiss the first-run sign-in
+dialog once via keyboard (`Tab` then `Return`), and always set
+`DISPLAY=:99` (Orgo's Xvnc display):
+
+```bash
+./orgo-term 'DISPLAY=:99 google-chrome --no-sandbox --disable-gpu --no-first-run https://news.google.com >/tmp/chrome.log 2>&1 &'
+```
 
 Architecture note: like Grok Bot, the brain does not live on the computer.
 Hermes (the brain) reaches out to the box (the hands) through Orgo's API;

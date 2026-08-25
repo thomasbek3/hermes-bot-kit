@@ -201,3 +201,30 @@ the stream from the first view until it reconnects.
 - **ASCII-only PowerShell. Always.**
 - **Rotating credentials must be fetched per connect.** Caching them is the
   #1 cause of "mystery" cloud failures.
+
+---
+
+## Orgo cloud box (Linux)
+
+### ⚠️ Chrome dies as root / "Missing X server"
+**Symptom:** `google-chrome URL &` exits immediately. Logs say
+`Running as root without --no-sandbox` or `Missing X server or $DISPLAY`.
+**Cause:** Orgo's desktop is Xvnc on **`:99`**, not `:0`. Chrome also
+refuses to start as root without `--no-sandbox`, and the software GPU
+needs `--disable-gpu`.
+**Fix:**
+```
+DISPLAY=:99 google-chrome --no-sandbox --disable-gpu --no-first-run URL &
+```
+First launch also shows a "Sign in to Chrome" interstitial — dismiss once
+with Tab then Return.
+
+### ⚠️ Direct SSH into the box is blocked
+**Symptom:** Tailscale ping works; `ssh root@<tailnet-ip>` hangs.
+**Cause:** Orgo uses userspace networking. Outbound works; inbound TCP
+(including SSH) does not. This is platform design, not a misconfig.
+**Fix:** Use `orgo-term` (WebSocket PTY, included in the monthly plan, no
+AI credits) or `orgo_computer_bash` from the agent plugin. Do not use
+`orgo_computer_run` / `/v1/chat/completions` unless you actually need
+clicks — that path spends AI credits.
+

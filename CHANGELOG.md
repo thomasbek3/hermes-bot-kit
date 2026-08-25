@@ -3,6 +3,19 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- `orgo-term`: one-shot root shell on an Orgo computer over the official
+  WebSocket PTY. Free (no AI credits). Set `ORGO_COMPUTER_ID` + `ORGO_API_KEY`.
+
+### Docs
+
+- README: bash-is-free / GUI-clicks-cost-credits, measured Chrome timing,
+  Chrome-on-Orgo launch flags (`DISPLAY=:99`, `--no-sandbox --disable-gpu`).
+- `docs/KNOWN-ISSUES.md`: Orgo Chrome/DISPLAY=:99 and inbound-SSH-blocked.
+
 ## [0.1.0] — 2026-08-24
 
 First public release.
