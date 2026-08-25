@@ -24,7 +24,7 @@ watchable from one pane, like a KVM switch for your agent fleet.
   <img src="screenshots/app-view.png" alt="Computer pane docked in Hermes Desktop" width="720">
 </p>
 <p align="center"><em>The Computer pane docked in Hermes Desktop — live remote desktop
-on the right, chats on the left. (Chat content blurred.)</em></p>
+on the right. Session names and chat text blurred.</em></p>
 
 <p align="center">
   <img src="screenshots/live-view.png" alt="Live remote desktop view" width="560">
