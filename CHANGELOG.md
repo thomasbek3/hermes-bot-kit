@@ -9,11 +9,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 - `orgo-term`: one-shot root shell on an Orgo computer over the official
   WebSocket PTY. Free (no AI credits). Set `ORGO_COMPUTER_ID` + `ORGO_API_KEY`.
+- `orgo-hands`: screenshot / click / type / key over Orgo REST (no AI credits).
+- Agent plugin hands: `orgo_computer_screenshot`, `orgo_computer_click`,
+  `orgo_computer_type`, `orgo_computer_key`. Hosted `orgo_computer_run` is
+  off unless plugin config `hosted_run: true`.
 
 ### Docs
 
-- README: bash-is-free / GUI-clicks-cost-credits, measured Chrome timing,
-  Chrome-on-Orgo launch flags (`DISPLAY=:99`, `--no-sandbox --disable-gpu`).
+- README: bash and hands are free; hosted `orgo_computer_run` is opt-in.
+  Measured Chrome timing. Chrome-on-Orgo launch flags (`DISPLAY=:99`).
 - `docs/KNOWN-ISSUES.md`: Orgo Chrome/DISPLAY=:99 and inbound-SSH-blocked.
 
 ## [0.1.0] — 2026-08-24

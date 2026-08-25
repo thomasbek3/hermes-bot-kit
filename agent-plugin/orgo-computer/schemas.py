@@ -8,18 +8,129 @@ ORGO_AGENT_MODELS = [
     "claude-opus-4.6",
 ]
 
+ORGO_COMPUTER_BASH = {
+    "name": "orgo_computer_bash",
+    "description": (
+        "Execute one shell command on this bot's pinned Orgo cloud VM and "
+        "return combined output and exit code. Preferred for anything that "
+        "is a command: open a URL, install a package, write a file, start "
+        "or stop a process. Changes real machine state. Do not use for "
+        "visual UI work -- take a screenshot and click instead."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "The shell command to run on the pinned Orgo VM.",
+                "minLength": 1,
+            },
+        },
+        "required": ["command"],
+    },
+}
+
+ORGO_COMPUTER_SCREENSHOT = {
+    "name": "orgo_computer_screenshot",
+    "description": (
+        "Take a screenshot of the pinned Orgo desktop and return the image. "
+        "Included in the monthly plan (no AI credits). Coordinates for "
+        "orgo_computer_click are pixels in this image. After click/type/key, "
+        "call this again to see what changed."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+}
+
+ORGO_COMPUTER_CLICK = {
+    "name": "orgo_computer_click",
+    "description": (
+        "Click the pinned Orgo desktop at pixel (x, y). Included in the "
+        "monthly plan (no AI credits). Use coordinates from the latest "
+        "orgo_computer_screenshot. Then screenshot again."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "x": {
+                "type": "integer",
+                "description": "Horizontal pixel from the left edge.",
+                "minimum": 0,
+            },
+            "y": {
+                "type": "integer",
+                "description": "Vertical pixel from the top edge.",
+                "minimum": 0,
+            },
+            "button": {
+                "type": "string",
+                "description": "Mouse button. Defaults to left.",
+                "enum": ["left", "right"],
+            },
+            "double": {
+                "type": "boolean",
+                "description": "If true, double-click. Defaults to false.",
+            },
+        },
+        "required": ["x", "y"],
+    },
+}
+
+ORGO_COMPUTER_TYPE = {
+    "name": "orgo_computer_type",
+    "description": (
+        "Type text into the focused field on the pinned Orgo desktop. "
+        "Included in the monthly plan (no AI credits). Screenshot first "
+        "so you know what is focused."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "Literal text to type.",
+                "minLength": 1,
+                "maxLength": 4000,
+            },
+        },
+        "required": ["text"],
+    },
+}
+
+ORGO_COMPUTER_KEY = {
+    "name": "orgo_computer_key",
+    "description": (
+        "Press one key on the pinned Orgo desktop (Return, Escape, Tab, "
+        "Page_Down, Down). Included in the monthly plan (no AI credits). "
+        "Use for dialogs and scrolling. Then screenshot again."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "key": {
+                "type": "string",
+                "description": "Key name, e.g. Return, Escape, Tab, Page_Down.",
+                "minLength": 1,
+                "maxLength": 40,
+            },
+        },
+        "required": ["key"],
+    },
+}
+
 ORGO_COMPUTER_RUN = {
     "name": "orgo_computer_run",
     "description": (
-        "Delegate a bounded multi-step GUI or browser task to the hosted "
-        "computer-use agent on this bot's provisioned cloud computer. It can "
-        "click, type, browse, and change external state, uses Orgo plan "
-        "credits, and is not idempotent. The run holds the computer's input "
-        "for the whole duration; a second call on the same computer fails "
-        "after about 5 seconds until the first finishes -- do not retry a "
-        "lock-busy error. Prefer orgo_computer_bash or other direct tools for "
-        "deterministic non-visual work. Write tasks self-contained with an "
-        "explicit end condition."
+        "LAST RESORT. Delegate a multi-step GUI task to Orgo's hosted "
+        "computer-use agent. Spends plan AI credits and holds the mouse "
+        "until it finishes. Do not use if orgo_computer_bash or "
+        "screenshot/click/type/key can do the job. A second call on the "
+        "same computer fails after about 5 seconds while a run is active "
+        "-- do not retry a lock-busy error. Write a self-contained task "
+        "with an explicit end condition."
     ),
     "parameters": {
         "type": "object",
@@ -46,29 +157,5 @@ ORGO_COMPUTER_RUN = {
             },
         },
         "required": ["task"],
-    },
-}
-
-ORGO_COMPUTER_BASH = {
-    "name": "orgo_computer_bash",
-    "description": (
-        "Execute one arbitrary shell command on this bot's pinned Orgo cloud "
-        "VM and return its combined output and exit code. This changes "
-        "external state on a real machine -- treat with the same care as any "
-        "shell. Deterministic and cheap; preferred over orgo_computer_run for "
-        "anything not requiring vision or a GUI. Runs concurrently with "
-        "delegated GUI work; avoid commands that manipulate the GUI while a "
-        "delegated run is active."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "The shell command to run on the pinned Orgo VM.",
-                "minLength": 1,
-            },
-        },
-        "required": ["command"],
     },
 }

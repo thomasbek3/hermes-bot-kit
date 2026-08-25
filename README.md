@@ -76,6 +76,7 @@ hiperf-linux.sh        HD agent installer, Linux (VAAPI / x264)
 agent-plugin/          orgo-computer: gives bots hands on their computer (shell + GUI tools)
 install-agent-plugin.sh  install the agent plugin into one or every Hermes profile
 orgo-term              one-shot root shell on an Orgo box (WebSocket PTY, no AI credits)
+orgo-hands             screenshot / click / type / key on an Orgo box (REST, no AI credits)
 docs/                  specs, build notes, known issues
 NOTICE.md              licensing + attribution (parts adapted from Korgo Bot, MIT)
 ```
@@ -160,8 +161,10 @@ With both halves installed, a bot in any chat can:
 
 - `orgo_computer_bash` — run shell commands on the pinned computer (files,
   packages, git — anything that doesn't need a screen)
-- `orgo_computer_run` — delegate a bounded GUI/browser task (clicks, typing)
-  to Orgo's hosted computer-use agent
+- `orgo_computer_screenshot` / `orgo_computer_click` / `orgo_computer_type` /
+  `orgo_computer_key` — see and drive the desktop yourself (no AI credits)
+- `orgo_computer_run` — **off by default.** Orgo's hosted click-AI; spends
+  plan credits. Enable with plugin config `hosted_run: true` only if you want it.
 
 Install into one or every Hermes profile:
 
@@ -180,19 +183,25 @@ works inside it.
 > [Korgo Bot](https://github.com/nickvasilescu/korgo-bot) (MIT) — see
 > [NOTICE.md](NOTICE.md).
 
-### Costs: bash is free, GUI clicks are not
+### Costs: bash and hands are free; hosted AI is not
 
 Orgo meters only one thing: its **hosted computer-use AI** (`orgo_computer_run`),
-which burns your plan's AI credits (~1¢/step). Everything else —
-`orgo_computer_bash`, screenshots, direct API calls, the WebSocket terminal —
-is included in your monthly plan. So:
+which burns plan AI credits (~1¢/step). That tool is **off by default**.
+Everything else is included in the monthly plan:
 
-- **Default to `orgo_computer_bash`.** Opening Chrome to a URL is one command
-  (`google-chrome --no-sandbox --disable-gpu URL &`), not eight GUI steps.
-- **Reach for `orgo_computer_run` only when eyes are required** — visual
-  verification, unfamiliar UI, no CLI path.
-- Measured on real hardware: Chrome + news site = 8 GUI steps / ~90s / ~12¢
-  vs 1 bash command / ~5s / $0.
+- **`orgo_computer_bash`** — open a URL, install, files, processes.
+- **Screenshot / click / type / key** — the bot looks at the desktop and
+  clicks itself (Grok Bot / OpenMausBot style).
+- **`orgo-term` / `orgo-hands`** — human CLI for the same free pipes.
+
+Measured on a real Orgo box (Google News headlines visible):
+
+- bash launch Chrome to the URL: **~14s, $0**
+- screenshot + click: **~34s, $0**
+- hosted `orgo_computer_run`: **~90s, ~12¢**
+
+Default: bash first, pixels if you must see it, hosted run never unless you
+turned it on.
 
 ### Direct terminal access: `orgo-term`
 

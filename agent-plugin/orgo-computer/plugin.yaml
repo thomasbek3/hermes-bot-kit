@@ -1,15 +1,19 @@
 manifest_version: 2
 api_version: 1
 name: orgo-computer
-version: 1.0.0
-description: Give this agent hands on its Orgo cloud computer - delegate GUI tasks and run shell commands
+version: 1.1.0
+description: Hands on a pinned Orgo cloud computer - bash, screenshot, click, type, key
 author: Thomas Bekkers
 license: MIT
 homepage: https://github.com/thomasbek3/hermes-computer-viewer
 tags: [computer-use, orgo]
 provides_tools:
-  - orgo_computer_run
   - orgo_computer_bash
+  - orgo_computer_screenshot
+  - orgo_computer_click
+  - orgo_computer_type
+  - orgo_computer_key
+  - orgo_computer_run
 provides_hooks:
   - pre_tool_call
 requires_env:
@@ -21,6 +25,7 @@ python_dependencies:
   - "httpx>=0.27,<1"
 config_schema:
   computer_id: {type: str, default: "", description: "Orgo computer UUID this profile controls (set via /computer)"}
+  hosted_run: {type: bool, default: false, description: "If true, register orgo_computer_run (spends Orgo AI credits). Default off."}
   model: {type: str, default: "claude-sonnet-5", description: "Model for delegated computer-use runs"}
   max_steps: {type: int, default: 30, description: "Default step budget per delegated run (1-100)"}
   timeout_seconds: {type: int, default: 420, description: "Per-run timeout for delegated runs"}

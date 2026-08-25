@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""orgo-hands: OpenMausBot-style direct control of an Orgo computer.
+
+Brain stays here. These are dumb buttons: screen / click / type / key.
+Uses Orgo REST only — never /v1/chat/completions, never AI credits.
+
+Usage:
+  orgo-hands screen [outfile]
+  orgo-hands click <x> <y> [--button left|right] [--double]
+  orgo-hands type "hello"
+  orgo-hands key Return
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+API = "https://www.orgo.ai/api"
+
+
+def _load_env() -> None:
+    for path in (
+        os.path.expanduser("~/.hermes-cv/orgo.env"),
+        os.path.expanduser("~/.hermes/.env"),
+    ):
+        if not os.path.exists(path):
+            continue
+        for line in open(path, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            name = name.strip()
+            if name in ("ORGO_API_KEY", "ORGO_COMPUTER_ID", "ORGO_API_BASE_URL"):
+                os.environ.setdefault(name, value.strip().strip("'\""))
+
+
+def _key() -> str:
+    _load_env()
+    key = os.environ.get("ORGO_API_KEY", "").strip()
+    if not key:
+        sys.exit("Set ORGO_API_KEY")
+    return key
+
+
+def _cid() -> str:
+    _load_env()
+    cid = os.environ.get("ORGO_COMPUTER_ID", "").strip()
+    if not cid:
+        sys.exit("Set ORGO_COMPUTER_ID")
+    return cid
+
+
+def _base() -> str:
+    _load_env()
+    return os.environ.get("ORGO_API_BASE_URL", API).rstrip("/")
+
+
+def _origin() -> str:
+    parsed = urllib.parse.urlparse(_base())
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return "https://www.orgo.ai"
+
+
+def _headers(key: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+
+def _load_json(resp: object) -> dict:
+    raw = resp.read()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        sys.exit("Orgo returned non-JSON")
+    if not isinstance(payload, dict):
+        sys.exit("Orgo returned non-object JSON")
+    return payload
+
+
+def _get(url: str, key: str) -> dict:
+    req = urllib.request.Request(url, headers=_headers(key))
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return _load_json(resp)
+
+
+def _post(url: str, key: str, body: dict) -> dict:
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(), headers=_headers(key), method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return _load_json(resp)
+
+
+def _image_url(path: str) -> str:
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    if not path.startswith("/"):
+        path = "/" + path
+    return _origin() + path
+
+
+def cmd_screen(outfile: str) -> int:
+    key, cid = _key(), _cid()
+    payload = _get(f"{_base()}/computers/{cid}/screenshot", key)
+    path = payload.get("image") or ""
+    if not path:
+        sys.exit("Orgo screenshot returned no image path")
+    req = urllib.request.Request(
+        _image_url(path),
+        headers={"Authorization": f"Bearer {key}", "Accept": "image/*"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        ctype = resp.headers.get_content_type()
+        data = resp.read()
+    if ctype and not str(ctype).startswith("image/"):
+        sys.exit("Orgo screenshot was not an image")
+    parent = os.path.dirname(outfile)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    open(outfile, "wb").write(data)
+    try:
+        os.chmod(outfile, 0o600)
+    except OSError:
+        pass
+    print(json.dumps({"ok": True, "file": outfile, "bytes": len(data)}))
+    return 0
+
+
+def cmd_click(x: int, y: int, button: str, double: bool) -> int:
+    payload = _post(
+        f"{_base()}/computers/{_cid()}/click",
+        _key(),
+        {"x": x, "y": y, "button": button, "double": double},
+    )
+    print(json.dumps({"success": payload.get("success"), "action": payload.get("action")}))
+    return 0 if payload.get("success") else 1
+
+
+def cmd_type(text: str) -> int:
+    payload = _post(f"{_base()}/computers/{_cid()}/type", _key(), {"text": text})
+    print(json.dumps({"success": payload.get("success"), "action": payload.get("action")}))
+    return 0 if payload.get("success") else 1
+
+
+def cmd_key(key_name: str) -> int:
+    payload = _post(f"{_base()}/computers/{_cid()}/key", _key(), {"key": key_name})
+    print(json.dumps({"success": payload.get("success"), "action": payload.get("action")}))
+    return 0 if payload.get("success") else 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="op", required=True)
+    screen = sub.add_parser("screen")
+    screen.add_argument("outfile", nargs="?", default=os.path.expanduser("~/.hermes-cv/orgo-screen.jpg"))
+    click = sub.add_parser("click")
+    click.add_argument("x", type=int)
+    click.add_argument("y", type=int)
+    click.add_argument("--button", choices=("left", "right"), default="left")
+    click.add_argument("--double", action="store_true")
+    typ = sub.add_parser("type")
+    typ.add_argument("text", nargs="+")
+    keyp = sub.add_parser("key")
+    keyp.add_argument("key")
+    args = parser.parse_args()
+    try:
+        if args.op == "screen":
+            return cmd_screen(args.outfile)
+        if args.op == "click":
+            return cmd_click(args.x, args.y, args.button, args.double)
+        if args.op == "type":
+            return cmd_type(" ".join(args.text))
+        if args.op == "key":
+            return cmd_key(args.key)
+        return 2
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"Orgo HTTP {exc.code}")
+    except urllib.error.URLError as exc:
+        sys.exit(f"Could not reach Orgo: {exc.reason}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -11,30 +11,52 @@ def register(ctx) -> None:
     """Wire tools, slash command, CLI, hook, and bundled skill."""
     tools.bind_context(ctx)
 
-    ctx.register_tool(
-        name="orgo_computer_run",
+    common = dict(
         toolset="orgo_computer",
-        schema=schemas.ORGO_COMPUTER_RUN,
-        handler=tools.orgo_computer_run,
         is_async=True,
         requires_env=["ORGO_API_KEY"],
         check_fn=tools.orgo_ready,
     )
     ctx.register_tool(
         name="orgo_computer_bash",
-        toolset="orgo_computer",
         schema=schemas.ORGO_COMPUTER_BASH,
         handler=tools.orgo_computer_bash,
-        is_async=True,
-        requires_env=["ORGO_API_KEY"],
-        check_fn=tools.orgo_ready,
+        **common,
     )
+    ctx.register_tool(
+        name="orgo_computer_screenshot",
+        schema=schemas.ORGO_COMPUTER_SCREENSHOT,
+        handler=tools.orgo_computer_screenshot,
+        **common,
+    )
+    ctx.register_tool(
+        name="orgo_computer_click",
+        schema=schemas.ORGO_COMPUTER_CLICK,
+        handler=tools.orgo_computer_click,
+        **common,
+    )
+    ctx.register_tool(
+        name="orgo_computer_type",
+        schema=schemas.ORGO_COMPUTER_TYPE,
+        handler=tools.orgo_computer_type,
+        **common,
+    )
+    ctx.register_tool(
+        name="orgo_computer_key",
+        schema=schemas.ORGO_COMPUTER_KEY,
+        handler=tools.orgo_computer_key,
+        **common,
+    )
+    if tools.hosted_run_enabled():
+        ctx.register_tool(
+            name="orgo_computer_run",
+            schema=schemas.ORGO_COMPUTER_RUN,
+            handler=tools.orgo_computer_run,
+            **common,
+        )
 
     ctx.register_hook("pre_tool_call", tools.pre_tool_call)
 
-    # Frozen into every new session prompt: tells the bot it HAS its own
-    # cloud computer, by name. Empty string (nothing pinned) renders as an
-    # omitted section -- verified against render_system_prompt_sections.
     ctx.register_system_prompt_section(
         id="orgo-computer-identity",
         content=lambda _session_info: tools.computer_identity_section(),

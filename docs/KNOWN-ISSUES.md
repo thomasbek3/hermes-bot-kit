@@ -223,8 +223,7 @@ with Tab then Return.
 **Symptom:** Tailscale ping works; `ssh root@<tailnet-ip>` hangs.
 **Cause:** Orgo uses userspace networking. Outbound works; inbound TCP
 (including SSH) does not. This is platform design, not a misconfig.
-**Fix:** Use `orgo-term` (WebSocket PTY, included in the monthly plan, no
-AI credits) or `orgo_computer_bash` from the agent plugin. Do not use
-`orgo_computer_run` / `/v1/chat/completions` unless you actually need
-clicks — that path spends AI credits.
+**Fix:** Use `orgo-term` (WebSocket PTY) or `orgo_computer_bash` /
+`orgo-hands` (screenshot/click). Hosted `orgo_computer_run` is off by
+default and spends AI credits — do not enable it just to click.
 
