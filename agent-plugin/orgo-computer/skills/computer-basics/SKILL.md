@@ -20,6 +20,13 @@ This profile can drive one pinned Orgo cloud computer:
   hosted computer-use agent. It clicks and types on the live desktop. It
   spends plan credits and holds the mouse until it finishes.
 
+**Bash first, GUI last resort (measured 2026-08-24).** A GUI run costs
+~8-12s per step and real credits (a Chrome + URL open took 8 steps /
+~12 cents via GUI but ~2 seconds via bash: `google-chrome URL &`).
+Default to bash for: launching apps, opening URLs, installing packages,
+file ops, anything scriptable. Reach for GUI only when the task truly
+needs eyes on screen (visual verification, unfamiliar UI, no CLI path).
+
 Credentials and the computer UUID are not tool arguments. If no computer is
 pinned, tell the user to run `/computer`. Do not retry the tool that same
 turn.
