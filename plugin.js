@@ -39,7 +39,7 @@ import {
   useValue
 } from '@hermes/plugin-sdk'
 import * as HermesSdk from '@hermes/plugin-sdk'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const PLUGIN_ID = 'computer-viewer'
@@ -1130,6 +1130,7 @@ function setUi(partial) {
 }
 
 function setExpanded(next) {
+  if (next) showPane()
   const ui = $ui.get()
   if (ui.expanded === next) {
     applyRfbDisplay()
@@ -1150,23 +1151,53 @@ function toggleExpanded() {
   setExpanded(!$ui.get().expanded)
 }
 
-function trySetPaneVisible(value) {
-  if (typeof host.paneVisibility !== 'function') return false
-  const vis = host.paneVisibility(PANE_CONTRIB_ID)
-  if (vis && typeof vis.set === 'function') {
-    vis.set(value)
-    return true
+let unregisterPane = null
+
+function paneContribution() {
+  return {
+    id: 'pane',
+    area: PANES_AREA,
+    title: 'Computer',
+    data: {
+      // Stock maps any non-left, non-main root-row child to ⌘J
+      // ($fileBrowserOpen, default closed) and display:none's the whole
+      // column — including this pane. Bot Mode's Cronjobs pane documents
+      // the same trap (hermes-bots/plugin.js) and docks as placement:'main'
+      // beside workspace. 'cronjobs' is not a pane id on stock.
+      placement: 'main',
+      width: '320px',
+      minWidth: '200px',
+      dock: { pane: 'workspace', pos: 'right', enforce: true }
+    },
+    render: () => el(ComputerPane, {})
   }
-  return false
+}
+
+function showPane() {
+  if (unregisterPane || !pluginCtx || typeof pluginCtx.register !== 'function') return
+  unregisterPane = pluginCtx.register(paneContribution())
+  engine.paneVisible = true
+}
+
+function hidePane() {
+  if (!unregisterPane) return
+  const dispose = unregisterPane
+  unregisterPane = null
+  engine.paneVisible = false
+  if (!$ui.get().expanded) {
+    setExpanded(false)
+    disconnect()
+  }
+  try {
+    dispose()
+  } catch {
+    /* already unregistered */
+  }
 }
 
 function togglePane() {
-  if (typeof host.paneVisibility === 'function') {
-    const vis = host.paneVisibility(PANE_CONTRIB_ID)
-    const currently = vis && typeof vis.get === 'function' ? vis.get() : true
-    if (trySetPaneVisible(!currently)) return
-  }
-  toggleExpanded()
+  if (unregisterPane) hidePane()
+  else showPane()
 }
 
 function openSettings(opts = {}) {
@@ -3903,35 +3934,40 @@ function ComputerOverlay({ iframeMode }) {
   const conn = useValue(engine.state)
   const overlayRef = useRef(null)
   const mountRef = useRef(null)
+  useEffect(() => {
+    if ($settings.get().ui && $settings.get().ui.lastExpanded) setExpanded(true)
+  }, [])
 
   useLayoutEffect(() => {
     engine.overlayRootEl = overlayRef.current
     engine.overlayMountEl = mountRef.current
     const node = overlayRef.current
     const portal = getSdkPortal()
-    let reactParent = null
+    // Re-steal after every expand/phase paint: React reconciliation puts the
+    // node back under the statusbar (overflow-x-clip) or a hidden pane.
     if (!portal && node && node.parentNode !== document.body) {
-      reactParent = node.parentNode
       document.body.appendChild(node)
     }
     placeLive()
+  }, [ui.expanded, conn.phase])
+
+  useLayoutEffect(() => {
+    const node = overlayRef.current
+    const portal = getSdkPortal()
+    if (!portal && node && node.parentNode !== document.body) {
+      document.body.appendChild(node)
+    }
     return () => {
       engine.overlayMountEl = null
       engine.overlayRootEl = null
       if (portal || !node || node.parentNode !== document.body) return
       try {
-        if (reactParent && reactParent.isConnected) reactParent.appendChild(node)
-        else document.body.removeChild(node)
+        document.body.removeChild(node)
       } catch (_) {
-        // Parent already gone or React will throw removeChild; don't leak the body node.
+        // React may already have moved or unmounted the node.
       }
     }
   }, [])
-
-  useLayoutEffect(() => {
-    engine.overlayMountEl = mountRef.current
-    placeLive()
-  }, [ui.expanded, conn.phase])
 
   useLayoutEffect(() => {
     if (!ui.expanded) return undefined
@@ -4112,18 +4148,19 @@ function ComputerPane() {
 
   useEffect(() => {
     engine.paneVisible = true
-    if ($settings.get().ui && $settings.get().ui.lastExpanded) setExpanded(true)
     syncConnection()
     return () => {
       engine.paneVisible = false
-      setExpanded(false)
-      disconnect()
+      if (!$ui.get().expanded) disconnect()
     }
   }, [])
 
   useLayoutEffect(() => {
     engine.slotEl = slotRef.current
     placeLive()
+    return () => {
+      if (engine.slotEl === slotRef.current) engine.slotEl = null
+    }
   }, [ui.expanded, conn.phase, conn.fbW, conn.fbH, placeTick, iframeMode, viewport, endpoint && endpoint.cropPanel])
 
   useEffect(() => {
@@ -4284,23 +4321,35 @@ function ComputerPane() {
           )
         : null
     ),
-    el(SettingsDialog, { profileName }),
-    el(ComputerOverlay, { iframeMode })
+    el(SettingsDialog, { profileName })
   )
 }
 
 function ComputerStatusItem() {
   const conn = useValue(engine.state)
+  const settings = useValue($settings)
+  const focused = useValue(safeAtom(host.state.focusedSessionProfile))
+  const profile = useValue(safeAtom(host.state.profile))
+  const profileName = focused || profile || 'default'
+  const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profileName] : null
+  const endpointId = overrideId || settings.globalEndpointId
+  const endpoint = endpointId ? settings.endpoints.find(item => item.id === endpointId) || null : null
+  const iframeMode = Boolean(endpoint && endpoint.mode === 'iframe')
   return el(
-    'button',
-    {
-      type: 'button',
-      className: 'flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs hover:bg-(--ui-surface-hover)',
-      'aria-label': 'Computer',
-      onClick: togglePane
-    },
-    el(StatusDot, { tone: toneFor(conn.phase, conn.attempt) }),
-    el('span', {}, 'Computer')
+    Fragment,
+    {},
+    el(
+      'button',
+      {
+        type: 'button',
+        className: 'flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs hover:bg-(--ui-surface-hover)',
+        'aria-label': 'Computer',
+        onClick: togglePane
+      },
+      el(StatusDot, { tone: toneFor(conn.phase, conn.attempt) }),
+      el('span', {}, 'Computer')
+    ),
+    el(ComputerOverlay, { iframeMode })
   )
 }
 
@@ -4311,19 +4360,8 @@ export default {
   description: 'Live remote desktop viewer (VNC / noVNC) docked on the right.',
   register(ctx) {
     attachEngine(ctx)
+    showPane()
     ctx.registerMany([
-      {
-        id: 'pane',
-        area: PANES_AREA,
-        title: 'Computer',
-        data: {
-          placement: 'right',
-          width: '320px',
-          dock: { pane: 'cronjobs', pos: 'top' },
-          height: '260px'
-        },
-        render: () => el(ComputerPane, { ctx })
-      },
       {
         id: 'status',
         area: STATUSBAR_AREAS.right,

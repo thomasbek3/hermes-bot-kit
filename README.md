@@ -62,6 +62,16 @@ viewed through the pane's noVNC connection.</em></p>
 > — every non-obvious failure we hit on real hardware and what fixed it.
 > Design docs live in [`docs/`](docs/).
 
+## Compatibility
+
+- **Requires Hermes Desktop ≥ 0.20.5 (2026.8.19).** The 2026-08 stock releases
+  reworked the pane shell: `placement: 'right'` now means the collapsible ⌘J
+  sidebar (hidden by default), and `host.paneVisibility` became read-only.
+  This plugin docks with `placement: 'main'` + an enforced workspace dock, the
+  same pattern the bundled Bot Mode Cronjobs tile uses, so it stays visible on
+  fresh installs. Older plugin versions show a zero-size pane on current stock
+  — update to this version.
+
 ## Repository layout
 
 ```
@@ -356,8 +366,11 @@ Windows (typical):
 
 Then:
 
-1. Hermes Desktop hot-loads disk plugins within a few seconds. If it does not
-   appear, open the command palette (⌘K / Ctrl+K) and run **Reload desktop
+1. Hermes Desktop usually hot-loads disk plugins; in practice a running app
+   sometimes needs a nudge — open the command palette (⌘K / Ctrl+K) and run
+   **Reload desktop plugins**, or restart the app. The pane docks at the right
+   edge of the workspace (like Bot Mode's Cronjobs tile).
+   If it still does not appear, run **Reload desktop
    plugins**.
 2. Enable it in **Settings → Plugins**. The inventory name is **Computer**.
 3. A **Computer** pane docks on the right (320px). The status bar shows a

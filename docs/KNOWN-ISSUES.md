@@ -227,3 +227,24 @@ with Tab then Return.
 `orgo-hands` (screenshot/click). Hosted `orgo_computer_run` is off by
 default and spends AI credits — do not enable it just to click.
 
+
+
+## 2026-08-26 — stock 0.20.5 pane-shell rework (the invisible-pane night)
+
+- **Symptom:** on stock Hermes Desktop 0.20.5, the pane registered, mounted,
+  and reported visible — while painting zero pixels. Root causes: (1)
+  `placement: 'right'` now targets the ⌘J files sidebar, closed by default;
+  (2) our dock target `cronjobs` does not exist on stock (Bot Mode's tile is
+  `hermes-bots:routines`) — adoption fell back and stranded the pane inside
+  the hidden rail; (3) `host.paneVisibility(...).set()` is a silent no-op on
+  stock (read-only computed), so the old Toggle Pane did nothing.
+- **Fix (this release):** dock as `placement: 'main'`,
+  `dock: { pane: 'workspace', pos: 'right', enforce: true }`; toggle by
+  registering/disposing the pane contribution; mount the fullscreen overlay
+  from the status-bar item instead of inside the (hideable) pane.
+- **Known rough edge:** the fullscreen overlay re-appends its node to
+  `document.body` after paints (the SDK exports no portal; `react-dom` is
+  blocked by the loader allowlist). Rarely, a click can race React
+  reconciliation into a `removeChild` crash caught by the app's error screen —
+  **Reload window** recovers, nothing is lost. Will be replaced with a
+  portal the moment the plugin SDK exports one.
