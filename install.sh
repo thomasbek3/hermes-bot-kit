@@ -19,8 +19,9 @@ fi
 
 mkdir -p "${DEST_DIR}"
 
-TMP=$(mktemp)
-trap 'rm -f "${TMP}"' EXIT
+TMP_DIR=$(mktemp -d)
+TMP="${TMP_DIR}/plugin.js"
+trap 'rm -rf "${TMP_DIR}"' EXIT
 
 if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/plugin.js" ]; then
   cp "${SCRIPT_DIR}/plugin.js" "${TMP}"
