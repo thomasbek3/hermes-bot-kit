@@ -1167,6 +1167,7 @@ function paneContribution() {
       placement: 'main',
       width: '320px',
       minWidth: '200px',
+      height: '320px',
       dock: { pane: 'workspace', pos: 'right', enforce: true }
     },
     render: () => el(ComputerPane, {})
