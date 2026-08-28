@@ -3,6 +3,14 @@
 Per-plugin history lives in [bubble-mode/CHANGELOG.md](bubble-mode/CHANGELOG.md)
 and [computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md).
 
+## 2026-08-28 — bubble-mode 1.1.0 · texting-style 1.1.0
+
+- bubble-mode: mixed text+code fix (1.0.1) and quiet chat — Bot Mode hides
+  thinking/tool noise by default, "Bubble Mode: toggle work rows" restores it.
+- texting-style: pre_llm_call backfill hook — eternal Bot Chat sessions whose
+  frozen prompt predates the plugin get the doctrine injected per turn until
+  a capability-epoch rebuild bakes the section in; then the hook goes silent.
+
 ## 2026-08-27 — texting-style 1.0.0
 
 - New third plugin: `texting-style/`, a Hermes **agent plugin** that adds an

@@ -13,7 +13,9 @@ import { PALETTE_AREA, host } from '@hermes/plugin-sdk'
 const PLUGIN_ID = 'bubble-mode'
 const STYLE_ID = 'hermes-bubble-mode-style'
 const BODY_CLASS = 'hermes-bubble-mode'
+const QUIET_CLASS = 'hermes-bubble-quiet'
 const STORAGE_KEY = 'enabled'
+const SHOW_WORK_KEY = 'showWork'
 
 const BOTS_PANE_ID = 'hermes-bots:pane'
 const BOTS_HOME_PANE_ID = 'plugin-workspace:hermes-bots:home'
@@ -105,10 +107,24 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-co
   margin-top: 3px;
   margin-bottom: 3px;
 }
+
+/* Quiet chat: hide the agent's working noise in Bot Mode. Approvals always
+   stay visible; the response-loading indicator still shows activity. Toggle
+   with "Bubble Mode: toggle work rows". */
+body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_thinking-disclosure"],
+body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_reasoning-text"],
+body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_turn-activity"] {
+  display: none;
+}
+
+body.hermes-bubble-quiet [data-chat-surface] [data-slot="tool-block"]:not(:has([data-slot="tool-approval-fallback"])) {
+  display: none;
+}
 `
 
 let pluginCtx = null
 let enabled = true
+let showWork = false
 let applied = false
 let raf = 0
 let observer = null
@@ -212,12 +228,21 @@ function setBodyClass(on) {
   if (typeof document === 'undefined' || !document.body) return
   if (on) document.body.classList.add(BODY_CLASS)
   else document.body.classList.remove(BODY_CLASS)
+  const quiet = Boolean(on && !showWork)
+  if (quiet) document.body.classList.add(QUIET_CLASS)
+  else document.body.classList.remove(QUIET_CLASS)
   applied = on
 }
 
 function sync() {
   const next = Boolean(enabled && botModeChatVisible())
-  if (next === applied && document.body && document.body.classList.contains(BODY_CLASS) === next) return
+  const quietNext = Boolean(next && !showWork)
+  if (
+    next === applied &&
+    document.body &&
+    document.body.classList.contains(BODY_CLASS) === next &&
+    document.body.classList.contains(QUIET_CLASS) === quietNext
+  ) return
   setBodyClass(next)
 }
 
@@ -249,6 +274,34 @@ function readEnabled(ctx) {
   } catch {
     return true
   }
+}
+
+function readShowWork(ctx) {
+  try {
+    const value = ctx.storage?.get?.(SHOW_WORK_KEY, false)
+    if (value && typeof value.then === 'function') {
+      value
+        .then(resolved => {
+          showWork = resolved === true
+          scheduleSync()
+        })
+        .catch(() => undefined)
+      return false
+    }
+    return value === true
+  } catch {
+    return false
+  }
+}
+
+function toggleShowWork() {
+  showWork = !showWork
+  try {
+    pluginCtx?.storage?.set?.(SHOW_WORK_KEY, showWork)
+  } catch {
+    /* storage unavailable — holds for this window */
+  }
+  scheduleSync()
 }
 
 function writeEnabled(value) {
@@ -342,6 +395,7 @@ export default {
   register(ctx) {
     pluginCtx = ctx
     enabled = readEnabled(ctx)
+    showWork = readShowWork(ctx)
     injectStyle()
 
     watchPane(BOTS_PANE_ID, scheduleSync)
@@ -362,6 +416,20 @@ export default {
         detailVariant: 'state',
         keepOpen: true,
         run: () => toggleEnabled()
+      }
+    })
+
+    ctx.register({
+      id: 'palette-toggle-work',
+      area: PALETTE_AREA,
+      data: {
+        id: `${PLUGIN_ID}.toggleWork`,
+        label: 'Bubble Mode: toggle work rows',
+        keywords: ['bubble', 'thinking', 'thoughts', 'tools', 'work', 'quiet', 'noise'],
+        detail: () => (showWork ? 'shown' : 'hidden'),
+        detailVariant: 'state',
+        keepOpen: true,
+        run: () => toggleShowWork()
       }
     })
 

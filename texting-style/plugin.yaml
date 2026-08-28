@@ -1,8 +1,10 @@
 manifest_version: 2
 api_version: 1
 name: texting-style
-version: 1.0.0
-description: Bots text like people - short, quick, SMS-register replies (adds a bounded system-prompt section)
+version: 1.1.0
+description: Bots text like people - short, quick, SMS-register replies (system-prompt section + eternal Bot Chat backfill hook)
+provides_hooks:
+  - pre_llm_call
 author: Thomas Bekkers
 license: MIT
 homepage: https://github.com/thomasbek3/hermes-bot-kit

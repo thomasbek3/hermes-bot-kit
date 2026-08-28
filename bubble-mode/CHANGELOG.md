@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0 — 2026-08-28
+
+- Quiet chat: in Bot Mode, thinking disclosures, reasoning text, activity
+  rows, and tool blocks are hidden by default (approvals and the typing
+  indicator always stay visible). New palette command "Bubble Mode: toggle
+  work rows" brings them back; the choice persists.
+
 ## 1.0.1 — 2026-08-28
 
 - Mixed text+code replies: split mode now also triggers on bare `pre`,
