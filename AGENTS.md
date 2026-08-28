@@ -55,6 +55,20 @@ it. Then:
   in [computer-viewer/README.md](computer-viewer/README.md); host-machine
   one-liners are printed by the plugin itself.
 
+## Optional: texting-style (agent plugin, per profile)
+
+Makes bots reply in a short SMS register. Installs into Hermes profile homes
+and enables itself in each profile's `config.yaml`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/texting-style/install.sh | bash          # all profiles
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/texting-style/install.sh | bash -s -- --profiles default,parker
+```
+
+Verify: `hermes plugins list` shows `texting-style enabled`. Takes effect on
+new sessions only (`/new` or gateway restart). Uninstall: remove
+`<profile-home>/plugins/texting-style` and its `plugins.enabled` entry.
+
 ## Optional: give bots hands (agent plugin, Orgo computers)
 
 Separate from the desktop plugins. Installs the `orgo-computer` agent plugin

@@ -3,6 +3,18 @@
 Per-plugin history lives in [bubble-mode/CHANGELOG.md](bubble-mode/CHANGELOG.md)
 and [computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md).
 
+## 2026-08-27 — texting-style 1.0.0
+
+- New third plugin: `texting-style/`, a Hermes **agent plugin** that adds an
+  SMS-register doctrine as a cache-safe system-prompt section
+  (`register_system_prompt_section`, ≤4k chars, frozen per session).
+- Config: `enabled`, `platforms` allowlist, `extra_rules`. No tools, hooks,
+  or network.
+- Own installer (`texting-style/install.sh`): symlinks from a clone or copies
+  when curl-piped; discovers `~/.hermes` + `~/.hermes/profiles/*`; enables
+  itself in each profile's `config.yaml`. Validated with `hermes plugins
+  doctor` on v0.20.5.
+
 ## 2026-08-27 — Hermes Bot Kit
 
 - Repo renamed `hermes-computer-viewer` → `hermes-bot-kit`. GitHub redirects

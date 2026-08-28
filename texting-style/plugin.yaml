@@ -1,0 +1,13 @@
+manifest_version: 2
+api_version: 1
+name: texting-style
+version: 1.0.0
+description: Bots text like people - short, quick, SMS-register replies (adds a bounded system-prompt section)
+author: Thomas Bekkers
+license: MIT
+homepage: https://github.com/thomasbek3/hermes-bot-kit
+tags: [style, texting, sms, bot-mode]
+config_schema:
+  enabled: {type: bool, default: true, description: "Master switch. Applies to new sessions (sections are frozen per session)."}
+  platforms: {type: str, default: "", description: "Comma-separated platform allowlist (empty = all), e.g. 'desktop,telegram'"}
+  extra_rules: {type: str, default: "", description: "Extra style rules appended to the doctrine"}
