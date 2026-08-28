@@ -5,7 +5,7 @@ version: 1.1.0
 description: Hands on a pinned Orgo cloud computer - bash, screenshot, click, type, key
 author: Thomas Bekkers
 license: MIT
-homepage: https://github.com/thomasbek3/hermes-computer-viewer
+homepage: https://github.com/thomasbek3/hermes-bot-kit
 tags: [computer-use, orgo]
 provides_tools:
   - orgo_computer_bash

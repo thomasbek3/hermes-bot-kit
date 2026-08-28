@@ -1,5 +1,8 @@
 # Bubble Mode for Hermes Desktop
 
+> Part of [**Hermes Bot Kit**](../README.md) — install both plugins with one
+> command from the kit root. Everything below also works standalone.
+
 iMessage-style chat bubbles — **only in Bot Mode**. Your Sessions view stays
 exactly as it is.
 
@@ -24,7 +27,7 @@ plain conversation text becomes bubbles.
 ## Install (one command — agents can run this unattended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bubble-mode/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/bubble-mode/install.sh | bash
 ```
 
 Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app). Done —

@@ -32,7 +32,7 @@ mapping switches the view with the bot)
 
 ## 2. Deliverables
 
-New top-level directory `agent-plugin/orgo-computer/` in the `hermes-computer-viewer` repo; the installer copies/symlinks it into profile homes:
+New top-level directory `agent-plugin/orgo-computer/` in the `hermes-bot-kit` repo (under `computer-viewer/`); the installer copies/symlinks it into profile homes:
 
 | File | Description |
 |---|---|
@@ -57,7 +57,7 @@ version: 1.0.0
 description: Give this agent hands on its Orgo cloud computer - delegate GUI tasks and run shell commands
 author: Thomas Bekkers
 license: MIT
-homepage: https://github.com/thomasbek3/hermes-computer-viewer
+homepage: https://github.com/thomasbek3/hermes-bot-kit
 tags: [computer-use, orgo]
 provides_tools:
   - orgo_computer_run

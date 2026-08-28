@@ -3,12 +3,12 @@
 # Safe for agents to run unattended: idempotent, no prompts, no sudo,
 # backs up any existing copy before overwriting.
 #
-#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bubble-mode/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/bubble-mode/install.sh | bash
 #
 # or from a clone:  bash install.sh
 set -euo pipefail
 
-RAW_URL="https://raw.githubusercontent.com/thomasbek3/hermes-bubble-mode/main/plugin.js"
+RAW_URL="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/bubble-mode/plugin.js"
 DEST_DIR="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins/bubble-mode"
 DEST="${DEST_DIR}/plugin.js"
 

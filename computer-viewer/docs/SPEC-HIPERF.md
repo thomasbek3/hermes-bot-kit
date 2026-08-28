@@ -28,7 +28,7 @@
 | `README.md` | New section "High-performance mode (optional)": what it is, per-OS one-liners, security notes, limitations. |
 | `docs/SPEC-HIPERF.md` | This file, copied into the repo. |
 
-All plugin platform constraints from SPEC.md §2 still apply verbatim (single ESM file, three import specifiers, no JSX, disposer hygiene, `node --check`). All scripts **pure ASCII, zero non-ASCII bytes** (round-17 lesson; verify with a byte scan before done). Installers are fetched via `curl`/`irm` from `RAW_REPO_URL` = `https://raw.githubusercontent.com/thomasbek3/hermes-computer-viewer/master` — exactly the value `localSetupCommand()` already uses in plugin.js.
+All plugin platform constraints from SPEC.md §2 still apply verbatim (single ESM file, three import specifiers, no JSX, disposer hygiene, `node --check`). All scripts **pure ASCII, zero non-ASCII bytes** (round-17 lesson; verify with a byte scan before done). Installers are fetched via `curl`/`irm` from `RAW_REPO_URL` = `https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master` — exactly the value `localSetupCommand()` already uses in plugin.js.
 
 **Installer relationship to the connect-* scripts:** mirror their *style* (idempotent re-runs, self-elevation pattern on Windows, printed endpoint values at the end) but NOT their service identity — the deltas are deliberate and listed in §5. Where this spec and a connect script disagree, this spec wins for hiperf files.
 
