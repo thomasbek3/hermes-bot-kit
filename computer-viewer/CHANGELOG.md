@@ -7,6 +7,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Shell crash guard ("Something broke in the interface" / removeChild): the
+  overlay's React-owned container is now guarded so reconciliation against
+  the body-stolen overlay node no-ops instead of throwing. Scoped to that
+  one element; no global prototype patch.
+
 - Viewer auto-connects when the bot starts using its computer: a fresh
   orgo-computer tool row during a live turn wakes the pane (releases a manual
   Disconnect hold too), so you watch the bot work without clicking Connect —

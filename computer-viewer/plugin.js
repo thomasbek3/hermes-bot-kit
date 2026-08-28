@@ -4005,6 +4005,29 @@ function OverlayBar({ iframeMode, connected, viewOnly }) {
   )
 }
 
+// The overlay node is React-rendered under a statusbar container but
+// physically stolen to document.body (no SDK portal). When React later
+// reconciles that container, removeChild/insertBefore against the moved
+// node throws and takes down the whole shell ("Something broke in the
+// interface" / removeChild crash). Guard the specific container: mismatched
+// removals no-op, mismatched insert anchors fall back to append. Scoped to
+// the one element that hosts the overlay in React's tree — never a global
+// prototype patch.
+function guardDomParent(parent) {
+  if (!parent || parent === document.body || parent.__cvDomGuard) return
+  parent.__cvDomGuard = true
+  const nativeRemove = parent.removeChild.bind(parent)
+  parent.removeChild = function (child) {
+    if (child && child.parentNode !== parent) return child
+    return nativeRemove(child)
+  }
+  const nativeInsert = parent.insertBefore.bind(parent)
+  parent.insertBefore = function (newNode, ref) {
+    if (ref && ref.parentNode !== parent) return nativeInsert(newNode, null)
+    return nativeInsert(newNode, ref)
+  }
+}
+
 function ComputerOverlay({ iframeMode }) {
   const ui = useValue($ui)
   const conn = useValue(engine.state)
@@ -4022,6 +4045,7 @@ function ComputerOverlay({ iframeMode }) {
     // Re-steal after every expand/phase paint: React reconciliation puts the
     // node back under the statusbar (overflow-x-clip) or a hidden pane.
     if (!portal && node && node.parentNode !== document.body) {
+      guardDomParent(node.parentNode)
       document.body.appendChild(node)
     }
     placeLive()
@@ -4031,6 +4055,7 @@ function ComputerOverlay({ iframeMode }) {
     const node = overlayRef.current
     const portal = getSdkPortal()
     if (!portal && node && node.parentNode !== document.body) {
+      guardDomParent(node.parentNode)
       document.body.appendChild(node)
     }
     return () => {
