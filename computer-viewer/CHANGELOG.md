@@ -7,6 +7,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Viewer auto-connects when the bot starts using its computer: a fresh
+  orgo-computer tool row during a live turn wakes the pane (releases a manual
+  Disconnect hold too), so you watch the bot work without clicking Connect —
+  Grok Bot behavior. History renders never trigger it; throttled to one wake
+  per 30s.
+
 - Pane docking: the Computer pane now docks ON TOP of Bot Mode's Cronjobs
   pane instead of beside the workspace. Cronjobs re-enforces its own dock on
   every app launch (stock Hermes behavior), which used to split the two into
