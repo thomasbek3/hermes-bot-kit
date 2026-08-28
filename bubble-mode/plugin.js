@@ -121,6 +121,15 @@ body.hermes-bubble-quiet [data-chat-surface] [data-slot="tool-block"]:not(:has([
   display: none;
 }
 
+/* Never paint a bubble around a reply that has no content yet (the empty
+   message container that appears next to the typing indicator). */
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:empty,
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:not(:has(*)) {
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
 /* Typing indicator: while the bot is thinking/working, the stock loading
    row becomes an iMessage-style "..." bubble (three pulsing dots). */
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_response-loading"] {

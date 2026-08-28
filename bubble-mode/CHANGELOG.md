@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.1 — 2026-08-28
+
+- Typing indicator: the empty just-created reply container no longer renders
+  as a stray mini-bubble next to the "..." dots.
+
 ## 1.4.0 — 2026-08-28
 
 - Sticky canonical detection: tab ids once seen labeled "Bot Chat" keep the
