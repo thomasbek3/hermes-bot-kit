@@ -5,6 +5,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Pane docking: the Computer pane now docks ON TOP of Bot Mode's Cronjobs
+  pane instead of beside the workspace. Cronjobs re-enforces its own dock on
+  every app launch (stock Hermes behavior), which used to split the two into
+  separate columns and revert any manual arrangement; both enforcements now
+  converge to one right column (Computer above Cronjobs) on every launch.
+
 ### Added
 
 - `orgo-term`: one-shot root shell on an Orgo computer over the official

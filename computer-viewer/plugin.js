@@ -1168,7 +1168,15 @@ function paneContribution() {
       width: '320px',
       minWidth: '200px',
       height: '320px',
-      dock: { pane: 'workspace', pos: 'right', enforce: true }
+      // Dock ON TOP of Bot Mode's Cronjobs pane (id 'hermes-bots:routines'
+      // on stock). Cronjobs itself ships dock enforce:true and re-docks to
+      // workspace-right on EVERY app launch (its "already enforced" memory
+      // is process-local), stomping any user placement. Targeting it makes
+      // both enforcements converge to one right column: Computer on top,
+      // Cronjobs beneath — stable across restarts. If the routines pane is
+      // absent (no Bot Mode), the enforce no-ops and the persisted layout
+      // stands.
+      dock: { pane: 'hermes-bots:routines', pos: 'top', enforce: true }
     },
     render: () => el(ComputerPane, {})
   }
