@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.2 — 2026-08-28
+
+- Stray pre-reply mini-bubble fully fixed (containers whose children are all
+  empty are treated as empty).
+- Typing indicator resized to Grok-Bot proportions: smaller pill, tighter
+  6px dots.
+
 ## 1.4.1 — 2026-08-28
 
 - Typing indicator: the empty just-created reply container no longer renders
