@@ -113,7 +113,8 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-co
    with "Bubble Mode: toggle work rows". */
 body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_thinking-disclosure"],
 body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_reasoning-text"],
-body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_turn-activity"] {
+body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_turn-activity"],
+body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_turn-duration"] {
   display: none;
 }
 
