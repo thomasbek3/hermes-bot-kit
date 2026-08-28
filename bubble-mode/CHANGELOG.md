@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0 — 2026-08-28
+
+- Quiet chat also hides the per-reply timer chips ("3s", "7s") in Bot Chat.
+  "Bubble Mode: toggle work rows" brings them back along with the rest.
+
 ## 1.4.2 — 2026-08-28
 
 - Stray pre-reply mini-bubble fully fixed (containers whose children are all
