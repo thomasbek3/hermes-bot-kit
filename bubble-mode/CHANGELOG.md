@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 — 2026-08-28
+
+- Bubbles + quiet chat now apply ONLY to the canonical "Bot Chat" tab (the
+  bot's main conversation) — matching the texting-style plugin's gate.
+  Long-form side sessions and new drafts in Bot Mode render stock.
+
 ## 1.1.0 — 2026-08-28
 
 - Quiet chat: in Bot Mode, thinking disclosures, reasoning text, activity

@@ -190,17 +190,22 @@ function visibleBotChatSurface() {
   return false
 }
 
-function visibleSessionTileIsBotScoped() {
+function canonicalBotChatTabSelected() {
   if (typeof document === 'undefined') return false
   const tabs = document.querySelectorAll('[data-tree-tab][aria-selected="true"]')
   for (const tab of tabs) {
     if (inHiddenPane(tab)) continue
     const id = tab.getAttribute('data-tree-tab') || ''
     if (!id.startsWith(SESSION_TILE_TAB_PREFIX)) continue
-    // Caller already gated on the Bots pane. Sessions-scoped tiles are
-    // filtered out of the tree while workspaceMode is 'bots', so this tab
-    // is a Bot Mode chat (canonical "Bot Chat" / "Agent Inbox" / new draft).
-    return true
+    // Only the canonical per-bot conversation (tab titled "Bot Chat", the
+    // desktop's createCanonicalChat title, matching the agent-side gate in
+    // tools/bot_mode_probe.py). Other Bot Mode tabs (long-form side
+    // sessions, new drafts) stay stock.
+    const label = (tab.getAttribute('aria-label') || tab.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+    if (label === 'bot chat') return true
   }
   return false
 }
@@ -219,9 +224,7 @@ function botModeChatVisible() {
   if (!botsPaneActive()) return false
   if (botsHomeFronted()) return false
   if (groupChatFronted()) return false
-  if (visibleBotChatSurface()) return true
-  if (visibleSessionTileIsBotScoped()) return true
-  return false
+  return canonicalBotChatTabSelected()
 }
 
 function setBodyClass(on) {
