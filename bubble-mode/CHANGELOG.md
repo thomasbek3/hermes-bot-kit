@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 — 2026-08-28
+
+- Sticky canonical detection: tab ids once seen labeled "Bot Chat" keep the
+  SMS styling even when a serve-process restart re-binds the tab and
+  scrambles its caption (the recurring "bubbles randomly turned off" bug).
+  Remembered per install, capped at 64 tabs.
+
 ## 1.3.0 — 2026-08-28
 
 - Typing indicator: while the bot is thinking or working, the loading row

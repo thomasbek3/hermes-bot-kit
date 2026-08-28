@@ -222,6 +222,32 @@ function visibleBotChatSurface() {
   return false
 }
 
+const knownBotChatTabs = new Set()
+
+function rememberBotChatTab(id) {
+  if (knownBotChatTabs.has(id)) return
+  knownBotChatTabs.add(id)
+  try {
+    pluginCtx?.storage?.set?.('knownBotChatTabs', Array.from(knownBotChatTabs).slice(-64))
+  } catch {
+    /* storage unavailable — holds for this window */
+  }
+}
+
+function readKnownBotChatTabs(ctx) {
+  try {
+    const value = ctx.storage?.get?.('knownBotChatTabs', [])
+    const absorb = list => {
+      if (Array.isArray(list)) for (const id of list) knownBotChatTabs.add(String(id))
+      scheduleSync()
+    }
+    if (value && typeof value.then === 'function') value.then(absorb).catch(() => undefined)
+    else absorb(value)
+  } catch {
+    /* ignore */
+  }
+}
+
 function canonicalBotChatTabSelected() {
   if (typeof document === 'undefined') return false
   const tabs = document.querySelectorAll('[data-tree-tab][aria-selected="true"]')
@@ -232,12 +258,19 @@ function canonicalBotChatTabSelected() {
     // Only the canonical per-bot conversation (tab titled "Bot Chat", the
     // desktop's createCanonicalChat title, matching the agent-side gate in
     // tools/bot_mode_probe.py). Other Bot Mode tabs (long-form side
-    // sessions, new drafts) stay stock.
+    // sessions, new drafts) stay stock. A serve-process restart under an
+    // open canonical tab can scramble the caption (re-bound plain tab), so
+    // any tab id once seen labeled "Bot Chat" keeps its styling even when
+    // the caption is wrong — persisted across app restarts.
     const label = (tab.getAttribute('aria-label') || tab.textContent || '')
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase()
-    if (label === 'bot chat') return true
+    if (label === 'bot chat') {
+      rememberBotChatTab(id)
+      return true
+    }
+    if (knownBotChatTabs.has(id)) return true
   }
   return false
 }
@@ -431,6 +464,7 @@ export default {
     pluginCtx = ctx
     enabled = readEnabled(ctx)
     showWork = readShowWork(ctx)
+    readKnownBotChatTabs(ctx)
     injectStyle()
 
     watchPane(BOTS_PANE_ID, scheduleSync)
