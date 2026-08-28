@@ -47,42 +47,75 @@ human texts:
   you are reading it right now. No need to investigate."""
 
 
-def _profile_home(profile_name: str) -> Path:
-    """Profile home dir. Prefer the live HERMES_HOME helper; fall back to
-    the standard layout derived from profile_name."""
+def _candidate_dbs(profile_name: str) -> list:
+    """state.db candidates, most-likely first: HERMES_HOME env, the
+    hermes_cli helper, the profile derived from profile_name, then root and
+    every named profile. Some builds mis-resolve the helper (returns root
+    while running a named profile), so we never trust one source alone."""
+    seen, out = set(), []
+
+    def add(home) -> None:
+        try:
+            db = Path(home) / "state.db"
+        except Exception:
+            return
+        key = str(db)
+        if key not in seen and db.is_file():
+            seen.add(key)
+            out.append(db)
+
+    env_home = os.environ.get("HERMES_HOME", "")
+    if env_home:
+        add(env_home)
     try:
         from hermes_cli.profiles import get_hermes_home  # type: ignore
 
-        home = Path(get_hermes_home())
-        if home.exists():
-            return home
+        add(get_hermes_home())
     except Exception:
         pass
     root = Path(os.path.expanduser("~/.hermes"))
     if profile_name and profile_name != "default":
-        return root / "profiles" / profile_name
-    return root
+        add(root / "profiles" / profile_name)
+    add(root)
+    profiles_dir = root / "profiles"
+    if profiles_dir.is_dir():
+        try:
+            for p in sorted(profiles_dir.iterdir()):
+                add(p)
+        except Exception:
+            pass
+    return out
+
+
+# session_id -> db path that actually holds it (found once, reused per turn)
+_db_for_session: dict = {}
 
 
 def _session_row(profile_name: str, session_id: str, columns: str) -> tuple:
-    """Read columns for a session from the profile's state.db (read-only).
-    Empty tuple on any failure -- never crash a prompt build."""
+    """Read columns for a session, searching candidate state.dbs until the
+    session id is found (cached). Empty tuple on any failure -- never crash
+    a prompt build."""
     if not session_id:
         return ()
-    db = _profile_home(profile_name) / "state.db"
-    if not db.is_file():
-        return ()
-    try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
+    known = _db_for_session.get(session_id)
+    dbs = [known] if known else _candidate_dbs(profile_name)
+    for db in dbs:
         try:
-            row = conn.execute(
-                f"SELECT {columns} FROM sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-        finally:
-            conn.close()
-    except Exception:
-        return ()
-    return tuple(row) if row else ()
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
+            try:
+                row = conn.execute(
+                    f"SELECT {columns} FROM sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+            finally:
+                conn.close()
+        except Exception:
+            continue
+        if row is not None:
+            if len(_db_for_session) > 512:
+                _db_for_session.clear()
+            _db_for_session[session_id] = db
+            return tuple(row)
+    return ()
 
 
 def _session_title(profile_name: str, session_id: str) -> str:
@@ -152,7 +185,17 @@ def register(ctx) -> None:
             _title_cache.clear()
         return result
 
+    def _debug(msg: str) -> None:
+        if not os.environ.get("TS_DEBUG"):
+            return
+        try:
+            with open("/tmp/texting-style-debug.log", "a") as fh:
+                fh.write(msg + "\n")
+        except Exception:
+            pass
+
     def backfill(session_id="", conversation_history=None, platform="", **kwargs):
+        _debug(f"backfill called: session={session_id!r} platform={platform!r}")
         try:
             if not _cfg("enabled", True):
                 return None
@@ -163,13 +206,16 @@ def register(ctx) -> None:
                 if plat and wanted and plat not in wanted:
                     return None
             if _cfg("bot_chat_only", True) and not _is_bot_chat(str(session_id or "")):
+                _debug(f"blocked: not a Bot Chat (session={session_id!r})")
                 return None
             history = conversation_history or []
             if history and isinstance(history[0], dict) and history[0].get("role") == "system":
                 if "## Texting register" in str(history[0].get("content") or ""):
                     return None  # section already baked into the prompt
             if _stored_prompt_has_doctrine(str(session_id or "")):
+                _debug("blocked: doctrine already in stored prompt")
                 return None  # persisted system prompt already carries it
+            _debug("INJECTING doctrine")
             text = DOCTRINE
             extra = str(_cfg("extra_rules", "") or "").strip()
             if extra:
