@@ -223,6 +223,8 @@ while IFS="$(printf '\t')" read -r name home; do
 done < "${SELECTED}"
 
 echo
-echo "Done. Applies to NEW sessions (prompt sections are frozen per session):"
-echo "  /new in a chat, or restart the gateway."
+echo "Done. Applies to each bot's canonical Bot Chat on its next message"
+echo "(a backfill hook covers existing chats). New plugin CODE loads when the"
+echo "agent process restarts: restart Hermes Desktop, or kill the per-profile"
+echo "serve daemons (pkill -f 'hermes --profile <name> serve'; they respawn)."
 echo "Scope to certain platforms via plugin config 'platforms' (e.g. 'desktop')."

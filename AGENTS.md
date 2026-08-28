@@ -66,7 +66,13 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/te
 ```
 
 Verify: `hermes plugins list` shows `texting-style enabled`. Takes effect on
-new sessions only (`/new` or gateway restart). Uninstall: remove
+the next message in each Bot Chat (a pre_llm_call backfill hook covers
+existing eternal sessions whose frozen prompt predates the plugin) — but the
+NEW PLUGIN CODE only loads when the agent process restarts: after
+install/update, restart Hermes Desktop or kill the per-profile serve
+daemons (`pkill -f "hermes --profile <name> serve"`; they respawn on
+demand). Debug: `TS_DEBUG=1` logs hook decisions to
+`/tmp/texting-style-debug.log`. Uninstall: remove
 `<profile-home>/plugins/texting-style` and its `plugins.enabled` entry.
 
 ## Optional: give bots hands (agent plugin, Orgo computers)
@@ -96,6 +102,21 @@ storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*`.
 
 - Requires Hermes Desktop ≥ 0.20.5. On older builds the Computer pane is
   zero-size; there is no workaround, update the app.
+- Desktop Bot Chats are served by long-lived per-profile
+  `hermes --profile <name> serve` daemons that SURVIVE app restarts. If a
+  plugin change "doesn't take", kill those daemons (they respawn on demand)
+  — do not keep redeploying files.
+- "Bot Chat" is the desktop's canonical per-bot conversation (session
+  literally titled `Bot Chat`, user-locked). Both bubble-mode's visuals and
+  texting-style's doctrine gate on it; every other session renders stock by
+  design.
+- A serve restart under an open Bot Chat tab can scramble the tab's caption
+  (stock Hermes bug; data unaffected). bubble-mode 1.4.0+ styling survives
+  it; the caption itself is restored by: close tab → quit app → relaunch →
+  click the bot.
+- CLI probes cannot reach a canonical Bot Chat: `-z --continue "Bot Chat"`
+  and `--resume <id>` both fork new sessions. Only the desktop UI talks to
+  the real one.
 - Both plugins fail safe: if a Hermes update renames internal hooks, chats
   render stock / the pane stays empty — nothing crashes.
 - The repo was formerly `hermes-computer-viewer`; old raw URLs still work
