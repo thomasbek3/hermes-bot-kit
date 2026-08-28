@@ -34,7 +34,7 @@ Two independent plugins, one install:
 |---|---|
 | 💬 **[Bubble Mode](bubble-mode/)** | iMessage-style chat bubbles — **only in Bot Mode**. Your messages right in light gray, the bot's left in dark gray. Cards, code blocks, tool runs, and approvals keep their stock chrome; Sessions view is never touched. Pure CSS, fails safe. |
 | 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
-| 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it: short replies by default, mirrors your length, no walls of text, "on it" then the result. Per-profile install, platform-scopable, one editable doctrine string. |
+| 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 
 <p align="center">
   <img src="computer-viewer/screenshots/app-view.png" alt="Computer pane docked in Hermes Desktop" width="720">

@@ -4,10 +4,25 @@ Registers one bounded, cache-safe system prompt section (frozen per session)
 that makes the bot reply like a person texting: short by default, mirroring
 the user's length, expanding only for real work output or when asked.
 
-No tools, no hooks, no network. Config: enabled / platforms / extra_rules.
+By default the doctrine applies ONLY to Bot Mode chats: the desktop's
+canonical per-bot conversation is the session titled "Bot Chat" (the same
+gate Hermes core uses in tools/bot_mode_probe.py), so regular Sessions keep
+stock behavior even in the same profile. Set config ``bot_chat_only: false``
+to apply everywhere.
+
+No tools, no hooks, no network. Config: enabled / bot_chat_only / platforms
+/ extra_rules.
 """
 
 from __future__ import annotations
+
+import os
+import sqlite3
+from pathlib import Path
+
+# Must match tools/bot_mode_probe.py BOT_CHAT_TITLE (the desktop's
+# createCanonicalChat title and the `-c "Bot Chat"` resume target).
+BOT_CHAT_TITLE = "Bot Chat"
 
 DOCTRINE = """## Texting register
 
@@ -28,6 +43,44 @@ human texts:
 - Never pad. If the honest answer is one word, send one word."""
 
 
+def _profile_home(profile_name: str) -> Path:
+    """Profile home dir. Prefer the live HERMES_HOME helper; fall back to
+    the standard layout derived from profile_name."""
+    try:
+        from hermes_cli.profiles import get_hermes_home  # type: ignore
+
+        home = Path(get_hermes_home())
+        if home.exists():
+            return home
+    except Exception:
+        pass
+    root = Path(os.path.expanduser("~/.hermes"))
+    if profile_name and profile_name != "default":
+        return root / "profiles" / profile_name
+    return root
+
+
+def _session_title(profile_name: str, session_id: str) -> str:
+    """Read the session's title from the profile's state.db (read-only).
+    Empty string on any failure -- never crash a prompt build."""
+    if not session_id:
+        return ""
+    db = _profile_home(profile_name) / "state.db"
+    if not db.is_file():
+        return ""
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = conn.execute(
+                "SELECT title FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return ""
+    return str(row[0]) if row and row[0] is not None else ""
+
+
 def register(ctx) -> None:
     def _cfg(key, default):
         try:
@@ -37,13 +90,21 @@ def register(ctx) -> None:
         return default if value is None else value
 
     def section(session_info) -> str:
+        info = session_info or {}
         if not _cfg("enabled", True):
             return ""
         allow = str(_cfg("platforms", "") or "").strip()
         if allow:
             wanted = {p.strip().lower() for p in allow.split(",") if p.strip()}
-            platform = str((session_info or {}).get("platform", "") or "").lower()
+            platform = str(info.get("platform", "") or "").lower()
             if platform and wanted and platform not in wanted:
+                return ""
+        if _cfg("bot_chat_only", True):
+            title = _session_title(
+                str(info.get("profile_name", "") or ""),
+                str(info.get("session_id", "") or ""),
+            )
+            if title.strip() != BOT_CHAT_TITLE:
                 return ""
         text = DOCTRINE
         extra = str(_cfg("extra_rules", "") or "").strip()

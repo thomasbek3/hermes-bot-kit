@@ -4,8 +4,8 @@
 > like texting; this makes your bots *talk* like texting.
 
 A tiny Hermes **agent plugin** (not a desktop plugin) that adds one bounded
-system-prompt section to every new session: reply short by default (1-2
-sentences), mirror the user's length, no headers or bullet lists in chat, ack
+system-prompt section to new **Bot Mode chats only** (by default): reply
+short (1-2 sentences), mirror the user's length, no headers or bullet lists in chat, ack
 first then report when doing real work, and go long only when asked or when
 the deliverable itself is long.
 
@@ -34,6 +34,7 @@ Per profile, in the plugin's config (`config_schema` keys):
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Master switch (next session). |
+| `bot_chat_only` | `true` | Apply only to Bot Mode chats — sessions titled `Bot Chat`, the desktop's canonical per-bot conversation (the exact gate Hermes core uses in `tools/bot_mode_probe.py`). Regular Sessions stay stock even in the same profile. `false` = everywhere. |
 | `platforms` | `""` (all) | Comma-separated allowlist, e.g. `desktop` or `desktop,telegram` — other platforms get stock behavior. |
 | `extra_rules` | `""` | One extra rule line appended to the doctrine. |
 

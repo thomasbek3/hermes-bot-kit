@@ -8,8 +8,12 @@ and [computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md).
 - New third plugin: `texting-style/`, a Hermes **agent plugin** that adds an
   SMS-register doctrine as a cache-safe system-prompt section
   (`register_system_prompt_section`, ≤4k chars, frozen per session).
-- Config: `enabled`, `platforms` allowlist, `extra_rules`. No tools, hooks,
-  or network.
+- **Bot Mode only by default**: `bot_chat_only: true` gates the doctrine to
+  sessions titled `Bot Chat` (the desktop's canonical per-bot conversation —
+  the same gate core uses in `tools/bot_mode_probe.py`, read from the
+  profile's `state.db`). Regular Sessions stay stock. `false` = everywhere.
+- Config: `enabled`, `bot_chat_only`, `platforms` allowlist, `extra_rules`.
+  No tools, hooks, or network.
 - Own installer (`texting-style/install.sh`): symlinks from a clone or copies
   when curl-piped; discovers `~/.hermes` + `~/.hermes/profiles/*`; enables
   itself in each profile's `config.yaml`. Validated with `hermes plugins
