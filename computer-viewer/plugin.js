@@ -2067,10 +2067,77 @@ function teardownEngine() {
   pluginCtx = null
 }
 
+// Auto-connect when the agent starts using its computer (Grok-Bot behavior):
+// a fresh orgo-computer tool row appearing DURING a live turn wakes the
+// viewer so the user can watch. Works even when Bot Chat's quiet mode hides
+// the row (display:none keeps it in the DOM). History renders don't trigger
+// it: a wake requires the response-loading indicator to be present.
+const AGENT_TOOL_RE = /orgo[\s_-]?computer/i
+let lastAgentWake = 0
+
+function turnInProgress() {
+  return Boolean(
+    document.querySelector(
+      '[data-slot="aui_response-loading"], [data-slot="aui_message-streaming-marker"]'
+    )
+  )
+}
+
+function wakeForAgentActivity() {
+  const endpoint = engine.endpoint || resolveEndpoint()
+  if (!endpoint) return
+  const phase = engine.state.get().phase
+  if (
+    phase === 'connected' ||
+    phase === 'connecting' ||
+    phase === 'resolving' ||
+    phase === 'loading-novnc'
+  )
+    return
+  releaseDisconnect(endpoint.id)
+  engine.reconnectAttempt = 0
+  void connect(endpoint)
+}
+
+function watchAgentActivity() {
+  if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return null
+  const obs = new MutationObserver(mutations => {
+    const now = Date.now()
+    if (now - lastAgentWake < 30000) return
+    for (const m of mutations) {
+      for (const node of m.addedNodes || []) {
+        if (!node || node.nodeType !== 1) continue
+        let block = null
+        if (typeof node.matches === 'function' && node.matches('[data-slot="tool-block"]')) {
+          block = node
+        } else if (typeof node.querySelector === 'function') {
+          block = node.querySelector('[data-slot="tool-block"]')
+        }
+        if (!block) continue
+        if (!AGENT_TOOL_RE.test(block.textContent || '')) continue
+        if (!turnInProgress()) continue
+        lastAgentWake = now
+        wakeForAgentActivity()
+        return
+      }
+    }
+  })
+  obs.observe(document.body || document.documentElement, { subtree: true, childList: true })
+  return obs
+}
+
 function attachEngine(ctx) {
   pluginCtx = ctx
   loadSettingsFrom(ctx)
   const unsubs = []
+  const agentActivityObserver = watchAgentActivity()
+  unsubs.push(() => {
+    try {
+      agentActivityObserver?.disconnect()
+    } catch {
+      /* ignore */
+    }
+  })
   if (host.state.focusedSessionProfile && typeof host.state.focusedSessionProfile.listen === 'function') {
     unsubs.push(host.state.focusedSessionProfile.listen(() => syncConnection()))
   }
