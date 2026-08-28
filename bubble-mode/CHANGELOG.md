@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 — 2026-08-28
+
+- Typing indicator: while the bot is thinking or working, the loading row
+  renders as an iMessage-style "..." bubble with three pulsing dots
+  (Bot Chat only, pure CSS on the stock aui_response-loading slot).
+
 ## 1.2.0 — 2026-08-28
 
 - Bubbles + quiet chat now apply ONLY to the canonical "Bot Chat" tab (the

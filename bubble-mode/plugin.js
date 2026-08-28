@@ -120,6 +120,38 @@ body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_turn-activity"] {
 body.hermes-bubble-quiet [data-chat-surface] [data-slot="tool-block"]:not(:has([data-slot="tool-approval-fallback"])) {
   display: none;
 }
+
+/* Typing indicator: while the bot is thinking/working, the stock loading
+   row becomes an iMessage-style "..." bubble (three pulsing dots). */
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_response-loading"] {
+  box-sizing: border-box;
+  width: fit-content;
+  padding: 0.8rem 1rem;
+  border-radius: 18px 18px 18px 4px;
+  background: #2b2b2e;
+}
+
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_response-loading"] > * {
+  display: none;
+}
+
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_response-loading"]::after {
+  content: '';
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin-right: 28px;
+  border-radius: 50%;
+  background: #6b6b70;
+  box-shadow: 14px 0 0 #6b6b70, 28px 0 0 #6b6b70;
+  animation: hermes-bubble-typing 1.2s infinite ease-in-out;
+}
+
+@keyframes hermes-bubble-typing {
+  0%, 90%, 100% { background: #b9b9bf; box-shadow: 14px 0 0 #6b6b70, 28px 0 0 #6b6b70; }
+  30% { background: #6b6b70; box-shadow: 14px 0 0 #b9b9bf, 28px 0 0 #6b6b70; }
+  60% { background: #6b6b70; box-shadow: 14px 0 0 #6b6b70, 28px 0 0 #b9b9bf; }
+}
 `
 
 let pluginCtx = null
