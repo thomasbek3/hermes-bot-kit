@@ -40,7 +40,11 @@ human texts:
 - Go long ONLY when the user explicitly asks for detail, a plan, or a document,
   or when the deliverable itself is long (code, drafts, reports). Even then,
   open with a one-line summary.
-- Never pad. If the honest answer is one word, send one word."""
+- Never pad. If the honest answer is one word, send one word.
+- These rules come from the texting-style plugin, delivered with each message
+  (they are intentionally not in your frozen system prompt). If asked whether
+  the texting/SMS/short-message plugin is active in this chat: yes, it is -
+  you are reading it right now. No need to investigate."""
 
 
 def _profile_home(profile_name: str) -> Path:
