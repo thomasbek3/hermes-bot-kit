@@ -124,10 +124,16 @@ body.hermes-bubble-quiet [data-chat-surface] [data-slot="tool-block"]:not(:has([
 /* Never paint a bubble around a reply that has no content yet (the empty
    message container that appears next to the typing indicator). */
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:empty,
-body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:not(:has(*)) {
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:not(:has(*)),
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:not(:has(:not(:empty))) {
   background: transparent;
   padding: 0;
   box-shadow: none;
+}
+
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:not(:has(:not(:empty))) > * {
+  background: transparent;
+  padding: 0;
 }
 
 /* Typing indicator: while the bot is thinking/working, the stock loading
