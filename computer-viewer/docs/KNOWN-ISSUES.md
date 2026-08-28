@@ -242,9 +242,12 @@ default and spends AI credits — do not enable it just to click.
   `dock: { pane: 'workspace', pos: 'right', enforce: true }`; toggle by
   registering/disposing the pane contribution; mount the fullscreen overlay
   from the status-bar item instead of inside the (hideable) pane.
-- **Known rough edge:** the fullscreen overlay re-appends its node to
-  `document.body` after paints (the SDK exports no portal; `react-dom` is
-  blocked by the loader allowlist). Rarely, a click can race React
-  reconciliation into a `removeChild` crash caught by the app's error screen —
-  **Reload window** recovers, nothing is lost. Will be replaced with a
+- **Fixed (2026-08-28): the removeChild shell crash.** The fullscreen
+  overlay re-appends its node to `document.body` after paints (the SDK
+  exports no portal; `react-dom` is blocked by the loader allowlist), and a
+  click could race React reconciliation into a `removeChild` crash caught by
+  the app's error screen ("Something broke in the interface"). The overlay's
+  React-owned container is now guarded: mismatched removals no-op and
+  mismatched insert anchors fall back to append — scoped to that single
+  element, no global prototype patch. Will still be replaced with a real
   portal the moment the plugin SDK exports one.

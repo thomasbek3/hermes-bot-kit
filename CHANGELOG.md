@@ -3,6 +3,22 @@
 Per-plugin history lives in [bubble-mode/CHANGELOG.md](bubble-mode/CHANGELOG.md)
 and [computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md).
 
+## 2026-08-28 (later) — bubble-mode 1.5.0 · computer-viewer fixes
+
+- bubble-mode 1.2.0–1.5.0: SMS look gated to the canonical Bot Chat tab
+  only; sticky tab memory survives the stock caption-scramble bug;
+  iMessage-style "..." typing indicator (Grok-Bot-sized); per-reply timer
+  chips hidden in quiet mode; stray empty pre-reply bubble fixed.
+- computer-viewer: auto-connects when the bot starts using its computer
+  (live-turn orgo tool rows; never on history renders); docks on top of the
+  Cronjobs tile so stock's every-launch dock enforcement converges to one
+  stable right column; overlay DOM moves guarded — the
+  "Something broke in the interface" removeChild shell crash is fixed.
+- texting-style 1.1.x: pre_llm_call backfill delivers the doctrine to
+  existing eternal Bot Chats; session lookup searches all profile state.dbs;
+  TS_DEBUG decision log; doctrine self-identifies as plugin-delivered.
+- Docs refreshed across the repo to match all of the above.
+
 ## 2026-08-28 — bubble-mode 1.1.0 · texting-style 1.1.0
 
 - bubble-mode: mixed text+code fix (1.0.1) and quiet chat — Bot Mode hides

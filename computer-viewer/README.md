@@ -54,6 +54,11 @@ viewed through the pane's noVNC connection.</em></p>
   path. One **HD** toggle; VNC is the silent safety net.
 - **Multi-bot aware.** Per-bot computer bindings — each of your profiles can
   have its own machine, and the pane follows the focused chat.
+- **Auto-connects when your bot goes to work.** The moment a fresh
+  orgo-computer tool call appears in a live turn, the pane wakes itself
+  (clearing a manual Disconnect hold) so you watch the bot drive — the
+  Grok Bot behavior. Never triggered by scrolling old history; at most one
+  wake per 30s.
 - **Bots with hands, not just eyes.** The optional `orgo-computer` agent
   plugin lets your bots run shell commands and delegate GUI tasks on their
   pinned computer. Watch the pane while the bot works inside it.
@@ -70,10 +75,12 @@ viewed through the pane's noVNC connection.</em></p>
 - **Requires Hermes Desktop ≥ 0.20.5 (2026.8.19).** The 2026-08 stock releases
   reworked the pane shell: `placement: 'right'` now means the collapsible ⌘J
   sidebar (hidden by default), and `host.paneVisibility` became read-only.
-  This plugin docks with `placement: 'main'` + an enforced workspace dock, the
-  same pattern the bundled Bot Mode Cronjobs tile uses, so it stays visible on
-  fresh installs. Older plugin versions show a zero-size pane on current stock
-  — update to this version.
+  This plugin docks with `placement: 'main'` + an enforced dock ON TOP of the
+  bundled Cronjobs tile, so it stays visible on fresh installs. (Stock's
+  Cronjobs pane re-enforces its own dock on every app launch, stomping manual
+  arrangements; targeting it makes both enforcements converge to one stable
+  right column — Computer above Cronjobs.) Older plugin versions show a
+  zero-size pane on current stock — update to this version.
 
 ## Repository layout
 
@@ -730,7 +737,9 @@ never cropped.
 session and the HD stream together, and it cancels reconnect backoff. The
 pane stays **Disconnected** with a **Connect** button. Collapsing and
 reopening the pane does not auto-connect that computer until you click
-**Connect**. A full Hermes app restart returns to the usual auto-connect
+**Connect** — with one exception: if the bot starts using its computer
+during a live turn, the pane wakes itself (that's exactly when you want
+eyes on it). A full Hermes app restart returns to the usual auto-connect
 behavior. The hold is in-memory only; nothing extra is written to plugin
 storage.
 

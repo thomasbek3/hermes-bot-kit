@@ -32,8 +32,8 @@ Two independent plugins, one install:
 
 | Plugin | What it does |
 |---|---|
-| 💬 **[Bubble Mode](bubble-mode/)** | iMessage-style chat bubbles — **only in Bot Mode**. Your messages right in light gray, the bot's left in dark gray. Cards, code blocks, tool runs, and approvals keep their stock chrome; Sessions view is never touched. Pure CSS, fails safe. |
-| 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
+| 💬 **[Bubble Mode](bubble-mode/)** | The full texting look — **only on each bot's main Bot Chat**: iMessage bubbles, a "..." typing indicator while the bot works, and thinking/tool/timer noise hidden (approvals always visible; one palette command brings the work rows back). Work sessions, side tabs, and Sessions view are never touched. Pure CSS, fails safe. |
+| 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Auto-connects the moment your bot starts using its computer**, so you watch it work. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 
 <p align="center">
@@ -50,7 +50,9 @@ Two independent plugins, one install:
 │  │ All green. Backups ran,  │              │  ← your bot
 │  │ nothing needs you.       │              │
 │  ╰──────────────────────────╯              │
-│  [ tool run: check_backups ✓ ]             │  ← tool rows stay stock
+│  ╭─────╮                                   │
+│  │ ⋯  │                                    │  ← typing while it works
+│  ╰─────╯                                   │
 └────────────────────────────────────────────┘
 ```
 
