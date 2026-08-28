@@ -71,6 +71,10 @@ Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
 Want just one plugin? `KIT_SKIP_BUBBLES=1` or `KIT_SKIP_COMPUTER=1` in front
 of the command, or use each plugin's own install instructions.
 
+**Installing via an AI agent?** Point it at [AGENTS.md](AGENTS.md) — exact
+unattended install, verify, and uninstall steps, plus the footguns. (Most
+coding agents read that file automatically.)
+
 ## Requirements
 
 - **Hermes Desktop ≥ 0.20.5** (2026.8.19) — earlier builds pre-date the pane
