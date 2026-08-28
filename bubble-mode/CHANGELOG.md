@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 — 2026-08-28
+
+- Mixed text+code replies: split mode now also triggers on bare `pre`,
+  `table`, mermaid blocks, and image wrappers (previously an unrecognized
+  code-block variant could leave the whole reply in one giant bubble).
+- Split mode: text chunks get 3px vertical gaps so consecutive paragraphs
+  read as separate bubbles instead of fusing into a slab; `hr` and wrappers
+  containing `pre`/`table` are never bubbled.
+
 ## 1.0.0 — 2026-08-27
 
 - Initial release.

@@ -70,7 +70,11 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-co
   [data-slot="aui_changed-files"],
   [data-slot="aui_generated-image"],
   [data-slot="aui_markdown-alert"],
-  [data-streamdown="code-block"]
+  [data-streamdown="code-block"],
+  [data-streamdown="mermaid-block"],
+  [data-streamdown="image-wrapper"],
+  pre,
+  table
 ) {
   width: 100%;
   max-width: 72%;
@@ -86,14 +90,20 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-co
   [data-slot="aui_changed-files"],
   [data-slot="aui_generated-image"],
   [data-slot="aui_markdown-alert"],
-  [data-streamdown="code-block"]
-) > :not([data-slot="code-card"]):not([data-slot="aui_artifact-card"]):not([data-slot="aui_embed-card"]):not([data-slot="aui_changed-files"]):not([data-slot="aui_generated-image"]):not([data-slot="aui_markdown-alert"]):not([data-streamdown="code-block"]) {
+  [data-streamdown="code-block"],
+  [data-streamdown="mermaid-block"],
+  [data-streamdown="image-wrapper"],
+  pre,
+  table
+) > :not([data-slot="code-card"]):not([data-slot="aui_artifact-card"]):not([data-slot="aui_embed-card"]):not([data-slot="aui_changed-files"]):not([data-slot="aui_generated-image"]):not([data-slot="aui_markdown-alert"]):not([data-streamdown="code-block"]):not([data-streamdown="mermaid-block"]):not([data-streamdown="image-wrapper"]):not([data-streamdown="horizontal-rule"]):not(pre):not(table):not(hr):not(:has(pre, table)) {
   box-sizing: border-box;
   width: fit-content;
   max-width: 100%;
   padding: 0.5rem 0.875rem;
   border-radius: 18px 18px 18px 4px;
   background: #2b2b2e;
+  margin-top: 3px;
+  margin-bottom: 3px;
 }
 `
 
