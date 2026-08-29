@@ -18,6 +18,7 @@ const STORAGE_KEY = 'enabled'
 const SHOW_WORK_KEY = 'showWork'
 
 const BOTS_PANE_ID = 'hermes-bots:pane'
+const ROUTINES_PANE_ID = 'hermes-bots:routines'
 const BOTS_HOME_PANE_ID = 'plugin-workspace:hermes-bots:home'
 const BOTS_GROUP_TAB_PREFIX = 'plugin-workspace:hermes-bots:group:'
 const SESSION_TILE_TAB_PREFIX = 'session-tile:'
@@ -301,11 +302,38 @@ function canonicalBotChatTabSelected() {
  * ('bots'). Visible session-tile panes in that scope are therefore Bot Mode
  * chats, never regular Sessions.
  */
+/** >=0.20.6 one-chat-per-agent Bot Mode: the canonical chat renders in the
+ *  MAIN workspace surface (no session-tile tabs anymore). hermes-bots seats
+ *  its Scheduled Jobs (routines) tile only while a real bot chat owns the
+ *  workspace and never for group chats, so that pane's visibility is the
+ *  public botChatOwnsWorkspace() bit. The message-slot check keeps the Bots
+ *  home / empty-draft splash (same surface, no transcript) unstyled. */
+function workspaceBotChatVisible() {
+  if (paneStoreGet(ROUTINES_PANE_ID) !== true) return false
+  if (typeof document === 'undefined') return false
+  const surfaces = document.querySelectorAll('[data-chat-surface]')
+  for (const el of surfaces) {
+    if (inHiddenPane(el)) continue
+    const target = el.getAttribute('data-composer-target') || ''
+    const anchor = el.getAttribute('data-session-anchor') || ''
+    if (target !== 'main' && anchor !== 'workspace') continue
+    if (
+      el.querySelector(
+        '[data-slot="aui_user-message-root"], [data-slot="aui_assistant-message-content"], [data-slot="aui_response-loading"]'
+      )
+    )
+      return true
+  }
+  return false
+}
+
 function botModeChatVisible() {
   if (!botsPaneActive()) return false
   if (botsHomeFronted()) return false
   if (groupChatFronted()) return false
-  return canonicalBotChatTabSelected()
+  // v0.20.5 tab-strip path first, then the >=0.20.6 workspace path.
+  if (canonicalBotChatTabSelected()) return true
+  return workspaceBotChatVisible()
 }
 
 function setBodyClass(on) {
@@ -485,6 +513,7 @@ export default {
 
     watchPane(BOTS_PANE_ID, scheduleSync)
     watchPane(BOTS_HOME_PANE_ID, scheduleSync)
+    watchPane(ROUTINES_PANE_ID, scheduleSync)
     watchStore(host.state?.focusedStoredSessionId || host.state?.activeSessionId, scheduleSync)
 
     startDomObserver()

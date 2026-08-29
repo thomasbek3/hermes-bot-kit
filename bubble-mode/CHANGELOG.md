@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0 — 2026-08-28
+
+- Hermes Desktop 0.20.6 support (Bot Mode redesign): new detection path —
+  the canonical chat now renders in the main workspace, gated via the
+  public "Scheduled Jobs (routines) tile seated" signal (hermes-bots seats
+  it only while a real bot chat owns the workspace, never for group chats)
+  plus a visible transcript check. The 0.20.5 tab-strip path is kept, so
+  one plugin works on both versions.
+
 ## 1.5.0 — 2026-08-28
 
 - Quiet chat also hides the per-reply timer chips ("3s", "7s") in Bot Chat.
