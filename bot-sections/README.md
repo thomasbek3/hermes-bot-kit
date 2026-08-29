@@ -54,6 +54,15 @@ Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
 
 ## How sections are managed
 
+Since 1.1.0 the headers themselves are interactive:
+
+- **Collapse/expand:** click a section header (persists across restarts).
+- **Rename + emoji:** double-click a header, type the new label
+  ("🏠 Airbnb Operations"), Enter to save, Escape to cancel. Renames are
+  display-only — config keys and palette commands keep the original id.
+
+The rest:
+
 Three layers, first match wins:
 
 1. **Palette cycle** — `⌘⇧P → Bot Sections: cycle <bot>`. One command per

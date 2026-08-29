@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 — 2026-08-29
+
+- Headers are actually clickable: 1.0.0 shipped them with
+  `pointer-events: none`, which silently ate 1.1.0's collapse/rename
+  clicks. Editable label gets a visible outline while renaming.
+
 ## 1.1.0 — 2026-08-29
 
 - Click a section header to collapse/expand it (persisted per install;

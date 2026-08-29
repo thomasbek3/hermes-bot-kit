@@ -76,9 +76,19 @@ body.hermes-bot-sections [${HEADER_ATTR}] {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--ui-text-quaternary);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   user-select: none;
   flex-shrink: 0;
+}
+
+body.hermes-bot-sections [${HEADER_ATTR}] .hermes-bot-section-label[contenteditable] {
+  user-select: text;
+  cursor: text;
+  outline: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.2));
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+  text-transform: none;
 }
 
 body.hermes-bot-sections [${HEADER_ATTR}][hidden] {
