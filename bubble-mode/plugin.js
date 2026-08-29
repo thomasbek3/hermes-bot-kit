@@ -123,6 +123,14 @@ body.hermes-bubble-quiet [data-chat-surface] [data-slot="tool-block"]:not(:has([
   display: none;
 }
 
+/* Background-process notifications ("Background process proc_x exited…")
+   render as a user-slot row holding a collapsible <details> with no composer
+   content. Agent-to-agent chips ("Message from X") carry their own
+   aui_agent-message-note slot and stay visible. */
+body.hermes-bubble-quiet [data-chat-surface] [data-slot="aui_user-message-root"]:has(details):not(:has([data-slot="aui_agent-message-note"])):not(:has(.composer-human-message)) {
+  display: none;
+}
+
 /* Never paint a bubble around a reply that has no content yet (the empty
    message container that appears next to the typing indicator). */
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:empty,

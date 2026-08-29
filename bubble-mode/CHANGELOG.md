@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0 — 2026-08-29
+
+- Quiet chat also hides background-process notification rows ("Background
+  process proc_… exited"). Agent-to-agent chips ("Message from X" /
+  "Replied to X") stay visible. "toggle work rows" restores everything.
+
+## 2.0.1 — 2026-08-29
+
+- Never bubble the live composer (the 0.20.6 redesign moved it into the
+  message structure; the user-bubble rule was shrinking the input bar).
+
 ## 2.0.0 — 2026-08-28
 
 - Hermes Desktop 0.20.6 support (Bot Mode redesign): new detection path —
