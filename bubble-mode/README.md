@@ -14,9 +14,13 @@ On the Bot Chat tab you get:
   the left (Grok-Bot palette). Cards, code blocks, and images keep stock
   chrome; mixed text+code replies split into text bubbles around the cards.
 - **Quiet chat.** Thinking disclosures, reasoning text, activity rows, tool
-  blocks, and per-reply timer chips ("3s") are hidden. Approvals always stay
-  visible. Bring the work rows back any time with
+  blocks, per-reply timer chips ("3s"), and background-process notifications
+  are hidden. Approvals and agent-to-agent chips ("Message from X") always
+  stay visible. Bring the work rows back any time with
   **⌘⇧P → Bubble Mode: toggle work rows** (persists).
+- **The composer is never touched.** The 0.20.6 redesign moved the input bar
+  into the message structure; anything you can type into is exempt from
+  bubble styling by rule.
 - **Typing indicator.** While the bot thinks or works, an iMessage-style
   "..." pill with pulsing dots shows where the reply will land.
 

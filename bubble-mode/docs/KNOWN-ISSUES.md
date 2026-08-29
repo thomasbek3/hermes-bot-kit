@@ -21,6 +21,11 @@ simply doesn't apply".
   text paragraphs get bubbles (with small gaps) and the cards render
   untouched. The split triggers on any `pre`, `table`, mermaid block, or
   image — not just known card slots (1.0.1).
+- **Background-process notification rows are hidden in quiet mode (2.1.0).**
+  Agent-to-agent chips ("Message from X" / "Replied to X") are conversation
+  and always stay. "toggle work rows" restores the process rows.
+- **The live composer is exempt from all bubble styling (2.0.1)** — any
+  element containing a textarea/contenteditable/input renders stock.
 - **The edit composer is tinted too.** Editing one of your sent messages
   reuses the same bubble surface, so the editor shows your bubble color.
   Cosmetic, accepted.

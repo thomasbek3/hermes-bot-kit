@@ -1,5 +1,12 @@
 # Changelog (kit)
 
+## 2026-08-29 — bubble-mode 2.1.0
+
+- Quiet chat also hides background-process notification rows; agent-to-agent
+  chips ("Message from X") always stay visible (2.1.0).
+- The live composer is exempt from bubble styling — the 0.20.6 redesign had
+  it inheriting the user-bubble shrink (2.0.1).
+
 Per-plugin history lives in [bubble-mode/CHANGELOG.md](bubble-mode/CHANGELOG.md)
 and [computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md).
 
