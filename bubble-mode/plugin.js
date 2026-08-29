@@ -25,11 +25,11 @@ const SESSION_TILE_TAB_PREFIX = 'session-tile:'
 const PANE_HIDDEN_ATTR = 'data-pane-hidden'
 
 const CSS = /* css */ `
-body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"] {
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"]:not(:has(textarea, [contenteditable="true"], input)) {
   align-items: flex-end;
 }
 
-body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"] .composer-human-message {
+body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"] .composer-human-message:not(:has(textarea, [contenteditable="true"], input)) {
   width: fit-content;
   max-width: 72%;
   margin-left: auto;
