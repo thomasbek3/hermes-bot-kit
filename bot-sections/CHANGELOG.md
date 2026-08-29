@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.4 — 2026-08-29
+
+- Menu restyled from the app's own context-menu recipe (same tokens:
+  --ui-bg-elevated color-mix surface, --ui-stroke-secondary border,
+  --ui-control-active-background hover, item metrics, icons on
+  Rename/Collapse) — tracks the app theme.
+- Section headers light up on hover (the app's own hover tokens) and show a
+  native-style tooltip chip: "<name> · N bots · right-click for options".
+
 ## 1.2.3 — 2026-08-29
 
 - The app's context menu is opened by a boot-time window-capture listener a

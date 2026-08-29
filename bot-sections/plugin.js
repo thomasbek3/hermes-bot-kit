@@ -85,69 +85,100 @@ body.hermes-bot-sections [${HEADER_ATTR}] {
 .hermes-bot-section-menu {
   position: fixed;
   z-index: 2147483000;
-  min-width: 208px;
+  min-width: 13rem;
   padding: 0.25rem;
   border-radius: 0.5rem;
-  background: var(--ui-surface-overlay, #17191d);
-  border: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.08));
-  box-shadow: 0 10px 38px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(0, 0, 0, 0.4);
-  font-size: 0.8125rem;
-  line-height: 1.2;
-  color: var(--ui-text-secondary, #c9c9ce);
+  border: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--ui-bg-elevated, #1b1e24) 96%, transparent);
   backdrop-filter: blur(12px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  font-size: var(--conversation-text-font-size, 0.8125rem);
+  line-height: 1.25;
+  color: var(--ui-text-primary, #e8e8ea);
 }
 
 .hermes-bot-section-menu-item {
+  position: relative;
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   width: 100%;
-  padding: 0.375rem 0.625rem;
+  padding: 0.25rem 0.5rem;
+  min-height: 1.75rem;
   border: none;
   border-radius: 0.375rem;
   background: transparent;
   color: var(--ui-text-primary, #e8e8ea);
   text-align: left;
-  cursor: pointer;
+  cursor: default;
   font: inherit;
+  font-size: 0.75rem;
+}
+
+.hermes-bot-section-menu-item svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  color: var(--ui-text-tertiary, #8a8a90);
 }
 
 .hermes-bot-section-menu-item:hover {
-  background: var(--chrome-action-hover, rgba(255, 255, 255, 0.07));
+  background: var(--ui-control-active-background, rgba(255, 255, 255, 0.08));
 }
 
 .hermes-bot-section-menu-emojis {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
-  padding: 0.125rem 0.25rem 0.25rem;
-  border-bottom: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.06));
+  padding: 0.125rem 0.125rem 0.25rem;
+  border-bottom: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.08));
   margin-bottom: 0.25rem;
 }
 
 .hermes-bot-section-menu-emojis button {
   border: none;
   background: transparent;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   line-height: 1;
-  padding: 0.3125rem 0.375rem;
+  padding: 0.3125rem 0.34rem;
   border-radius: 0.375rem;
-  cursor: pointer;
+  cursor: default;
 }
 
 .hermes-bot-section-menu-emojis button:hover {
-  background: var(--chrome-action-hover, rgba(255, 255, 255, 0.07));
+  background: var(--ui-control-active-background, rgba(255, 255, 255, 0.08));
+}
+
+body.hermes-bot-sections [${HEADER_ATTR}]:hover {
+  background: var(--chrome-action-hover, rgba(255, 255, 255, 0.06));
+  color: var(--ui-text-secondary, #c9c9ce);
+}
+
+.hermes-bot-section-tip {
+  position: fixed;
+  z-index: 2147483001;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.1));
+  background: var(--ui-bg-elevated, #26282e);
+  color: var(--ui-text-secondary, #d0d0d4);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 .hermes-bot-section-menu input {
   width: 100%;
   box-sizing: border-box;
   margin: 0.25rem 0;
-  padding: 0.375rem 0.625rem;
+  padding: 0.3125rem 0.5rem;
   border-radius: 0.375rem;
   border: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.12));
-  background: var(--ui-surface-sunken, rgba(0, 0, 0, 0.35));
+  background: var(--ui-surface-sunken, rgba(0, 0, 0, 0.3));
   color: var(--ui-text-primary, #f0f0f2);
   font: inherit;
+  font-size: 0.75rem;
   outline: none;
 }
 
@@ -524,13 +555,15 @@ function openSectionMenu(section, x, y, renameNow) {
   const renameItem = document.createElement('button')
   renameItem.type = 'button'
   renameItem.className = 'hermes-bot-section-menu-item'
-  renameItem.textContent = 'Rename…'
+  renameItem.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M11.1 2.6a1.4 1.4 0 0 1 2 2L5.4 12.3l-2.7.7.7-2.7 7.7-7.7z"/></svg><span>Rename…</span>'
   menu.appendChild(renameItem)
 
   const collapseItem = document.createElement('button')
   collapseItem.type = 'button'
   collapseItem.className = 'hermes-bot-section-menu-item'
-  collapseItem.textContent = collapsedSections.has(section) ? 'Expand' : 'Collapse'
+  collapseItem.innerHTML = collapsedSections.has(section)
+    ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 6l4 4 4-4"/></svg><span>Expand</span>'
+    : '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 10l4-4 4 4"/></svg><span>Collapse</span>'
   collapseItem.addEventListener('click', () => {
     toggleCollapsed(section)
     closeMenu()
@@ -660,6 +693,29 @@ function createHeader(section) {
     openSectionMenu(section, e.clientX, e.clientY, true)
   })
   el.style.cursor = 'pointer'
+  el.addEventListener('mouseenter', () => {
+    if (el._tipTimer) clearTimeout(el._tipTimer)
+    el._tipTimer = setTimeout(() => {
+      if (openMenuEl) return
+      const tip = document.createElement('div')
+      tip.className = 'hermes-bot-section-tip'
+      const n = (el.querySelector('[data-hermes-bot-section-count]') || {}).textContent || '0'
+      tip.textContent = `${displaySectionName(section)} · ${n} bots · right-click for options`
+      document.body.appendChild(tip)
+      const r = el.getBoundingClientRect()
+      tip.style.left = `${r.left + 8}px`
+      tip.style.top = `${Math.max(4, r.top - tip.getBoundingClientRect().height - 6)}px`
+      el._tipEl = tip
+    }, 450)
+  })
+  el.addEventListener('mouseleave', () => {
+    if (el._tipTimer) clearTimeout(el._tipTimer)
+    el._tipTimer = 0
+    if (el._tipEl) {
+      el._tipEl.remove()
+      el._tipEl = null
+    }
+  })
   el.addEventListener('click', e => {
     if (label.isContentEditable) return
     e.preventDefault()
