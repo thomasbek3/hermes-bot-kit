@@ -1,5 +1,13 @@
 # Changelog (kit)
 
+## 2026-08-29 — bot-sections 1.0.0
+
+- New fourth plugin: `bot-sections/`, a desktop plugin that overlays named
+  group headers on the Bot Mode roster (config block + per-bot palette
+  cycle + automatic Unassigned). Root `install.sh` ships it with
+  `KIT_SKIP_SECTIONS=1` to skip. Sessions and native gateway headings stay
+  stock.
+
 ## 2026-08-29 — bubble-mode 2.1.0
 
 - Quiet chat also hides background-process notification rows; agent-to-agent
@@ -7,8 +15,9 @@
 - The live composer is exempt from bubble styling — the 0.20.6 redesign had
   it inheriting the user-bubble shrink (2.0.1).
 
-Per-plugin history lives in [bubble-mode/CHANGELOG.md](bubble-mode/CHANGELOG.md)
-and [computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md).
+Per-plugin history lives in [bubble-mode/CHANGELOG.md](bubble-mode/CHANGELOG.md),
+[computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md), and
+[bot-sections/CHANGELOG.md](bot-sections/CHANGELOG.md).
 
 ## 2026-08-28 (final) — verified on Hermes v0.20.6
 

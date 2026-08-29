@@ -12,13 +12,13 @@ Texting-style chat bubbles + a live window into your bots' computers.
 [![Last commit](https://img.shields.io/github/last-commit/thomasbek3/hermes-bot-kit?style=flat-square)](https://github.com/thomasbek3/hermes-bot-kit/commits/master)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-[![Plugins](https://img.shields.io/badge/plugins-3-blue?style=flat-square)](#whats-in-the-kit)
+[![Plugins](https://img.shields.io/badge/plugins-4-blue?style=flat-square)](#whats-in-the-kit)
 [![Single file](https://img.shields.io/badge/plugins-single--file%20ESM-orange?style=flat-square)](#requirements)
 [![No build step](https://img.shields.io/badge/build%20step-none-success?style=flat-square)](#requirements)
 [![Agent installable](https://img.shields.io/badge/install-agent--safe%20%C2%B7%20unattended-blueviolet?style=flat-square)](#install)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](https://github.com/thomasbek3/hermes-bot-kit/pulls)
 
-[![Install](https://img.shields.io/badge/%E2%AC%87%EF%B8%8E%20INSTALL-one%20command%2C%20both%20plugins-1f6feb?style=for-the-badge)](#install)
+[![Install](https://img.shields.io/badge/%E2%AC%87%EF%B8%8E%20INSTALL-one%20command%2C%20desktop%20plugins-1f6feb?style=for-the-badge)](#install)
 
 </div>
 
@@ -26,7 +26,7 @@ Texting-style chat bubbles + a live window into your bots' computers.
 
 Your bots already live in Hermes. This kit makes talking to them feel like
 texting a person — and lets you look over their shoulder while they work.
-Two independent plugins, one install:
+Desktop plugins plus an optional agent plugin, one install:
 
 ## What's in the kit
 
@@ -34,6 +34,7 @@ Two independent plugins, one install:
 |---|---|
 | 💬 **[Bubble Mode](bubble-mode/)** | The full texting look — **only on each bot's main Bot Chat**: iMessage bubbles, a "..." typing indicator while the bot works, and thinking/tool/timer/background-process noise hidden (approvals and agent-to-agent "Message from X" chips always visible; one palette command brings the work rows back). Work sessions, side tabs, and Sessions view are never touched. Pure CSS, fails safe. |
 | 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Auto-connects the moment your bot starts using its computer**, so you watch it work. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
+| 📂 **[Bot Sections](bot-sections/)** | Named group headers in the Bot Mode roster (Apollo / OMH / HQ / …) with an automatic **Unassigned** bucket. Palette cycle per bot; Sessions stay stock. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 
 <p align="center">
@@ -58,7 +59,7 @@ Two independent plugins, one install:
 
 ## Install
 
-One command, both plugins (idempotent, no sudo, agents can run it unattended):
+One command, the desktop plugins (idempotent, no sudo, agents can run it unattended):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh | bash
@@ -67,12 +68,16 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/in
 Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
 
 - Bubble Mode is on immediately; toggle with **⌘⇧P → Bubble Mode: toggle**.
+- Bot Sections is on immediately in the Bots roster; toggle with
+  **⌘⇧P → Bot Sections: toggle**. Cycle a bot with
+  **⌘⇧P → `Bot Sections: cycle <bot>`**.
 - The Computer pane: enable **Computer** in **Settings → Plugins**, then add a
   computer — see the [computer-viewer README](computer-viewer/README.md) for
   connecting cloud boxes, spare Macs/PCs, HD mode, and giving bots hands.
 
-Want just one plugin? `KIT_SKIP_BUBBLES=1` or `KIT_SKIP_COMPUTER=1` in front
-of the command, or use each plugin's own install instructions.
+Want just one plugin? `KIT_SKIP_BUBBLES=1`, `KIT_SKIP_COMPUTER=1`, or
+`KIT_SKIP_SECTIONS=1` in front of the command, or use each plugin's own
+install instructions.
 
 **texting-style** is an *agent* plugin (it changes how bots write, per Hermes
 profile), so it has its own one-liner:
@@ -90,15 +95,16 @@ coding agents read that file automatically.)
 - **Hermes Desktop ≥ 0.20.5**, verified through **v0.20.6** (2026.8.27,
   including the Bot Mode redesign) — earlier builds pre-date the pane shell
   the plugins target.
-- Both plugins are single-file disk plugins: no build step, no core patches,
-  hot-reloadable, and they fail safe (if a Hermes update renames internal
-  hooks, they render stock instead of breaking).
+- The desktop plugins are single-file disk plugins: no build step, no core
+  patches, hot-reloadable, and they fail safe (if a Hermes update renames
+  internal hooks, they render stock instead of breaking).
 
 ## Repository layout
 
 ```
-install.sh          one-command installer for the two desktop plugins
+install.sh          one-command installer for the desktop plugins
 bubble-mode/        Bubble Mode: plugin, installer, docs
+bot-sections/       Bot Sections: plugin, docs
 texting-style/      agent plugin: SMS-register reply style, per profile
 computer-viewer/    Computer: plugin, host connect scripts, HD agent,
                     orgo-computer agent plugin, orgo-term / orgo-hands, docs
