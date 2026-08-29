@@ -82,6 +82,71 @@ body.hermes-bot-sections [${HEADER_ATTR}] {
   flex-shrink: 0;
 }
 
+.hermes-bot-section-menu {
+  position: fixed;
+  z-index: 2147483000;
+  min-width: 220px;
+  padding: 0.375rem;
+  border-radius: 0.5rem;
+  background: var(--ui-surface-raised, #232326);
+  border: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  font-size: 0.8125rem;
+  color: var(--ui-text-secondary, #d5d5d8);
+}
+
+.hermes-bot-section-menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.hermes-bot-section-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.hermes-bot-section-menu-emojis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.125rem;
+  padding: 0.25rem 0.25rem 0.375rem;
+  border-bottom: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.1));
+  margin-bottom: 0.25rem;
+}
+
+.hermes-bot-section-menu-emojis button {
+  border: none;
+  background: transparent;
+  font-size: 1rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.hermes-bot-section-menu-emojis button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.hermes-bot-section-menu input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.25rem 0;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.15));
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ui-text-primary, #f0f0f2);
+  font: inherit;
+  outline: none;
+}
+
 body.hermes-bot-sections [${HEADER_ATTR}] .hermes-bot-section-label[contenteditable] {
   user-select: text;
   cursor: text;
@@ -364,6 +429,126 @@ function readSectionNames(ctx) {
   }
 }
 
+const MENU_EMOJIS = ['🏠', '💼', '📣', '💰', '⚙️', '🧪', '🚀', '✨', '🤖', '📈']
+let openMenuEl = null
+
+function closeMenu() {
+  if (openMenuEl) {
+    openMenuEl.remove()
+    openMenuEl = null
+    document.removeEventListener('pointerdown', onMenuOutside, true)
+    document.removeEventListener('keydown', onMenuKey, true)
+  }
+}
+
+function onMenuOutside(e) {
+  if (openMenuEl && !openMenuEl.contains(e.target)) closeMenu()
+}
+
+function onMenuKey(e) {
+  if (e.key === 'Escape') {
+    e.stopPropagation()
+    closeMenu()
+  }
+}
+
+function setEmoji(section, emoji) {
+  const current = displaySectionName(section)
+  const bare = current.replace(/^[^\p{L}\p{N}]+\s*/u, '')
+  const next = emoji ? `${emoji} ${bare}` : bare
+  if (next && next !== section) sectionNames[section] = next
+  else delete sectionNames[section]
+  persistSectionNames()
+  scheduleSync()
+}
+
+function openSectionMenu(section, x, y, renameNow) {
+  closeMenu()
+  const menu = document.createElement('div')
+  menu.className = 'hermes-bot-section-menu'
+
+  const emojiRow = document.createElement('div')
+  emojiRow.className = 'hermes-bot-section-menu-emojis'
+  for (const em of MENU_EMOJIS) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.textContent = em
+    b.title = `Set ${em} on this section`
+    b.addEventListener('click', () => {
+      setEmoji(section, em)
+      closeMenu()
+    })
+    emojiRow.appendChild(b)
+  }
+  const clearB = document.createElement('button')
+  clearB.type = 'button'
+  clearB.textContent = '✕'
+  clearB.title = 'Remove emoji'
+  clearB.addEventListener('click', () => {
+    setEmoji(section, '')
+    closeMenu()
+  })
+  emojiRow.appendChild(clearB)
+  menu.appendChild(emojiRow)
+
+  const renameItem = document.createElement('button')
+  renameItem.type = 'button'
+  renameItem.className = 'hermes-bot-section-menu-item'
+  renameItem.textContent = 'Rename…'
+  menu.appendChild(renameItem)
+
+  const collapseItem = document.createElement('button')
+  collapseItem.type = 'button'
+  collapseItem.className = 'hermes-bot-section-menu-item'
+  collapseItem.textContent = collapsedSections.has(section) ? 'Expand' : 'Collapse'
+  collapseItem.addEventListener('click', () => {
+    toggleCollapsed(section)
+    closeMenu()
+  })
+  menu.appendChild(collapseItem)
+
+  const startRename = () => {
+    renameItem.hidden = true
+    collapseItem.hidden = true
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.value = displaySectionName(section)
+    input.placeholder = section
+    const commit = () => {
+      const next = input.value.trim()
+      if (next && next !== section) sectionNames[section] = next
+      else delete sectionNames[section]
+      persistSectionNames()
+      scheduleSync()
+      closeMenu()
+    }
+    input.addEventListener('keydown', e => {
+      e.stopPropagation()
+      if (e.key === 'Enter') commit()
+      if (e.key === 'Escape') closeMenu()
+    })
+    const save = document.createElement('button')
+    save.type = 'button'
+    save.className = 'hermes-bot-section-menu-item'
+    save.textContent = 'Save'
+    save.addEventListener('click', commit)
+    menu.appendChild(input)
+    menu.appendChild(save)
+    input.focus()
+    input.select()
+  }
+  renameItem.addEventListener('click', startRename)
+
+  document.body.appendChild(menu)
+  const rect = menu.getBoundingClientRect()
+  menu.style.left = `${Math.min(x, window.innerWidth - rect.width - 8)}px`
+  menu.style.top = `${Math.min(y, window.innerHeight - rect.height - 8)}px`
+  openMenuEl = menu
+  document.addEventListener('pointerdown', onMenuOutside, true)
+  document.addEventListener('keydown', onMenuKey, true)
+  if (renameNow) startRename()
+}
+
 function beginRename(label, section) {
   if (label.isContentEditable) return
   label.contentEditable = 'plaintext-only'
@@ -424,7 +609,12 @@ function createHeader(section) {
       clearTimeout(el._collapseTimer)
       el._collapseTimer = 0
     }
-    beginRename(label, section)
+    openSectionMenu(section, e.clientX, e.clientY, true)
+  })
+  el.addEventListener('contextmenu', e => {
+    e.preventDefault()
+    e.stopPropagation()
+    openSectionMenu(section, e.clientX, e.clientY, false)
   })
   el.style.cursor = 'pointer'
   el.addEventListener('click', e => {
@@ -759,6 +949,7 @@ function startDomObserver() {
 }
 
 function dispose() {
+  closeMenu()
   if (raf && typeof cancelAnimationFrame === 'function') {
     cancelAnimationFrame(raf)
     raf = 0

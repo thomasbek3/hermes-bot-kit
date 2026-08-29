@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 — 2026-08-29
+
+- Right-click a section header for a proper menu: an emoji picker
+  (🏠 💼 📣 💰 ⚙️ 🧪 🚀 ✨ 🤖 📈 + remove), Rename with a real input field
+  (Enter saves, Escape cancels, Save button), and Collapse/Expand.
+  Double-click still jumps straight to rename. The 1.1.0 inline
+  contenteditable rename fought the app's global keybinds (Enter never
+  committed) and is replaced by the input.
+
 ## 1.1.1 — 2026-08-29
 
 - Headers are actually clickable: 1.0.0 shipped them with

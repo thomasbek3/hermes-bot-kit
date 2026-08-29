@@ -57,9 +57,11 @@ Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
 Since 1.1.0 the headers themselves are interactive:
 
 - **Collapse/expand:** click a section header (persists across restarts).
-- **Rename + emoji:** double-click a header, type the new label
-  ("🏠 Airbnb Operations"), Enter to save, Escape to cancel. Renames are
-  display-only — config keys and palette commands keep the original id.
+- **Right-click a header** for the section menu: emoji picker (one click
+  sets 🏠 💼 📣 💰 … or removes it), **Rename…** (real input — Enter saves,
+  Escape cancels), and Collapse/Expand. Double-click jumps straight to
+  rename. Renames are display-only — config keys and palette commands keep
+  the original id.
 
 The rest:
 
