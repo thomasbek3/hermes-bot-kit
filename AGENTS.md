@@ -4,7 +4,7 @@ You are installing desktop plugins for Hermes Desktop. Everything here is
 safe to run unattended: no sudo, no prompts, idempotent, existing files are
 backed up (`*.bak.<timestamp>`) before overwrite.
 
-## Install both plugins (default)
+## Install the desktop plugins (default)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh | bash
@@ -13,8 +13,9 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/in
 Install just one:
 
 ```bash
-KIT_SKIP_COMPUTER=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Bubble Mode only
-KIT_SKIP_BUBBLES=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Computer viewer only
+KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Bubble Mode only
+KIT_SKIP_BUBBLES=1  KIT_SKIP_SECTIONS=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Computer viewer only
+KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Bot Sections only
 ```
 
 Into a named Hermes profile instead of the default home:
@@ -31,10 +32,11 @@ its sanity check (`node --check` + content marker).
 ```bash
 test -f ~/.hermes/desktop-plugins/bubble-mode/plugin.js && echo bubble-mode OK
 test -f ~/.hermes/desktop-plugins/computer-viewer/plugin.js && echo computer-viewer OK
+test -f ~/.hermes/desktop-plugins/bot-sections/plugin.js && echo bot-sections OK
 ```
 
-Folder names must be exactly `bubble-mode` and `computer-viewer` (they must
-match the plugin ids). Do not rename them.
+Folder names must be exactly `bubble-mode`, `computer-viewer`, and
+`bot-sections` (they must match the plugin ids). Do not rename them.
 
 ## After installing — needs the human or a running app
 
@@ -49,6 +51,9 @@ it. Then:
 
 - **Bubble Mode** is active immediately in Bot Mode chats. Toggle:
   palette → "Bubble Mode: toggle".
+- **Bot Sections** is active immediately in the Bots roster. Toggle:
+  palette → "Bot Sections: toggle". Cycle a bot:
+  palette → "Bot Sections: cycle <bot>".
 - **Computer viewer** must be enabled once in Settings → Plugins
   (inventory name: **Computer**), then a computer added in the pane. Endpoint
   setup (cloud boxes, spare machines, HD mode) is interactive and documented
@@ -92,11 +97,12 @@ files without the user's say-so.
 ## Uninstall
 
 ```bash
-rm -rf ~/.hermes/desktop-plugins/bubble-mode ~/.hermes/desktop-plugins/computer-viewer
+rm -rf ~/.hermes/desktop-plugins/bubble-mode ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/bot-sections
 ```
 
 Then reload plugins (same as above). Plugin settings live in Hermes plugin
-storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*`.
+storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` /
+`hermes.plugin.bot-sections.*`.
 
 ## Facts that prevent wasted debugging
 
@@ -117,11 +123,12 @@ storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*`.
 - CLI probes cannot reach a canonical Bot Chat: `-z --continue "Bot Chat"`
   and `--resume <id>` both fork new sessions. Only the desktop UI talks to
   the real one.
-- Both plugins fail safe: if a Hermes update renames internal hooks, chats
-  render stock / the pane stays empty — nothing crashes.
+- Desktop plugins fail safe: if a Hermes update renames internal hooks, chats
+  render stock / the pane stays empty / the roster stays stock — nothing
+  crashes.
 - The repo was formerly `hermes-computer-viewer`; old raw URLs still work
-  via root shim scripts. Canonical paths are `bubble-mode/` and
-  `computer-viewer/`.
+  via root shim scripts. Canonical paths are `bubble-mode/`,
+  `computer-viewer/`, and `bot-sections/`.
 - Do not curl-pipe `connect-*.sh` / `hiperf-*.sh` on the machine running
   Hermes Desktop unless the user asked to view **that** machine — they are
   host-side setup scripts for the computer being viewed, and they install

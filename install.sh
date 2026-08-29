@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Install the Hermes Bot Kit desktop plugins: Bubble Mode + Computer viewer.
-# Safe for agents to run unattended: idempotent, no prompts, no sudo,
-# backs up any existing copy before overwriting.
+# Install the Hermes Bot Kit desktop plugins: Bubble Mode + Computer viewer
+# + Bot Sections. Safe for agents to run unattended: idempotent, no prompts,
+# no sudo, backs up any existing copy before overwriting.
 #
 #   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh | bash
 #
 # or from a clone:  bash install.sh
 #
 # Env knobs:
-#   HERMES_HOME        Hermes home dir (default ~/.hermes)
+#   HERMES_HOME          Hermes home dir (default ~/.hermes)
 #   KIT_SKIP_BUBBLES=1   skip Bubble Mode
 #   KIT_SKIP_COMPUTER=1  skip the Computer viewer
+#   KIT_SKIP_SECTIONS=1  skip Bot Sections
 set -euo pipefail
 
 RAW_BASE="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master"
@@ -79,7 +80,15 @@ if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
   echo "Computer viewer  -> ${PLUGIN_ROOT}/computer-viewer/plugin.js (+ helper scripts)"
 fi
 
+if [ "${KIT_SKIP_SECTIONS:-0}" != "1" ]; then
+  sections=$(fetch "bot-sections/plugin.js" "sections-plugin.js")
+  check_js "${sections}" "hermes-bot-sections-style" "Bot Sections"
+  install_file "${sections}" "${PLUGIN_ROOT}/bot-sections/plugin.js"
+  echo "Bot Sections     -> ${PLUGIN_ROOT}/bot-sections/plugin.js"
+fi
+
 echo
 echo "Finish: in Hermes Desktop press Cmd+Shift+P -> 'Reload plugins' (or restart the app)."
 echo "Bubble Mode toggle: Cmd+Shift+P -> 'Bubble Mode: toggle'."
+echo "Bot Sections toggle: Cmd+Shift+P -> 'Bot Sections: toggle'."
 echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."
