@@ -85,6 +85,18 @@ body.hermes-bot-sections [${HEADER_ATTR}][hidden] {
   display: none !important;
 }
 
+body.hermes-bot-sections [data-bot-section][data-bot-section-collapsed="1"] {
+  display: none !important;
+}
+
+body.hermes-bot-sections [data-hermes-bot-section-header][data-collapsed="1"] .hermes-bot-section-caret {
+  transform: rotate(-90deg);
+}
+
+body.hermes-bot-sections .hermes-bot-section-caret {
+  transition: transform 0.12s ease;
+}
+
 body.hermes-bot-sections .hermes-bot-section-caret {
   width: 0;
   height: 0;
@@ -280,6 +292,110 @@ function setOrder(el, n) {
   if (el.style.order !== next) el.style.order = next
 }
 
+// Display names: rename any section (emoji welcome — "🏠 Airbnb Operations").
+// Section IDS stay stable (config keys, cycle commands); only the label
+// shown on the header changes. Persisted per install.
+let sectionNames = {}
+let collapsedSections = new Set()
+
+function persistCollapsed() {
+  try {
+    pluginCtx?.storage?.set?.('collapsedSections', Array.from(collapsedSections))
+  } catch {
+    /* holds for this window */
+  }
+}
+
+function readCollapsed(ctx) {
+  try {
+    const value = ctx.storage?.get?.('collapsedSections', [])
+    const absorb = list => {
+      if (Array.isArray(list)) collapsedSections = new Set(list.map(String))
+      scheduleSync()
+    }
+    if (value && typeof value.then === 'function') value.then(absorb).catch(() => undefined)
+    else absorb(value)
+  } catch {
+    /* ignore */
+  }
+}
+
+function toggleCollapsed(section) {
+  if (collapsedSections.has(section)) collapsedSections.delete(section)
+  else collapsedSections.add(section)
+  persistCollapsed()
+  scheduleSync()
+}
+
+function displaySectionName(section) {
+  const v = sectionNames[section]
+  return typeof v === 'string' && v.trim() ? v.trim() : section
+}
+
+function persistSectionNames() {
+  try {
+    pluginCtx?.storage?.set?.('sectionNames', sectionNames)
+  } catch {
+    /* storage unavailable — holds for this window */
+  }
+}
+
+function readSectionNames(ctx) {
+  try {
+    const value = ctx.storage?.get?.('sectionNames', {})
+    const absorb = obj => {
+      if (obj && typeof obj === 'object') sectionNames = { ...obj }
+      scheduleSync()
+    }
+    if (value && typeof value.then === 'function') value.then(absorb).catch(() => undefined)
+    else absorb(value)
+  } catch {
+    /* ignore */
+  }
+}
+
+function beginRename(label, section) {
+  if (label.isContentEditable) return
+  label.contentEditable = 'plaintext-only'
+  const prev = label.textContent
+  label.focus()
+  try {
+    const range = document.createRange()
+    range.selectNodeContents(label)
+    const sel = window.getSelection()
+    sel.removeAllRanges()
+    sel.addRange(range)
+  } catch {}
+  const finish = commit => {
+    label.contentEditable = 'false'
+    label.removeEventListener('keydown', onKey)
+    label.removeEventListener('blur', onBlur)
+    const next = (label.textContent || '').trim()
+    if (commit && next && next !== section) {
+      sectionNames[section] = next
+      persistSectionNames()
+    } else if (commit && (!next || next === section)) {
+      delete sectionNames[section]
+      persistSectionNames()
+    }
+    label.textContent = displaySectionName(section)
+  }
+  const onKey = e => {
+    e.stopPropagation()
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      finish(true)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      label.textContent = prev
+      finish(false)
+    }
+  }
+  const onBlur = () => finish(true)
+  label.addEventListener('keydown', onKey)
+  label.addEventListener('blur', onBlur)
+}
+
 function createHeader(section) {
   const el = document.createElement('div')
   el.setAttribute(HEADER_ATTR, section)
@@ -289,7 +405,28 @@ function createHeader(section) {
   caret.setAttribute('aria-hidden', 'true')
   const label = document.createElement('span')
   label.className = 'hermes-bot-section-label'
-  label.textContent = section
+  label.textContent = displaySectionName(section)
+  label.title = 'Double-click to rename (emoji welcome)'
+  label.addEventListener('dblclick', e => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (el._collapseTimer) {
+      clearTimeout(el._collapseTimer)
+      el._collapseTimer = 0
+    }
+    beginRename(label, section)
+  })
+  el.style.cursor = 'pointer'
+  el.addEventListener('click', e => {
+    if (label.isContentEditable) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (el._collapseTimer) clearTimeout(el._collapseTimer)
+    el._collapseTimer = setTimeout(() => {
+      el._collapseTimer = 0
+      toggleCollapsed(section)
+    }, 250)
+  })
   const spacer = document.createElement('span')
   spacer.className = 'hermes-bot-section-spacer'
   const count = document.createElement('span')
@@ -314,12 +451,18 @@ function syncHeaders(list, counts) {
     }
     if (header.parentNode !== list) list.appendChild(header)
     setOrder(header, sectionBaseOrder(section) - 1)
+    const labelEl = header.querySelector('.hermes-bot-section-label')
+    if (labelEl && !labelEl.isContentEditable) {
+      const want = displaySectionName(section)
+      if (labelEl.textContent !== want) labelEl.textContent = want
+    }
     const count = counts[section] || 0
     const countEl = header.querySelector('[data-hermes-bot-section-count]')
     const countText = String(count)
     if (countEl && countEl.textContent !== countText) countEl.textContent = countText
     const hide = count === 0
     if (header.hidden !== hide) header.hidden = hide
+    setAttr(header, 'data-collapsed', collapsedSections.has(section) ? '1' : '0')
   }
 }
 
@@ -328,6 +471,7 @@ function clearAnnotations() {
   const rows = document.querySelectorAll(`[${ROW_SECTION_ATTR}]`)
   for (const el of rows) {
     el.removeAttribute(ROW_SECTION_ATTR)
+    el.removeAttribute('data-bot-section-collapsed')
     el.style.removeProperty('order')
   }
   const lists = document.querySelectorAll(`[${LIST_ATTR}]`)
@@ -392,6 +536,7 @@ function applySections() {
       const section = sectionForRow(row)
       const item = listItem(row, list)
       setAttr(item, ROW_SECTION_ATTR, section)
+      setAttr(item, 'data-bot-section-collapsed', collapsedSections.has(section) ? '1' : '0')
       setOrder(item, sectionBaseOrder(section))
       counts[section] = (counts[section] || 0) + 1
     }
@@ -635,6 +780,8 @@ export default {
   register(ctx) {
     pluginCtx = ctx
     enabled = readEnabled(ctx)
+    readSectionNames(ctx)
+    readCollapsed(ctx)
     readOverrides(ctx)
     injectStyle()
 

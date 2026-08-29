@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-08-29
+
+- Click a section header to collapse/expand it (persisted per install;
+  caret rotates).
+- Double-click a header to rename it in place — emoji welcome
+  ("🏠 Airbnb Operations"). Section IDs (config keys, cycle commands) stay
+  stable; only the displayed label changes. Enter commits, Escape cancels.
+
+
 ## 1.0.0 — 2026-08-29
 
 - First release. Named group headers in the Bot Mode roster (Apollo / OMH /
