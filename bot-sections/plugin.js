@@ -574,6 +574,24 @@ function openSectionMenu(section, x, y, renameNow) {
   menu.style.left = `${Math.min(x, window.innerWidth - rect.width - 8)}px`
   menu.style.top = `${Math.min(y, window.innerHeight - rect.height - 8)}px`
   openMenuEl = menu
+  // The app's own context menu opens from a boot-time window-capture
+  // listener we cannot pre-empt (registration order wins within a phase).
+  // When OUR menu opens on a header, hide the app menu the moment it
+  // mounts. Identified narrowly: a small overlay whose entire text is just
+  // its menu items — never an ancestor (text length cap excludes those).
+  const hideRival = () => {
+    if (openMenuEl !== menu) return
+    const divs = document.querySelectorAll('div')
+    for (const d of divs) {
+      if (d === menu || menu.contains(d) || d.contains(menu)) continue
+      const text = d.textContent || ''
+      if (text.length > 300) continue
+      if (!text.includes('Update Hermes') || !text.includes('Toggle tabs')) continue
+      if (d.style.display === 'none') continue
+      d.style.display = 'none'
+    }
+  }
+  for (const t of [0, 40, 120, 260]) setTimeout(hideRival, t)
   document.addEventListener('pointerdown', onMenuOutside, true)
   document.addEventListener('keydown', onMenuKey, true)
   if (renameNow) startRename()

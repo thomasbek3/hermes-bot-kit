@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.3 — 2026-08-29
+
+- The app's context menu is opened by a boot-time window-capture listener a
+  plugin cannot run before; when the section menu opens on a header, the
+  app menu is now hidden the moment it mounts (narrowly identified, never
+  touched anywhere else).
+
 ## 1.2.2 — 2026-08-29
 
 - Right-click on headers truly wins now: the app opens its own menu on the
