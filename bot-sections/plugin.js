@@ -27,21 +27,23 @@ const ORDER_STEP = 10
 const HIDDEN_ORDER = 10000
 
 const SECTIONS = {
-  order: ['Apollo', 'OMH', 'HQ'],
+  order: ['PaverTurf', 'Airbnb Marketing & Sales', 'Airbnb Operations', 'HQ'],
   bots: {
-    pricing: 'Apollo',
-    pooly: 'Apollo',
-    knowledgey: 'Apollo',
-    listy: 'Apollo',
-    insurey: 'Apollo',
-    inquiry: 'Apollo',
-    onboardy: 'Apollo',
-    rainmaker: 'Apollo',
-    galen: 'OMH',
-    health: 'OMH',
-    sentinel: 'OMH',
+    // PaverTurf (clones land here when staffed)
+    // Airbnb Marketing & Sales
+    rainmaker: 'Airbnb Marketing & Sales',
+    inquiry: 'Airbnb Marketing & Sales',
+    // Airbnb Operations
+    pricing: 'Airbnb Operations',
+    pooly: 'Airbnb Operations',
+    knowledgey: 'Airbnb Operations',
+    listy: 'Airbnb Operations',
+    insurey: 'Airbnb Operations',
+    onboardy: 'Airbnb Operations',
+    // HQ
     jarvis: 'HQ',
     alfred: 'HQ',
+    hermes: 'HQ',
     muse: 'HQ',
     orchestrator: 'HQ',
     meta: 'HQ',
