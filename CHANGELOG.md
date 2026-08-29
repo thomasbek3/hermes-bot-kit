@@ -3,6 +3,14 @@
 Per-plugin history lives in [bubble-mode/CHANGELOG.md](bubble-mode/CHANGELOG.md)
 and [computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md).
 
+## 2026-08-28 (final) — verified on Hermes v0.20.6
+
+- Both Macs updated to Hermes Agent + Desktop v0.20.6 (Bot Mode redesign).
+- bubble-mode 2.0.0 dual detection verified end-to-end on 0.20.6 (probe:
+  body classes active on the selected Bot Chat tab; Scheduled Jobs signal
+  confirmed). texting-style and computer-viewer verified compatible; the
+  dock fix's converged right column (Computer over Scheduled Jobs) is live.
+
 ## 2026-08-28 (later) — bubble-mode 1.5.0 · computer-viewer fixes
 
 - bubble-mode 1.2.0–1.5.0: SMS look gated to the canonical Bot Chat tab
