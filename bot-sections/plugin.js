@@ -85,63 +85,67 @@ body.hermes-bot-sections [${HEADER_ATTR}] {
 .hermes-bot-section-menu {
   position: fixed;
   z-index: 2147483000;
-  min-width: 220px;
-  padding: 0.375rem;
+  min-width: 208px;
+  padding: 0.25rem;
   border-radius: 0.5rem;
-  background: var(--ui-surface-raised, #232326);
-  border: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.12));
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  background: var(--ui-surface-overlay, #17191d);
+  border: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 10px 38px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(0, 0, 0, 0.4);
   font-size: 0.8125rem;
-  color: var(--ui-text-secondary, #d5d5d8);
+  line-height: 1.2;
+  color: var(--ui-text-secondary, #c9c9ce);
+  backdrop-filter: blur(12px);
 }
 
 .hermes-bot-section-menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
-  padding: 0.375rem 0.5rem;
+  padding: 0.375rem 0.625rem;
   border: none;
   border-radius: 0.375rem;
   background: transparent;
-  color: inherit;
+  color: var(--ui-text-primary, #e8e8ea);
   text-align: left;
   cursor: pointer;
   font: inherit;
 }
 
 .hermes-bot-section-menu-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--chrome-action-hover, rgba(255, 255, 255, 0.07));
 }
 
 .hermes-bot-section-menu-emojis {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.125rem;
-  padding: 0.25rem 0.25rem 0.375rem;
-  border-bottom: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.1));
+  gap: 0;
+  padding: 0.125rem 0.25rem 0.25rem;
+  border-bottom: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.06));
   margin-bottom: 0.25rem;
 }
 
 .hermes-bot-section-menu-emojis button {
   border: none;
   background: transparent;
-  font-size: 1rem;
-  padding: 0.2rem 0.3rem;
-  border-radius: 0.3rem;
+  font-size: 0.9375rem;
+  line-height: 1;
+  padding: 0.3125rem 0.375rem;
+  border-radius: 0.375rem;
   cursor: pointer;
 }
 
 .hermes-bot-section-menu-emojis button:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--chrome-action-hover, rgba(255, 255, 255, 0.07));
 }
 
 .hermes-bot-section-menu input {
   width: 100%;
   box-sizing: border-box;
   margin: 0.25rem 0;
-  padding: 0.375rem 0.5rem;
+  padding: 0.375rem 0.625rem;
   border-radius: 0.375rem;
-  border: 1px solid var(--ui-stroke-tertiary, rgba(255, 255, 255, 0.15));
-  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.12));
+  background: var(--ui-surface-sunken, rgba(0, 0, 0, 0.35));
   color: var(--ui-text-primary, #f0f0f2);
   font: inherit;
   outline: none;
@@ -462,13 +466,30 @@ function setEmoji(section, emoji) {
   scheduleSync()
 }
 
-function onGlobalContextMenu(e) {
-  const header = e.target && typeof e.target.closest === 'function' ? e.target.closest(`[${HEADER_ATTR}]`) : null
+function headerFromEvent(e) {
+  return e.target && typeof e.target.closest === 'function' ? e.target.closest(`[${HEADER_ATTR}]`) : null
+}
+
+// The app opens its own context menu on right-button MOUSEDOWN, before the
+// contextmenu event ever fires — so we intercept the press itself, scoped
+// strictly to our headers. contextmenu is still swallowed as a backstop.
+function onGlobalRightPress(e) {
+  if (e.button !== 2) return
+  const header = headerFromEvent(e)
   if (!header) return
   e.preventDefault()
   e.stopImmediatePropagation()
   e.stopPropagation()
   openSectionMenu(header.getAttribute(HEADER_ATTR), e.clientX, e.clientY, false)
+}
+
+function onGlobalContextMenu(e) {
+  const header = headerFromEvent(e)
+  const insideOurMenu = openMenuEl && e.target && openMenuEl.contains(e.target)
+  if (!header && !insideOurMenu) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+  e.stopPropagation()
 }
 
 function openSectionMenu(section, x, y, renameNow) {
@@ -991,8 +1012,14 @@ export default {
     injectStyle()
 
     watchPane(BOTS_PANE_ID, scheduleSync)
+    window.addEventListener('pointerdown', onGlobalRightPress, true)
+    window.addEventListener('mousedown', onGlobalRightPress, true)
     window.addEventListener('contextmenu', onGlobalContextMenu, true)
-    unbinders.push(() => window.removeEventListener('contextmenu', onGlobalContextMenu, true))
+    unbinders.push(() => {
+      window.removeEventListener('pointerdown', onGlobalRightPress, true)
+      window.removeEventListener('mousedown', onGlobalRightPress, true)
+      window.removeEventListener('contextmenu', onGlobalContextMenu, true)
+    })
     startDomObserver()
     scheduleSync()
 

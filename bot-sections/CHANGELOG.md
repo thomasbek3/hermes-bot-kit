@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.2 — 2026-08-29
+
+- Right-click on headers truly wins now: the app opens its own menu on the
+  right-button PRESS (mousedown), before contextmenu ever fires. The plugin
+  intercepts the press itself (window capture, headers only) and swallows
+  the follow-up contextmenu. Right-click anywhere else is untouched.
+
 ## 1.2.1 — 2026-08-29
 
 - Right-click on a section header now reliably opens OUR menu: the app's
