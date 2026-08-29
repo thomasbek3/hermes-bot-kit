@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 — 2026-08-29
+
+- Right-click on a section header now reliably opens OUR menu: the app's
+  global context menu was capturing the event first; the plugin now
+  intercepts at window capture phase, scoped strictly to its own headers —
+  right-click everywhere else is untouched.
+
 ## 1.2.0 — 2026-08-29
 
 - Right-click a section header for a proper menu: an emoji picker

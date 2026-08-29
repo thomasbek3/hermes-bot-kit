@@ -462,6 +462,15 @@ function setEmoji(section, emoji) {
   scheduleSync()
 }
 
+function onGlobalContextMenu(e) {
+  const header = e.target && typeof e.target.closest === 'function' ? e.target.closest(`[${HEADER_ATTR}]`) : null
+  if (!header) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+  e.stopPropagation()
+  openSectionMenu(header.getAttribute(HEADER_ATTR), e.clientX, e.clientY, false)
+}
+
 function openSectionMenu(section, x, y, renameNow) {
   closeMenu()
   const menu = document.createElement('div')
@@ -610,11 +619,6 @@ function createHeader(section) {
       el._collapseTimer = 0
     }
     openSectionMenu(section, e.clientX, e.clientY, true)
-  })
-  el.addEventListener('contextmenu', e => {
-    e.preventDefault()
-    e.stopPropagation()
-    openSectionMenu(section, e.clientX, e.clientY, false)
   })
   el.style.cursor = 'pointer'
   el.addEventListener('click', e => {
@@ -987,6 +991,8 @@ export default {
     injectStyle()
 
     watchPane(BOTS_PANE_ID, scheduleSync)
+    window.addEventListener('contextmenu', onGlobalContextMenu, true)
+    unbinders.push(() => window.removeEventListener('contextmenu', onGlobalContextMenu, true))
     startDomObserver()
     scheduleSync()
 
