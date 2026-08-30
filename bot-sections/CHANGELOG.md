@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.5 — 2026-08-29
+
+- Editor polish round: the smiley button sits below the input (1.4.4), and
+  tapping it now opens a full scrollable emoji palette (120 emojis,
+  iMessage-style grid) instead of a single short row.
+
+
 ## 1.4.3 — 2026-08-29
 
 - Rename / New section editor redone: no Save button — Enter saves, and so

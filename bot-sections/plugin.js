@@ -186,8 +186,12 @@ body.hermes-bot-sections [${HEADER_ATTR}] {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
-  padding: 0;
-  margin: 0;
+  padding: 0.125rem 0;
+  margin: 0 0 0.125rem;
+  max-height: 8.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  width: 13.5rem;
 }
 
 .hermes-bot-section-menu-emojis button {
@@ -577,7 +581,20 @@ function readSectionNames(ctx) {
   }
 }
 
-const MENU_EMOJIS = ['🏠', '💼', '📣', '💰', '⚙️', '🧪', '🚀', '✨', '🤖', '📈']
+const MENU_EMOJIS = [
+  '🏠', '🏡', '🏢', '🏭', '🏗️', '🏖️', '🏔️', '🌆', '🗺️', '📍',
+  '💼', '📁', '📂', '🗂️', '📋', '📝', '📌', '🗃️', '🗄️', '📎',
+  '📣', '📢', '🔔', '💬', '📨', '📧', '☎️', '📱', '🎙️', '📡',
+  '💰', '💵', '💳', '🏦', '📈', '📉', '📊', '🧾', '🪙', '💎',
+  '⚙️', '🔧', '🔨', '🛠️', '🪛', '🔩', '⚡', '🔌', '🧰', '🖥️',
+  '🤖', '🧠', '👾', '🛰️', '🚀', '✈️', '🚗', '🚚', '🛳️', '🧭',
+  '🧪', '🔬', '🔭', '🧬', '⚗️', '📐', '📏', '🧮', '💡', '🔍',
+  '✨', '⭐', '🌟', '🔥', '💥', '🌈', '☀️', '🌙', '❄️', '🌊',
+  '🎯', '🏆', '🥇', '🎖️', '🚩', '🏁', '⛳', '🎲', '🎮', '🕹️',
+  '❤️', '💜', '💙', '💚', '🖤', '✅', '❌', '⚠️', '🚨', '🔒',
+  '🧹', '🧽', '🧺', '🛏️', '🛋️', '🚿', '🔑', '🚪', '🖼️', '🪴',
+  '🍀', '🌵', '🌴', '🐝', '🐜', '🦂', '🐢', '🦊', '🐺', '🦅',
+]
 let openMenuEl = null
 let menuAutosave = null
 
@@ -779,9 +796,9 @@ function openSectionMenu(section, x, y, renameNow) {
     })
 
     emrow.appendChild(smiley)
-    emrow.appendChild(strip)
     menu.appendChild(input)
     menu.appendChild(emrow)
+    menu.appendChild(strip)
     input.focus()
     if (mode === 'rename') input.select()
   }
