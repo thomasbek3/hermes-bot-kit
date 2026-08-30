@@ -27,29 +27,13 @@ const ORDER_STEP = 10
 const HIDDEN_ORDER = 10000
 
 const SECTIONS = {
-  order: ['PaverTurf', 'Airbnb Marketing & Sales', 'Airbnb Operations', 'HQ'],
-  bots: {
-    // PaverTurf (clones land here when staffed)
-    // Airbnb Marketing & Sales
-    rainmaker: 'Airbnb Marketing & Sales',
-    inquiry: 'Airbnb Marketing & Sales',
-    // Airbnb Operations
-    pricing: 'Airbnb Operations',
-    pooly: 'Airbnb Operations',
-    knowledgey: 'Airbnb Operations',
-    listy: 'Airbnb Operations',
-    insurey: 'Airbnb Operations',
-    onboardy: 'Airbnb Operations',
-    // HQ
-    jarvis: 'HQ',
-    alfred: 'HQ',
-    hermes: 'HQ',
-    muse: 'HQ',
-    orchestrator: 'HQ',
-    meta: 'HQ',
-    bouncer: 'HQ',
-    techy: 'HQ'
-  }
+  // One-time seed, imported into storage on first launch. Ship empty: a
+  // fresh install shows a single "Unassigned" section wrapping every bot —
+  // right-click it -> "New section…" to start organizing, then move bots
+  // with the palette ("Bot Sections: cycle <bot>"). Pre-fill this block if
+  // you prefer declaring a starting layout in code.
+  order: [],
+  bots: {}
 }
 
 let customSections = []
