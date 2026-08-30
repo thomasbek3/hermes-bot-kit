@@ -42,20 +42,6 @@ Desktop plugins plus an optional agent plugin, one install:
 </p>
 <p align="center"><em>The kit in one screen: iMessage-style Bot Chat, named roster sections, and the live Computer pane.</em></p>
 
-```
-┌────────────────────────────────────────────┐
-│                      ╭─────────────────╮   │
-│                      │ hey, status?    │   │  ← you
-│                      ╰─────────────────╯   │
-│  ╭──────────────────────────╮              │
-│  │ All green. Backups ran,  │              │  ← your bot
-│  │ nothing needs you.       │              │
-│  ╰──────────────────────────╯              │
-│  ╭─────╮                                   │
-│  │ ⋯  │                                    │  ← typing while it works
-│  ╰─────╯                                   │
-└────────────────────────────────────────────┘
-```
 
 ## Install
 
