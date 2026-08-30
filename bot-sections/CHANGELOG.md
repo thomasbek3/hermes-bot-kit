@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2 — 2026-08-29
+
+- Menu hover/clicks for real this time: the app's dismiss-layer locks the
+  whole page with body pointer-events:none and exempts only its own portal.
+  Our menu now exempts itself the same way (and unlocks the page while
+  open), so items highlight and respond.
+
 ## 1.3.1 — 2026-08-29
 
 - Menu items respond again: the app menu's invisible dismiss-layer (its

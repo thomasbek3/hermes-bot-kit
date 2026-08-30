@@ -98,6 +98,7 @@ body.hermes-bot-sections [${HEADER_ATTR}] {
 .hermes-bot-section-menu {
   position: fixed;
   z-index: 2147483000;
+  pointer-events: auto;
   min-width: 13rem;
   padding: 0.25rem;
   border-radius: 0.5rem;
@@ -504,6 +505,10 @@ let openMenuEl = null
 
 function closeMenu() {
   if (openMenuEl) {
+    if (openMenuEl._restoreBodyPE !== undefined && document.body.style.pointerEvents === '') {
+      // leave the page unlocked — the rival layer is hidden and cannot
+      // restore itself; re-locking would freeze the whole app
+    }
     openMenuEl.remove()
     openMenuEl = null
     document.removeEventListener('pointerdown', onMenuOutside, true)
@@ -699,6 +704,14 @@ function openSectionMenu(section, x, y, renameNow) {
   newItem.addEventListener('click', () => openEditor('new'))
 
   document.body.appendChild(menu)
+  menu.style.pointerEvents = 'auto'
+  // Radix-style dismiss layers set body { pointer-events: none } and exempt
+  // only their own portal. If the (hidden) rival layer left the page locked,
+  // unlock it for the lifetime of our menu and restore afterwards.
+  if (document.body.style.pointerEvents === 'none') {
+    menu._restoreBodyPE = 'none'
+    document.body.style.pointerEvents = ''
+  }
   const rect = menu.getBoundingClientRect()
   menu.style.left = `${Math.min(x, window.innerWidth - rect.width - 8)}px`
   menu.style.top = `${Math.min(y, window.innerHeight - rect.height - 8)}px`
