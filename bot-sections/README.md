@@ -57,11 +57,14 @@ Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
 Since 1.1.0 the headers themselves are interactive:
 
 - **Collapse/expand:** click a section header (persists across restarts).
-- **Right-click a header** for the section menu: emoji picker (one click
-  sets 🏠 💼 📣 💰 … or removes it), **Rename…** (real input — Enter saves,
-  Escape cancels), and Collapse/Expand. Double-click jumps straight to
-  rename. Renames are display-only — config keys and palette commands keep
-  the original id.
+- **Right-click a header** for the section menu: **Rename…**,
+  **New section…**, Collapse/Expand — and **Delete section** on sections
+  you created. Rename and New open an inline input with an emoji strip
+  beneath it (tap 🏠 💼 📣 💰 … to prepend, Enter saves name + emoji
+  together, Escape cancels). Double-click a header jumps straight to
+  rename. Custom sections persist per install and stay visible while
+  empty; deleting one sends its bots back to Unassigned. Renames are
+  display-only — config keys and palette commands keep the original id.
 
 The rest:
 

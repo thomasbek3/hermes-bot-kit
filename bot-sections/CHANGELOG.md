@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 — 2026-08-29
+
+- **New section…** in the header right-click menu: name it inline (emoji
+  strip under the input), it appears immediately and stays visible while
+  empty so you can cycle bots into it. Custom sections persist per install
+  and get a **Delete section** menu item (bots fall back to Unassigned).
+- **Emoji picker moved where it belongs:** no more always-visible strip at
+  the top of the menu — it now appears under the input when you click
+  Rename… or New section…, Notion-style: tap an emoji to prepend it, Enter
+  saves name + emoji together.
+
+
 ## 1.2.4 — 2026-08-29
 
 - Menu restyled from the app's own context-menu recipe (same tokens:

@@ -52,7 +52,20 @@ const SECTIONS = {
   }
 }
 
-const SECTION_LADDER = [...SECTIONS.order, UNASSIGNED]
+let customSections = []
+
+function sectionLadder() {
+  const seen = new Set()
+  const ladder = []
+  for (const name of [...SECTIONS.order, ...customSections]) {
+    const n = String(name || '').trim()
+    if (!n || n === UNASSIGNED || seen.has(n)) continue
+    seen.add(n)
+    ladder.push(n)
+  }
+  ladder.push(UNASSIGNED)
+  return ladder
+}
 
 const CSS = /* css */ `
 body.hermes-bot-sections [${LIST_ATTR}] {
@@ -130,9 +143,8 @@ body.hermes-bot-sections [${HEADER_ATTR}] {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
-  padding: 0.125rem 0.125rem 0.25rem;
-  border-bottom: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.08));
-  margin-bottom: 0.25rem;
+  padding: 0.125rem;
+  margin: 0 0 0.125rem;
 }
 
 .hermes-bot-section-menu-emojis button {
@@ -280,13 +292,13 @@ function botsPaneActive() {
 }
 
 function knownSection(name) {
-  return name === UNASSIGNED || SECTIONS.order.includes(name)
+  return sectionLadder().includes(name)
 }
 
 function sectionBaseOrder(sectionId) {
-  if (sectionId === UNASSIGNED) return (SECTIONS.order.length + 1) * ORDER_STEP
-  const i = SECTIONS.order.indexOf(sectionId)
-  if (i < 0) return (SECTIONS.order.length + 1) * ORDER_STEP
+  const ladder = sectionLadder()
+  const i = ladder.indexOf(sectionId)
+  if (i < 0) return ladder.length * ORDER_STEP
   return (i + 1) * ORDER_STEP
 }
 
@@ -430,6 +442,29 @@ function readCollapsed(ctx) {
   }
 }
 
+function persistCustomSections() {
+  try {
+    pluginCtx?.storage?.set?.('customSections', customSections)
+  } catch {
+    /* holds for this window */
+  }
+}
+
+function readCustomSections(ctx) {
+  try {
+    const value = ctx.storage?.get?.('customSections', [])
+    const absorb = list => {
+      if (Array.isArray(list)) customSections = list.map(String).filter(Boolean)
+      scheduleSync()
+      registerCycleCommands()
+    }
+    if (value && typeof value.then === 'function') value.then(absorb).catch(() => undefined)
+    else absorb(value)
+  } catch {
+    /* ignore */
+  }
+}
+
 function toggleCollapsed(section) {
   if (collapsedSections.has(section)) collapsedSections.delete(section)
   else collapsedSections.add(section)
@@ -528,60 +563,117 @@ function openSectionMenu(section, x, y, renameNow) {
   const menu = document.createElement('div')
   menu.className = 'hermes-bot-section-menu'
 
-  const emojiRow = document.createElement('div')
-  emojiRow.className = 'hermes-bot-section-menu-emojis'
-  for (const em of MENU_EMOJIS) {
+  const mkItem = (svg, text) => {
     const b = document.createElement('button')
     b.type = 'button'
-    b.textContent = em
-    b.title = `Set ${em} on this section`
-    b.addEventListener('click', () => {
-      setEmoji(section, em)
-      closeMenu()
-    })
-    emojiRow.appendChild(b)
+    b.className = 'hermes-bot-section-menu-item'
+    b.innerHTML = `${svg}<span>${text}</span>`
+    menu.appendChild(b)
+    return b
   }
-  const clearB = document.createElement('button')
-  clearB.type = 'button'
-  clearB.textContent = '✕'
-  clearB.title = 'Remove emoji'
-  clearB.addEventListener('click', () => {
-    setEmoji(section, '')
-    closeMenu()
-  })
-  emojiRow.appendChild(clearB)
-  menu.appendChild(emojiRow)
 
-  const renameItem = document.createElement('button')
-  renameItem.type = 'button'
-  renameItem.className = 'hermes-bot-section-menu-item'
-  renameItem.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M11.1 2.6a1.4 1.4 0 0 1 2 2L5.4 12.3l-2.7.7.7-2.7 7.7-7.7z"/></svg><span>Rename…</span>'
-  menu.appendChild(renameItem)
-
-  const collapseItem = document.createElement('button')
-  collapseItem.type = 'button'
-  collapseItem.className = 'hermes-bot-section-menu-item'
-  collapseItem.innerHTML = collapsedSections.has(section)
-    ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 6l4 4 4-4"/></svg><span>Expand</span>'
-    : '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 10l4-4 4 4"/></svg><span>Collapse</span>'
+  const renameItem = mkItem(
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M11.1 2.6a1.4 1.4 0 0 1 2 2L5.4 12.3l-2.7.7.7-2.7 7.7-7.7z"/></svg>',
+    'Rename…'
+  )
+  const newItem = mkItem(
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 3v10M3 8h10"/></svg>',
+    'New section…'
+  )
+  const collapseItem = mkItem(
+    collapsedSections.has(section)
+      ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 6l4 4 4-4"/></svg>'
+      : '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 10l4-4 4 4"/></svg>',
+    collapsedSections.has(section) ? 'Expand' : 'Collapse'
+  )
   collapseItem.addEventListener('click', () => {
     toggleCollapsed(section)
     closeMenu()
   })
-  menu.appendChild(collapseItem)
 
-  const startRename = () => {
+  let deleteItem = null
+  if (customSections.includes(section)) {
+    deleteItem = mkItem(
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.2a1 1 0 0 0 1 .9h3.6a1 1 0 0 0 1-.9l.7-8.2"/></svg>',
+      'Delete section'
+    )
+    deleteItem.addEventListener('click', () => {
+      customSections = customSections.filter(n => n !== section)
+      persistCustomSections()
+      // bots pointing at the deleted section fall back to Unassigned
+      let changed = false
+      const next = { ...overrides }
+      for (const [k, v] of Object.entries(next)) {
+        if (v === section) {
+          next[k] = UNASSIGNED
+          changed = true
+        }
+      }
+      if (changed) {
+        overrides = next
+        writeOverrides()
+      }
+      delete sectionNames[section]
+      persistSectionNames()
+      collapsedSections.delete(section)
+      persistCollapsed()
+      scheduleSync()
+      closeMenu()
+    })
+  }
+
+  // Shared editor: input + emoji strip beneath it (Notion-style: pick an
+  // emoji to prepend, then Enter/Save commits name+emoji together).
+  const openEditor = mode => {
     renameItem.hidden = true
+    newItem.hidden = true
     collapseItem.hidden = true
+    if (deleteItem) deleteItem.hidden = true
+
     const input = document.createElement('input')
     input.type = 'text'
-    input.value = displaySectionName(section)
-    input.placeholder = section
+    if (mode === 'rename') {
+      input.value = displaySectionName(section)
+      input.placeholder = section
+    } else {
+      input.value = ''
+      input.placeholder = 'New section name'
+    }
+
+    const strip = document.createElement('div')
+    strip.className = 'hermes-bot-section-menu-emojis'
+    const setLeading = em => {
+      const bare = input.value.replace(/^[^\p{L}\p{N}]+\s*/u, '')
+      input.value = em ? `${em} ${bare}` : bare
+      input.focus()
+    }
+    for (const em of MENU_EMOJIS) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.textContent = em
+      b.addEventListener('click', () => setLeading(em))
+      strip.appendChild(b)
+    }
+    const clearB = document.createElement('button')
+    clearB.type = 'button'
+    clearB.textContent = '✕'
+    clearB.title = 'Remove emoji'
+    clearB.addEventListener('click', () => setLeading(''))
+    strip.appendChild(clearB)
+
     const commit = () => {
       const next = input.value.trim()
-      if (next && next !== section) sectionNames[section] = next
-      else delete sectionNames[section]
-      persistSectionNames()
+      if (mode === 'rename') {
+        if (next && next !== section) sectionNames[section] = next
+        else delete sectionNames[section]
+        persistSectionNames()
+      } else {
+        if (next && !sectionLadder().includes(next)) {
+          customSections = [...customSections, next]
+          persistCustomSections()
+          registerCycleCommands()
+        }
+      }
       scheduleSync()
       closeMenu()
     }
@@ -593,14 +685,18 @@ function openSectionMenu(section, x, y, renameNow) {
     const save = document.createElement('button')
     save.type = 'button'
     save.className = 'hermes-bot-section-menu-item'
-    save.textContent = 'Save'
+    save.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8.5l3.2 3.2L13 5"/></svg><span>Save</span>'
     save.addEventListener('click', commit)
+
     menu.appendChild(input)
+    menu.appendChild(strip)
     menu.appendChild(save)
     input.focus()
-    input.select()
+    if (mode === 'rename') input.select()
   }
-  renameItem.addEventListener('click', startRename)
+
+  renameItem.addEventListener('click', () => openEditor('rename'))
+  newItem.addEventListener('click', () => openEditor('new'))
 
   document.body.appendChild(menu)
   const rect = menu.getBoundingClientRect()
@@ -608,10 +704,8 @@ function openSectionMenu(section, x, y, renameNow) {
   menu.style.top = `${Math.min(y, window.innerHeight - rect.height - 8)}px`
   openMenuEl = menu
   // The app's own context menu opens from a boot-time window-capture
-  // listener we cannot pre-empt (registration order wins within a phase).
-  // When OUR menu opens on a header, hide the app menu the moment it
-  // mounts. Identified narrowly: a small overlay whose entire text is just
-  // its menu items — never an ancestor (text length cap excludes those).
+  // listener we cannot pre-empt; hide it the moment it mounts (narrowly
+  // identified, never touched anywhere else).
   const hideRival = () => {
     if (openMenuEl !== menu) return
     const divs = document.querySelectorAll('div')
@@ -627,7 +721,7 @@ function openSectionMenu(section, x, y, renameNow) {
   for (const t of [0, 40, 120, 260]) setTimeout(hideRival, t)
   document.addEventListener('pointerdown', onMenuOutside, true)
   document.addEventListener('keydown', onMenuKey, true)
-  if (renameNow) startRename()
+  if (renameNow) openEditor('rename')
 }
 
 function beginRename(label, section) {
@@ -737,7 +831,7 @@ function createHeader(section) {
 }
 
 function syncHeaders(list, counts) {
-  for (const section of SECTION_LADDER) {
+  for (const section of sectionLadder()) {
     const sel = `:scope > [${HEADER_ATTR}="${cssAttr(section)}"]`
     let header = null
     try {
@@ -759,7 +853,7 @@ function syncHeaders(list, counts) {
     const countEl = header.querySelector('[data-hermes-bot-section-count]')
     const countText = String(count)
     if (countEl && countEl.textContent !== countText) countEl.textContent = countText
-    const hide = count === 0
+    const hide = count === 0 && !customSections.includes(section)
     if (header.hidden !== hide) header.hidden = hide
     setAttr(header, 'data-collapsed', collapsedSections.has(section) ? '1' : '0')
   }
@@ -830,7 +924,7 @@ function applySections() {
   for (const [list, listRows] of buckets) {
     setAttr(list, LIST_ATTR, '')
     const counts = Object.create(null)
-    for (const section of SECTION_LADDER) counts[section] = 0
+    for (const section of sectionLadder()) counts[section] = 0
     for (const row of listRows) {
       const section = sectionForRow(row)
       const item = listItem(row, list)
@@ -972,9 +1066,10 @@ function cycleBot(bot) {
     .trim()
     .toLowerCase()
   if (!key) return
+  const ladder = sectionLadder()
   const current = sectionForKey(key)
-  const i = SECTION_LADDER.indexOf(current)
-  const next = SECTION_LADDER[(i < 0 ? 0 : i + 1) % SECTION_LADDER.length]
+  const i = ladder.indexOf(current)
+  const next = ladder[(i < 0 ? 0 : i + 1) % ladder.length]
   overrides = { ...overrides, [key]: next }
   writeOverrides()
   scheduleSync()
@@ -1082,6 +1177,7 @@ export default {
     enabled = readEnabled(ctx)
     readSectionNames(ctx)
     readCollapsed(ctx)
+    readCustomSections(ctx)
     readOverrides(ctx)
     injectStyle()
 
