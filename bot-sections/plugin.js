@@ -186,8 +186,8 @@ body.hermes-bot-sections [${HEADER_ATTR}] {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
-  padding: 0.125rem;
-  margin: 0 0 0.125rem;
+  padding: 0;
+  margin: 0;
 }
 
 .hermes-bot-section-menu-emojis button {
@@ -223,11 +223,11 @@ body.hermes-bot-sections [${HEADER_ATTR}]:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
-.hermes-bot-section-menu-editrow {
+.hermes-bot-section-menu-emrow {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  margin: 0.25rem 0;
+  gap: 0.125rem;
+  margin: 0 0 0.125rem;
 }
 
 .hermes-bot-section-menu-smiley {
@@ -255,9 +255,9 @@ body.hermes-bot-sections [${HEADER_ATTR}]:hover {
 }
 
 .hermes-bot-section-menu input {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
   box-sizing: border-box;
+  margin: 0.25rem 0;
   padding: 0.3125rem 0.5rem;
   border-radius: 0.375rem;
   border: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.12));
@@ -716,8 +716,8 @@ function openSectionMenu(section, x, y, renameNow) {
       input.placeholder = 'New section name'
     }
 
-    const row = document.createElement('div')
-    row.className = 'hermes-bot-section-menu-editrow'
+    const emrow = document.createElement('div')
+    emrow.className = 'hermes-bot-section-menu-emrow'
 
     const smiley = document.createElement('button')
     smiley.type = 'button'
@@ -778,10 +778,10 @@ function openSectionMenu(section, x, y, renameNow) {
       }
     })
 
-    row.appendChild(input)
-    row.appendChild(smiley)
-    menu.appendChild(row)
-    menu.appendChild(strip)
+    emrow.appendChild(smiley)
+    emrow.appendChild(strip)
+    menu.appendChild(input)
+    menu.appendChild(emrow)
     input.focus()
     if (mode === 'rename') input.select()
   }
