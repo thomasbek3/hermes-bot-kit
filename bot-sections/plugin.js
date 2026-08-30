@@ -714,11 +714,24 @@ function openSectionMenu(section, x, y, renameNow) {
       const text = d.textContent || ''
       if (text.length > 300) continue
       if (!text.includes('Update Hermes') || !text.includes('Toggle tabs')) continue
-      if (d.style.display === 'none') continue
-      d.style.display = 'none'
+      // Hide the app menu's whole body-level portal, not just the visible
+      // box: its invisible dismiss-layer otherwise floats above our menu
+      // and eats every hover/click (same z, later in DOM wins hit-testing).
+      let node = d
+      while (node.parentElement && node.parentElement !== document.body) {
+        node = node.parentElement
+      }
+      const target = node.parentElement === document.body && node !== menu && !node.contains(menu) ? node : d
+      if (target.style.display !== 'none') target.style.display = 'none'
+      if (target !== d && d.style.display !== 'none') d.style.display = 'none'
+    }
+    // Re-assert our menu as the last body child so same-z hit-testing
+    // favors it over any layer mounted after we opened.
+    if (menu.parentNode === document.body && document.body.lastElementChild !== menu) {
+      document.body.appendChild(menu)
     }
   }
-  for (const t of [0, 40, 120, 260]) setTimeout(hideRival, t)
+  for (const t of [0, 40, 120, 260, 450]) setTimeout(hideRival, t)
   document.addEventListener('pointerdown', onMenuOutside, true)
   document.addEventListener('keydown', onMenuKey, true)
   if (renameNow) openEditor('rename')

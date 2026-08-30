@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 — 2026-08-29
+
+- Menu items respond again: the app menu's invisible dismiss-layer (its
+  full-screen click-catcher) was floating above our menu, eating hover and
+  clicks. The whole rival portal is now hidden and our menu re-asserts
+  itself as the top hit-test layer.
+
 ## 1.3.0 — 2026-08-29
 
 - **New section…** in the header right-click menu: name it inline (emoji
