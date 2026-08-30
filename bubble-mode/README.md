@@ -24,20 +24,9 @@ On the Bot Chat tab you get:
 - **Typing indicator.** While the bot thinks or works, an iMessage-style
   "..." pill with pulsing dots shows where the reply will land.
 
-```
-┌────────────────────────────────────────────┐
-│                      ╭─────────────────╮   │
-│                      │ hey, status?    │   │  ← you (light gray)
-│                      ╰─────────────────╯   │
-│  ╭─────╮                                   │
-│  │ ⋯  │                                    │  ← bot is typing/working
-│  ╰─────╯                                   │
-│  ╭──────────────────────────╮              │
-│  │ All green. Backups ran,  │              │  ← your bot (dark gray)
-│  │ nothing needs you.       │              │
-│  ╰──────────────────────────╯              │
-└────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="screenshots/bubbles.png" alt="iMessage-style bubbles in a Hermes Bot Chat" width="760">
+</p>
 
 ## Install (one command — agents can run this unattended)
 
