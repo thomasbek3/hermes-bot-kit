@@ -53,6 +53,64 @@ const SECTIONS = {
 }
 
 let customSections = []
+const discoveredBots = new Set()
+let discoveredDirty = false
+
+// First-run seed: the SECTIONS config block is a one-time template. On the
+// first launch it is imported into storage (custom sections + overrides);
+// from then on storage is the single source of truth, so users can rename
+// and delete every section — and kit updates shipping a neutral config
+// never touch an existing layout.
+const seedState = { customs: false, overrides: false, flag: undefined }
+
+function trySeedFromConfig() {
+  if (!seedState.customs || !seedState.overrides || seedState.flag === undefined) return
+  if (seedState.flag) return
+  seedState.flag = true
+  let changed = false
+  for (const name of SECTIONS.order) {
+    const n = String(name || '').trim()
+    if (n && n !== UNASSIGNED && !customSections.includes(n)) {
+      customSections.push(n)
+      changed = true
+    }
+  }
+  const next = { ...overrides }
+  for (const [k, v] of Object.entries(SECTIONS.bots)) {
+    const key = String(k || '').trim().toLowerCase()
+    if (key && !(key in next)) {
+      next[key] = v
+      changed = true
+    }
+  }
+  if (changed) {
+    overrides = next
+    writeOverrides()
+    persistCustomSections()
+  }
+  try {
+    pluginCtx?.storage?.set?.('configSeeded', true)
+  } catch {
+    /* holds for this window */
+  }
+  scheduleSync()
+  registerCycleCommands()
+}
+
+function readSeedFlag(ctx) {
+  try {
+    const value = ctx.storage?.get?.('configSeeded', false)
+    const absorb = v => {
+      seedState.flag = v === true
+      trySeedFromConfig()
+    }
+    if (value && typeof value.then === 'function') value.then(absorb).catch(() => { seedState.flag = false; trySeedFromConfig() })
+    else absorb(value)
+  } catch {
+    seedState.flag = false
+    trySeedFromConfig()
+  }
+}
 
 function sectionLadder() {
   const seen = new Set()
@@ -456,6 +514,8 @@ function readCustomSections(ctx) {
     const value = ctx.storage?.get?.('customSections', [])
     const absorb = list => {
       if (Array.isArray(list)) customSections = list.map(String).filter(Boolean)
+      seedState.customs = true
+      trySeedFromConfig()
       scheduleSync()
       registerCycleCommands()
     }
@@ -965,6 +1025,13 @@ function applySections() {
     for (const section of sectionLadder()) counts[section] = 0
     for (const row of listRows) {
       const section = sectionForRow(row)
+      for (const id of rowIdentities(row)) {
+        if (!discoveredBots.has(id)) {
+          discoveredBots.add(id)
+          discoveredDirty = true
+        }
+        break
+      }
       const item = listItem(row, list)
       setAttr(item, ROW_SECTION_ATTR, section)
       setAttr(item, 'data-bot-section-collapsed', collapsedSections.has(section) ? '1' : '0')
@@ -978,6 +1045,10 @@ function applySections() {
       }
     }
     syncHeaders(list, counts)
+  }
+  if (discoveredDirty) {
+    discoveredDirty = false
+    registerCycleCommands()
   }
 
   const staleHeaders = document.querySelectorAll(`[${HEADER_ATTR}]`)
@@ -1050,6 +1121,8 @@ function readEnabled(ctx) {
 }
 
 function absorbOverrides(value) {
+  seedState.overrides = true
+  setTimeout(trySeedFromConfig, 0)
   if (!value || typeof value !== 'object' || Array.isArray(value)) return
   const next = {}
   for (const [key, section] of Object.entries(value)) {
@@ -1116,6 +1189,7 @@ function cycleBot(bot) {
 function knownBots() {
   const bots = new Set(Object.keys(SECTIONS.bots))
   for (const key of Object.keys(overrides)) bots.add(key)
+  for (const key of discoveredBots) bots.add(key)
   return bots
 }
 
@@ -1216,6 +1290,7 @@ export default {
     readSectionNames(ctx)
     readCollapsed(ctx)
     readCustomSections(ctx)
+    readSeedFlag(ctx)
     readOverrides(ctx)
     injectStyle()
 

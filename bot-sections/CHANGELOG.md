@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.0 — 2026-08-29
+
+- **Cold-start ready for everyone.** The `SECTIONS` config block is now a
+  one-time seed: on first launch it imports into storage, which becomes the
+  single source of truth — so every section (including ones from config)
+  can be renamed and deleted, and plugin updates never clobber your layout.
+  The shipped default config is empty: a fresh install shows one
+  "Unassigned (n)" section wrapping all bots — right-click it → New
+  section… to start organizing.
+- **Bots auto-discovered from the roster** for the palette: "Bot Sections:
+  cycle <bot>" commands now exist for every bot visible in your roster, not
+  just ones already mapped — so new sections can be populated immediately.
+
+
 ## 1.3.3 — 2026-08-29
 
 - Delete section works visibly: the deleted section's header element was
