@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.1 — 2026-08-29
+
+- Collapse is instant (the 250ms double-click disambiguation delay is gone;
+  double-click rename retired — right-click → Rename… is the path).
+- Caret is a proper chevron (bigger, straight, rotates cleanly), replacing
+  the CSS border-triangle that rendered slightly diagonal.
+
+
 ## 1.4.0 — 2026-08-29
 
 - **Cold-start ready for everyone.** The `SECTIONS` config block is now a

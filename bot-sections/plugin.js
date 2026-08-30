@@ -263,14 +263,16 @@ body.hermes-bot-sections .hermes-bot-section-caret {
 }
 
 body.hermes-bot-sections .hermes-bot-section-caret {
-  width: 0;
-  height: 0;
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
-  border-left: 5px solid currentColor;
-  transform: rotate(90deg);
-  opacity: 0.85;
+  display: inline-flex;
+  width: 0.875rem;
+  height: 0.875rem;
+  opacity: 0.9;
   flex-shrink: 0;
+}
+
+body.hermes-bot-sections .hermes-bot-section-caret svg {
+  width: 100%;
+  height: 100%;
 }
 
 body.hermes-bot-sections .hermes-bot-section-label {
@@ -843,19 +845,12 @@ function createHeader(section) {
   const caret = document.createElement('span')
   caret.className = 'hermes-bot-section-caret'
   caret.setAttribute('aria-hidden', 'true')
+  caret.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.25L8 9.75l3.5-3.5"/></svg>'
   const label = document.createElement('span')
   label.className = 'hermes-bot-section-label'
   label.textContent = displaySectionName(section)
   label.title = 'Double-click to rename (emoji welcome)'
-  label.addEventListener('dblclick', e => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (el._collapseTimer) {
-      clearTimeout(el._collapseTimer)
-      el._collapseTimer = 0
-    }
-    openSectionMenu(section, e.clientX, e.clientY, true)
-  })
+
   el.style.cursor = 'pointer'
   el.addEventListener('mouseenter', () => {
     if (el._tipTimer) clearTimeout(el._tipTimer)
@@ -881,14 +876,9 @@ function createHeader(section) {
     }
   })
   el.addEventListener('click', e => {
-    if (label.isContentEditable) return
     e.preventDefault()
     e.stopPropagation()
-    if (el._collapseTimer) clearTimeout(el._collapseTimer)
-    el._collapseTimer = setTimeout(() => {
-      el._collapseTimer = 0
-      toggleCollapsed(section)
-    }, 250)
+    toggleCollapsed(section)
   })
   const spacer = document.createElement('span')
   spacer.className = 'hermes-bot-section-spacer'
