@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.3 — 2026-08-29
+
+- Rename / New section editor redone: no Save button — Enter saves, and so
+  does clicking anywhere outside (autosave; Escape cancels). The emoji strip
+  is hidden behind an iMessage-style smiley button at the end of the input.
+
+
 ## 1.4.2 — 2026-08-29
 
 - Menu slimmed: Collapse/Expand removed — left-click on the header already

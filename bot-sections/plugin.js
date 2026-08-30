@@ -223,10 +223,41 @@ body.hermes-bot-sections [${HEADER_ATTR}]:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
-.hermes-bot-section-menu input {
-  width: 100%;
-  box-sizing: border-box;
+.hermes-bot-section-menu-editrow {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
   margin: 0.25rem 0;
+}
+
+.hermes-bot-section-menu-smiley {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--ui-text-tertiary, rgba(255, 255, 255, 0.45));
+  cursor: default;
+}
+
+.hermes-bot-section-menu-smiley svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.hermes-bot-section-menu-smiley:hover {
+  background: var(--ui-control-active-background, rgba(255, 255, 255, 0.08));
+  color: var(--ui-text-secondary, #d0d0d4);
+}
+
+.hermes-bot-section-menu input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.3125rem 0.5rem;
   border-radius: 0.375rem;
   border: 1px solid var(--ui-stroke-secondary, rgba(255, 255, 255, 0.12));
@@ -548,8 +579,14 @@ function readSectionNames(ctx) {
 
 const MENU_EMOJIS = ['🏠', '💼', '📣', '💰', '⚙️', '🧪', '🚀', '✨', '🤖', '📈']
 let openMenuEl = null
+let menuAutosave = null
 
 function closeMenu() {
+  if (menuAutosave) {
+    const f = menuAutosave
+    menuAutosave = null
+    f()
+  }
   if (openMenuEl) {
     if (openMenuEl._restoreBodyPE !== undefined && document.body.style.pointerEvents === '') {
       // leave the page unlocked — the rival layer is hidden and cannot
@@ -679,8 +716,22 @@ function openSectionMenu(section, x, y, renameNow) {
       input.placeholder = 'New section name'
     }
 
+    const row = document.createElement('div')
+    row.className = 'hermes-bot-section-menu-editrow'
+
+    const smiley = document.createElement('button')
+    smiley.type = 'button'
+    smiley.className = 'hermes-bot-section-menu-smiley'
+    smiley.title = 'Add an emoji'
+    smiley.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M5.4 9.4a3.4 3.4 0 0 0 5.2 0"/><circle cx="6" cy="6.6" r="0.55" fill="currentColor" stroke="none"/><circle cx="10" cy="6.6" r="0.55" fill="currentColor" stroke="none"/></svg>'
+
     const strip = document.createElement('div')
     strip.className = 'hermes-bot-section-menu-emojis'
+    strip.hidden = true
+    smiley.addEventListener('click', () => {
+      strip.hidden = !strip.hidden
+      input.focus()
+    })
     const setLeading = em => {
       const bare = input.value.replace(/^[^\p{L}\p{N}]+\s*/u, '')
       input.value = em ? `${em} ${bare}` : bare
@@ -700,11 +751,11 @@ function openSectionMenu(section, x, y, renameNow) {
     clearB.addEventListener('click', () => setLeading(''))
     strip.appendChild(clearB)
 
-    const commit = () => {
+    const save = () => {
       const next = input.value.trim()
       if (mode === 'rename') {
         if (next && next !== section) sectionNames[section] = next
-        else delete sectionNames[section]
+        else if (!next || next === section) delete sectionNames[section]
         persistSectionNames()
       } else {
         if (next && !sectionLadder().includes(next)) {
@@ -714,22 +765,23 @@ function openSectionMenu(section, x, y, renameNow) {
         }
       }
       scheduleSync()
-      closeMenu()
     }
+    // autosave: Enter commits, clicking anywhere outside commits too;
+    // only Escape cancels.
+    menuAutosave = save
     input.addEventListener('keydown', e => {
       e.stopPropagation()
-      if (e.key === 'Enter') commit()
-      if (e.key === 'Escape') closeMenu()
+      if (e.key === 'Enter') closeMenu()
+      if (e.key === 'Escape') {
+        menuAutosave = null
+        closeMenu()
+      }
     })
-    const save = document.createElement('button')
-    save.type = 'button'
-    save.className = 'hermes-bot-section-menu-item'
-    save.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8.5l3.2 3.2L13 5"/></svg><span>Save</span>'
-    save.addEventListener('click', commit)
 
-    menu.appendChild(input)
+    row.appendChild(input)
+    row.appendChild(smiley)
+    menu.appendChild(row)
     menu.appendChild(strip)
-    menu.appendChild(save)
     input.focus()
     if (mode === 'rename') input.select()
   }
