@@ -1,5 +1,21 @@
 # Changelog (kit)
 
+## 2026-08-29 (evening) — bot-sections 1.0.0 → 1.4.1 in a day
+
+- New fourth plugin matured through live iteration: named roster sections
+  with counts and native-styled headers (1.0.0, Grok-built/Claude-reviewed);
+  instant click-to-collapse; right-click menu — Rename…, New section…,
+  Delete (custom sections), emoji strip under the input, Notion-style;
+  hover highlight + tooltip chips; real chevron carets.
+- Hard-won plugin engineering documented in its BUILD-NOTES: the app's
+  context menu opens on right-button mousedown from a boot-time capture
+  listener (interception must catch the press), and its dismiss-layer
+  locks the page with body pointer-events — plugin menus must exempt
+  themselves.
+- Cold-start ready (1.4.0): the config block is a one-time storage seed,
+  shipped empty — fresh installs begin from a single Unassigned section;
+  palette move-commands are auto-registered for every roster bot.
+
 ## 2026-08-29 — bot-sections 1.0.0
 
 - New fourth plugin: `bot-sections/`, a desktop plugin that overlays named
