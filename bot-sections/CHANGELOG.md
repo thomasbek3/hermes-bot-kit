@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.3 — 2026-08-29
+
+- Delete section works visibly: the deleted section's header element was
+  left orphaned in the roster (the sync loop never visits removed
+  sections); headers not in the current ladder are now swept out.
+
 ## 1.3.2 — 2026-08-29
 
 - Menu hover/clicks for real this time: the app's dismiss-layer locks the

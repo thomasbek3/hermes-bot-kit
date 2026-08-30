@@ -857,6 +857,18 @@ function createHeader(section) {
 }
 
 function syncHeaders(list, counts) {
+  // Remove headers for sections that no longer exist (deleted customs) —
+  // the ladder loop below never visits them, so they'd linger forever.
+  const valid = new Set(sectionLadder())
+  for (const h of list.querySelectorAll(`:scope > [${HEADER_ATTR}]`)) {
+    if (!valid.has(h.getAttribute(HEADER_ATTR))) {
+      try {
+        h.remove()
+      } catch {
+        /* already gone */
+      }
+    }
+  }
   for (const section of sectionLadder()) {
     const sel = `:scope > [${HEADER_ATTR}="${cssAttr(section)}"]`
     let header = null
