@@ -42,11 +42,6 @@ Desktop plugins plus an optional agent plugin, one install:
 </p>
 <p align="center"><em>The kit in one screen: named roster sections (left) and the Computer pane docked beside Scheduled Jobs (right).</em></p>
 
-<p align="center">
-  <img src="computer-viewer/screenshots/app-view.png" alt="Computer pane docked in Hermes Desktop" width="720">
-</p>
-<p align="center"><em>The Computer pane up close — watch your bot's machine while you chat.</em></p>
-
 ```
 ┌────────────────────────────────────────────┐
 │                      ╭─────────────────╮   │
