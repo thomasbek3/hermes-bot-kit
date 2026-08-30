@@ -1,12 +1,14 @@
 # Changelog (kit)
 
-## 2026-08-29 (evening) — bot-sections 1.0.0 → 1.4.1 in a day
+## 2026-08-29 (evening) — bot-sections 1.0.0 → 1.4.5 in a day
 
 - New fourth plugin matured through live iteration: named roster sections
   with counts and native-styled headers (1.0.0, Grok-built/Claude-reviewed);
   instant click-to-collapse; right-click menu — Rename…, New section…,
-  Delete (custom sections), emoji strip under the input, Notion-style;
-  hover highlight + tooltip chips; real chevron carets.
+  Delete (custom sections); autosave editor (Enter or click-away saves,
+  Escape cancels) with an iMessage-style smiley button that opens a
+  scrollable 120-emoji palette; hover highlight + tooltip chips; real
+  chevron carets.
 - Hard-won plugin engineering documented in its BUILD-NOTES: the app's
   context menu opens on right-button mousedown from a boot-time capture
   listener (interception must catch the press), and its dismiss-layer

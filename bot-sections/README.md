@@ -69,9 +69,11 @@ Since 1.1.0 the headers themselves are interactive:
 - **Collapse/expand:** click a section header — instant, persists across
   restarts.
 - **Right-click a header** for the section menu: **Rename…**,
-  **New section…** — and **Delete section** on sections you created. Rename and New open an inline input with a smiley
-  button at the end — tap it for the emoji row (🏠 💼 📣 💰 …, pick one to
-  prepend). Enter saves, clicking away saves too (autosave), Escape cancels. Custom sections persist per install and stay visible while
+  **New section…** — and **Delete section** on sections you created.
+  Rename and New open an inline input with a smiley button beneath it —
+  tap it for a scrollable emoji palette (120 emojis, iMessage-style; pick
+  one to prepend to the name). Enter saves, clicking away saves too
+  (autosave), Escape cancels. Custom sections persist per install and stay visible while
   empty; deleting one sends its bots back to Unassigned. Renames are
   display-only — config keys and palette commands keep the original id.
 
