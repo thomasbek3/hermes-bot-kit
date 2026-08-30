@@ -40,7 +40,7 @@ Desktop plugins plus an optional agent plugin, one install:
 <p align="center">
   <img src="bot-sections/screenshots/roster-sections.png" alt="Hermes Desktop with Bot Sections in the roster and the Computer pane docked" width="900">
 </p>
-<p align="center"><em>The kit in one screen: named roster sections (left) and the Computer pane docked beside Scheduled Jobs (right).</em></p>
+<p align="center"><em>The kit in one screen: iMessage-style Bot Chat, named roster sections, and the live Computer pane.</em></p>
 
 ```
 ┌────────────────────────────────────────────┐
