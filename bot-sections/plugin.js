@@ -631,17 +631,6 @@ function openSectionMenu(section, x, y, renameNow) {
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 3v10M3 8h10"/></svg>',
     'New section…'
   )
-  const collapseItem = mkItem(
-    collapsedSections.has(section)
-      ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 6l4 4 4-4"/></svg>'
-      : '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 10l4-4 4 4"/></svg>',
-    collapsedSections.has(section) ? 'Expand' : 'Collapse'
-  )
-  collapseItem.addEventListener('click', () => {
-    toggleCollapsed(section)
-    closeMenu()
-  })
-
   let deleteItem = null
   if (customSections.includes(section)) {
     deleteItem = mkItem(
@@ -678,7 +667,6 @@ function openSectionMenu(section, x, y, renameNow) {
   const openEditor = mode => {
     renameItem.hidden = true
     newItem.hidden = true
-    collapseItem.hidden = true
     if (deleteItem) deleteItem.hidden = true
 
     const input = document.createElement('input')

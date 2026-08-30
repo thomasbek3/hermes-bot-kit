@@ -31,6 +31,16 @@ headings are left alone. Our sections nest **inside** the flat bot list (and
 inside each gateway bucket, independently, when the roster is split per
 machine).
 
+
+<p align="center">
+  <img src="screenshots/roster-sections.png" alt="Named sections in the Bots roster" width="760">
+</p>
+
+<p align="center">
+  <img src="screenshots/section-menu.png" alt="Right-click menu on a section header" width="380">
+</p>
+<p align="center"><em>Right-click a header: Rename… (with the emoji picker), New section…, Delete. Click the header to collapse.</em></p>
+
 ## Install
 
 Covered by the kit installer:
@@ -56,10 +66,10 @@ Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
 
 Since 1.1.0 the headers themselves are interactive:
 
-- **Collapse/expand:** click a section header (persists across restarts).
+- **Collapse/expand:** click a section header — instant, persists across
+  restarts.
 - **Right-click a header** for the section menu: **Rename…**,
-  **New section…**, Collapse/Expand — and **Delete section** on sections
-  you created. Rename and New open an inline input with an emoji strip
+  **New section…** — and **Delete section** on sections you created. Rename and New open an inline input with an emoji strip
   beneath it (tap 🏠 💼 📣 💰 … to prepend, Enter saves name + emoji
   together, Escape cancels). Custom sections persist per install and stay visible while
   empty; deleting one sends its bots back to Unassigned. Renames are

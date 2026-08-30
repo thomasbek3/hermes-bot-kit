@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.2 — 2026-08-29
+
+- Menu slimmed: Collapse/Expand removed — left-click on the header already
+  does it; the menu is Rename…, New section…, and Delete section.
+- Screenshots added to the README (annotated roster + the right-click menu).
+
+
 ## 1.4.1 — 2026-08-29
 
 - Collapse is instant (the 250ms double-click disambiguation delay is gone;
