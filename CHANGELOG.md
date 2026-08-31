@@ -1,5 +1,11 @@
 # Changelog (kit)
 
+## 2026-08-31 — bot-sections 1.5.0
+
+- Agents (and you) can assign bots to roster sections by writing
+  `~/.hermes/bot-sections.json`. The plugin polls the file every 5s and
+  applies only when the contents change, so manual UI moves stick.
+
 ## 2026-08-29 (evening) — bot-sections 1.0.0 → 1.4.5 in a day
 
 - New fourth plugin matured through live iteration: named roster sections

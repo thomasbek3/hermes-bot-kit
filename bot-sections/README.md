@@ -96,11 +96,35 @@ Three layers, first match wins:
 Master switch: **⌘⇧P → Bot Sections: toggle** (persists). Off = stock
 roster.
 
+## Assignments file
+
+Agents (e.g. your chief-of-staff bot) can write this file to place bots
+into company sections; manual moves still win until the file changes
+again.
+
+Path: `<hermesHome>/bot-sections.json` (next to `desktop-plugins/`, not
+inside the plugin folder — typically `~/.hermes/bot-sections.json`).
+
+```json
+{
+  "sections": ["APOLLO", "PAVERTURF", "CREATOR"],
+  "assign": { "foreman": "PAVERTURF", "atlas": "APOLLO", "muse": "CREATOR" }
+}
+```
+
+- `sections` — custom section names to create if missing. The file never
+  deletes sections (deletion stays a manual UI act).
+- `assign` — bot name (case-insensitive, same keys as the palette
+  overrides) → section. `"Unassigned"` clears that bot's override.
+  Assigning to a section that does not exist yet creates it.
+- The plugin polls every 5 seconds and applies only when the raw file
+  text changes. Missing file is silent; malformed JSON is ignored.
+
 ## Honest limits
 
 - **No native right-click.** The bot row's context menu is owned by
   hermes-bots; this plugin does not patch it. Assign a bot to a section with
-  the cycle command or by editing `SECTIONS`.
+  the cycle command, the assignments file, or by editing `SECTIONS`.
 - **The app's "+" creates bots (and group chats), not sections.** Section
   names live in `SECTIONS.order`. Add a name there, map bots to it, reload.
 - **Overlay, not a data model.** Section membership is CSS `order` + plugin

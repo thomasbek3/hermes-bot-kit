@@ -14,6 +14,9 @@ const STYLE_ID = 'hermes-bot-sections-style'
 const BODY_CLASS = 'hermes-bot-sections'
 const STORAGE_ENABLED = 'enabled'
 const STORAGE_OVERRIDES = 'sectionOverrides'
+const STORAGE_ASSIGN_LAST = 'assignFileLastApplied'
+const ASSIGN_FILE = 'bot-sections.json'
+const ASSIGN_POLL_MS = 5000
 
 const BOTS_PANE_ID = 'hermes-bots:pane'
 const PANE_HIDDEN_ATTR = 'data-pane-hidden'
@@ -339,6 +342,18 @@ let observer = null
 const unbinders = []
 const registeredBots = new Set()
 
+// Agent inbox: <hermesHome>/bot-sections.json is reapplied only when the
+// raw text changes, so manual roster moves stick until an agent writes
+// the file again. Never written by this plugin.
+let assignFileLastApplied = ''
+let assignFileLastBad = ''
+let assignFilePath = ''
+let assignPollTimer = 0
+let assignPollGen = 0
+let assignPollInFlight = false
+let assignFileWarned = false
+const assignHydrated = { customs: false, overrides: false, last: false }
+
 function inHiddenPane(el) {
   return Boolean(el && typeof el.closest === 'function' && el.closest(`[${PANE_HIDDEN_ATTR}]`))
 }
@@ -539,11 +554,12 @@ function readCustomSections(ctx) {
       trySeedFromConfig()
       scheduleSync()
       registerCycleCommands()
+      noteAssignHydrated('customs')
     }
-    if (value && typeof value.then === 'function') value.then(absorb).catch(() => undefined)
+    if (value && typeof value.then === 'function') value.then(absorb).catch(() => noteAssignHydrated('customs'))
     else absorb(value)
   } catch {
-    /* ignore */
+    noteAssignHydrated('customs')
   }
 }
 
@@ -1154,7 +1170,10 @@ function readEnabled(ctx) {
 function absorbOverrides(value) {
   seedState.overrides = true
   setTimeout(trySeedFromConfig, 0)
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    noteAssignHydrated('overrides')
+    return
+  }
   const next = {}
   for (const [key, section] of Object.entries(value)) {
     const bot = String(key || '')
@@ -1166,18 +1185,19 @@ function absorbOverrides(value) {
   overrides = next
   registerCycleCommands()
   scheduleSync()
+  noteAssignHydrated('overrides')
 }
 
 function readOverrides(ctx) {
   try {
     const value = ctx.storage?.get?.(STORAGE_OVERRIDES, {})
     if (value && typeof value.then === 'function') {
-      value.then(absorbOverrides).catch(() => undefined)
+      value.then(absorbOverrides).catch(() => noteAssignHydrated('overrides'))
       return
     }
     absorbOverrides(value)
   } catch {
-    /* ignore */
+    noteAssignHydrated('overrides')
   }
 }
 
@@ -1285,7 +1305,184 @@ function startDomObserver() {
   })
 }
 
+function noteAssignHydrated(which) {
+  assignHydrated[which] = true
+  if (assignHydrated.customs && assignHydrated.overrides && assignHydrated.last) {
+    startAssignFilePoll()
+  }
+}
+
+function stripLastSegment(p) {
+  const s = String(p || '').replace(/[/\\]+$/, '')
+  const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'))
+  if (i < 0) return ''
+  if (i === 0) return s.charAt(0)
+  return s.slice(0, i)
+}
+
+function joinSeg(dir, name) {
+  if (!dir) return name
+  const sep = dir.includes('\\') && !dir.includes('/') ? '\\' : '/'
+  return String(dir).replace(/[/\\]+$/, '') + sep + name
+}
+
+function readAssignFileLastApplied(ctx) {
+  try {
+    const value = ctx.storage?.get?.(STORAGE_ASSIGN_LAST, '')
+    const absorb = v => {
+      if (typeof v === 'string') assignFileLastApplied = v
+      noteAssignHydrated('last')
+    }
+    if (value && typeof value.then === 'function') value.then(absorb).catch(() => noteAssignHydrated('last'))
+    else absorb(value)
+  } catch {
+    noteAssignHydrated('last')
+  }
+}
+
+function persistAssignFileLastApplied() {
+  try {
+    pluginCtx?.storage?.set?.(STORAGE_ASSIGN_LAST, assignFileLastApplied)
+  } catch {
+    /* holds for this window */
+  }
+}
+
+function ensureAssignSection(name) {
+  const n = String(name || '').trim()
+  if (!n || n.toLowerCase() === UNASSIGNED.toLowerCase()) return
+  if (sectionLadder().includes(n)) return
+  customSections = [...customSections, n]
+}
+
+function applyAssignData(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    scheduleSync()
+    registerCycleCommands()
+    return
+  }
+  const beforeCustoms = customSections
+  if (Array.isArray(data.sections)) {
+    for (const name of data.sections) {
+      if (typeof name !== 'string') continue
+      ensureAssignSection(name)
+    }
+  }
+  const assign = data.assign
+  let overridesChanged = false
+  if (assign && typeof assign === 'object' && !Array.isArray(assign)) {
+    const next = { ...overrides }
+    for (const [k, v] of Object.entries(assign)) {
+      const key = String(k || '')
+        .trim()
+        .toLowerCase()
+      if (!key) continue
+      if (typeof v !== 'string') continue
+      const section = v.trim()
+      if (!section) continue
+      const target = section.toLowerCase() === UNASSIGNED.toLowerCase() ? UNASSIGNED : section
+      if (target !== UNASSIGNED) ensureAssignSection(target)
+      if (next[key] !== target) {
+        next[key] = target
+        overridesChanged = true
+      }
+    }
+    if (overridesChanged) overrides = next
+  }
+  if (customSections !== beforeCustoms) persistCustomSections()
+  if (overridesChanged) writeOverrides()
+  scheduleSync()
+  registerCycleCommands()
+}
+
+function applyAssignFileText(raw) {
+  if (raw === assignFileLastApplied) return
+  let data
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    if (raw !== assignFileLastBad) {
+      assignFileLastBad = raw
+      try {
+        console.warn('[bot-sections] malformed bot-sections.json; ignored')
+      } catch {
+        /* ignore */
+      }
+    }
+    return
+  }
+  try {
+    applyAssignData(data)
+  } catch {
+    return
+  }
+  assignFileLastApplied = raw
+  persistAssignFileLastApplied()
+}
+
+async function pollAssignFile() {
+  if (assignPollInFlight) return
+  assignPollInFlight = true
+  const gen = assignPollGen
+  try {
+    if (typeof window === 'undefined') return
+    const desktop = window.hermesDesktop
+    if (!desktop || typeof desktop.readFileText !== 'function') return
+    let path = assignFilePath
+    if (!path) {
+      if (typeof desktop.desktopPluginsRoot !== 'function') return
+      const root = await desktop.desktopPluginsRoot()
+      if (gen !== assignPollGen) return
+      const home = stripLastSegment(root)
+      if (!home) return
+      path = joinSeg(home, ASSIGN_FILE)
+      assignFilePath = path
+    }
+    const result = await desktop.readFileText(path)
+    if (gen !== assignPollGen) return
+    const raw = typeof result === 'string' ? result : result && typeof result.text === 'string' ? result.text : null
+    if (typeof raw !== 'string') return
+    applyAssignFileText(raw)
+  } catch {
+    /* file absent or unreadable — silent */
+  } finally {
+    if (gen === assignPollGen) assignPollInFlight = false
+  }
+}
+
+function startAssignFilePoll() {
+  if (assignPollTimer) return
+  if (typeof window === 'undefined') return
+  if (typeof window.hermesDesktop?.readFileText !== 'function') {
+    if (!assignFileWarned) {
+      assignFileWarned = true
+      try {
+        console.warn('[bot-sections] assignments file disabled: readFileText is unavailable')
+      } catch {
+        /* ignore */
+      }
+    }
+    return
+  }
+  pollAssignFile()
+  assignPollTimer = setInterval(pollAssignFile, ASSIGN_POLL_MS)
+}
+
+function stopAssignFilePoll() {
+  assignPollGen += 1
+  assignPollInFlight = false
+  if (assignPollTimer) {
+    try {
+      clearInterval(assignPollTimer)
+    } catch {
+      /* ignore */
+    }
+    assignPollTimer = 0
+  }
+}
+
 function dispose() {
+  stopAssignFilePoll()
   closeMenu()
   if (raf && typeof cancelAnimationFrame === 'function') {
     cancelAnimationFrame(raf)
@@ -1323,6 +1520,7 @@ export default {
     readCustomSections(ctx)
     readSeedFlag(ctx)
     readOverrides(ctx)
+    readAssignFileLastApplied(ctx)
     injectStyle()
 
     watchPane(BOTS_PANE_ID, scheduleSync)

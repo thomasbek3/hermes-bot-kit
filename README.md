@@ -34,7 +34,7 @@ Desktop plugins plus an optional agent plugin, one install:
 |---|---|
 | 💬 **[Bubble Mode](bubble-mode/)** | The full texting look — **only on each bot's main Bot Chat**: iMessage bubbles, a "..." typing indicator while the bot works, and thinking/tool/timer/background-process noise hidden (approvals and agent-to-agent "Message from X" chips always visible; one palette command brings the work rows back). Work sessions, side tabs, and Sessions view are never touched. Pure CSS, fails safe. |
 | 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Auto-connects the moment your bot starts using its computer**, so you watch it work. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
-| 🗂️ **[Bot Sections](bot-sections/)** | Grok-Bot-style **named sections in the Bots roster**: right-click a header to create, rename (autosave, with an iMessage-style emoji palette), or delete sections; click to collapse (instant, persisted); native-styled menu with hover tooltips. Fresh installs start from one **Unassigned** bucket; layouts live in plugin storage and survive updates. Move bots via the palette (auto-discovered for every bot in your roster). |
+| 🗂️ **[Bot Sections](bot-sections/)** | Grok-Bot-style **named sections in the Bots roster**: right-click a header to create, rename (autosave, with an iMessage-style emoji palette), or delete sections; click to collapse (instant, persisted); native-styled menu with hover tooltips. Fresh installs start from one **Unassigned** bucket; layouts live in plugin storage and survive updates. Move bots via the palette (auto-discovered for every bot in your roster). Agents (e.g. your chief-of-staff bot) can write `~/.hermes/bot-sections.json` to place bots into company sections; manual moves still win until the file changes again. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 
 <p align="center">
@@ -56,7 +56,9 @@ Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
 - Bubble Mode is on immediately; toggle with **⌘⇧P → Bubble Mode: toggle**.
 - Bot Sections is on immediately in the Bots roster; toggle with
   **⌘⇧P → Bot Sections: toggle**. Cycle a bot with
-  **⌘⇧P → `Bot Sections: cycle <bot>`**.
+  **⌘⇧P → `Bot Sections: cycle <bot>`**. Agents can also assign bots by
+  writing `~/.hermes/bot-sections.json` (see the
+  [Bot Sections README](bot-sections/README.md)).
 - The Computer pane: enable **Computer** in **Settings → Plugins**, then add a
   computer — see the [computer-viewer README](computer-viewer/README.md) for
   connecting cloud boxes, spare Macs/PCs, HD mode, and giving bots hands.

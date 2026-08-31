@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0 — 2026-08-31
+
+- Agent-writable assignments file at `<hermesHome>/bot-sections.json`
+  (`sections` + `assign`). Polled every 5s via `readFileText`; applied
+  only when the raw text changes so palette/UI moves are not fought.
+  Missing file is silent; malformed JSON warns once per distinct
+  content. `"Unassigned"` clears a bot's override. The file never
+  deletes sections.
+
+
 ## 1.4.5 — 2026-08-29
 
 - Editor polish round: the smiley button sits below the input (1.4.4), and
