@@ -13,9 +13,10 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/in
 Install just one:
 
 ```bash
-KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Bubble Mode only
-KIT_SKIP_BUBBLES=1  KIT_SKIP_SECTIONS=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Computer viewer only
-KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Bot Sections only
+KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Bubble Mode only
+KIT_SKIP_BUBBLES=1  KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Computer viewer only
+KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Bot Sections only
+KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh)"   # Task Dock only
 ```
 
 Into a named Hermes profile instead of the default home:
@@ -33,10 +34,12 @@ its sanity check (`node --check` + content marker).
 test -f ~/.hermes/desktop-plugins/bubble-mode/plugin.js && echo bubble-mode OK
 test -f ~/.hermes/desktop-plugins/computer-viewer/plugin.js && echo computer-viewer OK
 test -f ~/.hermes/desktop-plugins/bot-sections/plugin.js && echo bot-sections OK
+test -f ~/.hermes/desktop-plugins/task-dock/plugin.js && echo task-dock OK
 ```
 
-Folder names must be exactly `bubble-mode`, `computer-viewer`, and
-`bot-sections` (they must match the plugin ids). Do not rename them.
+Folder names must be exactly `bubble-mode`, `computer-viewer`,
+`bot-sections`, and `task-dock` (they must match the plugin ids). Do not
+rename them.
 
 ## After installing — needs the human or a running app
 
@@ -54,6 +57,8 @@ it. Then:
 - **Bot Sections** is active immediately in the Bots roster. Toggle:
   palette → "Bot Sections: toggle". Cycle a bot:
   palette → "Bot Sections: cycle <bot>".
+- **Task Dock** is active immediately in Bot Mode chats. Toggle:
+  palette → "Task Dock: toggle".
 - **Computer viewer** must be enabled once in Settings → Plugins
   (inventory name: **Computer**), then a computer added in the pane. Endpoint
   setup (cloud boxes, spare machines, HD mode) is interactive and documented
@@ -97,12 +102,12 @@ files without the user's say-so.
 ## Uninstall
 
 ```bash
-rm -rf ~/.hermes/desktop-plugins/bubble-mode ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/bot-sections
+rm -rf ~/.hermes/desktop-plugins/bubble-mode ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/bot-sections ~/.hermes/desktop-plugins/task-dock
 ```
 
 Then reload plugins (same as above). Plugin settings live in Hermes plugin
 storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` /
-`hermes.plugin.bot-sections.*`.
+`hermes.plugin.bot-sections.*` / `hermes.plugin.task-dock.*`.
 
 ## Facts that prevent wasted debugging
 
@@ -128,7 +133,7 @@ storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` 
   crashes.
 - The repo was formerly `hermes-computer-viewer`; old raw URLs still work
   via root shim scripts. Canonical paths are `bubble-mode/`,
-  `computer-viewer/`, and `bot-sections/`.
+  `computer-viewer/`, `bot-sections/`, and `task-dock/`.
 - Do not curl-pipe `connect-*.sh` / `hiperf-*.sh` on the machine running
   Hermes Desktop unless the user asked to view **that** machine — they are
   host-side setup scripts for the computer being viewed, and they install

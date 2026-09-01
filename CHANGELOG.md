@@ -1,5 +1,13 @@
 # Changelog (kit)
 
+## 2026-09-01 — task-dock 1.0.0
+
+- New desktop plugin: `task-dock/`. Copies the live **Tasks N/M** composer
+  widget while it is on screen and re-renders a compact dock above the
+  composer after the app clears the list on bot switch. Per-bot snapshots,
+  ~1/s capture throttle, 24h expiry, palette **Task Dock: toggle**.
+  Root `install.sh` ships it with `KIT_SKIP_TASK_DOCK=1` to skip.
+
 ## 2026-08-31 — bot-sections 1.5.0
 
 - Agents (and you) can assign bots to roster sections by writing
@@ -40,8 +48,9 @@
   it inheriting the user-bubble shrink (2.0.1).
 
 Per-plugin history lives in [bubble-mode/CHANGELOG.md](bubble-mode/CHANGELOG.md),
-[computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md), and
-[bot-sections/CHANGELOG.md](bot-sections/CHANGELOG.md).
+[computer-viewer/CHANGELOG.md](computer-viewer/CHANGELOG.md),
+[bot-sections/CHANGELOG.md](bot-sections/CHANGELOG.md), and
+[task-dock/CHANGELOG.md](task-dock/CHANGELOG.md).
 
 ## 2026-08-28 (final) — verified on Hermes v0.20.6
 
