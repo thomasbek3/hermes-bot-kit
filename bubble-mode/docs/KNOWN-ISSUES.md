@@ -35,9 +35,10 @@ simply doesn't apply".
 - **Colors are tuned for the dark theme.** User bubble `#4a4a4e`, assistant
   `#2b2b2e` (Grok-Bot palette). On a light theme they'll look heavy — edit
   the hex values in the `CSS` block at the top of `plugin.js`.
-- **A brand-new bot draft may bubble a beat late.** Detection reads the
-  pane/tab state; a tab whose chat surface hasn't painted yet is caught on
-  the next frame by the DOM observer. You may see one unstyled frame.
+- **A brand-new bot draft may bubble a beat late on Hermes 0.20.5.** The old
+  tab-strip path waits for its chat surface to paint. Hermes 0.20.6+ uses the
+  stable Scheduled Jobs ownership pane and does not depend on transcript
+  children, including while a prompt submission remounts them.
 
 ## Upstream bug: tab caption scramble (worked around in 1.4.0)
 

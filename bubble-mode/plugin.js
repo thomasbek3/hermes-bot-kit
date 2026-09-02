@@ -310,29 +310,14 @@ function canonicalBotChatTabSelected() {
  * ('bots'). Visible session-tile panes in that scope are therefore Bot Mode
  * chats, never regular Sessions.
  */
-/** >=0.20.6 one-chat-per-agent Bot Mode: the canonical chat renders in the
- *  MAIN workspace surface (no session-tile tabs anymore). hermes-bots seats
- *  its Scheduled Jobs (routines) tile only while a real bot chat owns the
- *  workspace and never for group chats, so that pane's visibility is the
- *  public botChatOwnsWorkspace() bit. The message-slot check keeps the Bots
- *  home / empty-draft splash (same surface, no transcript) unstyled. */
+/** >=0.20.6 one-chat-per-agent Bot Mode: hermes-bots seats its Scheduled Jobs
+ *  (routines) tile only while a real bot chat owns the workspace and never for
+ *  Bots home or group chats, so that pane's visibility is the complete public
+ *  botChatOwnsWorkspace() bit. Do not also require transcript children here:
+ *  React briefly replaces them when a prompt is submitted, and treating that
+ *  render transition as a mode change flashes the stock session UI. */
 function workspaceBotChatVisible() {
-  if (paneStoreGet(ROUTINES_PANE_ID) !== true) return false
-  if (typeof document === 'undefined') return false
-  const surfaces = document.querySelectorAll('[data-chat-surface]')
-  for (const el of surfaces) {
-    if (inHiddenPane(el)) continue
-    const target = el.getAttribute('data-composer-target') || ''
-    const anchor = el.getAttribute('data-session-anchor') || ''
-    if (target !== 'main' && anchor !== 'workspace') continue
-    if (
-      el.querySelector(
-        '[data-slot="aui_user-message-root"], [data-slot="aui_assistant-message-content"], [data-slot="aui_response-loading"]'
-      )
-    )
-      return true
-  }
-  return false
+  return paneStoreGet(ROUTINES_PANE_ID) === true
 }
 
 function botModeChatVisible() {

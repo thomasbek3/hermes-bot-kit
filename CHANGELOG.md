@@ -1,5 +1,11 @@
 # Changelog (kit)
 
+## 2026-09-02 — bubble-mode 2.1.1
+
+- Bubble Mode now treats the stable Scheduled Jobs ownership pane as the
+  complete Hermes 0.20.6+ Bot Chat signal. Prompt submission can remount the
+  transcript without flashing back to stock session styling.
+
 ## 2026-09-01 — task-dock 1.0.0
 
 - New desktop plugin: `task-dock/`. Copies the live **Tasks N/M** composer

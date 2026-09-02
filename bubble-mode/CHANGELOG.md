@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1 — 2026-09-02
+
+- Keep Bubble Mode applied while React remounts the transcript during prompt
+  submission. The stable Scheduled Jobs ownership pane remains authoritative,
+  so the chat no longer flashes back to stock session styling for a frame.
+
 ## 2.1.0 — 2026-08-29
 
 - Quiet chat also hides background-process notification rows ("Background
