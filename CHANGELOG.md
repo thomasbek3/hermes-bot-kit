@@ -1,5 +1,15 @@
 # Changelog (kit)
 
+## 2026-09-02 — task-dock 1.0.1
+
+- Task Dock now requires bot profile and canonical session ID to agree before
+  restoring cached tasks, and it remains mounted through transient transcript
+  remounts. It also hides the captured stock source while enabled so the two
+  panels cannot overlap. Multiple source widgets collapse to the newest single
+  list, terminal lists auto-hide, and the persistent visibility toggle hides
+  all task UI without letting stock bars flash back in. This prevents stale
+  cross-bot panels, duplicate widgets, and random reappearance.
+
 ## 2026-09-02 — bubble-mode 2.1.1
 
 - Bubble Mode now treats the stable Scheduled Jobs ownership pane as the

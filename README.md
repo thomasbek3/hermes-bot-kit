@@ -52,7 +52,7 @@ One command, the desktop plugins (idempotent, no sudo, agents can run it unatten
 curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh | bash
 ```
 
-Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
+Then in Hermes Desktop: **⌘K → Reload plugins** (or restart the app).
 
 - Bubble Mode is on immediately; toggle with **⌘⇧P → Bubble Mode: toggle**.
 - Bot Sections is on immediately in the Bots roster; toggle with
@@ -61,7 +61,7 @@ Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
   writing `~/.hermes/bot-sections.json` (see the
   [Bot Sections README](bot-sections/README.md)).
 - Task Dock is on immediately in Bot Chats; toggle with
-  **⌘⇧P → Task Dock: toggle**.
+  **⌘K → Task Dock: toggle**.
 - The Computer pane: enable **Computer** in **Settings → Plugins**, then add a
   computer — see the [computer-viewer README](computer-viewer/README.md) for
   connecting cloud boxes, spare Macs/PCs, HD mode, and giving bots hands.

@@ -13,6 +13,7 @@ const PLUGIN_ID = 'task-dock'
 const STYLE_ID = 'hermes-task-dock-style'
 const BODY_CLASS = 'hermes-task-dock'
 const DOCK_ATTR = 'data-hermes-task-dock'
+const SOURCE_ATTR = 'data-hermes-task-dock-source'
 
 const STORAGE_ENABLED = 'enabled'
 const STORAGE_COLLAPSED = 'collapsed'
@@ -37,7 +38,12 @@ body:not(.hermes-task-dock) [${DOCK_ATTR}] {
   display: none !important;
 }
 
+body.hermes-task-dock [${SOURCE_ATTR}] {
+  display: none !important;
+}
+
 [${DOCK_ATTR}] {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -67,7 +73,7 @@ body:not(.hermes-task-dock) [${DOCK_ATTR}] {
   width: 100%;
   min-width: 0;
   margin: 0;
-  padding: 0.35rem 0.5rem;
+  padding: 0.35rem 2rem 0.35rem 0.5rem;
   border: none;
   background: transparent;
   color: var(--ui-text-secondary, #c9c9ce);
@@ -81,6 +87,33 @@ body:not(.hermes-task-dock) [${DOCK_ATTR}] {
 .hermes-task-dock-header:hover {
   color: var(--ui-text-primary, inherit);
   background: var(--chrome-action-hover, rgba(127, 127, 127, 0.08));
+}
+
+.hermes-task-dock-hide {
+  position: absolute;
+  top: 0.22rem;
+  right: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ui-text-quaternary, #8a8a90);
+  cursor: pointer;
+}
+
+.hermes-task-dock-hide:hover {
+  color: var(--ui-text-primary, inherit);
+  background: var(--chrome-action-hover, rgba(127, 127, 127, 0.12));
+}
+
+.hermes-task-dock-hide svg {
+  width: 0.8rem;
+  height: 0.8rem;
 }
 
 .hermes-task-dock-caret {
@@ -226,6 +259,8 @@ const CHECK_SVG =
   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>'
 const CANCEL_SVG =
   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 5.5l5 5"/></svg>'
+const CLOSE_SVG =
+  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4.5 4.5l7 7m0-7l-7 7"/></svg>'
 
 let pluginCtx = null
 let enabled = true
@@ -243,6 +278,7 @@ let dockEl = null
 let labelEl = null
 let updatedEl = null
 let listEl = null
+let sourceSectionEls = new Set()
 const unbinders = []
 const knownBotChatTabs = new Set()
 
@@ -342,22 +378,11 @@ function canonicalBotChatTabSelected() {
 }
 
 function workspaceBotChatVisible() {
-  if (paneStoreGet(ROUTINES_PANE_ID) !== true) return false
-  if (typeof document === 'undefined') return false
-  const surfaces = document.querySelectorAll('[data-chat-surface]')
-  for (const el of surfaces) {
-    if (inHiddenPane(el)) continue
-    const target = el.getAttribute('data-composer-target') || ''
-    const anchor = el.getAttribute('data-session-anchor') || ''
-    if (target !== 'main' && anchor !== 'workspace') continue
-    if (
-      el.querySelector(
-        '[data-slot="aui_user-message-root"], [data-slot="aui_assistant-message-content"], [data-slot="aui_response-loading"]'
-      )
-    )
-      return true
-  }
-  return false
+  // The transcript is briefly removed and remounted during sends and owner
+  // switches. The routines pane is the stable public Bot Chat ownership bit;
+  // treating transient message DOM as ownership makes the dock detach and
+  // then appear again seemingly at random.
+  return paneStoreGet(ROUTINES_PANE_ID) === true
 }
 
 function botModeChatVisible() {
@@ -442,22 +467,24 @@ function classNameOf(el) {
     .slice(0, STATUS_CLASS_MAX)
 }
 
-function findTasksHeader(root) {
-  if (!root) return null
+function findTasksHeaders(root) {
+  if (!root) return []
   const stack = root.querySelector('[data-slot="composer-status-stack"]')
   const dock = root.querySelector('[data-slot="composer-dock"]')
   const scope =
     stack && !inHiddenPane(stack) ? stack : dock && !inHiddenPane(dock) ? dock : root
   const passes = [scope.querySelectorAll('button'), scope.querySelectorAll('span')]
   for (const nodes of passes) {
+    const matches = []
     for (const el of nodes) {
       if (ownDock(el) || inHiddenPane(el)) continue
       const text = normText(el.textContent)
       if (text.length > 64) continue
-      if (TASKS_HEADER_RE.test(text)) return el
+      if (TASKS_HEADER_RE.test(text)) matches.push(el)
     }
+    if (matches.length) return matches
   }
-  return null
+  return []
 }
 
 function tasksSection(header) {
@@ -596,8 +623,13 @@ function parseCounts(header) {
 }
 
 function captureLive(surface, bot, sessionId) {
-  const header = findTasksHeader(surface)
-  if (!header) return null
+  const headers = findTasksHeaders(surface)
+  if (!headers.length) return null
+  const sections = headers.map(tasksSection).filter(Boolean)
+  markLiveSources(sections)
+  // Hermes can briefly retain several task widgets when a new todo run starts.
+  // The last header in DOM order is the newest/current list.
+  const header = headers[headers.length - 1]
   const counts = parseCounts(header)
   if (!counts) return null
   if (counts.total <= 0 && counts.done <= 0) return null
@@ -625,6 +657,33 @@ function captureLive(surface, bot, sessionId) {
     items,
     capturedAt: Date.now()
   }
+}
+
+function clearLiveSources() {
+  for (const source of sourceSectionEls) {
+    try {
+      source.removeAttribute(SOURCE_ATTR)
+    } catch {
+      /* source already unmounted */
+    }
+  }
+  sourceSectionEls = new Set()
+}
+
+function markLiveSources(sections) {
+  const next = new Set(
+    Array.from(sections || []).filter(section => section && typeof section.setAttribute === 'function')
+  )
+  for (const source of sourceSectionEls) {
+    if (next.has(source)) continue
+    try {
+      source.removeAttribute(SOURCE_ATTR)
+    } catch {
+      /* source already unmounted */
+    }
+  }
+  for (const source of next) source.setAttribute(SOURCE_ATTR, '')
+  sourceSectionEls = next
 }
 
 function normalizeItem(it) {
@@ -677,6 +736,25 @@ function usableSnapshot(snap) {
   if (Date.now() - normalized.capturedAt > SNAPSHOT_TTL_MS) return null
   if (normalized.total <= 0 && normalized.items.length === 0) return null
   return normalized
+}
+
+function matchingStoredSnapshot(raw, bot, sessionId) {
+  const snap = usableSnapshot(raw)
+  if (!snap) return null
+  const expectedBot = String(bot || '').trim().toLowerCase()
+  const snapshotBot = String(snap.bot || '').trim().toLowerCase()
+  if (!expectedBot || !snapshotBot || snapshotBot !== expectedBot) return null
+  const expectedSession = String(sessionId || '')
+  if (!expectedSession || !snap.sessionId || snap.sessionId !== expectedSession) return null
+  return snap
+}
+
+function isCompletedView(view) {
+  const done = Number(view?.done) || 0
+  const total = Number(view?.total) || 0
+  if (total > 0) return done >= total
+  const items = Array.isArray(view?.items) ? view.items : []
+  return Boolean(items.length && items.every(item => item.status === 'completed' || item.status === 'cancelled'))
 }
 
 function persistSnapshotsNow() {
@@ -812,10 +890,22 @@ function buildDock() {
     scheduleSync()
   })
 
+  const hide = document.createElement('button')
+  hide.type = 'button'
+  hide.className = 'hermes-task-dock-hide'
+  hide.setAttribute('aria-label', 'Hide all task lists')
+  hide.title = 'Hide all task lists — use Task Dock: toggle to show them again'
+  hide.innerHTML = CLOSE_SVG
+  hide.addEventListener('click', event => {
+    event.preventDefault()
+    event.stopPropagation()
+    writeEnabled(false)
+  })
+
   listEl = document.createElement('div')
   listEl.className = 'hermes-task-dock-list'
 
-  root.append(header, listEl)
+  root.append(header, hide, listEl)
   dockEl = root
   return root
 }
@@ -901,12 +991,13 @@ function setBodyClass(on) {
 
 function sync() {
   try {
-    const active = Boolean(enabled && botModeChatVisible())
+    const active = Boolean(botModeChatVisible())
     if (active) {
       if (!applied) setBodyClass(true)
       else if (document.body && !document.body.classList.contains(BODY_CLASS)) setBodyClass(true)
     } else {
       if (applied || (document.body && document.body.classList.contains(BODY_CLASS))) setBodyClass(false)
+      clearLiveSources()
       detachDock()
       return
     }
@@ -918,10 +1009,20 @@ function sync() {
     if (live) acceptLive(live)
     if (pruneSnapshots()) schedulePersist()
 
-    const stored = usableSnapshot(snapshots[bot])
+    // Profile state and session routing settle independently during a bot
+    // switch. Never restore a cached task list until both identities agree.
+    const stored = matchingStoredSnapshot(snapshots[bot], bot, sessionId)
     const view = live || stored
     const stale = !live && Boolean(view)
+    if (!enabled) {
+      detachDock()
+      return
+    }
     if (!view || !surface) {
+      detachDock()
+      return
+    }
+    if (isCompletedView(view)) {
       detachDock()
       return
     }
@@ -1095,6 +1196,7 @@ function dispose() {
     /* ignore */
   }
   observer = null
+  clearLiveSources()
   detachDock()
   dockEl = null
   labelEl = null

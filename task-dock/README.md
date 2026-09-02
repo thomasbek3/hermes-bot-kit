@@ -10,12 +10,17 @@ then clears that session's list. Come back and the widget is gone. There
 is no reload, no setting, and no command that rebuilds it.
 
 Task Dock copies the widget while it is on screen and pins its own panel
-above the composer in Bot Chats. Switch bots and the dock swaps to that
-bot's last copy instantly. When the live widget is missing, the copy
-renders faded with a last-updated timestamp. Snapshots older than 24 hours
-are ignored and pruned.
+above the composer in Bot Chats. Switch bots and the dock swaps to that bot's
+last copy once both the bot profile and canonical session ID agree. During
+the brief period where Hermes has updated only one of those owners, the dock
+stays hidden rather than showing another session's tasks. When the live widget
+is missing, the copy renders faded with a last-updated timestamp. Snapshots
+older than 24 hours are ignored and pruned.
 
-The app widget is never moved, hidden, or clicked through this plugin.
+The app widget is never moved or clicked through this plugin. Once captured,
+all stock task sections are hidden while the plugin is loaded so only the
+newest list renders in one dock. If the list is terminal (counts complete or
+every visible item is completed/cancelled), the dock auto-hides.
 
 ## Install
 
@@ -36,9 +41,13 @@ cp plugin.js ~/.hermes/desktop-plugins/task-dock/plugin.js
 
 The folder must be named `task-dock` (it must match the plugin id).
 
-Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app).
+Then in Hermes Desktop: **⌘K → Reload plugins** (or restart the app).
 
-Palette: **⌘⇧P → Task Dock: toggle** (persists). Off = no dock.
+Palette: **⌘K → Task Dock: toggle** (persists). Off = no Tasks UI at all;
+the plugin keeps suppressing stock task bars so they cannot flash back in.
+Toggle it on to restore the current single dock. The × button on the dock is
+the same persistent “off” action. Disabling Task Dock itself in Hermes'
+Plugins settings unloads it completely and restores stock Hermes behavior.
 
 Click the dock header to collapse or expand it (persists).
 
@@ -51,14 +60,17 @@ roster: a MutationObserver plus defensive queries, no hashed class names.
 Discovery:
 
 1. Find a short header whose text matches `Tasks N/M`.
-2. Treat that header's section as the widget (the header row plus its list).
+2. Treat each matching header's section as a stock widget; if several exist,
+   the last one in DOM order is the newest/current list.
 3. Read each row's title and status affordance (dashed pending ring, running
    `role="status"` spinner, completed vs cancelled icon colour).
+4. Hide every captured source section reversibly and render one normalized
+   dock, avoiding duplicate stock-plus-plugin panels.
 
 While that widget is present, a snapshot is written at most once per second
 under a per-bot storage key (bot profile + session id, N/M counts, items,
-timestamp). Returning to the bot renders that snapshot if the live widget
-is gone.
+timestamp). Returning to the bot renders that snapshot if the live widget is
+gone and the current session ID still matches the captured owner.
 
 ## Honest limits
 
