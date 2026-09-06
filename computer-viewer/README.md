@@ -414,6 +414,10 @@ The pane starts empty until you add a computer:
 | An API key (`sk-…` / `sk_…`, or a similar bare key) | **Find my computers**, then pick one. |
 | `host:port` or a hostname (`macbook.local:6080`) | Probes WebSocket `/websockify`, then `http://host:port/vnc.html`. |
 
+`http://` addresses (web viewer pages and session APIs) are accepted only for
+localhost, LAN, `.local`, and Tailscale hosts. Internet addresses must use
+`https://`.
+
 Power fields (explicit mode, raw URLs, username, scale, quality, …) live
 under **Advanced**.
 
@@ -701,7 +705,7 @@ The address field picks a mode for you. These names only appear under
 | Mode | How it connects | When to use |
 |---|---|---|
 | **WebSocket** (default) | Dynamically loads noVNC 1.7.0 (`RFB`) from jsDelivr, then `esm.sh` if that import throws. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
-| **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. | CSP blocks the noVNC module, you're offline, or you already have `vnc.html`. |
+| **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. Sandboxed; the page cannot read the clipboard unless **Allow this page to read my clipboard** is on for that computer (Advanced, off by default). | CSP blocks the noVNC module, you're offline, or you already have `vnc.html`. |
 | **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Rotating desktops (paste the API URL or an API key). |
 
 If noVNC cannot be loaded from the CDN (network or CSP), the pane shows
