@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
@@ -75,7 +76,7 @@ function atom(initial) {
   }
 }
 
-function loadPlugin({ fetchImpl } = {}) {
+function loadPlugin({ fetchImpl, importHook, hermesDesktop } = {}) {
   const fetches = []
   const fetch =
     fetchImpl ||
@@ -88,6 +89,7 @@ function loadPlugin({ fetchImpl } = {}) {
     AbortController,
     Array,
     ArrayBuffer,
+    Blob: globalThis.Blob,
     Boolean,
     DataView,
     Date,
@@ -129,6 +131,7 @@ function loadPlugin({ fetchImpl } = {}) {
     clearInterval,
     clearTimeout,
     console,
+    crypto: globalThis.crypto,
     decodeURI,
     decodeURIComponent,
     encodeURI,
@@ -177,11 +180,13 @@ function loadPlugin({ fetchImpl } = {}) {
       state: {},
       paneVisibility: () => ({ get: () => false, listen: () => () => undefined })
     },
-    __atom: atom
+    __atom: atom,
+    __importHook: importHook
   }
   context.window = context
   context.globalThis = context
   context.self = context
+  if (hermesDesktop) context.hermesDesktop = hermesDesktop
 
   const source = PRELUDE +
     fs
@@ -195,7 +200,7 @@ function loadPlugin({ fetchImpl } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch }\n'
+        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch, rfbSourceOrder, loadRFB, rfbStatusDetail, engine }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -297,4 +302,103 @@ test('authFetch sends the bearer with redirect: manual on an allowed call', asyn
   assert.equal(response.status, 200)
   assert.equal(seen.init.redirect, 'manual')
   assert.equal(seen.init.headers.Authorization, 'Bearer secret-token')
+})
+
+const VENDOR_RFB_PATH = new URL('./vendor/novnc-rfb.mjs', import.meta.url)
+const VENDOR_RFB_SOURCE = fs.readFileSync(VENDOR_RFB_PATH, 'utf8')
+const JSDELIVR = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.7.0/+esm'
+const ESM_SH = 'https://esm.sh/@novnc/novnc@1.7.0'
+
+function fakeBridge({ text, missing } = {}) {
+  const source = text === undefined ? VENDOR_RFB_SOURCE : text
+  return {
+    desktopPluginsRoot: async () => '/tmp/hermes-home/desktop-plugins',
+    readFileText: async filePath => {
+      assert.match(filePath, /computer-viewer[/\\]novnc-rfb\.mjs$/)
+      if (missing) throw new Error('ENOENT')
+      return {
+        binary: false,
+        byteSize: Buffer.byteLength(source),
+        text: source,
+        truncated: false
+      }
+    }
+  }
+}
+
+function cdnCtorHook(seen) {
+  return async url => {
+    seen.push(url)
+    if (url === JSDELIVR || url === ESM_SH) return { default: function RFB() {} }
+    throw new Error('unexpected import ' + url)
+  }
+}
+
+test('rfbSourceOrder is CDN-only', () => {
+  const { t } = loadPlugin()
+  assert.deepEqual([...t.rfbSourceOrder()], [JSDELIVR, ESM_SH])
+})
+
+test('loadRFB loads the real vendored source from the desktop bridge and skips the CDN', async () => {
+  const seen = []
+  const { t } = loadPlugin({
+    hermesDesktop: fakeBridge(),
+    importHook: async url => {
+      seen.push(url)
+      if (typeof url === 'string' && url.startsWith('blob:')) {
+        return { default: function RFB() {} }
+      }
+      throw new Error('CDN should not be tried, got ' + url)
+    }
+  })
+  const ctor = await t.loadRFB()
+  assert.equal(typeof ctor, 'function')
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].startsWith('blob:'), true)
+  assert.equal(t.engine.rfbSource, 'vendored')
+  assert.equal(t.engine.rfbVendoredReason, null)
+})
+
+test('loadRFB skips a vendored file that fails the SHA-256 check and falls back to CDN', async () => {
+  const seen = []
+  const flipped = (VENDOR_RFB_SOURCE[0] === 'x' ? 'y' : 'x') + VENDOR_RFB_SOURCE.slice(1)
+  const { t } = loadPlugin({
+    hermesDesktop: fakeBridge({ text: flipped }),
+    importHook: cdnCtorHook(seen)
+  })
+  const ctor = await t.loadRFB()
+  assert.equal(typeof ctor, 'function')
+  assert.equal(seen.includes(JSDELIVR), true)
+  assert.equal(
+    seen.some(url => typeof url === 'string' && url.startsWith('blob:')),
+    false
+  )
+  assert.equal(t.engine.rfbSource, 'cdn-jsdelivr')
+  assert.equal(t.engine.rfbVendoredReason, 'integrity')
+  assert.equal(t.rfbStatusDetail(), 'vendored noVNC failed integrity check; loaded from CDN')
+})
+
+test('loadRFB falls back to CDN when window.hermesDesktop is missing', async () => {
+  const seen = []
+  const { t } = loadPlugin({
+    importHook: cdnCtorHook(seen)
+  })
+  const ctor = await t.loadRFB()
+  assert.equal(typeof ctor, 'function')
+  assert.deepEqual(seen, [JSDELIVR])
+  assert.equal(t.engine.rfbSource, 'cdn-jsdelivr')
+  assert.equal(t.engine.rfbVendoredReason, 'no-bridge')
+})
+
+test('VENDORED_RFB_SHA256 matches sha256(computer-viewer/vendor/novnc-rfb.mjs)', () => {
+  const plugin = fs.readFileSync(pluginPath, 'utf8')
+  const match = plugin.match(/const VENDORED_RFB_SHA256 = '([0-9a-f]{64})'/)
+  assert.ok(match, 'plugin.js must pin VENDORED_RFB_SHA256')
+  const fileHash = createHash('sha256').update(fs.readFileSync(VENDOR_RFB_PATH)).digest('hex')
+  assert.equal(match[1], fileHash)
+})
+
+test('vendored noVNC default export is a function', async () => {
+  const mod = await import('./vendor/novnc-rfb.mjs')
+  assert.equal(typeof mod.default, 'function')
 })

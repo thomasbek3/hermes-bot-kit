@@ -86,6 +86,7 @@ viewed through the pane's noVNC connection.</em></p>
 
 ```
 plugin.js              the entire desktop plugin (single ESM file)
+vendor/novnc-rfb.mjs   bundled noVNC 1.7.0 RFB (installer copies it next to plugin.js)
 connect-mac.sh         one-paste VNC bridge setup for a Mac
 connect-windows.ps1    same for Windows (TightVNC/UltraVNC + websockify + virtual display)
 connect-linux.sh       same for Linux (x11vnc / wayvnc + websockify)
@@ -365,15 +366,21 @@ be `computer-viewer`.
 # macOS / Linux (default profile)
 mkdir -p ~/.hermes/desktop-plugins/computer-viewer
 cp plugin.js ~/.hermes/desktop-plugins/computer-viewer/plugin.js
+cp vendor/novnc-rfb.mjs ~/.hermes/desktop-plugins/computer-viewer/novnc-rfb.mjs
 cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-agent.py ~/.hermes/desktop-plugins/computer-viewer/
 chmod +x ~/.hermes/desktop-plugins/computer-viewer/connect-*.sh ~/.hermes/desktop-plugins/computer-viewer/hiperf-*.sh
 ```
+
+The kit installer places `novnc-rfb.mjs` next to `plugin.js`. The plugin
+verifies that file's SHA-256 before loading it, and only then falls back to
+the CDN.
 
 Named Hermes profile:
 
 ```bash
 mkdir -p ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer
 cp plugin.js ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/plugin.js
+cp vendor/novnc-rfb.mjs ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/novnc-rfb.mjs
 cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-agent.py ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/
 chmod +x ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-*.sh ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/hiperf-*.sh
 ```
@@ -382,6 +389,7 @@ Windows (typical):
 
 ```text
 %LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\plugin.js
+%LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\novnc-rfb.mjs
 %LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\connect-windows.ps1
 ```
 
@@ -717,14 +725,14 @@ The address field picks a mode for you. These names only appear under
 
 | Mode | How it connects | When to use |
 |---|---|---|
-| **WebSocket** (default) | Dynamically loads noVNC 1.7.0 (`RFB`) from jsDelivr, then `esm.sh` if that import throws. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
+| **WebSocket** (default) | Loads the vendored noVNC 1.7.0 (`RFB`) the installer places next to `plugin.js`, after a SHA-256 check. Falls back to jsDelivr then `esm.sh` only if that file is missing or the hash does not match; those CDN copies are unverified. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
 | **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. Sandboxed; the page cannot read the clipboard unless **Allow this page to read my clipboard** is on for that computer (Advanced, off by default). | CSP blocks the noVNC module, you're offline, or you already have `vnc.html`. |
 | **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Rotating desktops (paste the API URL or an API key). |
 
-If noVNC cannot be loaded from the CDN (network or CSP), the pane shows
-**Couldn't load the viewer** and tells you to switch the endpoint to iframe
-mode (Advanced, or paste a `vnc.html` URL). Iframe endpoints keep working in
-that situation.
+If noVNC cannot be loaded (missing vendored copy, network, or CSP), the pane
+shows **Couldn't load the viewer** and tells you to switch the endpoint to
+iframe mode (Advanced, or paste a `vnc.html` URL). Iframe endpoints keep
+working in that situation. CDN fallback is unverified.
 
 ## Controls
 
@@ -826,9 +834,9 @@ the other variant and the working choice is remembered per endpoint.
 
 - Passwords in `ctx.storage` are plain text on disk
   (`hermes.plugin.computer-viewer.*`).
-- CDN dependency in websocket mode (offline Hermes = iframe mode only, or
-  vendor the `+esm` file — vendoring requires serving it somehow since
-  relative imports don't resolve; out of scope v1).
+- Websocket mode loads the vendored noVNC next to `plugin.js` after a
+  SHA-256 check. Installs without that file, or with a hash mismatch, fall
+  back to the CDN (unverified); if the CDN is blocked too, use iframe mode.
 - `ws://` to non-private hosts may be blocked by the renderer (mixed
   content); use `wss://`.
 - Keyboard capture: in expanded interactive mode the remote desktop receives

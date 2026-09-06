@@ -20,11 +20,6 @@ the pinned ref in the installers, root shims, README one-liners, and the
 exist); runs the same tests as CI; commits `release: <tag>`; and creates
 the annotated tag. It does not push.
 
-`computer-viewer/vendor/novnc-rfb.mjs` is listed in the manifest but is
-still landing on another branch. A strict release fails until that file
-exists. CI currently runs `scripts/make-manifest.sh --check --allow-missing`
-for the same reason.
-
 ## What the manifest guarantees
 
 `MANIFEST.sha256` is `sha256sum` format (`<hex>  <path>`), one line per
