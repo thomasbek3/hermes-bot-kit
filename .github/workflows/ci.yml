@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Syntax-check plugins
+        run: |
+          node --check bubble-mode/plugin.js
+          node --check bot-sections/plugin.js
+          node --check task-dock/plugin.js
+          node --check computer-viewer/plugin.js
+
+      - name: Plugin unit tests
+        run: node --test bubble-mode/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
+
+      - name: Orgo computer plugin tests
+        run: python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
+
+      - name: Shell syntax
+        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 bash -n
+
+      - name: Host-script bind tests
+        run: bash computer-viewer/tests/test-bind.sh
+
+      - name: Agent-plugin installer tests
+        run: bash computer-viewer/tests/test-install-agent-plugin.sh
+
+      - name: ASCII check (agent plugin)
+        run: |
+          python3 -c '
+          import sys
+          from pathlib import Path
+          root = Path("computer-viewer/agent-plugin")
+          bad = [p for p in root.rglob("*.py") if any(b > 127 for b in p.read_bytes())]
+          if bad:
+              print("non-ASCII bytes in:")
+              for p in bad:
+                  print(" ", p)
+              sys.exit(1)
+          print("ASCII OK")
+          '
+
+      # Drop --allow-missing once computer-viewer/vendor/novnc-rfb.mjs lands.
+      - name: Manifest check
+        run: bash scripts/make-manifest.sh --check --allow-missing
+
+      - name: Installer tests
+        run: bash tests/test-install.sh

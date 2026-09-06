@@ -2,17 +2,27 @@
 # Install the texting-style agent plugin into one or more Hermes profiles.
 # Each profile is its own HERMES_HOME (plugins/, config.yaml).
 #
-#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/texting-style/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.06/texting-style/install.sh | bash
 #
 # or from a clone:  bash texting-style/install.sh [--profiles a,b] [--yes]
 #
 # From a clone the plugin is symlinked (repo pulls update it). When curl-piped,
-# the two plugin files are downloaded and copied instead. Re-runs idempotent.
+# the two plugin files are downloaded, checked against MANIFEST.sha256, and
+# copied. Re-runs idempotent.
 set -euo pipefail
 
-RAW_BASE="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/texting-style"
+KIT_REF="${KIT_REF:-v2026.09.06}"
+RAW_ROOT="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
+RAW_BASE="${RAW_ROOT}/texting-style"
 HERMES_ROOT="${HERMES_ROOT:-${HOME}/.hermes}"
 PLUGIN_NAME="texting-style"
+
+case "${KIT_REF}" in
+  v*) ;;
+  *)
+    echo "WARNING: installing from mutable ref '${KIT_REF}'; no release manifest guarantees apply." >&2
+    ;;
+esac
 
 usage() {
   cat <<'EOF'
@@ -48,6 +58,32 @@ if [ -n "${BASH_SOURCE:-}" ] && [ -f "${BASH_SOURCE[0]:-}" ]; then
   SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fi
 
+file_sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -- "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$1" | awk '{print $1}'
+  else
+    echo "install.sh: need shasum or sha256sum" >&2
+    exit 1
+  fi
+}
+
+verify_digest() {
+  local rel="$1" file="$2" manifest="$3" expected actual
+  expected=$(awk -v p="${rel}" '$2 == p { print $1; found=1; exit } END { if (!found) exit 1 }' "${manifest}") || {
+    echo "install.sh: ${rel} is missing from MANIFEST.sha256" >&2
+    exit 1
+  }
+  actual=$(file_sha256 "${file}")
+  if [ "${expected}" != "${actual}" ]; then
+    echo "install.sh: sha256 mismatch for ${rel}" >&2
+    echo "  manifest: ${expected}" >&2
+    echo "  staged:   ${actual}" >&2
+    exit 1
+  fi
+}
+
 # Source: local clone (symlink) or downloaded copy (curl-pipe).
 MODE="copy"
 SRC_DIR=""
@@ -57,8 +93,11 @@ if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/plugin.yaml" ] && [ -f "${SCRIP
 else
   SRC_DIR=$(mktemp -d)
   trap 'rm -rf "${SRC_DIR}"' EXIT
+  curl -fsSL "${RAW_ROOT}/MANIFEST.sha256" -o "${SRC_DIR}/MANIFEST.sha256"
   curl -fsSL "${RAW_BASE}/plugin.yaml" -o "${SRC_DIR}/plugin.yaml"
   curl -fsSL "${RAW_BASE}/__init__.py" -o "${SRC_DIR}/__init__.py"
+  verify_digest "texting-style/plugin.yaml" "${SRC_DIR}/plugin.yaml" "${SRC_DIR}/MANIFEST.sha256"
+  verify_digest "texting-style/__init__.py" "${SRC_DIR}/__init__.py" "${SRC_DIR}/MANIFEST.sha256"
 fi
 grep -q "texting-style.sms-register" "${SRC_DIR}/__init__.py" || {
   echo "install.sh: plugin source does not look like texting-style; aborting" >&2

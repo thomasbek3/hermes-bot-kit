@@ -2,8 +2,9 @@
 
 ## Supported versions
 
-Only the latest commit on `master` is supported. This project moves fast;
-please run from a fresh clone.
+Releases are tags named `vYYYY.MM.DD`. Install one-liners pin the latest
+tag and verify every file against that tag's `MANIFEST.sha256`. Running
+from `master` is possible with `KIT_REF=master` but unsupported.
 
 ## Reporting a vulnerability
 

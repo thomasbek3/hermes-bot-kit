@@ -31,7 +31,7 @@ On the Bot Chat tab you get:
 ## Install (one command — agents can run this unattended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/bubble-mode/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.06/bubble-mode/install.sh | bash
 ```
 
 Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or restart the app). Done —
