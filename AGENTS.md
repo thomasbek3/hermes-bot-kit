@@ -93,11 +93,12 @@ Orgo computer:
 
 ```bash
 git clone https://github.com/thomasbek3/hermes-bot-kit.git
-bash hermes-bot-kit/computer-viewer/install-agent-plugin.sh --profiles <name1>,<name2> --yes --api-key <ORGO_API_KEY>
+bash hermes-bot-kit/computer-viewer/install-agent-plugin.sh --profiles <name1>,<name2> --yes --api-key-stdin <<< "$ORGO_API_KEY"
 ```
 
-Requires an Orgo API key from the user. Never invent or reuse keys found in
-files without the user's say-so.
+Requires an Orgo API key from the user. The key never appears in argv or
+shell history this way. Never invent or reuse keys found in files without
+the user's say-so.
 
 ## Uninstall
 

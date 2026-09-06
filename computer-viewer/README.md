@@ -190,8 +190,12 @@ Install into one or every Hermes profile:
 
 ```bash
 bash install-agent-plugin.sh            # all profiles, prompts once for the key
-bash install-agent-plugin.sh --profiles default,parker --yes --api-key sk_live_xxx
+bash install-agent-plugin.sh --profiles default,parker --yes --api-key-stdin <<< "$ORGO_API_KEY"
+bash install-agent-plugin.sh --profiles default,parker --yes --api-key-file ~/.config/orgo/api-key
 ```
+
+The key never appears in argv or shell history this way. `--api-key KEY` still
+works but is discouraged (visible in the process list and shell history).
 
 Then pin a computer per profile with `/computer` in that chat. The plugin is
 per-profile on purpose: parker's bot can drive one Orgo box while alfred's

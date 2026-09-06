@@ -15,9 +15,14 @@ Options:
   --all                 Install into every discovered profile (default)
   --profiles LIST       Comma-separated profile names (default, ava, ...)
   --yes                 Do not prompt for profile selection
-  --api-key KEY         Write this ORGO_API_KEY into selected profiles that
+  --api-key-stdin       Read ORGO_API_KEY from stdin (one line). Never printed.
+  --api-key-file PATH   Read ORGO_API_KEY from the first line of PATH.
+  --api-key KEY         (discouraged: visible in ps and shell history)
+                        Write this ORGO_API_KEY into selected profiles that
                         lack a key. Never printed. If omitted, you are
                         prompted once (empty + --yes writes ORGO_API_KEY=).
+                        Prefer --api-key-stdin, --api-key-file, or the
+                        ORGO_API_KEY environment variable.
   -h, --help            Show this help
 
 Re-runs are idempotent: existing symlinks, enabled entries, and non-empty
@@ -34,6 +39,12 @@ ALL_FLAG=0
 YES=0
 PROFILES_ARG=""
 API_KEY_ARG=""
+API_KEY_SET=0
+API_KEY_STDIN=0
+API_KEY_FILE=""
+API_KEY_FILE_SET=0
+
+ARGV_KEY_WARNING="WARNING: --api-key puts the key in the process list and shell history. Prefer --api-key-stdin, --api-key-file, or the ORGO_API_KEY environment variable."
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -60,16 +71,42 @@ while [ $# -gt 0 ]; do
       YES=1
       shift
       ;;
-    --api-key)
-      API_KEY_ARG="${2:-}"
-      if [ -z "${API_KEY_ARG}" ]; then
-        echo "install-agent-plugin.sh: --api-key requires a value" >&2
+    --api-key-stdin)
+      API_KEY_STDIN=1
+      shift
+      ;;
+    --api-key-file)
+      API_KEY_FILE="${2:-}"
+      API_KEY_FILE_SET=1
+      if [ -z "${API_KEY_FILE}" ]; then
+        echo "install-agent-plugin.sh: --api-key-file requires a path" >&2
         exit 2
       fi
       shift 2
       ;;
+    --api-key-file=*)
+      API_KEY_FILE="${1#--api-key-file=}"
+      API_KEY_FILE_SET=1
+      if [ -z "${API_KEY_FILE}" ]; then
+        echo "install-agent-plugin.sh: --api-key-file requires a path" >&2
+        exit 2
+      fi
+      shift
+      ;;
+    --api-key)
+      API_KEY_ARG="${2:-}"
+      API_KEY_SET=1
+      if [ -z "${API_KEY_ARG}" ]; then
+        echo "install-agent-plugin.sh: --api-key requires a value" >&2
+        exit 2
+      fi
+      echo "${ARGV_KEY_WARNING}" >&2
+      shift 2
+      ;;
     --api-key=*)
       API_KEY_ARG="${1#--api-key=}"
+      API_KEY_SET=1
+      echo "${ARGV_KEY_WARNING}" >&2
       shift
       ;;
     -h|--help)
@@ -83,6 +120,47 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+explicit_key_flags=$((API_KEY_STDIN + API_KEY_FILE_SET + API_KEY_SET))
+if [ "${explicit_key_flags}" -gt 1 ]; then
+  echo "install-agent-plugin.sh: pass only one of --api-key-stdin, --api-key-file, --api-key" >&2
+  exit 2
+fi
+
+# Consume stdin now when asked, before profile selection or the
+# non-tty empty-key fallback can swallow it.
+API_KEY_STDIN_VALUE=""
+if [ "${API_KEY_STDIN}" -eq 1 ]; then
+  IFS= read -r API_KEY_STDIN_VALUE || true
+  API_KEY_STDIN_VALUE=${API_KEY_STDIN_VALUE%$'\r'}
+fi
+
+API_KEY_FILE_VALUE=""
+if [ "${API_KEY_FILE_SET}" -eq 1 ]; then
+  if [ ! -f "${API_KEY_FILE}" ]; then
+    echo "install-agent-plugin.sh: --api-key-file not found: ${API_KEY_FILE}" >&2
+    exit 2
+  fi
+  mode=""
+  if mode=$(stat -f '%Lp' "${API_KEY_FILE}" 2>/dev/null); then
+    :
+  elif mode=$(stat -c '%a' "${API_KEY_FILE}" 2>/dev/null); then
+    :
+  else
+    mode=""
+  fi
+  case "${mode}" in
+    *[!0-7]*|"")
+      ;;
+    *)
+      if [ $((8#${mode} & 8#044)) -ne 0 ]; then
+        echo "WARNING: --api-key-file ${API_KEY_FILE} is group- or world-readable" >&2
+      fi
+      ;;
+  esac
+  IFS= read -r API_KEY_FILE_VALUE < "${API_KEY_FILE}" || true
+  API_KEY_FILE_VALUE=${API_KEY_FILE_VALUE%$'\r'}
+fi
 
 if [ ! -f "${PLUGIN_SRC}/plugin.yaml" ] || [ ! -f "${PLUGIN_SRC}/__init__.py" ]; then
   echo "install-agent-plugin.sh: plugin source not found at ${PLUGIN_SRC}" >&2
@@ -342,7 +420,11 @@ done < "${SELECTED_FILE}"
 
 KEY_TO_WRITE=""
 if [ "${needs_key}" -eq 1 ]; then
-  if [ -n "${API_KEY_ARG}" ]; then
+  if [ "${API_KEY_STDIN}" -eq 1 ]; then
+    KEY_TO_WRITE=${API_KEY_STDIN_VALUE}
+  elif [ "${API_KEY_FILE_SET}" -eq 1 ]; then
+    KEY_TO_WRITE=${API_KEY_FILE_VALUE}
+  elif [ "${API_KEY_SET}" -eq 1 ]; then
     KEY_TO_WRITE=${API_KEY_ARG}
   elif [ -n "${ORGO_API_KEY:-}" ]; then
     KEY_TO_WRITE=${ORGO_API_KEY}
