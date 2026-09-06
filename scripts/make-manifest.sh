@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Write MANIFEST.sha256 (sha256sum format, sorted by path) from
 # scripts/manifest-files.txt. --check exits 1 if the committed file differs.
-# --allow-missing skips absent files with a warning (needed until
-# computer-viewer/vendor/novnc-rfb.mjs lands; drop it after that).
+# --allow-missing skips absent files with a warning (developer use only).
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

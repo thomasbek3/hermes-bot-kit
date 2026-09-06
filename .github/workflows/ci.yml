@@ -58,9 +58,8 @@ jobs:
           print("ASCII OK")
           '
 
-      # Drop --allow-missing once computer-viewer/vendor/novnc-rfb.mjs lands.
       - name: Manifest check
-        run: bash scripts/make-manifest.sh --check --allow-missing
+        run: bash scripts/make-manifest.sh --check
 
       - name: Installer tests
         run: bash tests/test-install.sh

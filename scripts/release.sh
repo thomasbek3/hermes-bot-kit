@@ -103,8 +103,7 @@ if bad:
     sys.exit(1)
 print("ASCII OK")
 '
-  # Drop --allow-missing once computer-viewer/vendor/novnc-rfb.mjs lands.
-  bash scripts/make-manifest.sh --check --allow-missing
+  bash scripts/make-manifest.sh --check
   bash tests/test-install.sh
 }
 

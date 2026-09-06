@@ -46,6 +46,12 @@ const PLUGIN_ID = 'computer-viewer'
 const PANE_CONTRIB_ID = 'computer-viewer:pane'
 const NOVNC_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.7.0/+esm'
 const NOVNC_FALLBACK_URL = 'https://esm.sh/@novnc/novnc@1.7.0'
+const VENDORED_RFB_SHA256 = '08b527c943eb410ffa1a35d7d14c018d9eba22363150c3dc35a70327f1e88a28'
+
+function rfbSourceOrder() {
+  return [NOVNC_URL, NOVNC_FALLBACK_URL]
+}
+
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 const CHROME_IDLE_MS = 2000
 /** Remote XFCE panel height in framebuffer pixels. Thumbnail crop uses this
@@ -54,7 +60,7 @@ const SCREEN_PANEL_PX = 28
 const PASSWORD_CAVEAT =
   'Stored locally in plugin storage (plain text). Prefer token-in-URL or session endpoints for anything sensitive.'
 const MIXED_CONTENT_HINT = 'Insecure ws:// to a public host will likely be blocked. Use wss://.'
-const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/computer-viewer'
+const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.06/computer-viewer'
 const SNAPSHOT_CAP = 8
 const HIPERF_BACKOFF_MS = [2000, 4000, 8000]
 const HIPERF_IDLE = { phase: 'off', code: null, fps: 0, mbps: 0, rtt: 0, url: '' }
@@ -951,7 +957,7 @@ function phaseLine(state) {
     case 'resolving':
       return 'Resolving session…'
     case 'loading-novnc':
-      return 'Loading viewer…'
+      return state.detail ? `Loading viewer… · ${state.detail}` : 'Loading viewer…'
     case 'connecting':
       return state.detail ? `Connecting to ${state.detail}…` : 'Connecting…'
     case 'connected':
@@ -1034,7 +1040,10 @@ const engine = {
   resolvedWsUrl: '',
   appliedDefaultsFor: null,
   authLock: false,
-  intentionalDisconnect: false
+  intentionalDisconnect: false,
+  rfbSource: null,
+  rfbLocalFailed: false,
+  rfbVendoredReason: null
 }
 
 function bumpGen() {
@@ -1339,17 +1348,148 @@ function switchComputer(id) {
   void connect(next)
 }
 
+function importRfbModule(url) {
+  if (typeof globalThis !== 'undefined' && typeof globalThis.__importHook === 'function') {
+    return globalThis.__importHook(url)
+  }
+  return import(/* webpackIgnore: true */ url)
+}
+
+function rfbConstructor(mod) {
+  let ctor = mod && (mod.default || mod.RFB)
+  if (ctor && typeof ctor !== 'function' && typeof ctor.default === 'function') ctor = ctor.default
+  return ctor
+}
+
+function rfbSourceLabel(url) {
+  if (url === NOVNC_FALLBACK_URL) return 'cdn-esm'
+  return 'cdn-jsdelivr'
+}
+
+function rfbStatusDetail() {
+  if (engine.rfbVendoredReason === 'integrity') {
+    return 'vendored noVNC failed integrity check; loaded from CDN'
+  }
+  if (engine.rfbLocalFailed) return 'vendored noVNC failed to load'
+  if (engine.rfbSource === 'cdn-jsdelivr' || engine.rfbSource === 'cdn-esm') {
+    return 'noVNC from CDN (unverified; re-run the installer to get the vendored copy)'
+  }
+  return null
+}
+
+function hexSha256(digest) {
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function textFromReadFile(payload) {
+  if (typeof payload === 'string') return payload
+  if (!payload || typeof payload !== 'object') return null
+  if (payload.truncated) return null
+  if (typeof payload.text === 'string') return payload.text
+  if (typeof payload.content === 'string') return payload.content
+  return null
+}
+
+function vendoredRfbPath(root) {
+  const sep = root.includes('\\') ? '\\' : '/'
+  const base = root.endsWith('\\') || root.endsWith('/') ? root.slice(0, -1) : root
+  return base + sep + 'computer-viewer' + sep + 'novnc-rfb.mjs'
+}
+
+async function loadVendoredRFB() {
+  const bridge = globalThis.window && window.hermesDesktop
+  // readPluginSource reads the whole file (16 MiB cap); readFileText is the
+  // preview door that truncates at 512 KiB. Prefer the former.
+  const readSource = bridge?.readPluginSource || bridge?.readFileText
+  if (!bridge?.desktopPluginsRoot || !readSource) {
+    engine.rfbVendoredReason = 'no-bridge'
+    return null
+  }
+
+  let root
+  try {
+    root = await bridge.desktopPluginsRoot()
+  } catch {
+    engine.rfbVendoredReason = 'no-bridge'
+    return null
+  }
+  if (typeof root !== 'string' || !root) {
+    engine.rfbVendoredReason = 'no-bridge'
+    return null
+  }
+
+  const filePath = vendoredRfbPath(root)
+  let payload
+  try {
+    payload = await readSource.call(bridge, filePath)
+  } catch {
+    engine.rfbVendoredReason = 'missing'
+    return null
+  }
+
+  const source = textFromReadFile(payload)
+  if (source == null) {
+    engine.rfbVendoredReason = 'missing'
+    return null
+  }
+
+  let hex
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
+    hex = hexSha256(digest)
+  } catch {
+    engine.rfbVendoredReason = 'import-failed'
+    engine.rfbLocalFailed = true
+    return null
+  }
+  if (hex !== VENDORED_RFB_SHA256) {
+    console.warn('[computer-viewer] vendored noVNC failed integrity check', filePath)
+    engine.rfbVendoredReason = 'integrity'
+    return null
+  }
+
+  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
+  try {
+    const mod = await importRfbModule(url)
+    const ctor = rfbConstructor(mod)
+    if (typeof ctor !== 'function') throw new Error('RFB constructor missing')
+    RFB = ctor
+    engine.rfbSource = 'vendored'
+    console.info('[computer-viewer] noVNC source: vendored', filePath)
+    return RFB
+  } catch (error) {
+    engine.rfbVendoredReason = 'import-failed'
+    engine.rfbLocalFailed = true
+    console.warn('[computer-viewer] vendored noVNC failed to load', error)
+    return null
+  } finally {
+    try {
+      URL.revokeObjectURL(url)
+    } catch {
+      /* already revoked */
+    }
+  }
+}
+
 async function loadRFB() {
   if (RFB) return RFB
-  const urls = [NOVNC_URL, NOVNC_FALLBACK_URL]
+  engine.rfbLocalFailed = false
+  engine.rfbVendoredReason = null
+  const vendored = await loadVendoredRFB()
+  if (vendored) return vendored
+  const urls = rfbSourceOrder()
   let lastError = null
   for (const url of urls) {
     try {
-      const mod = await import(/* webpackIgnore: true */ url)
-      let ctor = mod && (mod.default || mod.RFB)
-      if (ctor && typeof ctor !== 'function' && typeof ctor.default === 'function') ctor = ctor.default
+      const mod = await importRfbModule(url)
+      const ctor = rfbConstructor(mod)
       if (typeof ctor !== 'function') throw new Error('RFB constructor missing')
       RFB = ctor
+      engine.rfbSource = rfbSourceLabel(url)
+      const reason = engine.rfbVendoredReason || 'no-bridge'
+      console.info(
+        `[computer-viewer] noVNC source: ${engine.rfbSource} (unverified; reason: ${reason})`
+      )
       return RFB
     } catch (error) {
       lastError = error
@@ -1868,6 +2008,7 @@ async function connect(endpoint) {
     return
   }
   if (!still(gen)) return
+  patchState({ phase: 'loading-novnc', code: null, detail: rfbStatusDetail() })
 
   if (engine.appliedDefaultsFor !== endpoint.id) {
     setUi({
@@ -1945,7 +2086,7 @@ async function connect(endpoint) {
           })
         )
       }
-      patchState({ phase: 'connected', code: null, detail: null, attempt: 0 })
+      patchState({ phase: 'connected', code: null, detail: rfbStatusDetail(), attempt: 0 })
       measureScreen()
       attachCanvasObserver()
       hiperfOnRfbConnected()
