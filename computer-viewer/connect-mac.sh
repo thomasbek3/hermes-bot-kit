@@ -32,11 +32,44 @@ TAHOE_PATCHED='26.6.1'
 
 echo "Computer viewer - Mac Screen Sharing bridge"
 echo "websockify ${WEBSOCKIFY_PIN}, pinned in ${VENV_DIR}"
-echo "LAN / Tailscale only - VNC stays on localhost:5900; websocket on :${LISTEN_PORT}."
+echo "LAN / Tailscale only - VNC stays on localhost:5900; websocket bind is chosen below."
 echo
 
 xml_escape() {
   printf '%s' "$1" | sed -e 's/\&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+resolve_bind() {
+  # Env override wins.
+  case "${CV_BIND:-}" in
+    "")        ;;
+    lan|0.0.0.0) printf '0.0.0.0'; return ;;
+    *)         printf '%s' "${CV_BIND}"; return ;;
+  esac
+  # Tailscale present and up -> bind its IPv4 only.
+  if command -v tailscale >/dev/null 2>&1; then
+    ip="$(tailscale ip -4 2>/dev/null | head -n1 | tr -d '[:space:]')"
+    case "$ip" in 100.*) printf '%s' "$ip"; return ;; esac
+  fi
+  printf '127.0.0.1'
+}
+
+announce_bind() {
+  case "$1" in
+    0.0.0.0)
+      echo "==> Bind: 0.0.0.0 (CV_BIND override) WARNING: every interface, plaintext, LAN-only use."
+      ;;
+    127.0.0.1)
+      echo "==> Bind: 127.0.0.1 (no Tailscale found; reach it through an SSH tunnel or set CV_BIND=0.0.0.0)"
+      ;;
+    *)
+      if [ -n "${CV_BIND:-}" ]; then
+        echo "==> Bind: $1 (CV_BIND override)"
+      else
+        echo "==> Bind: $1 (Tailscale interface; set CV_BIND=0.0.0.0 for every interface)"
+      fi
+      ;;
+  esac
 }
 
 # Return 0 if dotted version $1 >= $2. Best-effort numeric; bash 3.2 safe.
@@ -150,6 +183,12 @@ detect_hostname() {
 
 warn_screen_sharing_cve
 
+if ! command -v tailscale >/dev/null 2>&1 && [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then
+  PATH="/Applications/Tailscale.app/Contents/MacOS:${PATH}"
+fi
+BIND="$(resolve_bind)"
+announce_bind "$BIND"
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 not found. Install Python 3 (Xcode Command Line Tools or python.org) and re-run." >&2
   echo "  xcode-select --install" >&2
@@ -187,6 +226,7 @@ echo "    ${WEBSOCKIFY_BIN}"
 BIN_XML="$(xml_escape "${WEBSOCKIFY_BIN}")"
 LOG_XML="$(xml_escape "${LOG_PATH}")"
 LABEL_XML="$(xml_escape "${LABEL}")"
+BIND_PORT_XML="$(xml_escape "${BIND}:${LISTEN_PORT}")"
 
 echo "==> Writing LaunchAgent ${PLIST}"
 cat > "${PLIST}" <<EOF
@@ -199,7 +239,7 @@ cat > "${PLIST}" <<EOF
   <key>ProgramArguments</key>
   <array>
     <string>${BIN_XML}</string>
-    <string>${LISTEN_PORT}</string>
+    <string>${BIND_PORT_XML}</string>
     <string>${VNC_TARGET}</string>
   </array>
   <key>RunAtLoad</key>
@@ -234,7 +274,7 @@ if command -v launchctl >/dev/null 2>&1; then
   launchctl enable "${DOMAIN}/${LABEL}" >/dev/null 2>&1 || true
   launchctl kickstart -k "${DOMAIN}/${LABEL}" >/dev/null 2>&1 || \
     launchctl start "${LABEL}" >/dev/null 2>&1 || true
-  echo "    Loaded ${LABEL} (websockify ${LISTEN_PORT} -> ${VNC_TARGET}, RunAtLoad + KeepAlive)."
+  echo "    Loaded ${LABEL} (websockify ${BIND}:${LISTEN_PORT} -> ${VNC_TARGET}, RunAtLoad + KeepAlive)."
 else
   echo "launchctl not found; plist is in place but was not loaded." >&2
 fi
@@ -267,20 +307,52 @@ fi
 
 HOST="$(detect_hostname)"
 MAC_USER="$(whoami)"
+TS_DNS=""
+if command -v tailscale >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  TS_DNS="$(tailscale status --json 2>/dev/null | python3 -c 'import sys,json
+try:
+    d=json.load(sys.stdin)
+    n=(d.get("Self") or {}).get("DNSName") or ""
+    print(n.rstrip("."))
+except Exception:
+    print("")
+' || true)"
+fi
 
 echo
 echo "===================================================================="
 echo "Paste this address in Computer:"
-echo "  ws://${HOST}:${LISTEN_PORT}/websockify"
+case "$BIND" in
+  127.0.0.1)
+    echo "  Reach it through an SSH tunnel:"
+    echo "    ssh -N -L ${LISTEN_PORT}:127.0.0.1:${LISTEN_PORT} ${MAC_USER}@${HOST}"
+    echo "  then paste:"
+    echo "    ws://127.0.0.1:${LISTEN_PORT}/websockify"
+    ;;
+  0.0.0.0)
+    echo "  ws://${HOST}:${LISTEN_PORT}/websockify"
+    echo
+    echo "Tailscale names work too (ws://<tailscale-name>:${LISTEN_PORT}/websockify)."
+    echo ".local (Bonjour) and Tailscale MagicDNS both resolve on a private net."
+    echo
+    echo "WARNING: bound to every interface, plaintext. LAN-only use."
+    ;;
+  *)
+    echo "  ws://${BIND}:${LISTEN_PORT}/websockify"
+    if [ -n "${TS_DNS}" ]; then
+      echo "  ws://${TS_DNS}:${LISTEN_PORT}/websockify"
+    else
+      echo "  ws://<tailscale-name>:${LISTEN_PORT}/websockify"
+    fi
+    echo ".local (Bonjour) and Tailscale MagicDNS both resolve on a private net."
+    ;;
+esac
 echo
 echo "The plugin also needs:"
 echo "  Username  ${MAC_USER}   (your Mac login, Advanced -> Username)"
 echo "  Password  the 8-char VNC password you set in Screen Sharing"
 echo
-echo "Tailscale names work too (ws://<tailscale-name>:${LISTEN_PORT}/websockify)."
-echo ".local (Bonjour) and Tailscale MagicDNS both resolve on a private net."
-echo
 echo "LAN / Tailscale only. Do not port-forward 5900 or ${LISTEN_PORT}."
-echo "VNC is bound to localhost; only the websocket port is reachable."
+echo "VNC stays on localhost:5900. websockify is bound to ${BIND}:${LISTEN_PORT}."
 echo "Logs: ${LOG_PATH}"
 echo "===================================================================="

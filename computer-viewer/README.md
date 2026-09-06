@@ -112,15 +112,19 @@ The plugin talks to two kinds of computer:
   TLS-fronted VPS, a Docker desktop box). Detection is automatic; you do not
   pick a mode.
 - **Local** — a Mac, Windows PC, or Linux box on your LAN or Tailscale. Run
-  the one-paste script **on that machine**. It binds VNC to localhost and
-  publishes a WebSocket on port **6080**. Paste the printed
-  `ws://.../websockify` address into **Computer address**, plus the VNC
+  the one-paste script **on that machine**. VNC stays on localhost:5900.
+  websockify (:6080) and the HD agent (:6090) bind the Tailscale IPv4 when
+  Tailscale is up, otherwise loopback. `CV_BIND=0.0.0.0` (Windows: `-Bind
+  0.0.0.0`) exposes them on every interface — trusted LAN only. Paste the
+  printed `ws://...` address into **Computer address**, plus the VNC
   password (and on a Mac, your username).
 
 The scripts are idempotent and print the exact paste address when they
-finish. Tailscale MagicDNS names and `.local` hostnames both work. websockify
-is pinned (`websockify==0.13.0` on Mac/Windows; distro package on Linux).
-LAN / Tailscale only — never the public internet.
+finish. On a Tailscale bind they print the `100.x` address and the
+MagicDNS name; on loopback they print an SSH tunnel recipe first.
+websockify is pinned (`websockify==0.13.0` on Mac/Windows; distro package
+on Linux). Transport is plaintext `ws://` — the tailnet or an SSH tunnel
+is the boundary, never the public internet.
 
 ### macOS
 
@@ -321,10 +325,16 @@ stream), paste the printed token, turn on HD.
 
 ## Security
 
-- **Never expose VNC or the websocket port to the internet.** These scripts
-  bind VNC (`:5900`) to localhost and only publish websockify (`:6080`) on
-  the private network. Use Tailscale or LAN. No router port-forward, no
-  public IP, no `0.0.0.0` on 5900.
+- **Never expose VNC or the websocket ports to the internet.** VNC (`:5900`)
+  is loopback-only. websockify (`:6080`) and the HD agent (`:6090`) are
+  network listeners: Tailscale IPv4 when present, otherwise loopback.
+  `CV_BIND=0.0.0.0` binds every interface and is supported only on a
+  trusted LAN. No router port-forward, no public IP. Transport is
+  plaintext `ws://` — confidentiality comes from the tailnet (WireGuard)
+  or an SSH tunnel, not from the bridge. No TLS/`wss` mode exists. The HD
+  token is in the WebSocket query string (the browser API cannot set
+  headers); anyone who can read the wire can read it. The desktop plugin
+  refuses `ws://` to public hosts.
 - **August 2026 macOS Screen Sharing CVE (CVE-2026-65400).** Unpatched Screen
   Sharing can authenticate an attacker on the network **without valid
   credentials**. Apple patched this in macOS **Sonoma 14.8.9**,
@@ -332,11 +342,8 @@ stream), paste the printed token, turn on HD.
   Sharing. `connect-mac.sh` warns if `sw_vers` is below those builds. Never
   publish port 5900.
 - **VNC passwords are weak.** Classic VNC authentication is DES with an
-  **8-character** secret (longer passwords are truncated). Treat it as a LAN
-  PIN, not an account password.
-- **`ws://` is unencrypted.** That is fine on a private net (this machine,
-  LAN, Tailscale). Public hosts need `wss://` with a trusted certificate;
-  self-signed certs fail *silently* at the websocket layer.
+  **8-character** secret (longer passwords are truncated). Treat it as a
+  second factor, not the boundary.
 
 Passwords stored by the plugin live in plugin storage **in plain text**
 (`hermes.plugin.computer-viewer.*`). Prefer a token in the WebSocket URL or a
@@ -466,8 +473,9 @@ VNC password.
    (`RunAtLoad` + `KeepAlive`, `ThrottleInterval` 10) whose
    `ProgramArguments` use the **absolute** venv `websockify` (launchd has a
    bare PATH - `pip --user` is not visible). Mapping is
-   `6080 -> localhost:5900`. Logs: `~/.hermes-cv/websockify.log`. It prints
-   `ws://<LocalHostName>.local:6080/websockify`. Tailscale names work too.
+   `<bind>:6080 -> localhost:5900` (Tailscale IPv4, else loopback; see
+   `CV_BIND`). Logs: `~/.hermes-cv/websockify.log`. It prints the paste
+   address for that bind (SSH tunnel recipe when loopback).
 3. In the plugin: paste that address, then **Username** (your Mac login) and
    **Password** (the Screen Sharing VNC password). Update macOS past the
    Aug-2026 Screen Sharing CVE before exposing anything (see **Security**).
@@ -495,8 +503,9 @@ installs Python 3.12 if needed (`winget ... Python.Python.3.12 --scope
 machine`), pins `websockify==0.13.0`, and registers a SYSTEM scheduled task
 at startup with `RestartCount 3` / `RestartInterval 1min` and
 **`ExecutionTimeLimit` zero** (the default would kill the task after 72
-hours). Command: `python -m websockify 0.0.0.0:6080 127.0.0.1:5900`. Firewall:
-inbound TCP 6080 on the **Private** profile only.
+hours). Command: `python -m websockify <bind>:6080 127.0.0.1:5900` (`<bind>`
+is the Tailscale IPv4, loopback, or `-Bind`). Firewall: inbound TCP 6080 on
+the **Private** profile only.
 
 It prints `ws://<COMPUTERNAME>:6080/websockify` and the generated 8-character
 VNC password. UAC prompts are visible in TightVNC service mode (expected).
@@ -545,7 +554,7 @@ Branches on `$XDG_SESSION_TYPE`:
   `~/.hermes-cv/vncpwd`, and enables systemd **user** units
   `computer-viewer-x11vnc.service` (`x11vnc -localhost -forever -shared
   -noxdamage -rfbauth ... -rfbport 5900`) and
-  `computer-viewer-websockify.service` (`6080 -> localhost:5900`,
+  `computer-viewer-websockify.service` (`<bind>:6080 -> localhost:5900`,
   `Restart=always`). `loginctl enable-linger` keeps them up without a login.
 - **wlroots Wayland** (Sway, Hyprland, ...) - `wayvnc` on localhost with
   RSA-AES / `relax_encryption`, websockify in front. Best-effort; noVNC may

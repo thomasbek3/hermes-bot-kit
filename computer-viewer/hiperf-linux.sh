@@ -24,11 +24,44 @@ RAW_REPO_URL='https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master
 WEBSOCKETS_PIN='websockets>=13,<16'
 
 echo "Computer viewer - high-performance stream (Linux)"
-echo "LAN / Tailscale only - H.264 agent on :${LISTEN_PORT}."
+echo "LAN / Tailscale only - H.264 agent bind is chosen below (port ${LISTEN_PORT})."
 echo
 
 umask 077
 mkdir -p "${HIPERF_DIR}" "${HERMES_CV}" "${UNIT_DIR}"
+
+resolve_bind() {
+  # Env override wins.
+  case "${CV_BIND:-}" in
+    "")        ;;
+    lan|0.0.0.0) printf '0.0.0.0'; return ;;
+    *)         printf '%s' "${CV_BIND}"; return ;;
+  esac
+  # Tailscale present and up -> bind its IPv4 only.
+  if command -v tailscale >/dev/null 2>&1; then
+    ip="$(tailscale ip -4 2>/dev/null | head -n1 | tr -d '[:space:]')"
+    case "$ip" in 100.*) printf '%s' "$ip"; return ;; esac
+  fi
+  printf '127.0.0.1'
+}
+
+announce_bind() {
+  case "$1" in
+    0.0.0.0)
+      echo "==> Bind: 0.0.0.0 (CV_BIND override) WARNING: every interface, plaintext, LAN-only use."
+      ;;
+    127.0.0.1)
+      echo "==> Bind: 127.0.0.1 (no Tailscale found; reach it through an SSH tunnel or set CV_BIND=0.0.0.0)"
+      ;;
+    *)
+      if [ -n "${CV_BIND:-}" ]; then
+        echo "==> Bind: $1 (CV_BIND override)"
+      else
+        echo "==> Bind: $1 (Tailscale interface; set CV_BIND=0.0.0.0 for every interface)"
+      fi
+      ;;
+  esac
+}
 
 port_listening() {
   local port="$1"
@@ -221,6 +254,9 @@ PYTHON_BIN="${VENV_DIR}/bin/python"
 DISPLAY_VAL="${DISPLAY:-:0}"
 XAUTH_VAL="${XAUTHORITY:-%h/.Xauthority}"
 
+BIND="$(resolve_bind)"
+announce_bind "$BIND"
+
 echo "==> Writing systemd user unit ${UNIT_FILE}"
 cat > "${UNIT_FILE}" <<EOF
 [Unit]
@@ -231,7 +267,7 @@ After=graphical-session.target
 Type=simple
 Environment=DISPLAY=${DISPLAY_VAL}
 Environment=XAUTHORITY=${XAUTH_VAL}
-ExecStart=${PYTHON_BIN} ${AGENT_PATH} --port ${LISTEN_PORT} --token-file ${TOKEN_FILE} --ffmpeg ${FFMPEG_BIN} --bind 0.0.0.0 --display ${DISPLAY_VAL}
+ExecStart=${PYTHON_BIN} ${AGENT_PATH} --port ${LISTEN_PORT} --token-file ${TOKEN_FILE} --ffmpeg ${FFMPEG_BIN} --bind ${BIND} --display ${DISPLAY_VAL}
 Restart=on-failure
 RestartSec=10
 
@@ -250,10 +286,8 @@ else
 fi
 
 HOST="$(hostname -s 2>/dev/null || hostname)"
-TS_IP=""
 TS_DNS=""
 if command -v tailscale >/dev/null 2>&1; then
-  TS_IP="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
   TS_DNS="$(tailscale status --json 2>/dev/null | python3 -c 'import sys,json
 try:
     d=json.load(sys.stdin)
@@ -276,15 +310,33 @@ echo "  ${TOKEN}"
 echo "  stored at ${TOKEN_FILE} (mode 600)"
 echo
 echo "Optional stream URL override (leave blank to derive :6090 from the VNC host):"
-echo "  ws://${HOST}:${LISTEN_PORT}/stream"
-echo "  ws://${HOST}.local:${LISTEN_PORT}/stream"
-if [ -n "${TS_DNS}" ]; then
-  echo "  ws://${TS_DNS}:${LISTEN_PORT}/stream"
-fi
-if [ -n "${TS_IP}" ]; then
-  echo "  ws://${TS_IP}:${LISTEN_PORT}/stream"
-fi
+case "$BIND" in
+  127.0.0.1)
+    echo "  Reach it through an SSH tunnel:"
+    echo "    ssh -N -L ${LISTEN_PORT}:127.0.0.1:${LISTEN_PORT} ${USER}@${HOST}"
+    echo "  then paste:"
+    echo "    ws://127.0.0.1:${LISTEN_PORT}/stream"
+    ;;
+  0.0.0.0)
+    echo "  ws://${HOST}:${LISTEN_PORT}/stream"
+    echo "  ws://${HOST}.local:${LISTEN_PORT}/stream"
+    if [ -n "${TS_DNS}" ]; then
+      echo "  ws://${TS_DNS}:${LISTEN_PORT}/stream"
+    fi
+    echo "  WARNING: bound to every interface, plaintext. LAN-only use."
+    ;;
+  *)
+    echo "  ws://${BIND}:${LISTEN_PORT}/stream"
+    if [ -n "${TS_DNS}" ]; then
+      echo "  ws://${TS_DNS}:${LISTEN_PORT}/stream"
+    else
+      echo "  ws://<tailscale-name>:${LISTEN_PORT}/stream"
+    fi
+    echo "(.local and Tailscale MagicDNS both work on a private net.)"
+    ;;
+esac
 echo
 echo "LAN / Tailscale only. Do not port-forward ${LISTEN_PORT}."
+echo "HD agent is bound to ${BIND}:${LISTEN_PORT}."
 echo "X11 only. On Wayland the agent stays up but capture fails (use an Xorg session)."
 echo "===================================================================="

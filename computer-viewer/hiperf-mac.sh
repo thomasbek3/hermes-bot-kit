@@ -28,11 +28,44 @@ RAW_REPO_URL='https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master
 WEBSOCKETS_PIN='websockets>=13,<16'
 
 echo "Computer viewer - high-performance stream (macOS)"
-echo "LAN / Tailscale only - H.264 agent on :${LISTEN_PORT}."
+echo "LAN / Tailscale only - H.264 agent bind is chosen below (port ${LISTEN_PORT})."
 echo
 
 xml_escape() {
   printf '%s' "$1" | sed -e 's/\&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+resolve_bind() {
+  # Env override wins.
+  case "${CV_BIND:-}" in
+    "")        ;;
+    lan|0.0.0.0) printf '0.0.0.0'; return ;;
+    *)         printf '%s' "${CV_BIND}"; return ;;
+  esac
+  # Tailscale present and up -> bind its IPv4 only.
+  if command -v tailscale >/dev/null 2>&1; then
+    ip="$(tailscale ip -4 2>/dev/null | head -n1 | tr -d '[:space:]')"
+    case "$ip" in 100.*) printf '%s' "$ip"; return ;; esac
+  fi
+  printf '127.0.0.1'
+}
+
+announce_bind() {
+  case "$1" in
+    0.0.0.0)
+      echo "==> Bind: 0.0.0.0 (CV_BIND override) WARNING: every interface, plaintext, LAN-only use."
+      ;;
+    127.0.0.1)
+      echo "==> Bind: 127.0.0.1 (no Tailscale found; reach it through an SSH tunnel or set CV_BIND=0.0.0.0)"
+      ;;
+    *)
+      if [ -n "${CV_BIND:-}" ]; then
+        echo "==> Bind: $1 (CV_BIND override)"
+      else
+        echo "==> Bind: $1 (Tailscale interface; set CV_BIND=0.0.0.0 for every interface)"
+      fi
+      ;;
+  esac
 }
 
 port_listening() {
@@ -206,6 +239,12 @@ if [ -z "${BREW_PREFIX}" ]; then
 fi
 PATH_VALUE="${HERMES_CV}/bin:${BREW_PREFIX:+${BREW_PREFIX}/bin:}/usr/local/bin:/usr/bin:/bin"
 
+if ! command -v tailscale >/dev/null 2>&1 && [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then
+  PATH="/Applications/Tailscale.app/Contents/MacOS:${PATH}"
+fi
+BIND="$(resolve_bind)"
+announce_bind "$BIND"
+
 echo "==> Capture probe (will not obtain Screen Recording permission by itself)"
 echo "    A launchd-started agent cannot show the TCC prompt, and launchctl asuser"
 echo "    requires root, so this script cannot grant Screen Recording for you."
@@ -215,7 +254,7 @@ set +e
   --port "${LISTEN_PORT}" \
   --token-file "${TOKEN_FILE}" \
   --ffmpeg "${FFMPEG_BIN}" \
-  --bind 127.0.0.1 &
+  --bind "${BIND}" &
 PROBE_PID=$!
 sleep 8
 kill "${PROBE_PID}" >/dev/null 2>&1
@@ -232,6 +271,7 @@ LABEL_XML="$(xml_escape "${LABEL}")"
 PATH_XML="$(xml_escape "${PATH_VALUE}")"
 WD_XML="$(xml_escape "${HIPERF_DIR}")"
 PORT_XML="$(xml_escape "${LISTEN_PORT}")"
+BIND_XML="$(xml_escape "${BIND}")"
 
 echo "==> Writing LaunchAgent ${PLIST}"
 cat > "${PLIST}" <<EOF
@@ -252,7 +292,7 @@ cat > "${PLIST}" <<EOF
     <string>--ffmpeg</string>
     <string>${FFMPEG_XML}</string>
     <string>--bind</string>
-    <string>0.0.0.0</string>
+    <string>${BIND_XML}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -304,10 +344,9 @@ else
 fi
 
 HOST="$(detect_hostname)"
-TS_IP=""
+MAC_USER="$(whoami)"
 TS_DNS=""
 if command -v tailscale >/dev/null 2>&1; then
-  TS_IP="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
   TS_DNS="$(tailscale status --json 2>/dev/null | "${PYTHON_CMD}" -c 'import sys,json
 try:
     d=json.load(sys.stdin)
@@ -330,15 +369,33 @@ echo "  ${TOKEN}"
 echo "  stored at ${TOKEN_FILE} (mode 600)"
 echo
 echo "Optional stream URL override (leave blank to derive :6090 from the VNC host):"
-echo "  ws://${HOST}:${LISTEN_PORT}/stream"
-if [ -n "${TS_DNS}" ]; then
-  echo "  ws://${TS_DNS}:${LISTEN_PORT}/stream"
-fi
-if [ -n "${TS_IP}" ]; then
-  echo "  ws://${TS_IP}:${LISTEN_PORT}/stream"
-fi
+case "$BIND" in
+  127.0.0.1)
+    echo "  Reach it through an SSH tunnel:"
+    echo "    ssh -N -L ${LISTEN_PORT}:127.0.0.1:${LISTEN_PORT} ${MAC_USER}@${HOST}"
+    echo "  then paste:"
+    echo "    ws://127.0.0.1:${LISTEN_PORT}/stream"
+    ;;
+  0.0.0.0)
+    echo "  ws://${HOST}:${LISTEN_PORT}/stream"
+    if [ -n "${TS_DNS}" ]; then
+      echo "  ws://${TS_DNS}:${LISTEN_PORT}/stream"
+    fi
+    echo "  WARNING: bound to every interface, plaintext. LAN-only use."
+    ;;
+  *)
+    echo "  ws://${BIND}:${LISTEN_PORT}/stream"
+    if [ -n "${TS_DNS}" ]; then
+      echo "  ws://${TS_DNS}:${LISTEN_PORT}/stream"
+    else
+      echo "  ws://<tailscale-name>:${LISTEN_PORT}/stream"
+    fi
+    echo ".local (Bonjour) and Tailscale MagicDNS both resolve on a private net."
+    ;;
+esac
 echo
 echo "LAN / Tailscale only. Do not port-forward ${LISTEN_PORT}."
+echo "HD agent is bound to ${BIND}:${LISTEN_PORT}."
 echo
 echo "The Mac must be LOGGED IN (not at the lock screen) or capture shows only"
 echo "the lock screen."

@@ -21,6 +21,10 @@
   print the HDMI dummy-plug fallback. Machines with a real monitor are unchanged.
 #>
 
+param(
+    [string]$Bind = ''
+)
+
 $ErrorActionPreference = 'Stop'
 $ListenPort = 6080
 $VncPort = 5900
@@ -61,11 +65,13 @@ if (-not (Test-IsAdmin)) {
         Set-Content -LiteralPath $file -Value $text -Encoding UTF8
     }
     try {
-        $proc = Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -Wait -ArgumentList @(
+        $argList = @(
             '-NoProfile',
             '-ExecutionPolicy', 'Bypass',
             '-File', $file
         )
+        if ($Bind) { $argList += @('-Bind', $Bind) }
+        $proc = Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -Wait -ArgumentList $argList
         if ($null -ne $proc) { exit $proc.ExitCode }
         exit 0
     } catch {
@@ -74,8 +80,27 @@ if (-not (Test-IsAdmin)) {
     }
 }
 
+if (-not $Bind) {
+    try {
+        $tsIp = (tailscale ip -4 2>$null | Select-Object -First 1)
+        if ($tsIp) { $tsIp = ([string]$tsIp).Trim() }
+        if ($tsIp -match '^100\.') { $Bind = $tsIp }
+    } catch {}
+}
+if (-not $Bind) { $Bind = '127.0.0.1' }
+
+if ($Bind -eq '0.0.0.0') {
+    Write-Host "==> Bind: 0.0.0.0 (-Bind override) WARNING: every interface, plaintext, LAN-only use."
+} elseif ($Bind -eq '127.0.0.1') {
+    Write-Host "==> Bind: 127.0.0.1 (no Tailscale found; reach it through an SSH tunnel or set -Bind 0.0.0.0)"
+} elseif ($Bind -match '^100\.') {
+    Write-Host "==> Bind: $Bind (Tailscale interface; set -Bind 0.0.0.0 for every interface)"
+} else {
+    Write-Host "==> Bind: $Bind (-Bind override)"
+}
+
 Write-Host 'Computer viewer - Windows TightVNC + websockify bridge'
-Write-Host "LAN / Tailscale only - VNC stays on 127.0.0.1:$VncPort; websocket on 0.0.0.0:$ListenPort."
+Write-Host "LAN / Tailscale only - VNC stays on 127.0.0.1:$VncPort; websocket on ${Bind}:$ListenPort."
 Write-Host ''
 
 function New-VncPassword8 {
@@ -605,7 +630,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Step "Registering scheduled task $TaskName (SYSTEM, AtStartup, ExecutionTimeLimit=0)"
 # Default ExecutionTimeLimit is 72 hours - the task would be killed. Zero = unlimited.
-$action = New-ScheduledTaskAction -Execute $python -Argument "-m websockify 0.0.0.0:$ListenPort 127.0.0.1:$VncPort"
+$action = New-ScheduledTaskAction -Execute $python -Argument "-m websockify ${Bind}:$ListenPort 127.0.0.1:$VncPort"
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `
@@ -687,7 +712,21 @@ if (-not $hostname) {
 Write-Host ''
 Write-Host '===================================================================='
 Write-Host 'Paste this address in Computer:'
-Write-Host "  ws://${hostname}:${ListenPort}/websockify"
+if ($Bind -eq '127.0.0.1') {
+    Write-Host '  Reach it through an SSH tunnel:'
+    Write-Host ("    ssh -N -L {0}:127.0.0.1:{0} {1}@{2}" -f $ListenPort, $env:USERNAME, $hostname)
+    Write-Host '  then paste:'
+    Write-Host "    ws://127.0.0.1:${ListenPort}/websockify"
+} elseif ($Bind -eq '0.0.0.0') {
+    Write-Host "  ws://${hostname}:${ListenPort}/websockify"
+    Write-Host '  Tailscale names work too: ws://<tailscale-name>:6080/websockify'
+    Write-Host '  .local / MagicDNS both work on a private net.'
+    Write-Host '  WARNING: bound to every interface, plaintext. LAN-only use.'
+} else {
+    Write-Host "  ws://${Bind}:${ListenPort}/websockify"
+    Write-Host '  Tailscale names work too: ws://<tailscale-name>:6080/websockify'
+    Write-Host '  .local / MagicDNS both work on a private net.'
+}
 Write-Host ''
 Write-Host 'VNC password (paste into the plugin Password field):'
 Write-Host "  $vncPassword"
@@ -696,11 +735,9 @@ Write-Host ''
 Write-Host 'Notes:'
 Write-Host '  - Run in Administrator PowerShell (this script self-elevates).'
 Write-Host '  - LAN / Tailscale only. Do not port-forward 5900 or 6080.'
-Write-Host '  - TightVNC is loopback-only; only the websocket port is on the LAN.'
+Write-Host "  - TightVNC is loopback-only. websockify is bound to ${Bind}:$ListenPort."
 Write-Host '  - UAC prompts show only in TightVNC service mode - they will. That is expected.'
 Write-Host '  - Defender may flag VNC. Allow TightVNC / tvnserver if it quarantines it.'
-Write-Host '  - Tailscale names work too: ws://<tailscale-name>:6080/websockify'
-Write-Host '  - .local / MagicDNS both work on a private net.'
 if ($headless) {
     Write-Host '  - Headless: Amyuni usbmmidd virtual display (default 1920x1080).'
     Write-Host '    enableidd is re-applied at boot by task ComputerViewerVirtualDisplay.'
