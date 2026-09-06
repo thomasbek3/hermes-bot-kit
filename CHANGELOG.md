@@ -1,5 +1,29 @@
 # Changelog (kit)
 
+## 2026-09-06 — security hardening (issues #6 #7 #8 #9)
+
+- **Host scripts bind to Tailscale or loopback, never `0.0.0.0` by default**
+  (#7). `connect-*` and `hiperf-*` resolve one bind address: `CV_BIND` if
+  set (`0.0.0.0`/`lan` for every interface, with a warning), else the
+  Tailscale IPv4, else `127.0.0.1`. `hiperf-agent.py` defaults `--bind` to
+  loopback. Windows scripts take `-Bind`. Printed paste addresses follow the
+  bind. `SECURITY.md` now states the real model (plaintext `ws://`, tailnet or
+  SSH tunnel as the boundary). Re-run the script on each host to migrate.
+- **Computer viewer sends the API key only to the configured origin** (#6).
+  One `authFetch` helper checks origin, requires https except for
+  local/LAN/`.local`/Tailscale hosts, and refuses redirects. Public `http://`
+  addresses are rejected at paste time. Agent plugin: `ORGO_API_BASE_URL` must
+  be https (or loopback / `ORGO_ALLOW_INSECURE_HTTP=1`); foreign screenshot
+  URLs are fetched without the bearer; httpx never follows redirects.
+- **Viewer iframe is sandboxed** (#8): `allow-scripts allow-same-origin
+  allow-forms`; clipboard read is a per-computer Advanced switch, off by
+  default. The status line shows the embedded origin.
+- **Installer keeps the Orgo key out of argv** (#9): `--api-key-stdin` and
+  `--api-key-file`; `--api-key` still works but warns.
+- Tests: `computer-viewer/plugin.test.mjs`, `tests/test-bind.sh`,
+  `tests/test-install-agent-plugin.sh`, 7 new cases in `test_hands.py`.
+- orgo-computer agent plugin 1.1.0 → 1.2.0.
+
 ## 2026-09-02 — task-dock 1.0.1
 
 - Task Dock now requires bot profile and canonical session ID to agree before

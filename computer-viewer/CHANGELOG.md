@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- Bearer tokens go only to the configured API origin, over https unless the
+  host is local/LAN/`.local`/Tailscale; redirects are refused (#6).
+- Viewer iframe sandboxed; clipboard read is a per-computer opt-in (#8).
+- Host scripts bind websockify and the HD agent to the Tailscale IPv4 or
+  loopback; `CV_BIND=0.0.0.0` opts into every interface (#7).
+- `install-agent-plugin.sh --api-key-stdin` / `--api-key-file` (#9).
+- orgo-computer 1.2.0: https required for `ORGO_API_BASE_URL` unless loopback
+  or `ORGO_ALLOW_INSECURE_HTTP=1`; no bearer to foreign screenshot hosts;
+  `follow_redirects=False`.
+
 ### Fixed
 
 - Shell crash guard ("Something broke in the interface" / removeChild): the
