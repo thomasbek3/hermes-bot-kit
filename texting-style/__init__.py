@@ -68,7 +68,7 @@ def _candidate_dbs(profile_name: str) -> list:
     if env_home:
         add(env_home)
     try:
-        from hermes_cli.profiles import get_hermes_home  # type: ignore
+        from hermes_constants import get_hermes_home  # type: ignore
 
         add(get_hermes_home())
     except Exception:

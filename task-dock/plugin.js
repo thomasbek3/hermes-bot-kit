@@ -21,7 +21,6 @@ const STORAGE_SNAPSHOTS = 'snapshots'
 
 const BOTS_PANE_ID = 'hermes-bots:pane'
 const ROUTINES_PANE_ID = 'hermes-bots:routines'
-const BOTS_HOME_PANE_ID = 'plugin-workspace:hermes-bots:home'
 const BOTS_GROUP_TAB_PREFIX = 'plugin-workspace:hermes-bots:group:'
 const SESSION_TILE_TAB_PREFIX = 'session-tile:'
 const PANE_HIDDEN_ATTR = 'data-pane-hidden'
@@ -318,12 +317,6 @@ function botsPaneActive() {
   return tabSelected(BOTS_PANE_ID)
 }
 
-function botsHomeFronted() {
-  const fromSdk = paneStoreGet(BOTS_HOME_PANE_ID)
-  if (fromSdk !== undefined) return fromSdk
-  return tabSelected(BOTS_HOME_PANE_ID)
-}
-
 function groupChatFronted() {
   if (typeof document === 'undefined') return false
   const tabs = document.querySelectorAll(`[data-tree-tab^="${BOTS_GROUP_TAB_PREFIX}"]`)
@@ -387,7 +380,6 @@ function workspaceBotChatVisible() {
 
 function botModeChatVisible() {
   if (!botsPaneActive()) return false
-  if (botsHomeFronted()) return false
   if (groupChatFronted()) return false
   if (canonicalBotChatTabSelected()) return true
   return workspaceBotChatVisible()
@@ -1220,7 +1212,6 @@ export default {
     injectStyle()
 
     watchPane(BOTS_PANE_ID, scheduleSync)
-    watchPane(BOTS_HOME_PANE_ID, scheduleSync)
     watchPane(ROUTINES_PANE_ID, scheduleSync)
     watchStore(host.state?.focusedStoredSessionId || host.state?.activeSessionId, scheduleSync)
     watchStore(host.state?.focusedSessionProfile, scheduleSync)
