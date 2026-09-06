@@ -63,7 +63,9 @@ rewrite() {
   local file="$1" tmp
   tmp=$(mktemp)
   sed "s/${OLD_ESC}/${TAG}/g" "${file}" > "${tmp}"
-  mv "${tmp}" "${file}"
+  # cat, not mv: keep the file's mode (mv would drop the executable bit).
+  cat "${tmp}" > "${file}"
+  rm -f "${tmp}"
 }
 
 for file in ${PINNED_FILES}; do
@@ -77,7 +79,8 @@ done
 plugin_tmp=$(mktemp)
 sed -e "s|hermes-bot-kit/[^/']*/computer-viewer|hermes-bot-kit/${TAG}/computer-viewer|g" \
   computer-viewer/plugin.js > "${plugin_tmp}"
-mv "${plugin_tmp}" computer-viewer/plugin.js
+cat "${plugin_tmp}" > computer-viewer/plugin.js
+rm -f "${plugin_tmp}"
 
 bash scripts/make-manifest.sh
 
