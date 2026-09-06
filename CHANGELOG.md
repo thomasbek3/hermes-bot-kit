@@ -1,5 +1,21 @@
 # Changelog (kit)
 
+## 2026-09-06 — release v2026.09.06: pinned installs, verified manifest, vendored noVNC (issues #5 #10)
+
+- **Installs are pinned and verified** (#10, #5). Every one-liner fetches from
+  a release tag (`KIT_REF`, default `v2026.09.06`) and `install.sh` checks each
+  file's SHA-256 against that tag's `MANIFEST.sha256` before copying anything;
+  staged files are syntax-checked; a failed copy rolls back. `KIT_REF=master`
+  still works but warns. `texting-style/install.sh` verifies too;
+  `bubble-mode/install.sh` wraps the root installer.
+- **noVNC is vendored** (#5). `computer-viewer/vendor/novnc-rfb.mjs` (1.7.0,
+  MPL-2.0) is installed next to `plugin.js`; the viewer reads it through the
+  desktop bridge, checks its SHA-256 against the hash pinned in `plugin.js`,
+  and imports it from a blob. CDN only as a labelled fallback.
+- **CI** on ubuntu + macOS runs every test suite plus the manifest check and
+  an installer tamper test. `scripts/release.sh vYYYY.MM.DD` cuts releases
+  (see `RELEASING.md`).
+
 ## 2026-09-06 — security hardening (issues #6 #7 #8 #9)
 
 - **Host scripts bind to Tailscale or loopback, never `0.0.0.0` by default**
