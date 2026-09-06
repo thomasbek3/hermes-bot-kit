@@ -12,7 +12,7 @@ function store(value) {
   }
 }
 
-function loadDetection({ bots = true, home = false, routines = true, transcript = false } = {}) {
+function loadDetection({ bots = true, routines = true, transcript = false } = {}) {
   const surface = {
     closest: () => null,
     getAttribute: name => {
@@ -24,7 +24,6 @@ function loadDetection({ bots = true, home = false, routines = true, transcript 
   }
   const paneValues = {
     'hermes-bots:pane': bots,
-    'plugin-workspace:hermes-bots:home': home,
     'hermes-bots:routines': routines
   }
   const document = {
@@ -62,8 +61,7 @@ test('Bubble Mode stays active while a Bot Chat transcript remounts during send'
   assert.equal(detection.botModeChatVisible(), true)
 })
 
-test('Bubble Mode still rejects Bots home and non-Bot-Chat workspaces', () => {
-  assert.equal(loadDetection({ home: true }).botModeChatVisible(), false)
+test('Bubble Mode still rejects non-Bot-Chat workspaces', () => {
   assert.equal(loadDetection({ routines: false }).botModeChatVisible(), false)
   assert.equal(loadDetection({ bots: false }).botModeChatVisible(), false)
 })

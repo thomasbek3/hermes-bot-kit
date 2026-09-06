@@ -83,9 +83,9 @@ coding agents read that file automatically.)
 
 ## Requirements
 
-- **Hermes Desktop ≥ 0.20.5**, verified through **v0.20.6** (2026.8.27,
-  including the Bot Mode redesign) — earlier builds pre-date the pane shell
-  the plugins target.
+- **Hermes Desktop ≥ 0.20.5**, verified against **v0.20.6** and a main-branch
+  build from 2026-09-05 (hermes-agent `9dd6634c56`); upstream head
+  (`14ca27fa06`, 2026-09-06) has an identical plugin contract.
 - The desktop plugins are single-file disk plugins: no build step, no core
   patches, hot-reloadable, and they fail safe (if a Hermes update renames
   internal hooks, they render stock instead of breaking).
