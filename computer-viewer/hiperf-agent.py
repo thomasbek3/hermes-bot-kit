@@ -1187,7 +1187,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--fps', type=int, default=30)
     p.add_argument('--bitrate', default='8M')
     p.add_argument('--display', default=':0')
-    p.add_argument('--bind', default='0.0.0.0')
+    p.add_argument('--bind', default='127.0.0.1')
     return p
 
 

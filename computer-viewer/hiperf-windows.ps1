@@ -13,6 +13,10 @@
   Desktop capture (ddagrab / gdigrab) needs the interactive user session.
 #>
 
+param(
+    [string]$Bind = ''
+)
+
 $ErrorActionPreference = 'Stop'
 $ListenPort = 6090
 $TaskName = 'ComputerViewerHiperf'
@@ -51,11 +55,13 @@ if (-not (Test-IsAdmin)) {
         Set-Content -LiteralPath $file -Value $text -Encoding UTF8
     }
     try {
-        $proc = Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -Wait -ArgumentList @(
+        $argList = @(
             '-NoProfile',
             '-ExecutionPolicy', 'Bypass',
             '-File', $file
         )
+        if ($Bind) { $argList += @('-Bind', $Bind) }
+        $proc = Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -Wait -ArgumentList $argList
         if ($null -ne $proc) { exit $proc.ExitCode }
         exit 0
     } catch {
@@ -71,8 +77,27 @@ if (-not $InstallUser) {
     else { $InstallUser = $env:USERNAME }
 }
 
+if (-not $Bind) {
+    try {
+        $tsIp = (tailscale ip -4 2>$null | Select-Object -First 1)
+        if ($tsIp) { $tsIp = ([string]$tsIp).Trim() }
+        if ($tsIp -match '^100\.') { $Bind = $tsIp }
+    } catch {}
+}
+if (-not $Bind) { $Bind = '127.0.0.1' }
+
+if ($Bind -eq '0.0.0.0') {
+    Write-Host "==> Bind: 0.0.0.0 (-Bind override) WARNING: every interface, plaintext, LAN-only use."
+} elseif ($Bind -eq '127.0.0.1') {
+    Write-Host "==> Bind: 127.0.0.1 (no Tailscale found; reach it through an SSH tunnel or set -Bind 0.0.0.0)"
+} elseif ($Bind -match '^100\.') {
+    Write-Host "==> Bind: $Bind (Tailscale interface; set -Bind 0.0.0.0 for every interface)"
+} else {
+    Write-Host "==> Bind: $Bind (-Bind override)"
+}
+
 Write-Host 'Computer viewer - high-performance stream (Windows)'
-Write-Host "LAN / Tailscale only - H.264 agent on 0.0.0.0:$ListenPort as $InstallUser."
+Write-Host "LAN / Tailscale only - H.264 agent on ${Bind}:$ListenPort as $InstallUser."
 Write-Host ''
 
 function Refresh-ProcessPath {
@@ -277,7 +302,7 @@ if (-not (Test-Path -LiteralPath $venvPythonw)) {
 Write-Step "Registering scheduled task $TaskName (user=$InstallUser, LogonType=Interactive, AtLogOn, ExecutionTimeLimit=0)"
 # Default ExecutionTimeLimit is 72 hours - the task would be killed. Zero = unlimited.
 # SYSTEM cannot capture the interactive desktop; this task MUST run as the installing user.
-$arg = '"{0}" --port {1} --token-file "{2}" --ffmpeg "{3}" --bind 0.0.0.0' -f $AgentPath, $ListenPort, $TokenFile, $ffmpeg
+$arg = '"{0}" --port {1} --token-file "{2}" --ffmpeg "{3}" --bind {4}' -f $AgentPath, $ListenPort, $TokenFile, $ffmpeg, $Bind
 $action = New-ScheduledTaskAction -Execute $venvPythonw -Argument $arg
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $InstallUser
 $principal = New-ScheduledTaskPrincipal -UserId $InstallUser -LogonType Interactive
@@ -352,16 +377,32 @@ Write-Host "  $token"
 Write-Host "  stored at $TokenFile"
 Write-Host ''
 Write-Host 'Optional stream URL override (leave blank to derive :6090 from the VNC host):'
-Write-Host "  ws://${hostname}:${ListenPort}/stream"
-if ($tsDns) {
-    Write-Host "  ws://${tsDns}:${ListenPort}/stream"
-}
-if ($tsIp) {
-    Write-Host "  ws://${tsIp}:${ListenPort}/stream"
+if ($Bind -eq '127.0.0.1') {
+    Write-Host '  Reach it through an SSH tunnel:'
+    Write-Host ("    ssh -N -L {0}:127.0.0.1:{0} {1}@{2}" -f $ListenPort, $env:USERNAME, $hostname)
+    Write-Host '  then paste:'
+    Write-Host "    ws://127.0.0.1:${ListenPort}/stream"
+} elseif ($Bind -eq '0.0.0.0') {
+    Write-Host "  ws://${hostname}:${ListenPort}/stream"
+    if ($tsDns) {
+        Write-Host "  ws://${tsDns}:${ListenPort}/stream"
+    }
+    if ($tsIp) {
+        Write-Host "  ws://${tsIp}:${ListenPort}/stream"
+    }
+    Write-Host '  WARNING: bound to every interface, plaintext. LAN-only use.'
+} else {
+    Write-Host "  ws://${Bind}:${ListenPort}/stream"
+    if ($tsDns) {
+        Write-Host "  ws://${tsDns}:${ListenPort}/stream"
+    } else {
+        Write-Host "  ws://<tailscale-name>:${ListenPort}/stream"
+    }
 }
 Write-Host ''
 Write-Host 'Notes:'
 Write-Host '  - Run in Administrator PowerShell (this script self-elevates).'
+Write-Host "  - HD agent is bound to ${Bind}:$ListenPort."
 Write-Host '  - LAN / Tailscale only. Do not port-forward 6090.'
 Write-Host '  - Task ComputerViewerHiperf runs as the interactive user, not SYSTEM.'
 Write-Host "  - pythonw is silent; logs: $LogFile"
