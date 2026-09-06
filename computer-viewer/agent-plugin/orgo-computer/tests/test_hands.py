@@ -73,9 +73,11 @@ class FakeClient:
         self.router = router
         self.posts = []
         self.gets = []
+        self.get_headers = []
 
     async def get(self, url, headers=None):
         self.gets.append(url)
+        self.get_headers.append(headers or {})
         return self.router("GET", url, None)
 
     async def post(self, url, headers=None, json=None):
@@ -108,6 +110,7 @@ class HandsTests(unittest.TestCase):
         os.environ["ORGO_COMPUTER_ID"] = PIN
         os.environ.pop("ORGO_DEFAULT_COMPUTER_ID", None)
         os.environ.pop("ORGO_API_BASE_URL", None)
+        os.environ.pop("ORGO_ALLOW_INSECURE_HTTP", None)
         tools.bind_context(None)
         tools._PROCESS_LOCKS.clear()
 
@@ -116,6 +119,8 @@ class HandsTests(unittest.TestCase):
         os.environ.pop("HERMES_HOME", None)
         os.environ.pop("ORGO_API_KEY", None)
         os.environ.pop("ORGO_COMPUTER_ID", None)
+        os.environ.pop("ORGO_API_BASE_URL", None)
+        os.environ.pop("ORGO_ALLOW_INSECURE_HTTP", None)
 
     def test_pin_reads_orgo_computer_id(self):
         self.assertEqual(tools._resolve_computer_id(), PIN)
@@ -288,6 +293,100 @@ class HandsTests(unittest.TestCase):
 
     def test_jpeg_size(self):
         self.assertEqual(tools._jpeg_size(TINY_JPEG), (1, 1))
+
+    def _image_headers(self, fake):
+        self.assertGreaterEqual(len(fake.client.get_headers), 2)
+        return fake.client.get_headers[1]
+
+    def test_screenshot_relative_image_sends_bearer(self):
+        def router(method, url, body):
+            if method == "GET" and url.endswith("/screenshot"):
+                return FakeResponse(200, {"success": True, "image": "/api/storage/x.jpg"})
+            return FakeResponse(
+                200, payload=None, content=TINY_JPEG, content_type="image/jpeg"
+            )
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            result = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertTrue(result["_multimodal"])
+        auth = self._image_headers(fake).get("Authorization")
+        self.assertTrue(str(auth or "").startswith("Bearer "))
+
+    def test_screenshot_absolute_https_cdn_omits_bearer(self):
+        def router(method, url, body):
+            if method == "GET" and url.endswith("/screenshot"):
+                return FakeResponse(
+                    200, {"success": True, "image": "https://cdn.example/x.jpg"}
+                )
+            if url == "https://cdn.example/x.jpg":
+                return FakeResponse(
+                    200, payload=None, content=TINY_JPEG, content_type="image/jpeg"
+                )
+            self.fail(url)
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            result = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertTrue(result["_multimodal"])
+        self.assertNotIn("Authorization", self._image_headers(fake))
+
+    def test_screenshot_absolute_http_cdn_rejected(self):
+        def router(method, url, body):
+            if method == "GET" and url.endswith("/screenshot"):
+                return FakeResponse(
+                    200, {"success": True, "image": "http://cdn.example/x.jpg"}
+                )
+            self.fail(url)
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            raw = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertIn("insecure screenshot URL", raw)
+
+    def test_http_api_base_public_host_rejected(self):
+        os.environ["ORGO_API_BASE_URL"] = "http://example.com/api"
+        raw = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertIn("must use https://", raw)
+        self.assertIn("ORGO_ALLOW_INSECURE_HTTP", raw)
+
+    def test_http_api_base_loopback_proceeds(self):
+        os.environ["ORGO_API_BASE_URL"] = "http://127.0.0.1:8000/api"
+
+        def router(method, url, body):
+            self.assertTrue(url.startswith("http://127.0.0.1:8000/"))
+            if method == "GET" and url.endswith("/screenshot"):
+                return FakeResponse(200, {"success": True, "image": "/api/storage/x.jpg"})
+            return FakeResponse(
+                200, payload=None, content=TINY_JPEG, content_type="image/jpeg"
+            )
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            result = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertTrue(result["_multimodal"])
+
+    def test_http_api_base_public_with_opt_in_proceeds(self):
+        os.environ["ORGO_API_BASE_URL"] = "http://example.com/api"
+        os.environ["ORGO_ALLOW_INSECURE_HTTP"] = "1"
+
+        def router(method, url, body):
+            self.assertTrue(url.startswith("http://example.com/"))
+            if method == "GET" and url.endswith("/screenshot"):
+                return FakeResponse(200, {"success": True, "image": "/api/storage/x.jpg"})
+            return FakeResponse(
+                200, payload=None, content=TINY_JPEG, content_type="image/jpeg"
+            )
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            result = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertTrue(result["_multimodal"])
+
+    def test_client_kwargs_disables_redirects(self):
+        fake = FakeHttpx(lambda *a, **k: None)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            self.assertIs(tools._client_kwargs(5.0)["follow_redirects"], False)
 
     def test_schemas_exist(self):
         self.assertEqual(schemas.ORGO_COMPUTER_CLICK["name"], "orgo_computer_click")

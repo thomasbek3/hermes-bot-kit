@@ -138,19 +138,51 @@ def _default_max_steps() -> int:
     return min(MAX_STEPS_LIMIT, max(1, value))
 
 
+def _host_is_loopback(host: str) -> bool:
+    return (host or "").strip().lower().strip("[]") in {"localhost", "127.0.0.1", "::1"}
+
+
+def _insecure_http_opt_in() -> bool:
+    return os.environ.get("ORGO_ALLOW_INSECURE_HTTP", "").strip() == "1"
+
+
+def _url_scheme_allowed(parsed: Any) -> bool:
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "https":
+        return True
+    if scheme == "http" and (
+        _host_is_loopback(parsed.hostname or "") or _insecure_http_opt_in()
+    ):
+        return True
+    return False
+
+
+def _validated_base_url(raw: str, *, setting: str) -> str:
+    text = str(raw or "").strip()
+    parsed = urlparse(text)
+    if _url_scheme_allowed(parsed):
+        return text
+    raise OrgoAgentRequestError(
+        f"{setting} must use https:// (set ORGO_ALLOW_INSECURE_HTTP=1 only for local development)."
+    )
+
+
 def _agent_endpoint() -> str:
     explicit = os.environ.get("ORGO_AGENT_API_URL", "").strip()
     if explicit:
-        return explicit
+        return _validated_base_url(explicit, setting="ORGO_AGENT_API_URL")
 
-    base = os.environ.get("ORGO_API_BASE_URL", DEFAULT_ORGO_API_BASE).strip().rstrip("/")
+    base = _api_base()
     if base.endswith("/v1"):
         return f"{base}/chat/completions"
     return f"{base}/v1/chat/completions"
 
 
 def _api_base() -> str:
-    return os.environ.get("ORGO_API_BASE_URL", DEFAULT_ORGO_API_BASE).strip().rstrip("/")
+    return _validated_base_url(
+        os.environ.get("ORGO_API_BASE_URL", DEFAULT_ORGO_API_BASE).strip().rstrip("/"),
+        setting="ORGO_API_BASE_URL",
+    )
 
 
 def _api_key() -> str:
@@ -1285,6 +1317,7 @@ async def _run_orgo_agent(
     computer_id = _require_computer_id()
     timeout_seconds = _resolve_timeout_seconds()
     lock_wait_seconds = _resolve_lock_wait_seconds()
+    endpoint = _agent_endpoint()
     httpx = _import_httpx()
     request_body = {
         "model": model,
@@ -1294,12 +1327,10 @@ async def _run_orgo_agent(
     }
 
     async with _ComputerRunLock(computer_id, lock_wait_seconds):
-        active_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds, connect=min(30.0, timeout_seconds))
-        )
+        active_client = httpx.AsyncClient(**_client_kwargs(timeout_seconds))
         try:
             response = await active_client.post(
-                _agent_endpoint(),
+                endpoint,
                 headers=_auth_headers(api_key),
                 json=request_body,
             )
@@ -1349,13 +1380,11 @@ async def _run_bash(command: str) -> dict[str, Any]:
     api_key = _require_api_key()
     computer_id = _require_computer_id()
     timeout_seconds = _resolve_bash_timeout()
-    httpx = _import_httpx()
     url = f"{_api_base()}/computers/{quote(computer_id, safe='')}/bash"
+    httpx = _import_httpx()
     # Give Orgo a chance to return before the client times out.
     client_timeout = float(timeout_seconds) + 15.0
-    active_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(client_timeout, connect=min(30.0, client_timeout))
-    )
+    active_client = httpx.AsyncClient(**_client_kwargs(client_timeout))
     try:
         response = await active_client.post(
             url,
@@ -1423,20 +1452,27 @@ def _refuse_if_run_locked() -> None:
         raise OrgoAgentRequestError(LOCK_BUSY_ERROR)
 
 
+def _client_kwargs(timeout: float) -> dict[str, Any]:
+    httpx = _import_httpx()
+    return {
+        "timeout": httpx.Timeout(timeout, connect=min(30.0, timeout)),
+        "follow_redirects": False,
+    }
+
+
 async def _http_client(timeout: float) -> Any:
     httpx = _import_httpx()
-    return httpx, httpx.AsyncClient(
-        timeout=httpx.Timeout(timeout, connect=min(30.0, timeout))
-    )
+    return httpx, httpx.AsyncClient(**_client_kwargs(timeout))
 
 
 async def _take_screenshot() -> dict[str, Any]:
     api_key = _require_api_key()
     computer_id = _require_computer_id()
+    base = _api_base()
     httpx, client = await _http_client(30.0)
     try:
         meta = await client.get(
-            f"{_api_base()}/computers/{quote(computer_id, safe='')}/screenshot",
+            f"{base}/computers/{quote(computer_id, safe='')}/screenshot",
             headers=_auth_headers(api_key),
         )
         payload = _read_json(meta, kind="screenshot")
@@ -1448,7 +1484,14 @@ async def _take_screenshot() -> dict[str, Any]:
         if not isinstance(image_path, str) or not image_path.strip():
             raise OrgoAgentRequestError("Orgo screenshot returned no image.")
         image_url = _absolute_image_url(image_path)
-        headers = {"Authorization": f"Bearer {api_key}", "Accept": "image/*"}
+        parsed_image = urlparse(image_url)
+        image_origin = f"{parsed_image.scheme}://{parsed_image.netloc}"
+        if image_origin == _image_origin():
+            headers = {"Authorization": f"Bearer {api_key}", "Accept": "image/*"}
+        else:
+            if not _url_scheme_allowed(parsed_image):
+                raise OrgoAgentRequestError("Orgo returned an insecure screenshot URL.")
+            headers = {"Accept": "image/*"}
         image_resp = await client.get(image_url, headers=headers)
         if not image_resp.is_success:
             _raise_hands_http(image_resp.status_code, None, "screenshot")
@@ -1514,10 +1557,11 @@ async def _post_hands(path: str, body: dict[str, Any], action: str) -> dict[str,
     _refuse_if_run_locked()
     api_key = _require_api_key()
     computer_id = _require_computer_id()
+    url = f"{_api_base()}/computers/{quote(computer_id, safe='')}/{path}"
     httpx, client = await _http_client(30.0)
     try:
         response = await client.post(
-            f"{_api_base()}/computers/{quote(computer_id, safe='')}/{path}",
+            url,
             headers=_auth_headers(api_key),
             json=body,
         )

@@ -1,0 +1,300 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import test from 'node:test'
+import vm from 'node:vm'
+
+const pluginPath = new URL('./plugin.js', import.meta.url)
+
+const SDK_COMPONENTS = [
+  'Badge',
+  'Button',
+  'ConfirmDialog',
+  'CopyButton',
+  'Dialog',
+  'DialogContent',
+  'DialogDescription',
+  'DialogFooter',
+  'DialogHeader',
+  'DialogTitle',
+  'DropdownMenu',
+  'DropdownMenuContent',
+  'DropdownMenuItem',
+  'DropdownMenuSeparator',
+  'DropdownMenuTrigger',
+  'EmptyState',
+  'ErrorState',
+  'Input',
+  'Loader',
+  'SegmentedControl',
+  'Select',
+  'SelectContent',
+  'SelectItem',
+  'SelectTrigger',
+  'SelectValue',
+  'Separator',
+  'StatusDot',
+  'Switch',
+  'Tip'
+]
+
+const PRELUDE = `
+const PALETTE_AREA = 'palette'
+const KEYBINDS_AREA = 'keybinds'
+const PANES_AREA = 'panes'
+const STATUSBAR_AREAS = { right: 'right' }
+const host = globalThis.__host
+const HermesSdk = globalThis.HermesSdk || {}
+const atom = globalThis.__atom
+const cn = (...xs) => xs.filter(Boolean).join(' ')
+const useValue = store => (store && typeof store.get === 'function' ? store.get() : null)
+const icons = new Proxy({}, { get: () => () => null })
+${SDK_COMPONENTS.map(name => `const ${name} = '${name}'`).join('\n')}
+const Fragment = 'Fragment'
+const useEffect = () => {}
+const useLayoutEffect = () => {}
+const useMemo = fn => fn()
+const useRef = value => ({ current: value })
+const useState = value => [typeof value === 'function' ? value() : value, () => {}]
+const jsx = (type, props, key) => ({ type, props, key })
+const jsxs = jsx
+`
+
+function atom(initial) {
+  let value = initial
+  const listeners = new Set()
+  return {
+    get: () => value,
+    set: next => {
+      value = next
+      for (const fn of listeners) fn(value)
+    },
+    listen: fn => {
+      listeners.add(fn)
+      return () => listeners.delete(fn)
+    }
+  }
+}
+
+function loadPlugin({ fetchImpl } = {}) {
+  const fetches = []
+  const fetch =
+    fetchImpl ||
+    (async (url, init) => {
+      fetches.push({ url, init })
+      return { ok: true, status: 200, type: 'basic', json: async () => ({}) }
+    })
+
+  const context = {
+    AbortController,
+    Array,
+    ArrayBuffer,
+    Boolean,
+    DataView,
+    Date,
+    Error,
+    Float32Array,
+    Float64Array,
+    Infinity,
+    Int16Array,
+    Int32Array,
+    Int8Array,
+    JSON,
+    Map,
+    Math,
+    NaN,
+    Number,
+    Object,
+    Promise,
+    Proxy,
+    RangeError,
+    Reflect,
+    RegExp,
+    Set,
+    String,
+    Symbol,
+    SyntaxError,
+    TextDecoder,
+    TextEncoder,
+    TypeError,
+    URIError,
+    URL,
+    URLSearchParams,
+    Uint16Array,
+    Uint32Array,
+    Uint8Array,
+    WeakMap,
+    WeakSet,
+    atob: typeof atob === 'function' ? atob : undefined,
+    btoa: typeof btoa === 'function' ? btoa : undefined,
+    clearInterval,
+    clearTimeout,
+    console,
+    decodeURI,
+    decodeURIComponent,
+    encodeURI,
+    encodeURIComponent,
+    fetch,
+    isFinite,
+    isNaN,
+    parseFloat,
+    parseInt,
+    queueMicrotask,
+    setInterval,
+    setTimeout,
+    undefined,
+    document: {
+      body: { classList: { add() {}, contains: () => false, remove() {} } },
+      createElement: () => ({
+        setAttribute() {},
+        getAttribute: () => null,
+        style: {},
+        addEventListener() {}
+      }),
+      querySelector: () => null,
+      querySelectorAll: () => []
+    },
+    localStorage: {
+      getItem: () => null,
+      setItem() {},
+      removeItem() {},
+      clear() {}
+    },
+    navigator: {
+      userAgent: 'test',
+      clipboard: { readText: async () => '', writeText: async () => {} }
+    },
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+      takeRecords() {
+        return []
+      }
+    },
+    requestAnimationFrame: cb => setTimeout(cb, 0),
+    cancelAnimationFrame: id => clearTimeout(id),
+    HermesSdk: {},
+    __host: {
+      state: {},
+      paneVisibility: () => ({ get: () => false, listen: () => () => undefined })
+    },
+    __atom: atom
+  }
+  context.window = context
+  context.globalThis = context
+  context.self = context
+
+  const source = PRELUDE +
+    fs
+      .readFileSync(pluginPath, 'utf8')
+      .replace(/import\s+\{[\s\S]*?\}\s+from '@hermes\/plugin-sdk'\n/, '')
+      .replace(/import \* as HermesSdk from '@hermes\/plugin-sdk'\n/, '')
+      .replace(
+        /import \{ Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState \} from 'react'\n/,
+        ''
+      )
+      .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
+      .replace('export default {', 'globalThis.__plugin = {')
+      .concat(
+        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch }\n'
+      )
+
+  vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
+  return { t: context.__t, fetches, context }
+}
+
+test('credentialTargetAllowed accepts the configured https origin only', () => {
+  const { t } = loadPlugin()
+  const session = 'https://www.orgo.ai/api/session'
+  assert.equal(t.credentialTargetAllowed('https://www.orgo.ai/api/computers/1', session), true)
+  assert.equal(t.credentialTargetAllowed('https://evil.example/steal', session), false)
+  assert.equal(
+    t.credentialTargetAllowed('http://example.com/api/x', 'http://example.com/api'),
+    false
+  )
+  assert.equal(
+    t.credentialTargetAllowed('http://192.168.1.5:8000/x', 'http://192.168.1.5:8000/api'),
+    true
+  )
+  assert.equal(
+    t.credentialTargetAllowed('http://localhost:8000/x', 'http://localhost:8000/api'),
+    true
+  )
+  assert.equal(t.credentialTargetAllowed('not a url', session), false)
+})
+
+test('classifyAddress rejects public http and names iframe origins', () => {
+  const { t } = loadPlugin()
+  const publicVnc = t.classifyAddress('http://1.2.3.4:6080/vnc.html')
+  assert.equal(publicVnc.kind, 'invalid')
+  assert.equal(publicVnc.connectEnabled, false)
+
+  const httpsVnc = t.classifyAddress('https://x.example/vnc.html')
+  assert.equal(httpsVnc.kind, 'iframe')
+  assert.match(httpsVnc.line, /https:\/\/x\.example/)
+
+  const lanVnc = t.classifyAddress('http://192.168.1.5:6080/')
+  assert.equal(lanVnc.kind, 'iframe')
+  assert.equal(lanVnc.connectEnabled, true)
+
+  const publicSession = t.classifyAddress('http://1.2.3.4/api/session')
+  assert.equal(publicSession.kind, 'invalid')
+
+  const orgo = t.classifyAddress('https://www.orgo.ai/api/session')
+  assert.equal(orgo.kind, 'session-json')
+})
+
+test('iframePolicy sandboxes the viewer and keeps clipboard-read opt-in', () => {
+  const { t } = loadPlugin()
+  const off = t.iframePolicy({})
+  assert.equal(off.sandbox, 'allow-scripts allow-same-origin allow-forms')
+  assert.equal(off.allow.includes('clipboard-read'), false)
+  assert.equal(off.allow, 'fullscreen; clipboard-write')
+
+  const on = t.iframePolicy({ allowClipboard: true })
+  assert.equal(on.sandbox, 'allow-scripts allow-same-origin allow-forms')
+  assert.match(on.allow, /clipboard-read/)
+})
+
+test('authFetch refuses off-origin targets without calling fetch', async () => {
+  const { t, fetches } = loadPlugin()
+  await assert.rejects(
+    () =>
+      t.authFetch('https://evil.example/api', {
+        bearer: 'secret',
+        sessionUrl: 'https://www.orgo.ai/api/session'
+      }),
+    err => err && err.status === 'unsafe-origin'
+  )
+  assert.equal(fetches.length, 0)
+})
+
+test('authFetch throws redirect on opaqueredirect and never follows', async () => {
+  const { t } = loadPlugin({
+    fetchImpl: async () => ({ type: 'opaqueredirect', status: 0 })
+  })
+  await assert.rejects(
+    () =>
+      t.authFetch('https://www.orgo.ai/api/session', {
+        bearer: 'secret',
+        sessionUrl: 'https://www.orgo.ai/api/session'
+      }),
+    err => err && err.status === 'redirect'
+  )
+})
+
+test('authFetch sends the bearer with redirect: manual on an allowed call', async () => {
+  let seen
+  const { t } = loadPlugin({
+    fetchImpl: async (url, init) => {
+      seen = { url, init }
+      return { ok: true, status: 200, type: 'basic' }
+    }
+  })
+  const response = await t.authFetch('https://www.orgo.ai/api/computers/1', {
+    bearer: 'secret-token',
+    sessionUrl: 'https://www.orgo.ai/api/session'
+  })
+  assert.equal(response.status, 200)
+  assert.equal(seen.init.redirect, 'manual')
+  assert.equal(seen.init.headers.Authorization, 'Bearer secret-token')
+})

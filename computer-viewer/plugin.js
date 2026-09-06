@@ -111,6 +111,14 @@ const ERRORS = {
   unreachable: {
     title: "Can't reach the computer",
     body: 'Gave up after 5 attempts. Check that the endpoint is up ({wsUrl}).'
+  },
+  'unsafe-origin': {
+    title: 'Refused to send API key',
+    body: 'Refused to send your API key to {origin}. Only the configured API address gets it.'
+  },
+  redirect: {
+    title: 'Redirect blocked',
+    body: 'The API address redirected elsewhere; refusing to follow with your key.'
   }
 }
 
@@ -286,6 +294,8 @@ const DEFAULT_ENDPOINT_NAME = 'My computer'
 const ADDRESS_EMPTY_HELP =
   "Works with a wss:// address, a noVNC web page, a cloud API key, or just host:port — paste it and I'll figure out which."
 const ADDRESS_INVALID_LINE = "Hmm — that doesn't look like an address or key."
+const HTTP_PUBLIC_ADDRESS_LINE =
+  'Use https:// for internet addresses. http:// only works for localhost, LAN, .local and Tailscale hosts.'
 const SK_KEY_RE = /^sk[_-][A-Za-z0-9_-]{8,}$/
 
 function isDefaultishName(name) {
@@ -394,20 +404,38 @@ function classifyAddress(raw) {
     }
   }
   if (lower.startsWith('http://') || lower.startsWith('https://')) {
+    let parsed
     try {
-      const parsed = new URL(address)
+      parsed = new URL(address)
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         return { kind: 'invalid', line: ADDRESS_INVALID_LINE, connectEnabled: false, patch: { probe: false } }
       }
     } catch {
       return { kind: 'invalid', line: ADDRESS_INVALID_LINE, connectEnabled: false, patch: { probe: false } }
     }
+    const insecurePublic = parsed.protocol === 'http:' && !isPrivateWsHost(parsed.hostname)
     if (isNovncPageUrl(address)) {
+      if (insecurePublic) {
+        return {
+          kind: 'invalid',
+          line: HTTP_PUBLIC_ADDRESS_LINE,
+          connectEnabled: false,
+          patch: { probe: false }
+        }
+      }
       return {
         kind: 'iframe',
-        line: '✓ Web viewer page — will be embedded',
+        line: `✓ Web viewer page at ${parsed.origin} — will be embedded`,
         connectEnabled: true,
         patch: { mode: 'iframe', iframeUrl: address, probe: false }
+      }
+    }
+    if (insecurePublic) {
+      return {
+        kind: 'invalid',
+        line: HTTP_PUBLIC_ADDRESS_LINE,
+        connectEnabled: false,
+        patch: { probe: false }
       }
     }
     return {
@@ -485,7 +513,8 @@ function blankEndpoint() {
     compressionLevel: 2,
     hiperfEnabled: false,
     hiperfUrl: '',
-    hiperfToken: ''
+    hiperfToken: '',
+    allowClipboard: false
   }
 }
 
@@ -512,7 +541,8 @@ function normalizeEndpoint(raw) {
     compressionLevel: clampInt(raw.compressionLevel, 0, 9, 2),
     hiperfEnabled: raw.hiperfEnabled === true,
     hiperfUrl: String(raw.hiperfUrl || ''),
-    hiperfToken: String(raw.hiperfToken || '')
+    hiperfToken: String(raw.hiperfToken || ''),
+    allowClipboard: raw.allowClipboard === true
   }
 }
 
@@ -531,7 +561,8 @@ function fingerprint(endpoint) {
     endpoint.probe ? '1' : '0',
     endpoint.qualityLevel,
     endpoint.compressionLevel,
-    endpoint.autoConnect ? '1' : '0'
+    endpoint.autoConnect ? '1' : '0',
+    endpoint.allowClipboard ? '1' : '0'
   ].join('\0')
 }
 
@@ -560,6 +591,43 @@ function orgoApiOrigin(sessionUrl) {
     /* not an absolute URL */
   }
   return 'https://www.orgo.ai'
+}
+
+function credentialTargetAllowed(url, sessionUrl) {
+  try {
+    const parsed = new URL(String(url || '').trim())
+    if (parsed.origin !== orgoApiOrigin(sessionUrl)) return false
+    if (parsed.protocol === 'https:') return true
+    if (parsed.protocol === 'http:' && isPrivateWsHost(parsed.hostname)) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
+function credentialError(status, origin) {
+  return Object.assign(new Error(status), { status, origin })
+}
+
+async function authFetch(url, { bearer, sessionUrl, signal, accept } = {}) {
+  let origin = ''
+  try {
+    origin = new URL(String(url || '').trim()).origin
+  } catch {
+    origin = ''
+  }
+  if (!credentialTargetAllowed(url, sessionUrl)) {
+    throw credentialError('unsafe-origin', origin)
+  }
+  const headers = {
+    Accept: accept || 'application/json',
+    Authorization: 'Bearer ' + bearer
+  }
+  const response = await fetch(url, { headers, signal, redirect: 'manual' })
+  const redirected =
+    response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)
+  if (redirected) throw credentialError('redirect', origin)
+  return response
 }
 
 function orgoShapeKeys(value) {
@@ -695,11 +763,16 @@ function orgoDiscoverError(kind) {
   return err
 }
 
-async function orgoFetchJson(url, headers) {
+function isCredentialError(error) {
+  return Boolean(error && (error.status === 'unsafe-origin' || error.status === 'redirect'))
+}
+
+async function orgoFetchJson(url, { bearer, sessionUrl }) {
   let response
   try {
-    response = await fetch(url, { headers })
-  } catch {
+    response = await authFetch(url, { bearer, sessionUrl })
+  } catch (error) {
+    if (isCredentialError(error)) throw error
     throw orgoDiscoverError('network')
   }
   if (response.status === 401 || response.status === 403) throw orgoDiscoverError('auth')
@@ -711,11 +784,12 @@ async function orgoFetchJson(url, headers) {
   }
 }
 
-async function orgoFetchJsonOptional(url, headers) {
+async function orgoFetchJsonOptional(url, { bearer, sessionUrl }) {
   let response
   try {
-    response = await fetch(url, { headers })
-  } catch {
+    response = await authFetch(url, { bearer, sessionUrl })
+  } catch (error) {
+    if (isCredentialError(error)) throw error
     return { ok: false, status: 'network', body: null }
   }
   let body = null
@@ -734,8 +808,7 @@ function pushOrgoComputers(computers, list, workspaceName) {
 }
 
 async function discoverOrgoComputers(origin, bearer, sessionUrl) {
-  const headers = { Accept: 'application/json', Authorization: `Bearer ${bearer}` }
-  const listed = await orgoFetchJson(`${origin}/api/workspaces`, headers)
+  const listed = await orgoFetchJson(`${origin}/api/workspaces`, { bearer, sessionUrl })
   const workspaces = unwrapWorkspaceList(listed.body)
   const workspaceCount = workspaces.length
   const computers = []
@@ -769,7 +842,10 @@ async function discoverOrgoComputers(origin, bearer, sessionUrl) {
   const details = await Promise.all(
     detailSlice.map(async ws => {
       const id = String(ws.id).trim()
-      const result = await orgoFetchJsonOptional(`${origin}/api/workspaces/${encodeURIComponent(id)}`, headers)
+      const result = await orgoFetchJsonOptional(`${origin}/api/workspaces/${encodeURIComponent(id)}`, {
+        bearer,
+        sessionUrl
+      })
       return { ws, result }
     })
   )
@@ -801,7 +877,10 @@ async function discoverOrgoComputers(origin, bearer, sessionUrl) {
     const uuid = uuidFromText(sessionUrl)
     if (uuid) {
       uuidFallback = true
-      const result = await orgoFetchJsonOptional(`${origin}/api/computers/${encodeURIComponent(uuid)}`, headers)
+      const result = await orgoFetchJsonOptional(`${origin}/api/computers/${encodeURIComponent(uuid)}`, {
+        bearer,
+        sessionUrl
+      })
       uuidFallbackStatus = result.status
       const record = unwrapSessionBody(result.body)
       const id = record && typeof record.id === 'string' ? record.id.trim() : ''
@@ -874,9 +953,9 @@ function phaseLine(state) {
     case 'loading-novnc':
       return 'Loading viewer…'
     case 'connecting':
-      return 'Connecting…'
+      return state.detail ? `Connecting to ${state.detail}…` : 'Connecting…'
     case 'connected':
-      return 'Connected'
+      return state.detail ? `Connected · ${state.detail}` : 'Connected'
     case 'disconnected':
       return state.detail || 'Disconnected'
     case 'error':
@@ -1305,11 +1384,20 @@ function ensureSurfaceEl() {
   return elNode
 }
 
+function iframePolicy(endpoint) {
+  const allowClipboard = Boolean(endpoint && endpoint.allowClipboard)
+  return {
+    sandbox: 'allow-scripts allow-same-origin allow-forms',
+    allow: allowClipboard
+      ? 'fullscreen; clipboard-write; clipboard-read'
+      : 'fullscreen; clipboard-write'
+  }
+}
+
 function ensureIframeEl() {
   if (engine.iframeEl) return engine.iframeEl
   const frame = document.createElement('iframe')
   frame.setAttribute('title', 'Remote computer')
-  frame.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen')
   frame.style.width = '100%'
   frame.style.height = '100%'
   frame.style.border = '0'
@@ -1466,15 +1554,18 @@ function teardownIframe(blank) {
   if (blank) engine.iframeEl.src = 'about:blank'
 }
 
-async function fetchOrgoVncPassword(origin, computerId, headers, signal, gen) {
+async function fetchOrgoVncPassword(origin, computerId, bearer, sessionUrl, signal, gen) {
   let response
   try {
-    response = await fetch(`${origin}/api/computers/${encodeURIComponent(computerId)}/vnc-password`, {
-      headers,
-      signal
-    })
+    const url = `${origin}/api/computers/${encodeURIComponent(computerId)}/vnc-password`
+    if (bearer) {
+      response = await authFetch(url, { bearer, sessionUrl, signal })
+    } else {
+      response = await fetch(url, { headers: { Accept: 'application/json' }, signal })
+    }
   } catch (error) {
     if (error && error.name === 'AbortError') throw error
+    if (isCredentialError(error)) throw error
     return ''
   }
   if (!still(gen)) {
@@ -1494,16 +1585,42 @@ async function fetchOrgoVncPassword(origin, computerId, headers, signal, gen) {
   return raw == null ? '' : String(raw)
 }
 
+function credentialErrorDetail(error) {
+  if (!error) return null
+  if (error.status === 'unsafe-origin') {
+    const origin = error.origin || 'an unexpected address'
+    return {
+      code: 'unsafe-origin',
+      detail: ERRORS['unsafe-origin'].body.replace('{origin}', origin)
+    }
+  }
+  if (error.status === 'redirect') {
+    return { code: 'redirect', detail: ERRORS.redirect.body }
+  }
+  return null
+}
+
 async function fetchSession(endpoint, gen) {
   const ac = new AbortController()
   engine.fetchAbort = ac
-  const headers = { Accept: 'application/json' }
-  if (endpoint.sessionBearer) headers.Authorization = `Bearer ${endpoint.sessionBearer}`
+  const bearer = String(endpoint.sessionBearer || '')
   let response
   try {
-    response = await fetch(endpoint.sessionUrl, { headers, signal: ac.signal })
+    if (bearer) {
+      response = await authFetch(endpoint.sessionUrl, {
+        bearer,
+        sessionUrl: endpoint.sessionUrl,
+        signal: ac.signal
+      })
+    } else {
+      response = await fetch(endpoint.sessionUrl, {
+        headers: { Accept: 'application/json' },
+        signal: ac.signal
+      })
+    }
   } catch (error) {
     if (error && error.name === 'AbortError') throw error
+    if (isCredentialError(error)) throw error
     const wrapped = new Error('network')
     wrapped.status = 'network'
     throw wrapped
@@ -1550,7 +1667,8 @@ async function fetchSession(endpoint, gen) {
           password = await fetchOrgoVncPassword(
             orgoApiOrigin(endpoint.sessionUrl),
             computerId,
-            headers,
+            bearer,
+            endpoint.sessionUrl,
             ac.signal,
             gen
           )
@@ -1608,13 +1726,33 @@ async function connectIframe(endpoint, gen) {
     setError('unconfigured', ERRORS.unconfigured.body)
     return
   }
-  patchState({ phase: 'connecting', code: null, detail: null, desktopName: null, fbW: 0, fbH: 0 })
+  let origin = ''
+  try {
+    origin = new URL(String(endpoint.iframeUrl).trim()).origin
+  } catch {
+    origin = String(endpoint.iframeUrl || '')
+  }
+  const policy = iframePolicy(endpoint)
+  if (engine.iframeEl) {
+    const existing = engine.iframeEl
+    if (
+      existing.getAttribute('sandbox') !== policy.sandbox ||
+      existing.getAttribute('allow') !== policy.allow
+    ) {
+      existing.onload = null
+      if (existing.parentNode) existing.parentNode.removeChild(existing)
+      engine.iframeEl = null
+    }
+  }
+  patchState({ phase: 'connecting', code: null, detail: origin, desktopName: null, fbW: 0, fbH: 0 })
   const frame = ensureIframeEl()
+  frame.setAttribute('sandbox', policy.sandbox)
+  frame.setAttribute('allow', policy.allow)
   frame.onload = () => {
     if (!still(gen)) return
     if (!frame.src || frame.src === 'about:blank') return
     engine.reconnectAttempt = 0
-    patchState({ phase: 'connected', code: null, detail: null })
+    patchState({ phase: 'connected', code: null, detail: origin })
     bumpPlace()
   }
   if (frame.getAttribute('src') === endpoint.iframeUrl) frame.src = 'about:blank'
@@ -1686,6 +1824,11 @@ async function connect(endpoint) {
     } catch (error) {
       if (!still(gen)) return
       if (error && error.name === 'AbortError') return
+      const credential = credentialErrorDetail(error)
+      if (credential) {
+        setError(credential.code, credential.detail)
+        return
+      }
       if (error && error.sessionDetail) {
         setError('session-failed', error.sessionDetail)
         return
@@ -3191,7 +3334,9 @@ function OrgoComputerFinder({ bearer, sessionUrl, onPick }) {
       }
     } catch (err) {
       if (gen !== genRef.current) return
-      if (err && err.kind === 'auth') setError('This API key was rejected.')
+      const credential = credentialErrorDetail(err)
+      if (credential) setError(credential.detail)
+      else if (err && err.kind === 'auth') setError('This API key was rejected.')
       else setError("Couldn't reach the API from the app — set the API address in Advanced.")
     } finally {
       if (gen === genRef.current) setLoading(false)
@@ -3526,6 +3671,31 @@ function EndpointEditor({
                 onChange: event => touchAdvanced({ username: event.target.value })
               })
             ),
+            draft.mode === 'iframe'
+              ? el(
+                  'div',
+                  { className: 'grid gap-1' },
+                  el(
+                    'div',
+                    { className: 'flex items-center justify-between gap-3' },
+                    el(
+                      'span',
+                      { className: 'text-[0.7rem] text-(--ui-text-secondary)' },
+                      'Allow this page to read my clipboard'
+                    ),
+                    el(Switch, {
+                      size: 'xs',
+                      checked: draft.allowClipboard === true,
+                      onCheckedChange: value => touchAdvanced({ allowClipboard: value })
+                    })
+                  ),
+                  el(
+                    'p',
+                    { className: 'text-[0.64rem] leading-4 text-(--ui-text-quaternary)' },
+                    'Off by default. Only turn on for pages you control.'
+                  )
+                )
+              : null,
             el(
               'div',
               { className: 'flex items-center justify-between gap-3' },
