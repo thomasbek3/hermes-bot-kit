@@ -293,6 +293,14 @@ access units over a token-authed WebSocket. The plugin decodes with WebCodecs
 and paints over the VNC view. If HD hiccups, VNC is already showing — you
 never see a gap.
 
+**The HD token is sent as the first message, never in the address.** The
+client opens the socket with no `?token=`, sends `{"type":"auth","token":…}`
+on open, waits for the agent's `hello`, then sends `{"type":"start"}`. Query
+strings leak into logs and process lists; a first frame does not. One
+compatibility exception: if you paste an **HD stream URL** that already
+carries `?token=`, that URL is left untouched and no auth frame is sent, so
+an older agent keeps working.
+
 **Tuning notes from live hardware** (details in
 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)): Electron's VideoDecoder is
 particular — encoders are forced to constrained-baseline, single-slice,
@@ -333,9 +341,10 @@ stream), paste the printed token, turn on HD.
   trusted LAN. No router port-forward, no public IP. Transport is
   plaintext `ws://` — confidentiality comes from the tailnet (WireGuard)
   or an SSH tunnel, not from the bridge. No TLS/`wss` mode exists. The HD
-  token is in the WebSocket query string (the browser API cannot set
-  headers); anyone who can read the wire can read it. The desktop plugin
-  refuses `ws://` to public hosts.
+  token travels as the first WebSocket message rather than in the query
+  string (the browser API cannot set headers), so it stays out of logs and
+  argv — but on a plaintext `ws://` link anyone who can read the wire can
+  still read it. The desktop plugin refuses `ws://` to public hosts.
 - **August 2026 macOS Screen Sharing CVE (CVE-2026-65400).** Unpatched Screen
   Sharing can authenticate an attacker on the network **without valid
   credentials**. Apple patched this in macOS **Sonoma 14.8.9**,
@@ -725,14 +734,20 @@ The address field picks a mode for you. These names only appear under
 
 | Mode | How it connects | When to use |
 |---|---|---|
-| **WebSocket** (default) | Loads the vendored noVNC 1.7.0 (`RFB`) the installer places next to `plugin.js`, after a SHA-256 check. Falls back to jsDelivr then `esm.sh` only if that file is missing or the hash does not match; those CDN copies are unverified. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
-| **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. Sandboxed; the page cannot read the clipboard unless **Allow this page to read my clipboard** is on for that computer (Advanced, off by default). | CSP blocks the noVNC module, you're offline, or you already have `vnc.html`. |
+| **WebSocket** (default) | Loads the vendored noVNC 1.7.0 (`RFB`) the installer places next to `plugin.js`, after a SHA-256 check. Falls back to jsDelivr then `esm.sh` only if that file is **missing, truncated, or unreadable**; those CDN copies are unverified. A file that is present but **fails the hash check, or fails to import**, is treated as tampering: the pane stops with **Viewer file failed verification** and no CDN copy is loaded. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
+| **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. Sandboxed; the page cannot read the clipboard unless **Allow this computer to use my clipboard** is on for that computer (Advanced, off by default). | CSP blocks the noVNC module, you're offline, or you already have `vnc.html`. |
 | **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Rotating desktops (paste the API URL or an API key). |
 
 If noVNC cannot be loaded (missing vendored copy, network, or CSP), the pane
 shows **Couldn't load the viewer** and tells you to switch the endpoint to
 iframe mode (Advanced, or paste a `vnc.html` URL). Iframe endpoints keep
 working in that situation. CDN fallback is unverified.
+
+The status line always names the live source and, when the vendored copy
+lost, why: `noVNC from CDN (unverified); vendored file missing` (or
+`vendored file truncated`, `vendored read failed`, `no desktop bridge`).
+Only a verified vendored constructor is cached, so dropping a good file into
+place takes effect on the next connect without restarting Hermes.
 
 ## Controls
 
@@ -777,7 +792,7 @@ Mouse-move shows the bar; it auto-fades after 2s idle. Escape collapses
 |---|---|
 | View only | Live-updates `rfb.viewOnly`. |
 | Fit / Native | Fit scales the framebuffer into the overlay. Native turns scaling off and lets the container scroll. |
-| Paste | `navigator.clipboard.readText()` → `rfb.clipboardPasteFrom`. Remote clipboard events write back via `ctx.os.writeClipboard`. |
+| Paste | `navigator.clipboard.readText()` → `rfb.clipboardPasteFrom`. Remote clipboard events write back via `ctx.os.writeClipboard` **only when Allow this computer to use my clipboard is on** (Advanced, off by default, all modes). |
 | Ctrl+Alt+Del | `rfb.sendCtrlAltDel()`. |
 | Screenshot | `rfb.toBlob` → PNG on the clipboard when possible; otherwise a PNG download. |
 | HD | Toggles the high-performance H.264 overlay (when the endpoint has an HD token). VNC stays underneath either way. |
@@ -835,8 +850,17 @@ the other variant and the working choice is remembered per endpoint.
 - Passwords in `ctx.storage` are plain text on disk
   (`hermes.plugin.computer-viewer.*`).
 - Websocket mode loads the vendored noVNC next to `plugin.js` after a
-  SHA-256 check. Installs without that file, or with a hash mismatch, fall
-  back to the CDN (unverified); if the CDN is blocked too, use iframe mode.
+  SHA-256 check. Installs without that file (missing, truncated, unreadable)
+  fall back to the CDN (unverified); if the CDN is blocked too, use iframe
+  mode. A hash mismatch does **not** fall back — it stops the connection.
+- The VNC server's RSA key is pinned on first connect (trust on first use).
+  A changed key stops the connection with **Server key changed**; clear the
+  pin with **Forget pinned server key** under Advanced if the change was
+  expected (rebuilt machine, new host).
+- Bare `host:port` addresses probe `wss://` for public hosts and only offer
+  the `http://…/vnc.html` iframe fallback on localhost, LAN, `.local` and
+  Tailscale hosts. A public host that never answers reports that it needs
+  `wss://` or an `https://` viewer page.
 - `ws://` to non-private hosts may be blocked by the renderer (mixed
   content); use `wss://`.
 - Keyboard capture: in expanded interactive mode the remote desktop receives

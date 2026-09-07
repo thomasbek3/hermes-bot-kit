@@ -60,6 +60,8 @@ const SCREEN_PANEL_PX = 28
 const PASSWORD_CAVEAT =
   'Stored locally in plugin storage (plain text). Prefer token-in-URL or session endpoints for anything sensitive.'
 const MIXED_CONTENT_HINT = 'Insecure ws:// to a public host will likely be blocked. Use wss://.'
+const PUBLIC_HOST_SECURE_HINT =
+  'A host on the public internet needs wss:// (or an https:// viewer page) — plain ws:// and http:// are refused.'
 const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer'
 const SNAPSHOT_CAP = 8
 const HIPERF_BACKOFF_MS = [2000, 4000, 8000]
@@ -97,6 +99,14 @@ const ERRORS = {
   'cdn-blocked': {
     title: "Couldn't load the viewer",
     body: "noVNC couldn't be fetched from the CDN (network or CSP). Switch this endpoint to iframe mode, or check your connection."
+  },
+  'vendored-tampered': {
+    title: 'Viewer file failed verification',
+    body: 'The installed noVNC bundle does not match the expected hash. Re-run the kit installer.'
+  },
+  'server-key-changed': {
+    title: 'Server key changed',
+    body: "The VNC server key for {name} does not match the one pinned on first connect. If that is expected (rebuilt machine, new host), clear the pin with 'Forget pinned server key' under Advanced."
   },
   'mixed-content': {
     title: 'Blocked insecure connection',
@@ -362,21 +372,19 @@ function parseHostPort(value) {
 
 function probeUrlsFromHostPort(parsed) {
   const host = formatHostForUrl(parsed.host)
-  const scheme = isPrivateWsHost(parsed.host) ? 'ws' : 'wss'
+  const priv = isPrivateWsHost(parsed.host)
+  // Public hosts never get a plain-http iframe fallback: embedding
+  // http://<public>/vnc.html would ship the session in the clear.
   return {
-    wsUrl: `${scheme}://${host}:${parsed.port}/websockify`,
-    iframeUrl: `http://${host}:${parsed.port}/vnc.html`
+    wsUrl: `${priv ? 'ws' : 'wss'}://${host}:${parsed.port}/websockify`,
+    iframeUrl: priv ? `http://${host}:${parsed.port}/vnc.html` : ''
   }
 }
 
+// An address is an API key only when it announces itself as one. The old
+// entropy heuristic swallowed ordinary hostnames (`windows-11-desktop`).
 function looksLikeApiKey(value) {
-  const text = String(value || '').trim()
-  if (!text) return false
-  if (SK_KEY_RE.test(text)) return true
-  if (text.length < 16) return false
-  if (/[./\\:@]/.test(text)) return false
-  if (!/^[A-Za-z0-9_-]+$/.test(text)) return false
-  return /[A-Za-z]/.test(text) && /[0-9]/.test(text)
+  return SK_KEY_RE.test(String(value || '').trim())
 }
 
 function isNovncPageUrl(href) {
@@ -520,7 +528,8 @@ function blankEndpoint() {
     hiperfEnabled: false,
     hiperfUrl: '',
     hiperfToken: '',
-    allowClipboard: false
+    allowClipboard: false,
+    serverKeyFingerprint: ''
   }
 }
 
@@ -548,7 +557,8 @@ function normalizeEndpoint(raw) {
     hiperfEnabled: raw.hiperfEnabled === true,
     hiperfUrl: String(raw.hiperfUrl || ''),
     hiperfToken: String(raw.hiperfToken || ''),
-    allowClipboard: raw.allowClipboard === true
+    allowClipboard: raw.allowClipboard === true,
+    serverKeyFingerprint: String(raw.serverKeyFingerprint || '')
   }
 }
 
@@ -1041,9 +1051,11 @@ const engine = {
   appliedDefaultsFor: null,
   authLock: false,
   intentionalDisconnect: false,
-  rfbSource: null,
-  rfbLocalFailed: false,
-  rfbVendoredReason: null
+  secureHostHint: false,
+  // Where the noVNC constructor came from and, when the vendored copy was
+  // not used, why. `engine.rfb` is the live RFB instance, so the loader
+  // state lives under its own key.
+  rfbLoad: { source: null, reason: null }
 }
 
 function bumpGen() {
@@ -1366,28 +1378,45 @@ function rfbSourceLabel(url) {
   return 'cdn-jsdelivr'
 }
 
+const VENDORED_REASON_TEXT = {
+  missing: 'vendored file missing',
+  truncated: 'vendored file truncated',
+  'read-failed': 'vendored read failed',
+  integrity: 'vendored integrity check failed',
+  'import-failed': 'vendored import failed',
+  'no-bridge': 'no desktop bridge'
+}
+
+// Two facts, always both surfaced: which source is live, and (when the
+// vendored copy lost) why it lost.
 function rfbStatusDetail() {
-  if (engine.rfbVendoredReason === 'integrity') {
-    return 'vendored noVNC failed integrity check; loaded from CDN'
+  const { source, reason } = engine.rfbLoad
+  const why = VENDORED_REASON_TEXT[reason] || null
+  if (source === 'vendored') return null
+  if (source === 'cdn-jsdelivr' || source === 'cdn-esm') {
+    return why ? `noVNC from CDN (unverified); ${why}` : 'noVNC from CDN (unverified)'
   }
-  if (engine.rfbLocalFailed) return 'vendored noVNC failed to load'
-  if (engine.rfbSource === 'cdn-jsdelivr' || engine.rfbSource === 'cdn-esm') {
-    return 'noVNC from CDN (unverified; re-run the installer to get the vendored copy)'
-  }
-  return null
+  return why
 }
 
 function hexSha256(digest) {
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
 }
 
+// -> { text } on success, { reason } on failure. The reason is what the
+// status line shows, so a truncated read must not read as "missing".
 function textFromReadFile(payload) {
-  if (typeof payload === 'string') return payload
-  if (!payload || typeof payload !== 'object') return null
-  if (payload.truncated) return null
-  if (typeof payload.text === 'string') return payload.text
-  if (typeof payload.content === 'string') return payload.content
-  return null
+  if (typeof payload === 'string') return { text: payload, reason: null }
+  if (!payload || typeof payload !== 'object') return { text: null, reason: 'missing' }
+  if (payload.truncated) return { text: null, reason: 'truncated' }
+  if (typeof payload.text === 'string') return { text: payload.text, reason: null }
+  if (typeof payload.content === 'string') return { text: payload.content, reason: null }
+  return { text: null, reason: 'missing' }
+}
+
+function readFailureReason(error) {
+  const message = String((error && error.message) || error || '')
+  return /ENOENT|not found/i.test(message) ? 'missing' : 'read-failed'
 }
 
 function vendoredRfbPath(root) {
@@ -1397,56 +1426,48 @@ function vendoredRfbPath(root) {
   return base + sep + 'computer-viewer' + sep + 'vendor' + sep + 'novnc-rfb.mjs'
 }
 
+function vendoredFailed(reason) {
+  engine.rfbLoad = { source: null, reason }
+  return null
+}
+
 async function loadVendoredRFB() {
   const bridge = globalThis.window && window.hermesDesktop
   // readPluginSource reads the whole file (16 MiB cap); readFileText is the
   // preview door that truncates at 512 KiB. Prefer the former.
   const readSource = bridge?.readPluginSource || bridge?.readFileText
-  if (!bridge?.desktopPluginsRoot || !readSource) {
-    engine.rfbVendoredReason = 'no-bridge'
-    return null
-  }
+  if (!bridge?.desktopPluginsRoot || !readSource) return vendoredFailed('no-bridge')
 
   let root
   try {
     root = await bridge.desktopPluginsRoot()
   } catch {
-    engine.rfbVendoredReason = 'no-bridge'
-    return null
+    return vendoredFailed('no-bridge')
   }
-  if (typeof root !== 'string' || !root) {
-    engine.rfbVendoredReason = 'no-bridge'
-    return null
-  }
+  if (typeof root !== 'string' || !root) return vendoredFailed('no-bridge')
 
   const filePath = vendoredRfbPath(root)
   let payload
   try {
     payload = await readSource.call(bridge, filePath)
-  } catch {
-    engine.rfbVendoredReason = 'missing'
-    return null
+  } catch (error) {
+    return vendoredFailed(readFailureReason(error))
   }
 
-  const source = textFromReadFile(payload)
-  if (source == null) {
-    engine.rfbVendoredReason = 'missing'
-    return null
-  }
+  const read = textFromReadFile(payload)
+  if (read.text == null) return vendoredFailed(read.reason || 'missing')
+  const source = read.text
 
   let hex
   try {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
     hex = hexSha256(digest)
   } catch {
-    engine.rfbVendoredReason = 'import-failed'
-    engine.rfbLocalFailed = true
-    return null
+    return vendoredFailed('import-failed')
   }
   if (hex !== VENDORED_RFB_SHA256) {
     console.warn('[computer-viewer] vendored noVNC failed integrity check', filePath)
-    engine.rfbVendoredReason = 'integrity'
-    return null
+    return vendoredFailed('integrity')
   }
 
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
@@ -1455,14 +1476,12 @@ async function loadVendoredRFB() {
     const ctor = rfbConstructor(mod)
     if (typeof ctor !== 'function') throw new Error('RFB constructor missing')
     RFB = ctor
-    engine.rfbSource = 'vendored'
+    engine.rfbLoad = { source: 'vendored', reason: null }
     console.info('[computer-viewer] noVNC source: vendored', filePath)
     return RFB
   } catch (error) {
-    engine.rfbVendoredReason = 'import-failed'
-    engine.rfbLocalFailed = true
     console.warn('[computer-viewer] vendored noVNC failed to load', error)
-    return null
+    return vendoredFailed('import-failed')
   } finally {
     try {
       URL.revokeObjectURL(url)
@@ -1472,12 +1491,22 @@ async function loadVendoredRFB() {
   }
 }
 
+// A vendored file that is present but wrong is an attack signal, not a
+// network hiccup: fail closed instead of silently reaching for the CDN.
+const VENDORED_TAMPERED_REASONS = { integrity: true, 'import-failed': true }
+
 async function loadRFB() {
-  if (RFB) return RFB
-  engine.rfbLocalFailed = false
-  engine.rfbVendoredReason = null
+  // Only a verified vendored constructor is cached. Anything else re-runs the
+  // bridge attempt, so dropping a good file in place takes effect next connect.
+  if (RFB && engine.rfbLoad.source === 'vendored') return RFB
+  engine.rfbLoad = { source: null, reason: null }
   const vendored = await loadVendoredRFB()
   if (vendored) return vendored
+  const reason = engine.rfbLoad.reason
+  if (VENDORED_TAMPERED_REASONS[reason]) {
+    RFB = null
+    throw Object.assign(new Error('vendored-tampered'), { code: 'vendored-tampered' })
+  }
   const urls = rfbSourceOrder()
   let lastError = null
   for (const url of urls) {
@@ -1486,16 +1515,16 @@ async function loadRFB() {
       const ctor = rfbConstructor(mod)
       if (typeof ctor !== 'function') throw new Error('RFB constructor missing')
       RFB = ctor
-      engine.rfbSource = rfbSourceLabel(url)
-      const reason = engine.rfbVendoredReason || 'no-bridge'
+      engine.rfbLoad = { source: rfbSourceLabel(url), reason }
       console.info(
-        `[computer-viewer] noVNC source: ${engine.rfbSource} (unverified; reason: ${reason})`
+        `[computer-viewer] noVNC source: ${engine.rfbLoad.source} (unverified; reason: ${reason})`
       )
       return RFB
     } catch (error) {
       lastError = error
     }
   }
+  RFB = null
   throw lastError || new Error('cdn-blocked')
 }
 
@@ -1756,7 +1785,8 @@ async function fetchSession(endpoint, gen) {
     } else {
       response = await fetch(endpoint.sessionUrl, {
         headers: { Accept: 'application/json' },
-        signal: ac.signal
+        signal: ac.signal,
+        redirect: 'manual'
       })
     }
   } catch (error) {
@@ -1765,6 +1795,19 @@ async function fetchSession(endpoint, gen) {
     const wrapped = new Error('network')
     wrapped.status = 'network'
     throw wrapped
+  }
+  // Same rule as authFetch: an unauthenticated session endpoint that bounces
+  // us elsewhere is not followed either.
+  const redirected =
+    response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)
+  if (redirected) {
+    let origin = ''
+    try {
+      origin = new URL(String(endpoint.sessionUrl || '').trim()).origin
+    } catch {
+      origin = ''
+    }
+    throw credentialError('redirect', origin)
   }
   if (!still(gen)) {
     const aborted = new Error('aborted')
@@ -1833,11 +1876,16 @@ async function fetchSession(endpoint, gen) {
   return { websocketUrl, password }
 }
 
+function unreachableBody(wsUrl) {
+  const body = ERRORS.unreachable.body.replace('{wsUrl}', wsUrl || '')
+  return engine.secureHostHint ? `${body} ${PUBLIC_HOST_SECURE_HINT}` : body
+}
+
 function scheduleBackoff(endpoint, gen) {
   if (!still(gen)) return
   if (engine.reconnectAttempt >= BACKOFF_MS.length) {
     const wsUrl = engine.resolvedWsUrl || endpoint.wsUrl || endpoint.sessionUrl || ''
-    let body = ERRORS.unreachable.body.replace('{wsUrl}', wsUrl)
+    let body = unreachableBody(wsUrl)
     if (endpoint.mode === 'session-json') {
       body += ' Token may have expired/been rejected.'
     }
@@ -1859,6 +1907,66 @@ function scheduleBackoff(endpoint, gen) {
     if (!engine.paneVisible && !$ui.get().expanded) return
     void connect(endpoint)
   }, delay)
+}
+
+// The endpoint object the listeners captured can be a stale copy after a
+// persist; prefer the live one when the id still matches.
+function liveEndpoint(endpoint) {
+  const live = engine.endpoint
+  if (live && endpoint && live.id === endpoint.id) return live
+  return endpoint || {}
+}
+
+// Trust on first use: pin the server's key hash the first time, then refuse
+// to reconnect silently if it ever changes.
+function fingerprintDecision(stored, presented) {
+  const pin = String(stored || '')
+  const seen = String(presented || '')
+  if (!seen) return { action: 'approve', detail: null }
+  if (!pin) return { action: 'pin', detail: 'first contact: server key pinned' }
+  if (pin === seen) return { action: 'approve', detail: null }
+  return { action: 'reject', detail: null }
+}
+
+async function serverKeyFingerprint(detail) {
+  const key = detail && detail.publickey
+  if (!key) return ''
+  try {
+    const bytes = key instanceof Uint8Array ? key : new Uint8Array(key)
+    if (!bytes.length) return ''
+    return hexSha256(await crypto.subtle.digest('SHA-256', bytes))
+  } catch {
+    return ''
+  }
+}
+
+async function verifyServerKey(rfb, endpoint, event, gen) {
+  const presented = await serverKeyFingerprint(event && event.detail)
+  if (!still(gen) || engine.rfb !== rfb) return
+  const current = liveEndpoint(endpoint)
+  const decision = fingerprintDecision(current.serverKeyFingerprint, presented)
+  if (decision.action === 'reject') {
+    engine.authLock = true
+    try {
+      rfb.disconnect()
+    } catch {
+      /* already dead */
+    }
+    setError(
+      'server-key-changed',
+      ERRORS['server-key-changed'].body.replace('{name}', current.name || 'this computer')
+    )
+    return
+  }
+  if (decision.action === 'pin') {
+    persistEndpointFields({ ...current, serverKeyFingerprint: presented })
+  }
+  try {
+    rfb.approveServer()
+  } catch {
+    /* older noVNC builds omit this */
+  }
+  if (decision.detail) patchState({ detail: decision.detail })
 }
 
 async function connectIframe(endpoint, gen) {
@@ -1942,6 +2050,7 @@ async function connect(endpoint) {
   const username = String(endpoint.username || '')
   let iframeFallbackUrl = ''
 
+  engine.secureHostHint = false
   if (probing) {
     const parsed = parseHostPort(String(endpoint.address || '').trim())
     if (!parsed) {
@@ -1951,6 +2060,9 @@ async function connect(endpoint) {
     const urls = probeUrlsFromHostPort(parsed)
     wsUrl = urls.wsUrl
     iframeFallbackUrl = urls.iframeUrl
+    // No http:// iframe fallback exists for a public host, so say what the
+    // host actually has to offer if wss:// never answers.
+    engine.secureHostHint = !isPrivateWsHost(parsed.host)
   } else if (endpoint.mode === 'session-json') {
     if (!endpoint.sessionUrl) {
       setError('session-failed', `GET ${endpoint.sessionUrl || '(empty)'} → HTTP network.`)
@@ -2003,9 +2115,10 @@ async function connect(endpoint) {
   let RfbCtor
   try {
     RfbCtor = await loadRFB()
-  } catch {
+  } catch (error) {
     if (!still(gen)) return
-    setError('cdn-blocked', ERRORS['cdn-blocked'].body)
+    const code = error && error.code === 'vendored-tampered' ? 'vendored-tampered' : 'cdn-blocked'
+    setError(code, ERRORS[code].body)
     return
   }
   if (!still(gen)) return
@@ -2060,8 +2173,7 @@ async function connect(endpoint) {
         void connectIframe(next, gen)
         return
       }
-      const body = ERRORS.unreachable.body.replace('{wsUrl}', wsUrl || endpoint.wsUrl || '')
-      setError('unreachable', body)
+      setError('unreachable', unreachableBody(wsUrl || endpoint.wsUrl || ''))
       return
     }
 
@@ -2125,19 +2237,18 @@ async function connect(endpoint) {
 
     rfb.addEventListener('clipboard', event => {
       if (!still(gen) || engine.rfb !== rfb) return
+      // The remote only reaches the operator's clipboard when this computer
+      // has been given permission to.
+      if (!liveEndpoint(endpoint).allowClipboard) return
       const text = event && event.detail && event.detail.text
       if (text && pluginCtx && pluginCtx.os && pluginCtx.os.writeClipboard) {
         void pluginCtx.os.writeClipboard(text)
       }
     })
 
-    rfb.addEventListener('serververification', () => {
+    rfb.addEventListener('serververification', event => {
       if (!still(gen) || engine.rfb !== rfb) return
-      try {
-        rfb.approveServer()
-      } catch {
-        /* older noVNC builds omit this */
-      }
+      void verifyServerKey(rfb, endpoint, event, gen)
     })
 
     rfb.addEventListener('disconnect', event => {
@@ -2528,7 +2639,8 @@ const hiperf = {
   intentionalClose: false,
   lastErrorCode: null,
   resetting: false,
-  configureInFlight: false
+  configureInFlight: false,
+  handshake: null
 }
 
 function hiperfIsStreaming() {
@@ -2574,11 +2686,31 @@ function hiperfBuildUrl(endpoint) {
   if (isInsecurePublicWs(parsed.toString())) {
     return { error: 'mixed-public', url: parsed.toString() }
   }
-  if (!parsed.searchParams.get('token')) {
-    const token = String((endpoint && endpoint.hiperfToken) || '').trim()
-    if (token) parsed.searchParams.set('token', token)
-  }
+  // The token never goes in the URL: query strings land in logs and in the
+  // agent's argv. It is sent as the first frame instead (see below).
   return { url: parsed.toString() }
+}
+
+// Compatibility knob: a user-pasted hiperfUrl that already carries ?token=
+// is talking to an older agent, so leave it alone and send no auth frame.
+function hiperfUrlHasToken(endpoint) {
+  const raw = String((endpoint && endpoint.hiperfUrl) || '').trim()
+  if (!raw) return false
+  try {
+    return new URL(raw).searchParams.get('token') != null
+  } catch {
+    return false
+  }
+}
+
+// Ordered client frames: auth (on open, when we hold the token) then start
+// (once the agent's hello lands).
+function hiperfHandshakeFrames(endpoint) {
+  const frames = []
+  const token = String((endpoint && endpoint.hiperfToken) || '').trim()
+  if (token && !hiperfUrlHasToken(endpoint)) frames.push({ type: 'auth', token })
+  frames.push({ type: 'start' })
+  return frames
 }
 
 function hiperfFindStartCodes(data) {
@@ -2622,16 +2754,18 @@ function hiperfReadUe(data, bitpos) {
     if (zeros > 31) return { value: null, bitpos }
   }
   if (bitpos > nbits && zeros) return { value: null, bitpos }
-  let val = (1 << zeros) - 1
+  // ue(v) = suffix + 2^zeros - 1. The suffix accumulates from 0; seeding it
+  // with the offset and then shifting inflates every non-zero code.
+  let suffix = 0
   for (let k = 0; k < zeros; k++) {
     if (bitpos >= nbits) return { value: null, bitpos }
     const byteI = bitpos >> 3
     const bitI = 7 - (bitpos & 7)
     const bit = (data[byteI] >> bitI) & 1
     bitpos += 1
-    val = (val << 1) | bit
+    suffix = (suffix << 1) | bit
   }
-  return { value: val, bitpos }
+  return { value: suffix + ((1 << zeros) - 1), bitpos }
 }
 
 function hiperfIsISlice(nal) {
@@ -2835,6 +2969,7 @@ function hiperfTeardown(opts) {
   hiperf.lastErrorCode = null
   hiperf.resetting = false
   hiperf.configureInFlight = false
+  hiperf.handshake = null
   if (!keepAtom) hiperfPatch({ ...HIPERF_IDLE })
 }
 
@@ -3132,15 +3267,23 @@ async function hiperfOnBinary(gen, data) {
   }
 }
 
+function hiperfSendFrame(type) {
+  const frame = (hiperf.handshake || []).find(item => item.type === type)
+  if (!frame || !hiperf.ws) return false
+  try {
+    hiperf.ws.send(JSON.stringify(frame))
+    return true
+  } catch {
+    /* socket dying */
+    return false
+  }
+}
+
 function hiperfOnHello(gen, _msg) {
   if (gen !== hiperf.generation) return
   if (!hiperf.started) {
     hiperf.started = true
-    try {
-      hiperf.ws && hiperf.ws.send(JSON.stringify({ type: 'start' }))
-    } catch {
-      /* socket dying */
-    }
+    hiperfSendFrame('start')
     return
   }
   // Post-spawn hello is informational. Do not reset a live decoder —
@@ -3278,6 +3421,7 @@ function hiperfStart(endpoint, opts) {
   const gen = hiperf.generation
   hiperf.runningKey = key
   hiperf.url = built.url
+  hiperf.handshake = hiperfHandshakeFrames(endpoint)
   hiperf.intentionalClose = false
   hiperf.lastErrorCode = null
   hiperfPatch({ phase: 'connecting', code: null, fps: 0, mbps: 0, rtt: 0, url: built.url })
@@ -3293,6 +3437,7 @@ function hiperfStart(endpoint, opts) {
   hiperf.ws = ws
   ws.onopen = () => {
     if (gen !== hiperf.generation) return
+    hiperfSendFrame('auth')
     hiperfStartStats(gen)
   }
   ws.onmessage = event => {
@@ -3813,28 +3958,47 @@ function EndpointEditor({
                 onChange: event => touchAdvanced({ username: event.target.value })
               })
             ),
-            draft.mode === 'iframe'
+            el(
+              'div',
+              { className: 'grid gap-1' },
+              el(
+                'div',
+                { className: 'flex items-center justify-between gap-3' },
+                el(
+                  'span',
+                  { className: 'text-[0.7rem] text-(--ui-text-secondary)' },
+                  'Allow this computer to use my clipboard'
+                ),
+                el(Switch, {
+                  size: 'xs',
+                  checked: draft.allowClipboard === true,
+                  onCheckedChange: value => touchAdvanced({ allowClipboard: value })
+                })
+              ),
+              el(
+                'p',
+                { className: 'text-[0.64rem] leading-4 text-(--ui-text-quaternary)' },
+                "Off by default. Covers the embedded page's clipboard access and remote clipboard sync."
+              )
+            ),
+            draft.serverKeyFingerprint
               ? el(
                   'div',
                   { className: 'grid gap-1' },
                   el(
-                    'div',
-                    { className: 'flex items-center justify-between gap-3' },
-                    el(
-                      'span',
-                      { className: 'text-[0.7rem] text-(--ui-text-secondary)' },
-                      'Allow this page to read my clipboard'
-                    ),
-                    el(Switch, {
-                      size: 'xs',
-                      checked: draft.allowClipboard === true,
-                      onCheckedChange: value => touchAdvanced({ allowClipboard: value })
-                    })
+                    Button,
+                    {
+                      type: 'button',
+                      variant: 'ghost',
+                      className: 'w-fit',
+                      onClick: () => touchAdvanced({ serverKeyFingerprint: '' })
+                    },
+                    'Forget pinned server key'
                   ),
                   el(
                     'p',
                     { className: 'text-[0.64rem] leading-4 text-(--ui-text-quaternary)' },
-                    'Off by default. Only turn on for pages you control.'
+                    'The next connect pins whatever key this computer presents.'
                   )
                 )
               : null,
