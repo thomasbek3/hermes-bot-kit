@@ -7,12 +7,13 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "${ROOT}"
 
 usage() {
-  echo "Usage: scripts/release.sh vYYYY.MM.DD" >&2
+  echo "Usage: scripts/release.sh vYYYY.MM.DD[.N]" >&2
 }
 
 TAG="${1:-}"
 case "${TAG}" in
   v[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]) ;;
+  v[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9].[1-9]) ;;  # same-day follow-up: vYYYY.MM.DD.N
   *)
     usage
     exit 2
@@ -91,7 +92,10 @@ run_ci_tests() {
   node --check computer-viewer/plugin.js
   node --test bubble-mode/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
   python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
-  find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 bash -n
+  # -n 1: without it xargs passes every later path as an ARGUMENT to the
+  # first script, so only one file was ever parsed.
+  find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n 1 bash -n
+  python3 computer-viewer/tests/test-hiperf-agent.py
   bash computer-viewer/tests/test-bind.sh
   bash computer-viewer/tests/test-install-agent-plugin.sh
   python3 -c '

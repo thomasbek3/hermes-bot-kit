@@ -209,24 +209,39 @@ WantedBy=default.target
 EOF
 }
 
+show_effective_listener() {
+  # `enable --now` is a no-op on an already-active unit, so a re-run used to
+  # leave the OLD bind in place. Print what is actually listening now.
+  local port="$1"
+  command -v ss >/dev/null 2>&1 || return 0
+  echo "    effective listener on :${port}"
+  ss -ltnp 2>/dev/null | grep ":${port}" || echo "      (nothing listening on :${port} yet)"
+}
+
 enable_user_units() {
-  echo "==> systemctl --user daemon-reload && enable --now"
+  echo "==> systemctl --user daemon-reload, then enable + restart"
   if ! command -v systemctl >/dev/null 2>&1; then
     echo "systemctl not found. User units written to ${UNIT_DIR} but not started." >&2
-    echo "  After login: systemctl --user daemon-reload && systemctl --user enable --now $*" >&2
+    echo "  After login: systemctl --user daemon-reload && systemctl --user enable $* && systemctl --user restart $*" >&2
     return 0
   fi
   if ! systemctl --user daemon-reload; then
     echo "systemd --user is not running (typical over SSH without lingering)." >&2
     echo "Units written. On the graphical session run:" >&2
     echo "  systemctl --user daemon-reload" >&2
-    echo "  systemctl --user enable --now $*" >&2
+    echo "  systemctl --user enable $* && systemctl --user restart $*" >&2
     return 0
   fi
   local u
   for u in "$@"; do
-    systemctl --user enable --now "$u" || echo "    failed to enable $u (will be available after login)" >&2
+    systemctl --user enable "$u" || echo "    failed to enable $u (will be available after login)" >&2
+    if systemctl --user is-active --quiet "$u"; then
+      systemctl --user restart "$u" || echo "    failed to restart $u" >&2
+    else
+      systemctl --user start "$u" || echo "    failed to start $u (will be available after login)" >&2
+    fi
   done
+  show_effective_listener "${LISTEN_PORT}"
 }
 
 note_linger() {

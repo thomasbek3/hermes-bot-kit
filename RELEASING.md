@@ -1,6 +1,6 @@
 # Cutting a release
 
-Releases are annotated tags named `vYYYY.MM.DD`. The install one-liners pin
+Releases are annotated tags named `vYYYY.MM.DD` (a same-day follow-up is `vYYYY.MM.DD.N`). The install one-liners pin
 that tag and check every copied file against that tag's `MANIFEST.sha256`.
 
 ## How to cut one

@@ -201,6 +201,9 @@ if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
   need "computer-viewer/connect-mac.sh"
   need "computer-viewer/connect-linux.sh"
   need "computer-viewer/hiperf-mac.sh"
+  need "computer-viewer/hiperf-linux.sh"
+  need "computer-viewer/connect-windows.ps1"
+  need "computer-viewer/hiperf-windows.ps1"
   need "computer-viewer/hiperf-agent.py"
 fi
 if [ "${KIT_SKIP_SECTIONS:-0}" != "1" ]; then

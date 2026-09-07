@@ -260,28 +260,73 @@ if ($LASTEXITCODE -ne 0) {
     throw "pip install $WebsocketsPin failed (exit $LASTEXITCODE)."
 }
 
+function Get-ManifestAgentSha {
+    # MANIFEST.sha256 sits at the repo root, one level above $RawRepoUrl.
+    param([string]$Root, [string]$Here)
+    $lines = $null
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+        $resp = Invoke-WebRequest -Uri "$Root/MANIFEST.sha256" -UseBasicParsing
+        $lines = $resp.Content -split "`n"
+    } catch {
+        Write-Warning "Could not fetch $Root/MANIFEST.sha256: $_"
+    }
+    if (-not $lines -and $Here) {
+        # Offline fallback: the MANIFEST that ships with a local checkout.
+        $localManifest = Join-Path (Split-Path -Parent $Here) 'MANIFEST.sha256'
+        if (Test-Path -LiteralPath $localManifest) {
+            $lines = Get-Content -LiteralPath $localManifest
+        }
+    }
+    if (-not $lines) { return $null }
+    foreach ($line in $lines) {
+        $parts = ($line -replace "`r", '').Trim() -split '\s+', 2
+        if ($parts.Count -eq 2 -and $parts[1].Trim() -eq 'computer-viewer/hiperf-agent.py') {
+            return $parts[0]
+        }
+    }
+    return $null
+}
+
 Write-Step 'Fetching hiperf-agent.py'
-$downloaded = $false
+# Staged to a temp file and checked against MANIFEST.sha256 before it replaces
+# anything, so a tampered or truncated download cannot become the running agent.
+$here = $PSScriptRoot
+if (-not $here -and $PSCommandPath) { $here = Split-Path -Parent $PSCommandPath }
+$manifestRoot = $RawRepoUrl -replace '/computer-viewer$', ''
+$agentSha = Get-ManifestAgentSha -Root $manifestRoot -Here $here
+if (-not $agentSha) {
+    throw "Could not read the hiperf-agent.py digest from $manifestRoot/MANIFEST.sha256 and no local MANIFEST.sha256 was found. Refusing to install an unverified agent."
+}
+
+$agentTmp = "$AgentPath.new"
+if (Test-Path -LiteralPath $agentTmp) { Remove-Item -LiteralPath $agentTmp -Force }
+$agentSrc = $null
 try {
     $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri "$RawRepoUrl/hiperf-agent.py" -OutFile $AgentPath -UseBasicParsing
-    $downloaded = $true
-    Write-Host "    downloaded from $RawRepoUrl/hiperf-agent.py"
+    Invoke-WebRequest -Uri "$RawRepoUrl/hiperf-agent.py" -OutFile $agentTmp -UseBasicParsing
+    $agentSrc = "$RawRepoUrl/hiperf-agent.py"
 } catch {
     Write-Warning "Download failed: $_"
 }
-if (-not $downloaded) {
-    $here = $PSScriptRoot
-    if (-not $here -and $PSCommandPath) { $here = Split-Path -Parent $PSCommandPath }
+if (-not $agentSrc) {
     $local = $null
     if ($here) { $local = Join-Path $here 'hiperf-agent.py' }
     if ($local -and (Test-Path -LiteralPath $local)) {
-        Copy-Item -LiteralPath $local -Destination $AgentPath -Force
-        Write-Host "    copied local $local (download failed)"
+        Copy-Item -LiteralPath $local -Destination $agentTmp -Force
+        $agentSrc = "$local (download failed)"
     } else {
         throw "Could not download hiperf-agent.py from $RawRepoUrl and no local copy was found."
     }
 }
+$actualSha = (Get-FileHash -LiteralPath $agentTmp -Algorithm SHA256).Hash
+if ($actualSha -ne $agentSha.ToUpperInvariant()) {
+    Remove-Item -LiteralPath $agentTmp -Force -ErrorAction SilentlyContinue
+    throw "hiperf-agent.py sha256 mismatch - refusing to install. manifest $agentSha, file $actualSha. Left $AgentPath untouched."
+}
+Move-Item -LiteralPath $agentTmp -Destination $AgentPath -Force
+Write-Host "    installed from $agentSrc"
+Write-Host "    sha256 $actualSha verified against MANIFEST.sha256"
 
 if (-not (Test-Path -LiteralPath $LogFile)) {
     Set-Content -LiteralPath $LogFile -Value '' -Encoding ASCII

@@ -40,10 +40,76 @@ $UsbmmiddTaskName = 'ComputerViewerVirtualDisplay'
 $UltraVncZipUrl = 'https://uvnc.eu/download/1800/UltraVNC_1824.zip'
 $UltraVncDir = Join-Path ${env:ProgramFiles} 'UltraVNC'
 
+# sha256 of the two version-pinned third-party downloads, computed 2026-09-07
+# from the exact URLs above. These URLs name a version, so their bytes must not
+# change; if a pin ever fails, bump the URL and the pin together, deliberately.
+$TightVncSha256 = 'FA86D817AC29C5FFE1E8E7095E738D9BA5CA28AA62304AC234580916622A8CA2'
+$UltraVncZipSha256 = '8AF948089626008F02EDD1254AFC15C814E454EC5FC9E3EAA860356F19D4F113'
+
+# $UsbmmiddUrl is an unversioned "latest" link, so no hash can be pinned to it.
+# The weaker fallback is an Authenticode check before anything from the zip is
+# executed. Note that deviceinstaller64.exe itself carries NO Authenticode
+# signature (its PE certificate table is empty, checked 2026-09-07); the signed
+# artefact in the zip is the driver catalog usbmmidd.cat, WHQL-signed by
+# "Microsoft Windows Hardware Compatibility Publisher" (Amyuni's driver, signed
+# through Microsoft's hardware program). That catalog is what Windows itself
+# validates at install time, so it is the strongest signal available here.
+$UsbmmiddSigner = 'Microsoft Windows Hardware Compatibility Publisher'
+
 function Test-IsAdmin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     $p = New-Object Security.Principal.WindowsPrincipal $id
     return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-PinnedHash {
+    # $true when the downloaded file matches the pinned sha256.
+    param([string]$Path, [string]$Expected, [string]$Label)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Warning "$Label was not downloaded; nothing to verify."
+        return $false
+    }
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    if ($actual -ne $Expected.ToUpperInvariant()) {
+        Write-Warning "$Label sha256 mismatch - refusing to use it."
+        Write-Warning "  expected: $Expected"
+        Write-Warning "  got:      $actual"
+        return $false
+    }
+    Write-Host "    $Label sha256 $actual verified"
+    return $true
+}
+
+function Test-SignedBy {
+    # Weaker than a pinned hash - only for downloads behind a moving URL.
+    # Requires a Valid Authenticode status AND the expected signer subject.
+    param([string]$Path, [string]$SignerMatch, [string]$Label)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Warning "$Label is missing; cannot check its signature."
+        return $false
+    }
+    $sig = $null
+    try {
+        $sig = Get-AuthenticodeSignature -LiteralPath $Path
+    } catch {
+        Write-Warning "$Label signature could not be read: $_"
+        return $false
+    }
+    if (-not $sig -or $sig.Status -ne 'Valid') {
+        $status = if ($sig) { $sig.Status } else { 'none' }
+        Write-Warning "$Label Authenticode status is '$status', not 'Valid' - refusing to use it."
+        return $false
+    }
+    $subject = ''
+    if ($sig.SignerCertificate) { $subject = [string]$sig.SignerCertificate.Subject }
+    if ($subject -notlike "*$SignerMatch*") {
+        Write-Warning "$Label is signed by an unexpected publisher - refusing to use it."
+        Write-Warning "  expected subject to contain: $SignerMatch"
+        Write-Warning "  got: $subject"
+        return $false
+    }
+    Write-Host "    $Label signature Valid, signer $subject"
+    return $true
 }
 
 function Write-Step([string]$Message) {
@@ -288,6 +354,8 @@ function Install-UsbmmiddVirtualDisplay {
             Write-Warning "usbmmidd extract failed: $_"
             return $false
         }
+        # No pinned hash is possible for a moving "latest" URL; the driver
+        # catalog's signature is checked below, before anything is executed.
         $installer = Get-ChildItem -LiteralPath $extract -Recurse -Filter 'deviceinstaller64.exe' | Select-Object -First 1
         if (-not $installer) {
             Write-Warning 'usbmmidd zip did not contain deviceinstaller64.exe'
@@ -304,6 +372,17 @@ function Install-UsbmmiddVirtualDisplay {
     }
 
     if (-not $already) {
+        # Gate on the driver catalog's Authenticode signature BEFORE running the
+        # installer as admin. See the $UsbmmiddSigner comment for why this is the
+        # check available (moving URL, unsigned deviceinstaller64.exe).
+        $catDir = Split-Path -Parent $exe
+        $cat = Join-Path $catDir 'usbmmidd.cat'
+        if (-not (Test-Path -LiteralPath $cat)) { $cat = Join-Path $catDir 'usbmmIdd.cat' }
+        if (-not (Test-SignedBy -Path $cat -SignerMatch $UsbmmiddSigner -Label 'usbmmidd driver catalog')) {
+            Write-Warning 'Not running deviceinstaller64.exe.'
+            Write-Warning 'Fallback: plug in a monitor or an HDMI/DisplayPort dummy plug (~$8), then re-run.'
+            return $false
+        }
         Write-Host "    $exe install usbmmidd.inf usbmmidd"
         $outFile = Join-Path $env:TEMP 'usbmmidd-install-out.txt'
         $errFile = Join-Path $env:TEMP 'usbmmidd-install-err.txt'
@@ -449,6 +528,11 @@ function Install-UltraVncHeadlessFallback {
             Write-Warning 'TightVNC will keep serving :5900. Expect a black picture on a headless IDD. Dummy-plug fallback still applies.'
             return $false
         }
+        if (-not (Test-PinnedHash -Path $zip -Expected $UltraVncZipSha256 -Label 'UltraVNC zip')) {
+            Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+            Write-Warning 'Not extracting or running UltraVNC. TightVNC keeps serving :5900.'
+            return $false
+        }
         try {
             if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
             New-Item -ItemType Directory -Force -Path $extract | Out-Null
@@ -546,6 +630,10 @@ if (-not $tvnInstalled) {
     $msi = Join-Path $env:TEMP 'tightvnc-2.8.88-gpl-setup-64bit.msi'
     $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest -Uri $TightVncUrl -OutFile $msi -UseBasicParsing
+    if (-not (Test-PinnedHash -Path $msi -Expected $TightVncSha256 -Label 'TightVNC MSI')) {
+        Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+        throw 'TightVNC MSI failed its pinned sha256 check. Refusing to run msiexec on it.'
+    }
     Write-Step 'Installing TightVNC Server (service, SAS/CAD, VNC auth)'
     # MSI password properties are unreliable - see header comment. Print $vncPassword later regardless.
     $msiArgs = @(
