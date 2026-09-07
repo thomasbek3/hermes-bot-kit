@@ -16,7 +16,7 @@ the top of [`__init__.py`](__init__.py) — edit it to taste.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.06/texting-style/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/texting-style/install.sh | bash
 ```
 
 Non-interactive it installs into **every** discovered profile (`~/.hermes`

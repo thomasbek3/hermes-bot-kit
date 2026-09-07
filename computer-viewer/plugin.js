@@ -60,7 +60,7 @@ const SCREEN_PANEL_PX = 28
 const PASSWORD_CAVEAT =
   'Stored locally in plugin storage (plain text). Prefer token-in-URL or session endpoints for anything sensitive.'
 const MIXED_CONTENT_HINT = 'Insecure ws:// to a public host will likely be blocked. Use wss://.'
-const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.06/computer-viewer'
+const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer'
 const SNAPSHOT_CAP = 8
 const HIPERF_BACKOFF_MS = [2000, 4000, 8000]
 const HIPERF_IDLE = { phase: 'off', code: null, fps: 0, mbps: 0, rtt: 0, url: '' }

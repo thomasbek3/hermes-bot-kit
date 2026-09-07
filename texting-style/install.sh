@@ -2,7 +2,7 @@
 # Install the texting-style agent plugin into one or more Hermes profiles.
 # Each profile is its own HERMES_HOME (plugins/, config.yaml).
 #
-#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.06/texting-style/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/texting-style/install.sh | bash
 #
 # or from a clone:  bash texting-style/install.sh [--profiles a,b] [--yes]
 #
@@ -11,7 +11,7 @@
 # copied. Re-runs idempotent.
 set -euo pipefail
 
-KIT_REF="${KIT_REF:-v2026.09.06}"
+KIT_REF="${KIT_REF:-v2026.09.07}"
 RAW_ROOT="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
 RAW_BASE="${RAW_ROOT}/texting-style"
 HERMES_ROOT="${HERMES_ROOT:-${HOME}/.hermes}"
