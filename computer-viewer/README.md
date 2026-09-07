@@ -208,6 +208,13 @@ drives another. Pair each profile with the same machine in the viewer's
 per-bot endpoint and you get the full picture — watch the pane while the bot
 works inside it.
 
+One Orgo computer can run up to four screens, so several bots can share one
+box without stepping on each other. Pin a screen per profile with the plugin
+config `screen` (or the env var `ORGO_SCREEN`, or
+`hermes orgo-computer set <profile> <uuid> --screen <id>`); leave it empty for
+the boot screen. Screenshot, click, type, and key go to that screen only —
+`orgo_computer_bash` is the whole machine either way.
+
 > Attribution: parts of this agent plugin are adapted from
 > [Korgo Bot](https://github.com/nickvasilescu/korgo-bot) (MIT) — see
 > [NOTICE.md](NOTICE.md).

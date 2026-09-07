@@ -25,6 +25,7 @@ python_dependencies:
   - "httpx>=0.27,<1"
 config_schema:
   computer_id: {type: str, default: "", description: "Orgo computer UUID this profile controls (set via /computer)"}
+  screen: {type: str, default: "", description: "Screen id on that computer for screenshot/click/type/key (empty = boot screen)"}
   hosted_run: {type: bool, default: false, description: "If true, register orgo_computer_run (spends Orgo AI credits). Default off."}
   model: {type: str, default: "claude-sonnet-5", description: "Model for delegated computer-use runs"}
   max_steps: {type: int, default: 30, description: "Default step budget per delegated run (1-100)"}
