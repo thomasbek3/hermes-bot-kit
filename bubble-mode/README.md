@@ -107,17 +107,23 @@ makes the bot *write* like a texter in the same chats this plugin makes
 
 ## Colors
 
-Tuned for the dark theme, sampled from Grok Bot:
+Bubbles read from Hermes' own theme tokens, so they follow the light and dark
+themes instead of pinning the dark palette. The hexes sampled from Grok Bot
+stay as fallbacks for hosts that don't publish the tokens.
 
-| Surface | Color |
-|---|---|
-| Your bubble (right) | `#4a4a4e`, ink `#f2f2f3` |
-| Agent bubble (left) | `#2b2b2e`, ink `#e8e8ea` |
-| Radius | `18px`, `4px` tail on the inner corner |
-| Typing pill | `#2b2b2e`, 6px dots, 16px radius |
+| Surface | Token | Dark fallback |
+|---|---|---|
+| Your bubble (right) | `--ui-bg-elevated` mixed with `--ui-text-primary` | `#4a4a4e`, ink `#f2f2f3` |
+| Agent bubble (left) | `--ui-chat-bubble-background`, ink `--ui-text-primary` | `#2b2b2e`, ink `#e8e8ea` |
+| Typing pill | `--ui-chat-bubble-background`, dots `--ui-text-tertiary` / `--ui-text-secondary` | `#2b2b2e`, `#6b6b70` / `#b9b9bf` |
+| Radius | — | `18px`, `4px` tail on the inner corner |
+
+The plugin only *reads* `--ui-chat-bubble-background`; it never redefines it,
+since that token is shared with the rest of the app.
 
 Want different colors? They live in one obvious `CSS` block at the top of
-`plugin.js` — edit the hex values and reload plugins.
+`plugin.js` — edit the fallback hex values, or point the `var(...)` at your
+own token, and reload plugins.
 
 ## Repository layout
 
@@ -140,7 +146,10 @@ so Bubble Mode reconstructs the question from public signals:
 `host.paneVisibility('hermes-bots:pane')`, the Bots home / group-chat tab
 state, and — since 1.2.0 — the selected session tab's label: only the tab
 titled **"Bot Chat"** (the desktop's canonical per-bot conversation, the same
-title Hermes core gates on in `tools/bot_mode_probe.py`) gets the look.
+title Hermes core gates on in `tools/bot_mode_probe.py`) gets the look. The
+caption is matched as "Bot Chat" followed by anything that isn't a letter, so
+the desktop's own decorations ("Bot Chat, 2 unread", a close glyph) still
+count while a differently named chat ("Bot Chats") does not.
 Since 1.4.0 the plugin also remembers tab ids it has seen correctly labeled,
 so a desktop tab-caption scramble can't turn the styling off. The full
 derivation — including the signals that looked tempting and were rejected —

@@ -212,10 +212,10 @@ Setting: `ctx.storage` key `enabled`, default `true`.
 | Surface | Why we don't touch it |
 |---|---|
 | Sessions view | Bots pane visibility is false → body class off. CSS never matches. |
-| Sessions primary ChatView | `workspaceMode: 'sessions'` pane is filtered out in Bot Mode; selector also skips `data-composer-target="main"`. |
+| Sessions primary ChatView | `workspaceMode: 'sessions'` pane is filtered out in Bot Mode, and the body class is only ever on while the gate below says a canonical Bot Chat owns the workspace. The CSS itself does **not** skip `data-composer-target="main"` — it never needs to, because the class is off. |
 | `::card` / artifact / code cards | Excluded by slot + `:has()` split. |
 | computer-viewer pane | No `aui_*` message slots. Class toggle does not register panes or bind keys. |
-| Streaming | CSS only. MutationObserver `attributeFilter` ignores class/text; `childList` is rAF-coalesced and the class is toggled only on boolean change. No wrappers, no React, no layout JS on token flush. |
+| Streaming | CSS only. MutationObserver `attributeFilter` ignores class; `characterData` and `childList` are rAF-coalesced and the class is toggled only on boolean change. No wrappers, no React, no layout JS on token flush. |
 | Sticky human clamp | We do not change `position`, `--human-msg-full`, or clamp classes. |
 
 ---
@@ -229,14 +229,20 @@ Setting: `ctx.storage` key `enabled`, default `true`.
 
 ---
 
-## 9. Watcher wiring (mirrors hermes-bots register())
+## 9. The gate as shipped, and its watcher wiring
 
-hermes-bots listens to:
+`botModeChatVisible()` is exactly four checks, in this order:
 
-- `host.paneVisibility('hermes-bots:pane')`
-- `host.paneVisibility(BOTS_HOME_PANE_ID)`
-- `host.state.focusedStoredSessionId || host.state.activeSessionId`
+1. `botsPaneActive()` — `host.paneVisibility('hermes-bots:pane')`, falling back to the tab's `aria-selected` when the SDK has no pane store. False → off.
+2. `groupChatFronted()` — any selected `plugin-workspace:hermes-bots:group:*` tab. True → off.
+3. **v0.20.5 canonical-tab path** — a selected `session-tile:*` tab captioned `Bot Chat` (`aria-label` first, then `textContent`; normalized, and matched as `bot chat` followed by a non-letter so `Bot Chat, 2 unread` counts and `Bot Chats` does not). Tab ids seen with that caption are remembered in storage, so a caption scramble after a serve restart keeps the styling.
+4. **>=0.20.6 routines-pane path** — `host.paneVisibility('hermes-bots:routines') === true`. hermes-bots seats the Scheduled Jobs tile only while a real bot chat owns the workspace, so that bit is the whole public `botChatOwnsWorkspace()`.
 
-This plugin listens to the same three, plus a document MutationObserver on `data-pane-hidden`, `aria-selected`, `data-tree-tab`, `data-chat-surface`, `data-composer-target`, `data-session-anchor` so tab-fronting that does not move focus still flips the class.
+Not watched, deliberately:
+
+- **No Bots-home pane watch.** hermes-bots reads `host.paneVisibility(BOTS_HOME_PANE_ID)`; this plugin does not need it. Bots home has no routines pane and no `Bot Chat` tab selected, so checks 3 and 4 already return false there.
+- **No chat-surface / transcript inspection.** React removes and remounts the transcript on send; treating that as a mode change flashed the stock UI.
+
+Watchers: `host.paneVisibility('hermes-bots:pane')`, `host.paneVisibility('hermes-bots:routines')`, `host.state.focusedStoredSessionId || host.state.activeSessionId`, plus a document MutationObserver on `data-pane-hidden`, `aria-selected`, `aria-label`, `data-tree-tab` with `characterData: true`, so tab-fronting or a late caption update that does not move focus still flips the class.
 
 Style element id: `hermes-bubble-mode-style`. Body class: `hermes-bubble-mode`. Both removed on `ctx.onDispose`.

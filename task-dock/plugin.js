@@ -32,7 +32,7 @@ const ITEM_TEXT_MAX = 300
 const STATUS_CLASS_MAX = 240
 const STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled', 'unknown'])
 
-const CSS = /* css */ `
+const PLUGIN_CSS = /* css */ `
 body:not(.hermes-task-dock) [${DOCK_ATTR}] {
   display: none !important;
 }
@@ -350,6 +350,17 @@ function readKnownBotChatTabs(ctx) {
   }
 }
 
+/**
+ * Same rule as bubble-mode: the desktop decorates the canonical caption
+ * ("Bot Chat, 2 unread", a close glyph), so match "bot chat" followed by any
+ * non-letter, while a differently named session ("Bot Chats") stays out.
+ */
+function isCanonicalBotChatLabel(label) {
+  if (label === 'bot chat') return true
+  if (!label.startsWith('bot chat')) return false
+  return !/\p{L}/u.test(label.charAt(8))
+}
+
 function canonicalBotChatTabSelected() {
   if (typeof document === 'undefined') return false
   const tabs = document.querySelectorAll('[data-tree-tab][aria-selected="true"]')
@@ -361,7 +372,7 @@ function canonicalBotChatTabSelected() {
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase()
-    if (label === 'bot chat') {
+    if (isCanonicalBotChatLabel(label)) {
       rememberBotChatTab(id)
       return true
     }
@@ -948,7 +959,10 @@ function viewKey(view, stale) {
     items: view.items.map(it => [it.text, it.status]),
     stale,
     collapsed,
-    ageBucket: stale ? Math.floor(view.capturedAt / 15000) : 0
+    // Bucket the *age*, not the capture time: keying on `capturedAt` never
+    // changes for a stored snapshot, so the "last updated …" label froze at
+    // "just now" for as long as the dock stayed mounted.
+    ageBucket: stale ? Math.floor((Date.now() - Number(view.capturedAt || 0)) / 15000) : 0
   })
 }
 
@@ -1096,7 +1110,7 @@ function injectStyle() {
   if (document.getElementById(STYLE_ID)) return
   const el = document.createElement('style')
   el.id = STYLE_ID
-  el.textContent = CSS
+  el.textContent = PLUGIN_CSS
   ;(document.head || document.documentElement).appendChild(el)
 }
 
