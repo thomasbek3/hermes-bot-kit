@@ -313,8 +313,14 @@ function fakeBridge({ text, missing } = {}) {
   const source = text === undefined ? VENDOR_RFB_SOURCE : text
   return {
     desktopPluginsRoot: async () => '/tmp/hermes-home/desktop-plugins',
-    readFileText: async filePath => {
-      assert.match(filePath, /computer-viewer[/\\]novnc-rfb\.mjs$/)
+    readPluginSource: async filePath => {
+      // Drift guard: the plugin must look exactly where the installer puts the
+      // file, i.e. the manifest's relative path under desktop-plugins.
+      const manifestRel = fs
+        .readFileSync(new URL('../scripts/manifest-files.txt', import.meta.url), 'utf8')
+        .split('\n')
+        .find(line => line.endsWith('novnc-rfb.mjs'))
+      assert.equal(filePath, '/tmp/hermes-home/desktop-plugins/' + manifestRel)
       if (missing) throw new Error('ENOENT')
       return {
         binary: false,
