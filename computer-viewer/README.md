@@ -86,7 +86,7 @@ viewed through the pane's noVNC connection.</em></p>
 
 ```
 plugin.js              the entire desktop plugin (single ESM file)
-vendor/novnc-rfb.mjs   bundled noVNC 1.7.0 RFB (installer copies it next to plugin.js)
+vendor/novnc-rfb.mjs   bundled noVNC 1.7.0 RFB (installer copies it to vendor/ on the target)
 connect-mac.sh         one-paste VNC bridge setup for a Mac
 connect-windows.ps1    same for Windows (TightVNC/UltraVNC + websockify + virtual display)
 connect-linux.sh       same for Linux (x11vnc / wayvnc + websockify)
@@ -373,23 +373,24 @@ be `computer-viewer`.
 
 ```bash
 # macOS / Linux (default profile)
-mkdir -p ~/.hermes/desktop-plugins/computer-viewer
+mkdir -p ~/.hermes/desktop-plugins/computer-viewer/vendor
 cp plugin.js ~/.hermes/desktop-plugins/computer-viewer/plugin.js
-cp vendor/novnc-rfb.mjs ~/.hermes/desktop-plugins/computer-viewer/novnc-rfb.mjs
+cp vendor/novnc-rfb.mjs ~/.hermes/desktop-plugins/computer-viewer/vendor/novnc-rfb.mjs
 cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-agent.py ~/.hermes/desktop-plugins/computer-viewer/
 chmod +x ~/.hermes/desktop-plugins/computer-viewer/connect-*.sh ~/.hermes/desktop-plugins/computer-viewer/hiperf-*.sh
 ```
 
-The kit installer places `novnc-rfb.mjs` next to `plugin.js`. The plugin
-verifies that file's SHA-256 before loading it, and only then falls back to
-the CDN.
+The kit installer places `novnc-rfb.mjs` in `computer-viewer/vendor/`. The
+plugin verifies that file's SHA-256 before loading it, and only then falls back
+to the CDN. A copy left next to `plugin.js` by an older release is still read
+(and hash-checked) if `vendor/` has none.
 
 Named Hermes profile:
 
 ```bash
-mkdir -p ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer
+mkdir -p ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/vendor
 cp plugin.js ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/plugin.js
-cp vendor/novnc-rfb.mjs ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/novnc-rfb.mjs
+cp vendor/novnc-rfb.mjs ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/vendor/novnc-rfb.mjs
 cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-agent.py ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/
 chmod +x ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-*.sh ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/hiperf-*.sh
 ```
@@ -398,7 +399,7 @@ Windows (typical):
 
 ```text
 %LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\plugin.js
-%LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\novnc-rfb.mjs
+%LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\vendor\novnc-rfb.mjs
 %LOCALAPPDATA%\hermes\desktop-plugins\computer-viewer\connect-windows.ps1
 ```
 
@@ -734,7 +735,7 @@ The address field picks a mode for you. These names only appear under
 
 | Mode | How it connects | When to use |
 |---|---|---|
-| **WebSocket** (default) | Loads the vendored noVNC 1.7.0 (`RFB`) the installer places next to `plugin.js`, after a SHA-256 check. Falls back to jsDelivr then `esm.sh` only if that file is **missing, truncated, or unreadable**; those CDN copies are unverified. A file that is present but **fails the hash check, or fails to import**, is treated as tampering: the pane stops with **Viewer file failed verification** and no CDN copy is loaded. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
+| **WebSocket** (default) | Loads the vendored noVNC 1.7.0 (`RFB`) the installer places in `computer-viewer/vendor/`, after a SHA-256 check. Falls back to jsDelivr then `esm.sh` only if that file is **missing, truncated, or unreadable**; those CDN copies are unverified. A file that is present but **fails the hash check, or fails to import**, is treated as tampering: the pane stops with **Viewer file failed verification** and no CDN copy is loaded. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
 | **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. Sandboxed; the page cannot read the clipboard unless **Allow this computer to use my clipboard** is on for that computer (Advanced, off by default). | CSP blocks the noVNC module, you're offline, or you already have `vnc.html`. |
 | **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Rotating desktops (paste the API URL or an API key). |
 
@@ -849,8 +850,8 @@ the other variant and the working choice is remembered per endpoint.
 
 - Passwords in `ctx.storage` are plain text on disk
   (`hermes.plugin.computer-viewer.*`).
-- Websocket mode loads the vendored noVNC next to `plugin.js` after a
-  SHA-256 check. Installs without that file (missing, truncated, unreadable)
+- Websocket mode loads the vendored noVNC from `computer-viewer/vendor/`
+  after a SHA-256 check. Installs without that file (missing, truncated, unreadable)
   fall back to the CDN (unverified); if the CDN is blocked too, use iframe
   mode. A hash mismatch does **not** fall back — it stops the connection.
 - The VNC server's RSA key is pinned on first connect (trust on first use).

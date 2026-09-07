@@ -13,6 +13,7 @@ function loadSelection(setup = {}) {
     'hermes-bots:pane': bots,
     'hermes-bots:routines': routines
   }
+  const observed = []
   const context = {
     __host: {
       paneVisibility: id => ({ get: () => Boolean(paneValues[id]) }),
@@ -20,8 +21,14 @@ function loadSelection(setup = {}) {
     },
     CSS: { escape: value => value },
     Date: now ? { now } : Date,
-    document: buildGateDocument(setup),
+    document: { ...buildGateDocument(setup), documentElement: {} },
     globalThis: null,
+    MutationObserver: class {
+      observe(_target, options) {
+        observed.push(options)
+      }
+      disconnect() {}
+    },
     setInterval: () => 0,
     setTimeout: () => 0
   }
@@ -37,12 +44,12 @@ function loadSelection(setup = {}) {
     .concat(
       '\nglobalThis.__testHooks = { matchingStoredSnapshot, workspaceBotChatVisible, botModeChatVisible,' +
         ' isCanonicalBotChatLabel, knownBotChatTabs, markLiveSources, clearLiveSources, isCompletedView,' +
-        ' viewKey, relativeTime }\n'
+        ' viewKey, relativeTime, startDomObserver }\n'
     )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
   for (const id of setup.remembered || []) context.__testHooks.knownBotChatTabs.add(id)
-  return context.__testHooks
+  return { ...context.__testHooks, observed }
 }
 
 function snapshot({ bot = 'gamer-boy', sessionId = 'gamer-session' } = {}) {
@@ -153,4 +160,20 @@ test('a stale snapshot ages instead of freezing at "just now"', () => {
   // The render key has to move too, or renderDock() short-circuits and the
   // "last updated …" label keeps whatever text it was first given.
   assert.notEqual(viewKey(view, true), fresh)
+})
+
+test('the DOM observer watches captions and no longer watches dead chat-surface attributes', () => {
+  const kit = loadSelection()
+
+  kit.startDomObserver()
+  const [options] = kit.observed
+
+  assert.ok(options)
+  assert.equal(options.characterData, true)
+  assert.deepEqual(Array.from(options.attributeFilter), [
+    'data-pane-hidden',
+    'aria-selected',
+    'aria-label',
+    'data-tree-tab'
+  ])
 })

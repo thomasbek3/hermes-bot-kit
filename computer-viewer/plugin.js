@@ -1399,6 +1399,24 @@ function rfbStatusDetail() {
   return why
 }
 
+// A load failure already recorded *why* it failed; that reason is the
+// actionable half, so it rides along in the error detail instead of being
+// dropped for a generic body. An import or crypto failure is not a hash
+// mismatch, and calling it one sends the operator hunting for tampering that
+// never happened.
+function novncErrorBody(code) {
+  const why = rfbStatusDetail()
+  if (code === 'vendored-tampered') {
+    if (engine.rfbLoad.reason === 'integrity') {
+      return `${ERRORS['vendored-tampered'].body} (hash mismatch)`
+    }
+    const body = 'The installed noVNC bundle could not be loaded. Re-run the kit installer.'
+    return why ? `${body} (${why})` : body
+  }
+  // Missing vendored copy *and* a blocked CDN: say both, not just the CDN.
+  return why ? `${ERRORS['cdn-blocked'].body} (${why})` : ERRORS['cdn-blocked'].body
+}
+
 function hexSha256(digest) {
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
 }
@@ -1419,17 +1437,25 @@ function readFailureReason(error) {
   return /ENOENT|not found/i.test(message) ? 'missing' : 'read-failed'
 }
 
-function vendoredRfbPath(root) {
+function vendoredRfbPaths(root) {
   const sep = root.includes('\\') ? '\\' : '/'
   const base = root.endsWith('\\') || root.endsWith('/') ? root.slice(0, -1) : root
-  // Must match scripts/manifest-files.txt: computer-viewer/vendor/novnc-rfb.mjs
-  return base + sep + 'computer-viewer' + sep + 'vendor' + sep + 'novnc-rfb.mjs'
+  const dir = base + sep + 'computer-viewer' + sep
+  // First must match scripts/manifest-files.txt: computer-viewer/vendor/novnc-rfb.mjs.
+  // The legacy next-to-plugin.js location stays readable so a copy made by
+  // hand from an older README still loads — it is hash-checked either way, so
+  // the second path buys compatibility, not trust.
+  return [dir + 'vendor' + sep + 'novnc-rfb.mjs', dir + 'novnc-rfb.mjs']
 }
 
 function vendoredFailed(reason) {
   engine.rfbLoad = { source: null, reason }
   return null
 }
+
+// A vendored file that is present but wrong is an attack signal, not a
+// network hiccup: fail closed instead of silently reaching for the CDN.
+const VENDORED_TAMPERED_REASONS = { integrity: true, 'import-failed': true }
 
 async function loadVendoredRFB() {
   const bridge = globalThis.window && window.hermesDesktop
@@ -1446,16 +1472,29 @@ async function loadVendoredRFB() {
   }
   if (typeof root !== 'string' || !root) return vendoredFailed('no-bridge')
 
-  const filePath = vendoredRfbPath(root)
+  let reason = 'missing'
+  for (const filePath of vendoredRfbPaths(root)) {
+    const attempt = await loadVendoredRfbFrom(bridge, readSource, filePath)
+    if (attempt.ctor) return attempt.ctor
+    // A file that is present but wrong is an attack signal: stop here rather
+    // than let a second candidate paper over it.
+    if (VENDORED_TAMPERED_REASONS[attempt.reason]) return vendoredFailed(attempt.reason)
+    if (reason === 'missing') reason = attempt.reason
+  }
+  return vendoredFailed(reason)
+}
+
+// -> { ctor } once a candidate hashes and imports, else { reason }.
+async function loadVendoredRfbFrom(bridge, readSource, filePath) {
   let payload
   try {
     payload = await readSource.call(bridge, filePath)
   } catch (error) {
-    return vendoredFailed(readFailureReason(error))
+    return { ctor: null, reason: readFailureReason(error) }
   }
 
   const read = textFromReadFile(payload)
-  if (read.text == null) return vendoredFailed(read.reason || 'missing')
+  if (read.text == null) return { ctor: null, reason: read.reason || 'missing' }
   const source = read.text
 
   let hex
@@ -1463,11 +1502,11 @@ async function loadVendoredRFB() {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
     hex = hexSha256(digest)
   } catch {
-    return vendoredFailed('import-failed')
+    return { ctor: null, reason: 'import-failed' }
   }
   if (hex !== VENDORED_RFB_SHA256) {
     console.warn('[computer-viewer] vendored noVNC failed integrity check', filePath)
-    return vendoredFailed('integrity')
+    return { ctor: null, reason: 'integrity' }
   }
 
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
@@ -1478,10 +1517,10 @@ async function loadVendoredRFB() {
     RFB = ctor
     engine.rfbLoad = { source: 'vendored', reason: null }
     console.info('[computer-viewer] noVNC source: vendored', filePath)
-    return RFB
+    return { ctor, reason: null }
   } catch (error) {
     console.warn('[computer-viewer] vendored noVNC failed to load', error)
-    return vendoredFailed('import-failed')
+    return { ctor: null, reason: 'import-failed' }
   } finally {
     try {
       URL.revokeObjectURL(url)
@@ -1490,10 +1529,6 @@ async function loadVendoredRFB() {
     }
   }
 }
-
-// A vendored file that is present but wrong is an attack signal, not a
-// network hiccup: fail closed instead of silently reaching for the CDN.
-const VENDORED_TAMPERED_REASONS = { integrity: true, 'import-failed': true }
 
 async function loadRFB() {
   // Only a verified vendored constructor is cached. Anything else re-runs the
@@ -1905,15 +1940,23 @@ function scheduleBackoff(endpoint, gen) {
     engine.backoffTimer = null
     if (!still(gen)) return
     if (!engine.paneVisible && !$ui.get().expanded) return
-    void connect(endpoint)
+    // Resolve at fire time: the copy captured when the timer was armed predates
+    // any pin written during the connection that just dropped.
+    void connect(liveEndpoint(endpoint))
   }, delay)
 }
 
-// The endpoint object the listeners captured can be a stale copy after a
-// persist; prefer the live one when the id still matches.
+// The endpoint object a listener, timer or retry captured is a snapshot: any
+// persist since then (the pinned server key, above all) replaced it. Every
+// merge that spreads an endpoint, and every reconnect, has to start from the
+// freshest copy or it writes the snapshot back and silently drops the pin.
 function liveEndpoint(endpoint) {
   const live = engine.endpoint
   if (live && endpoint && live.id === endpoint.id) return live
+  if (endpoint && endpoint.id) {
+    const stored = $settings.get().endpoints.find(item => item.id === endpoint.id)
+    if (stored) return stored
+  }
   return endpoint || {}
 }
 
@@ -1922,7 +1965,10 @@ function liveEndpoint(endpoint) {
 function fingerprintDecision(stored, presented) {
   const pin = String(stored || '')
   const seen = String(presented || '')
-  if (!seen) return { action: 'approve', detail: null }
+  // Nothing presented: either a non-RSA security type or a noVNC too old to
+  // hand us the key. Fine on a computer that was never pinned; on a pinned one
+  // it is the pin check being skipped, which is exactly what an attacker wants.
+  if (!seen) return { action: pin ? 'reject' : 'approve', detail: null }
   if (!pin) return { action: 'pin', detail: 'first contact: server key pinned' }
   if (pin === seen) return { action: 'approve', detail: null }
   return { action: 'reject', detail: null }
@@ -2098,7 +2144,7 @@ async function connect(endpoint) {
     if (!still(gen)) return
     if (iframeFallbackUrl) {
       const next = normalizeEndpoint({
-        ...endpoint,
+        ...liveEndpoint(endpoint),
         mode: 'iframe',
         iframeUrl: iframeFallbackUrl,
         probe: false
@@ -2118,7 +2164,7 @@ async function connect(endpoint) {
   } catch (error) {
     if (!still(gen)) return
     const code = error && error.code === 'vendored-tampered' ? 'vendored-tampered' : 'cdn-blocked'
-    setError(code, ERRORS[code].body)
+    setError(code, novncErrorBody(code))
     return
   }
   if (!still(gen)) return
@@ -2164,7 +2210,7 @@ async function connect(endpoint) {
         const fallback = iframeFallbackUrl
         iframeFallbackUrl = ''
         const next = normalizeEndpoint({
-          ...endpoint,
+          ...liveEndpoint(endpoint),
           mode: 'iframe',
           iframeUrl: fallback,
           probe: false
@@ -2190,9 +2236,12 @@ async function connect(endpoint) {
       persistWsProtocol(endpoint.id, variant)
       engine.reconnectAttempt = 0
       if (probing) {
+        // Merge onto the live copy: a server key pinned moments ago (the
+        // serververification listener fires before 'connect') lives there, and
+        // normalizeEndpoint drops any field the spread does not carry.
         persistEndpointFields(
           normalizeEndpoint({
-            ...endpoint,
+            ...liveEndpoint(endpoint),
             mode: 'websocket',
             wsUrl,
             probe: false
@@ -2274,7 +2323,7 @@ async function connect(endpoint) {
         const fallback = iframeFallbackUrl
         iframeFallbackUrl = ''
         const next = normalizeEndpoint({
-          ...endpoint,
+          ...liveEndpoint(endpoint),
           mode: 'iframe',
           iframeUrl: fallback,
           probe: false
@@ -3510,7 +3559,7 @@ function toggleHiperfEnabled(endpoint) {
     openHiperfEditor()
     return
   }
-  persistHiperfFields({ ...endpoint, hiperfEnabled: !endpoint.hiperfEnabled })
+  persistHiperfFields({ ...liveEndpoint(endpoint), hiperfEnabled: !endpoint.hiperfEnabled })
 }
 
 function hiperfSetupCommand(os) {

@@ -112,7 +112,7 @@ function fakeNode() {
   }
 }
 
-function loadPlugin({ fetchImpl, importHook, hermesDesktop } = {}) {
+function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
   const fetches = []
   const fetch =
     fetchImpl ||
@@ -179,7 +179,9 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop } = {}) {
     parseInt,
     queueMicrotask,
     setInterval,
-    setTimeout,
+    // `timers` parks every scheduled callback so a test can fire the
+    // reconnect backoff without waiting a real second.
+    setTimeout: timers ? (fn, ms) => timers.push({ fn, ms }) : setTimeout,
     undefined,
     document: {
       body: { classList: { add() {}, contains: () => false, remove() {} } },
@@ -231,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch, rfbSourceOrder, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint }\n'
+        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch, rfbSourceOrder, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -340,18 +342,28 @@ const VENDOR_RFB_SOURCE = fs.readFileSync(VENDOR_RFB_PATH, 'utf8')
 const JSDELIVR = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.7.0/+esm'
 const ESM_SH = 'https://esm.sh/@novnc/novnc@1.7.0'
 
-function fakeBridge({ text, missing, truncated, throws } = {}) {
+// Drift guard: the first path the plugin tries must be exactly where the
+// installer puts the file, i.e. the manifest's relative path.
+const MANIFEST_REL = fs
+  .readFileSync(new URL('../scripts/manifest-files.txt', import.meta.url), 'utf8')
+  .split('\n')
+  .find(line => line.endsWith('novnc-rfb.mjs'))
+const ROOT = '/tmp/hermes-home/desktop-plugins'
+const VENDOR_PATH = ROOT + '/' + MANIFEST_REL
+// Where releases before the vendor/ move told operators to copy the file.
+const LEGACY_PATH = ROOT + '/computer-viewer/novnc-rfb.mjs'
+
+function fakeBridge({ text, missing, truncated, throws, only, seen } = {}) {
   const source = text === undefined ? VENDOR_RFB_SOURCE : text
   return {
-    desktopPluginsRoot: async () => '/tmp/hermes-home/desktop-plugins',
+    desktopPluginsRoot: async () => ROOT,
     readPluginSource: async filePath => {
-      // Drift guard: the plugin must look exactly where the installer puts the
-      // file, i.e. the manifest's relative path under desktop-plugins.
-      const manifestRel = fs
-        .readFileSync(new URL('../scripts/manifest-files.txt', import.meta.url), 'utf8')
-        .split('\n')
-        .find(line => line.endsWith('novnc-rfb.mjs'))
-      assert.equal(filePath, '/tmp/hermes-home/desktop-plugins/' + manifestRel)
+      if (seen) seen.push(filePath)
+      assert.ok(
+        filePath === VENDOR_PATH || filePath === LEGACY_PATH,
+        'unexpected vendored path ' + filePath
+      )
+      if (only && filePath !== only) throw new Error('ENOENT')
       if (throws) throw throws
       if (missing) throw new Error('ENOENT')
       return {
@@ -478,7 +490,8 @@ test('loadRFB retries the desktop bridge after a CDN load', async () => {
     desktopPluginsRoot: async () => '/tmp/hermes-home/desktop-plugins',
     readPluginSource: async () => {
       reads += 1
-      if (reads === 1) throw new Error('ENOENT')
+      // Both candidate paths miss on the first loadRFB pass, so it reaches the CDN.
+      if (reads <= 2) throw new Error('ENOENT')
       return {
         binary: false,
         byteSize: Buffer.byteLength(VENDOR_RFB_SOURCE),
@@ -499,7 +512,7 @@ test('loadRFB retries the desktop bridge after a CDN load', async () => {
   await t.loadRFB()
   assert.equal(t.engine.rfbLoad.source, 'cdn-jsdelivr')
   await t.loadRFB()
-  assert.equal(reads, 2)
+  assert.equal(reads, 3)
   assert.equal(t.engine.rfbLoad.source, 'vendored')
   assert.equal(t.engine.rfbLoad.reason, null)
 })
@@ -707,4 +720,199 @@ test('a remote clipboard event is ignored unless the computer is allowed', async
   const allowed = await connectedRfb({ allowClipboard: true })
   allowed.rfb.listeners.get('clipboard')({ detail: { text: 'shared' } })
   assert.deepEqual(allowed.written, ['shared'])
+})
+
+test('loadRFB reads vendor/ first and still accepts a copy left next to plugin.js', async () => {
+  const seen = []
+  const { t } = loadPlugin({
+    hermesDesktop: fakeBridge({ only: LEGACY_PATH, seen }),
+    importHook: async url => {
+      if (typeof url === 'string' && url.startsWith('blob:')) return { default: function RFB() {} }
+      throw new Error('CDN should not be tried, got ' + url)
+    }
+  })
+  const ctor = await t.loadRFB()
+  assert.equal(typeof ctor, 'function')
+  assert.deepEqual(seen, [VENDOR_PATH, LEGACY_PATH])
+  assert.equal(t.engine.rfbLoad.source, 'vendored')
+  assert.equal(t.engine.rfbLoad.reason, null)
+})
+
+test('a tampered file in vendor/ fails closed instead of falling through to the legacy path', async () => {
+  const seen = []
+  const flipped = (VENDOR_RFB_SOURCE[0] === 'x' ? 'y' : 'x') + VENDOR_RFB_SOURCE.slice(1)
+  const cdn = []
+  const { t } = loadPlugin({
+    hermesDesktop: fakeBridge({ text: flipped, seen }),
+    importHook: cdnCtorHook(cdn)
+  })
+  await assert.rejects(
+    () => t.loadRFB(),
+    err => err && err.code === 'vendored-tampered'
+  )
+  assert.deepEqual(seen, [VENDOR_PATH])
+  assert.deepEqual(cdn, [])
+})
+
+const NOVNC_BODIES = {
+  hash: 'The installed noVNC bundle does not match the expected hash. Re-run the kit installer. (hash mismatch)',
+  load: 'The installed noVNC bundle could not be loaded. Re-run the kit installer. (vendored import failed)'
+}
+
+function wsEndpoint(t, extra = {}) {
+  return t.normalizeEndpoint({
+    id: 'ep-pin',
+    name: 'Pinned box',
+    mode: 'websocket',
+    wsUrl: 'ws://127.0.0.1:6080/websockify',
+    ...extra
+  })
+}
+
+/** attachEngine + connect(), with the endpoint already in stored settings. */
+async function attached({ endpoint, importHook, hermesDesktop, timers }) {
+  const instances = []
+  const { t } = loadPlugin({
+    hermesDesktop,
+    timers,
+    importHook: importHook || (async () => ({ default: fakeRfbCtorWithListeners(instances) }))
+  })
+  const ctx = makeCtx()
+  ctx.os.__written = []
+  const ep = endpoint(t)
+  ctx.storage.set('endpoints', [ep])
+  ctx.storage.set('globalEndpointId', ep.id)
+  t.attachEngine(ctx)
+  await t.connect(ep)
+  return { t, ctx, ep, instances }
+}
+
+async function keyHash(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
+}
+
+const KEY_A = new Uint8Array([1, 2, 3, 4])
+const KEY_B = new Uint8Array([9, 8, 7, 6])
+
+/** Fire serververification and let the async digest settle. */
+async function presentKey(rfb, publickey) {
+  rfb.listeners.get('serververification')({ detail: publickey ? { publickey } : {} })
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
+
+function storedPin(ctx, id) {
+  const found = ctx.storage.get('endpoints', []).find(item => item.id === id)
+  return found ? found.serverKeyFingerprint : null
+}
+
+test('a probe that succeeds keeps the server key pinned moments earlier', async () => {
+  const { t, ctx, ep, instances } = await attached({
+    endpoint: t => wsEndpoint(t, { probe: true, address: '192.168.1.5:6080', wsUrl: '' })
+  })
+  const rfb = instances[0]
+
+  await presentKey(rfb, KEY_A)
+  const pin = await keyHash(KEY_A)
+  assert.equal(t.engine.endpoint.serverKeyFingerprint, pin)
+
+  // Probe success rewrites the endpoint as a plain websocket one. Merging that
+  // onto the copy captured before the pin used to wipe the pin.
+  rfb.listeners.get('connect')({})
+  assert.equal(t.engine.endpoint.mode, 'websocket')
+  assert.equal(t.engine.endpoint.probe, false)
+  assert.equal(t.engine.endpoint.serverKeyFingerprint, pin)
+  assert.equal(storedPin(ctx, ep.id), pin)
+})
+
+test('an auto-reconnect presenting a different key is rejected, not re-pinned', async () => {
+  const timers = []
+  const { t, ctx, ep, instances } = await attached({
+    endpoint: t => wsEndpoint(t),
+    timers
+  })
+  const first = instances[0]
+
+  await presentKey(first, KEY_A)
+  const pin = await keyHash(KEY_A)
+  assert.equal(storedPin(ctx, ep.id), pin)
+
+  t.engine.paneVisible = true
+  first.listeners.get('connect')({})
+  first.listeners.get('disconnect')({ detail: { clean: false } })
+
+  // The backoff timer used to hand connect() the pre-pin copy it captured.
+  const backoff = timers.find(entry => entry.ms === 1000)
+  assert.ok(backoff, 'reconnect backoff should be scheduled')
+  backoff.fn()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(instances.length, 2, 'the reconnect should build a second RFB')
+
+  await presentKey(instances[1], KEY_B)
+  const state = t.engine.state.get()
+  assert.equal(state.phase, 'error')
+  assert.equal(state.code, 'server-key-changed')
+  assert.equal(storedPin(ctx, ep.id), pin)
+  assert.equal(t.engine.endpoint.serverKeyFingerprint, pin)
+})
+
+test('a pinned computer that presents no key at all is rejected', async () => {
+  const { t, ctx, ep, instances } = await attached({ endpoint: t => wsEndpoint(t) })
+  const rfb = instances[0]
+
+  await presentKey(rfb, KEY_A)
+  const pin = await keyHash(KEY_A)
+
+  await presentKey(rfb, null)
+  const state = t.engine.state.get()
+  assert.equal(state.phase, 'error')
+  assert.equal(state.code, 'server-key-changed')
+  assert.equal(storedPin(ctx, ep.id), pin)
+})
+
+test('a computer with no pin still connects when no key is presented', async () => {
+  const { t, instances } = await attached({ endpoint: t => wsEndpoint(t) })
+
+  await presentKey(instances[0], null)
+  const state = t.engine.state.get()
+  assert.notEqual(state.phase, 'error')
+  assert.equal(t.engine.endpoint.serverKeyFingerprint, '')
+})
+
+test('connect() reports why the vendored viewer lost, not a generic body', async () => {
+  const flipped = (VENDOR_RFB_SOURCE[0] === 'x' ? 'y' : 'x') + VENDOR_RFB_SOURCE.slice(1)
+  const tampered = await attached({
+    endpoint: t => wsEndpoint(t),
+    hermesDesktop: fakeBridge({ text: flipped }),
+    importHook: async () => {
+      throw new Error('CDN blocked')
+    }
+  })
+  assert.equal(tampered.t.engine.state.get().code, 'vendored-tampered')
+  assert.equal(tampered.t.engine.state.get().detail, NOVNC_BODIES.hash)
+
+  // An import failure is fail-closed too, but it is not a hash mismatch.
+  const unloadable = await attached({
+    endpoint: t => wsEndpoint(t),
+    hermesDesktop: fakeBridge(),
+    importHook: async url => {
+      if (typeof url === 'string' && url.startsWith('blob:')) throw new Error('bad module')
+      throw new Error('CDN blocked')
+    }
+  })
+  assert.equal(unloadable.t.engine.state.get().code, 'vendored-tampered')
+  assert.equal(unloadable.t.engine.state.get().detail, NOVNC_BODIES.load)
+
+  // Missing vendored copy and a blocked CDN: the pane names both.
+  const blocked = await attached({
+    endpoint: t => wsEndpoint(t),
+    hermesDesktop: fakeBridge({ missing: true }),
+    importHook: async () => {
+      throw new Error('CDN blocked')
+    }
+  })
+  const state = blocked.t.engine.state.get()
+  assert.equal(state.code, 'cdn-blocked')
+  assert.match(state.detail, /noVNC couldn't be fetched from the CDN/)
+  assert.match(state.detail, /vendored file missing/)
 })
