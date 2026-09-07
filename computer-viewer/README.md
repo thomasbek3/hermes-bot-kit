@@ -138,7 +138,7 @@ On the Mac you want to view:
 2. In Terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer/connect-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/computer-viewer/connect-mac.sh | bash
 ```
 
 3. In the plugin: paste the printed address, your Mac username
@@ -155,7 +155,7 @@ Recording must be granted by hand.
 ### Windows (Administrator PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer/connect-windows.ps1 | iex
+irm https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/computer-viewer/connect-windows.ps1 | iex
 ```
 
 Run in **Administrator** PowerShell (the script self-elevates). It installs
@@ -168,7 +168,7 @@ see **Headless Windows** below.
 ### Linux (X11; wlroots-Wayland best-effort)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer/connect-linux.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/computer-viewer/connect-linux.sh | bash
 ```
 
 X11 uses `x11vnc`. wlroots compositors (Sway, Hyprland, ...) use `wayvnc`
@@ -278,7 +278,7 @@ the `connect-*` script.
 macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer/hiperf-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/computer-viewer/hiperf-mac.sh | bash
 ```
 
 `hiperf-mac.sh` looks for ffmpeg at `~/.hermes-cv/bin/ffmpeg` and Python
@@ -480,7 +480,7 @@ VNC password.
 2. **Run `connect-mac.sh`** (one paste in Terminal - no sudo):
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer/connect-mac.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/computer-viewer/connect-mac.sh | bash
    ```
 
    Or from this folder: `bash connect-mac.sh`.
@@ -509,7 +509,7 @@ the view shrinks into the pane; **Native** will scroll.
 In an **Administrator** PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer/connect-windows.ps1 | iex
+irm https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/computer-viewer/connect-windows.ps1 | iex
 ```
 
 The script is ASCII-only so `irm ... | iex` works on Windows PowerShell 5.1.
@@ -562,7 +562,7 @@ Re-run is idempotent: an already-attached USB Mobile Monitor is not
 ### 4. Use a Linux machine as your computer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07/computer-viewer/connect-linux.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/computer-viewer/connect-linux.sh | bash
 ```
 
 Branches on `$XDG_SESSION_TYPE`:
