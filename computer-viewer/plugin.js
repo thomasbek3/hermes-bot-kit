@@ -1393,7 +1393,8 @@ function textFromReadFile(payload) {
 function vendoredRfbPath(root) {
   const sep = root.includes('\\') ? '\\' : '/'
   const base = root.endsWith('\\') || root.endsWith('/') ? root.slice(0, -1) : root
-  return base + sep + 'computer-viewer' + sep + 'novnc-rfb.mjs'
+  // Must match scripts/manifest-files.txt: computer-viewer/vendor/novnc-rfb.mjs
+  return base + sep + 'computer-viewer' + sep + 'vendor' + sep + 'novnc-rfb.mjs'
 }
 
 async function loadVendoredRFB() {
