@@ -62,6 +62,7 @@ PIN_401_ERROR = (
     "Orgo rejected the configured API key. Fix ORGO_API_KEY in this profile."
 )
 MAX_SCREENSHOT_BYTES = 1_500_000
+TOO_LARGE_ERROR = "Screenshot is too large to attach."
 MAX_TYPE_LENGTH = 4000
 HANDS_INPUT_TOOLS = frozenset(
     {"orgo_computer_click", "orgo_computer_type", "orgo_computer_key"}
@@ -562,26 +563,41 @@ class _ComputerRunLock(AbstractAsyncContextManager[None]):
             _log_flock_skip()
             return None
 
-        self._file = self._path.open("a+", encoding="utf-8")
+        handle: Any = None
+        locked = False
         try:
+            handle = self._path.open("a+", encoding="utf-8")
             while True:
                 try:
-                    fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    return None
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked = True
+                    break
                 except BlockingIOError:
                     if time.monotonic() >= deadline:
-                        self._file.close()
-                        self._file = None
-                        proc.release()
-                        self._proc = None
                         _busy()
                     await asyncio.sleep(0.25)
-        except Exception:
-            self._file.close()
+        except BaseException:
+            # Cancellation counts: release exactly what was acquired, then
+            # re-raise so the caller still sees the original failure.
+            if locked and handle is not None:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    logger.debug("flock unlock failed", exc_info=True)
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
             self._file = None
-            proc.release()
+            try:
+                proc.release()
+            except RuntimeError:
+                pass
             self._proc = None
             raise
+        self._file = handle
+        return None
 
     async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         if self._file is not None and fcntl is not None:
@@ -1465,6 +1481,20 @@ async def _http_client(timeout: float) -> Any:
     return httpx, httpx.AsyncClient(**_client_kwargs(timeout))
 
 
+def _declared_length(response: Any) -> int:
+    """Content-Length as an int, or -1 when absent or unparseable."""
+    try:
+        raw = response.headers.get("content-length")
+    except Exception:
+        return -1
+    if raw is None:
+        return -1
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return -1
+
+
 async def _take_screenshot() -> dict[str, Any]:
     api_key = _require_api_key()
     computer_id = _require_computer_id()
@@ -1492,21 +1522,31 @@ async def _take_screenshot() -> dict[str, Any]:
             if not _url_scheme_allowed(parsed_image):
                 raise OrgoAgentRequestError("Orgo returned an insecure screenshot URL.")
             headers = {"Accept": "image/*"}
-        image_resp = await client.get(image_url, headers=headers)
-        if not image_resp.is_success:
-            _raise_hands_http(image_resp.status_code, None, "screenshot")
-        content_type = ""
-        try:
-            content_type = str(image_resp.headers.get("content-type") or "")
-        except Exception:
+        async with client.stream("GET", image_url, headers=headers) as image_resp:
+            if not image_resp.is_success:
+                _raise_hands_http(image_resp.status_code, None, "screenshot")
             content_type = ""
-        if content_type and "image/" not in content_type.lower():
-            raise OrgoAgentRequestError("Orgo screenshot was not an image.")
-        data = bytes(image_resp.content or b"")
+            try:
+                content_type = str(image_resp.headers.get("content-type") or "")
+            except Exception:
+                content_type = ""
+            if content_type and "image/" not in content_type.lower():
+                raise OrgoAgentRequestError("Orgo screenshot was not an image.")
+            if _declared_length(image_resp) > MAX_SCREENSHOT_BYTES:
+                # Refuse before a single byte of the body is read.
+                raise OrgoAgentRequestError(TOO_LARGE_ERROR)
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in image_resp.aiter_bytes():
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_SCREENSHOT_BYTES:
+                    raise OrgoAgentRequestError(TOO_LARGE_ERROR)
+                chunks.append(bytes(chunk))
+        data = b"".join(chunks)
         if not data:
             raise OrgoAgentRequestError("Orgo screenshot was empty.")
-        if len(data) > MAX_SCREENSHOT_BYTES:
-            raise OrgoAgentRequestError("Screenshot is too large to attach.")
     except httpx.TimeoutException as exc:
         raise OrgoAgentRequestError("The Orgo screenshot timed out.") from exc
     except httpx.HTTPError as exc:
