@@ -86,6 +86,42 @@ if awk '$2 == "computer-viewer/vendor/novnc-rfb.mjs" { found=1 } END { exit foun
 fi
 echo "OK  happy path"
 
+# The helper scripts' offline digest check needs a manifest next to them.
+manifest_dest="${home}/desktop-plugins/MANIFEST.sha256"
+[ -f "${manifest_dest}" ] || fail "MANIFEST.sha256 was not installed to desktop-plugins/"
+cmp -s "${MANIFEST}" "${manifest_dest}" || fail "installed MANIFEST.sha256 differs from the source"
+echo "OK  manifest installed alongside the plugins"
+
+# With curl unusable, hiperf-mac.sh's manifest_agent_sha must still resolve the
+# agent digest from that installed manifest (../../MANIFEST.sha256 relative to
+# desktop-plugins/computer-viewer/). Extracted the way test-bind.sh extracts
+# resolve_bind, and sourced from the installed directory so script_dir() lands
+# where the real script would.
+shim_curl=$(mktemp -d)
+CLEANUP+=("${shim_curl}")
+cat > "${shim_curl}/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "${shim_curl}/curl"
+
+extract="${home}/desktop-plugins/computer-viewer/.manifest-agent-sha-extract.sh"
+{
+  printf "RAW_REPO_URL='https://offline.invalid/hermes-bot-kit/computer-viewer'\n"
+  sed -n '/^script_dir()/,/^}/p' "${ROOT}/computer-viewer/hiperf-mac.sh"
+  sed -n '/^manifest_agent_sha()/,/^}/p' "${ROOT}/computer-viewer/hiperf-mac.sh"
+} > "${extract}"
+grep -q '^manifest_agent_sha()' "${extract}" || fail "manifest_agent_sha not found in hiperf-mac.sh"
+[ "$(tail -n1 "${extract}")" = '}' ] || fail "manifest_agent_sha extract did not end at a closing brace"
+
+got=$(env -i PATH="${shim_curl}:/usr/bin:/bin" HOME="${HOME:-/tmp}" \
+  bash --noprofile --norc -c \
+  'set -euo pipefail; . "$1"; manifest_agent_sha' _ "${extract}")
+want=$(manifest_hash "computer-viewer/hiperf-agent.py") || fail "hiperf-agent.py not in MANIFEST.sha256"
+[ "${got}" = "${want}" ] || fail "offline manifest_agent_sha -> '${got}' want '${want}'"
+rm -f "${extract}"
+echo "OK  offline agent digest from the installed manifest"
+
 # Tamper: flip one byte, installer must refuse and copy nothing
 tampered=$(mktemp -d)
 CLEANUP+=("${tampered}")

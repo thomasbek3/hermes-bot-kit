@@ -120,11 +120,20 @@ manifest_agent_sha() {
   local sum=""
   sum="$(curl -fsSL "${root}/MANIFEST.sha256" 2>/dev/null | awk "$pick" || true)"
   if [ -z "$sum" ]; then
-    # Offline fallback: the MANIFEST that ships with a local checkout.
-    local here
+    # Offline fallback. Two layouts: a clone keeps MANIFEST.sha256 one level
+    # up (repo root, next to computer-viewer/), and install.sh puts a copy two
+    # levels up (desktop-plugins/, next to computer-viewer/).
+    local here local_manifest
     here="$(script_dir)"
-    if [ -n "$here" ] && [ -f "${here}/../MANIFEST.sha256" ]; then
-      sum="$(awk "$pick" "${here}/../MANIFEST.sha256" || true)"
+    if [ -n "$here" ]; then
+      for local_manifest in "${here}/../MANIFEST.sha256" "${here}/../../MANIFEST.sha256"; do
+        if [ -f "$local_manifest" ]; then
+          sum="$(awk "$pick" "$local_manifest" || true)"
+          if [ -n "$sum" ]; then
+            break
+          fi
+        fi
+      done
     fi
   fi
   [ -n "$sum" ] || return 1

@@ -46,15 +46,40 @@ $UltraVncDir = Join-Path ${env:ProgramFiles} 'UltraVNC'
 $TightVncSha256 = 'FA86D817AC29C5FFE1E8E7095E738D9BA5CA28AA62304AC234580916622A8CA2'
 $UltraVncZipSha256 = '8AF948089626008F02EDD1254AFC15C814E454EC5FC9E3EAA860356F19D4F113'
 
-# $UsbmmiddUrl is an unversioned "latest" link, so no hash can be pinned to it.
-# The weaker fallback is an Authenticode check before anything from the zip is
-# executed. Note that deviceinstaller64.exe itself carries NO Authenticode
-# signature (its PE certificate table is empty, checked 2026-09-07); the signed
-# artefact in the zip is the driver catalog usbmmidd.cat, WHQL-signed by
-# "Microsoft Windows Hardware Compatibility Publisher" (Amyuni's driver, signed
-# through Microsoft's hardware program). That catalog is what Windows itself
-# validates at install time, so it is the strongest signal available here.
+# deviceinstaller64.exe carries NO Authenticode signature of its own (its PE
+# certificate table is empty, checked 2026-09-07), and it is run elevated - by
+# the driver install, by 'enableidd 1', and by the SYSTEM scheduled task. So it
+# is pinned by hash, not by signature. Both pins were computed 2026-09-07 from
+# the exact bytes $UsbmmiddUrl served on that day (zip 199,309 bytes;
+# deviceinstaller64.exe 161,792 bytes).
+#
+# $UsbmmiddUrl is an UNVERSIONED "latest" link, so unlike the version-pinned
+# downloads above, a routine vendor update legitimately changes these bytes: a
+# mismatch here means "re-verify and re-pin", not automatically "attack". See
+# $UsbmmiddRepinHelp for the procedure. Until it is re-pinned, this script
+# refuses to run the executable.
+$UsbmmiddZipSha256 = '629B51E9944762BAE73948171C65D09A79595CF4C771A82EBC003FBBA5B24F51'
+$UsbmmiddExeSha256 = 'E9BAA02CDAE921ACF0AAE4D8E8C29A4CDF4057AB61F9C60862B7CC439E2753F7'
+
+# The driver catalog usbmmidd.cat IS signed - WHQL, by "Microsoft Windows
+# Hardware Compatibility Publisher" (Amyuni's driver, through Microsoft's
+# hardware program). Windows validates it at install time, so it is kept as an
+# extra check on top of the hash pins, not as a replacement for them.
 $UsbmmiddSigner = 'Microsoft Windows Hardware Compatibility Publisher'
+
+$UsbmmiddRepinHelp = @'
+    usbmmidd_v2.zip is served from an UNVERSIONED "latest" URL, so a vendor
+    update changes these bytes legitimately. To re-pin deliberately:
+      1. Download https://amyuni.com/downloads/usbmmidd_v2.zip on a machine you trust.
+      2. Get-FileHash .\usbmmidd_v2.zip -Algorithm SHA256
+      3. Expand-Archive .\usbmmidd_v2.zip -DestinationPath .\usbmmidd_check
+         Get-FileHash .\usbmmidd_check\usbmmidd_v2\deviceinstaller64.exe -Algorithm SHA256
+      4. Confirm usbmmidd.cat is still Authenticode-Valid and signed by
+         "Microsoft Windows Hardware Compatibility Publisher".
+      5. Update $UsbmmiddZipSha256 and $UsbmmiddExeSha256 in this script, in one
+         reviewed commit, with the date you verified them.
+    Until then: plug in a monitor or an HDMI/DisplayPort dummy plug (~$8) and re-run.
+'@
 
 function Test-IsAdmin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -334,7 +359,21 @@ function Install-UsbmmiddVirtualDisplay {
         $inf = Join-Path $UsbmmiddDir 'usbmmIdd.inf'
     }
 
-    if (-not (Test-Path -LiteralPath $exe)) {
+    # An already-present deviceinstaller64.exe is NOT trusted just because it is
+    # there: 'enableidd 1' below and the SYSTEM scheduled task both execute it,
+    # so it is hashed against the pin every run. A mismatch re-extracts it from
+    # the hash-verified zip rather than running whatever is on disk.
+    $exeVerified = $false
+    if (Test-Path -LiteralPath $exe) {
+        $exeVerified = Test-PinnedHash -Path $exe -Expected $UsbmmiddExeSha256 -Label 'installed deviceinstaller64.exe'
+        if (-not $exeVerified) {
+            Write-Warning 'The deviceinstaller64.exe already in C:\usbmmidd_v2 does not match the pin.'
+            Write-Warning $UsbmmiddRepinHelp
+            Write-Host '    Re-extracting deviceinstaller64.exe from the pinned zip instead of running it.'
+        }
+    }
+
+    if (-not $exeVerified) {
         $zip = Join-Path $env:TEMP 'usbmmidd_v2.zip'
         $extract = Join-Path $env:TEMP 'usbmmidd_extract'
         Write-Host "    Downloading $UsbmmiddUrl"
@@ -346,6 +385,12 @@ function Install-UsbmmiddVirtualDisplay {
             Write-Warning 'Headless Windows has no display target. Plug in a monitor or an HDMI/DisplayPort dummy plug (~$8), then re-run.'
             return $false
         }
+        # Verified BEFORE extraction: nothing from an unexpected archive is
+        # written to disk, let alone executed.
+        if (-not (Test-PinnedHash -Path $zip -Expected $UsbmmiddZipSha256 -Label 'usbmmidd_v2.zip')) {
+            Write-Warning $UsbmmiddRepinHelp
+            return $false
+        }
         try {
             if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
             New-Item -ItemType Directory -Force -Path $extract | Out-Null
@@ -354,8 +399,6 @@ function Install-UsbmmiddVirtualDisplay {
             Write-Warning "usbmmidd extract failed: $_"
             return $false
         }
-        # No pinned hash is possible for a moving "latest" URL; the driver
-        # catalog's signature is checked below, before anything is executed.
         $installer = Get-ChildItem -LiteralPath $extract -Recurse -Filter 'deviceinstaller64.exe' | Select-Object -First 1
         if (-not $installer) {
             Write-Warning 'usbmmidd zip did not contain deviceinstaller64.exe'
@@ -369,12 +412,20 @@ function Install-UsbmmiddVirtualDisplay {
         if (-not (Test-Path -LiteralPath $inf)) {
             $inf = Join-Path $UsbmmiddDir 'usbmmIdd.inf'
         }
+        # The extracted copy is re-hashed where it will actually be run from.
+        $exeVerified = Test-PinnedHash -Path $exe -Expected $UsbmmiddExeSha256 -Label 'deviceinstaller64.exe'
+    }
+
+    if (-not $exeVerified) {
+        Write-Warning 'Refusing to run deviceinstaller64.exe: it does not match the pinned sha256.'
+        Write-Warning $UsbmmiddRepinHelp
+        return $false
     }
 
     if (-not $already) {
-        # Gate on the driver catalog's Authenticode signature BEFORE running the
-        # installer as admin. See the $UsbmmiddSigner comment for why this is the
-        # check available (moving URL, unsigned deviceinstaller64.exe).
+        # Extra gate, on top of the exe hash pin above: the driver catalog's
+        # Authenticode signature, checked BEFORE the installer runs as admin.
+        # It is what Windows itself validates when the .inf is installed.
         $catDir = Split-Path -Parent $exe
         $cat = Join-Path $catDir 'usbmmidd.cat'
         if (-not (Test-Path -LiteralPath $cat)) { $cat = Join-Path $catDir 'usbmmIdd.cat' }
@@ -404,6 +455,7 @@ function Install-UsbmmiddVirtualDisplay {
         }
     } else {
         Write-Host '    USB Mobile Monitor already present - skipping driver install'
+        Write-Host '    (deviceinstaller64.exe was still hash-verified above; enableidd runs it.)'
     }
 
     $snap = Get-DisplaySnapshot

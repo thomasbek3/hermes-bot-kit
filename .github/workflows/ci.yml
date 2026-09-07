@@ -29,10 +29,13 @@ jobs:
           node --check computer-viewer/plugin.js
 
       - name: Plugin unit tests
-        run: node --test bubble-mode/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
+        run: node --test bubble-mode/plugin.test.mjs bot-sections/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
 
       - name: Orgo computer plugin tests
         run: python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
+
+      - name: Texting-style tests
+        run: python3 -m unittest discover -s texting-style/tests -p 'test_*.py'
 
       # -n 1: without it xargs passes every later path as an ARGUMENT to the
       # first script, so only one file was ever parsed.

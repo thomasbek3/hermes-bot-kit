@@ -345,5 +345,212 @@ class TestClientGeneration(unittest.TestCase):
         self.assertTrue(asyncio.run(go()), 'stale stop tore down the live pipeline')
 
 
+class FakeProc:
+    """Stand-in for asyncio.subprocess.Process that exits only when released."""
+
+    def __init__(self, returncode=None) -> None:
+        self.returncode = returncode
+        self.stdout = None
+        self.stderr = None
+        self.pid = -1
+        self.exit_gate = asyncio.Event()
+        if returncode is not None:
+            self.exit_gate.set()
+
+    async def wait(self):
+        await self.exit_gate.wait()
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode
+
+
+class TestPipelineOwnership(unittest.TestCase):
+    """A superseded client must not write into the live client's pipeline."""
+
+    def test_probe_from_writes_no_shared_state(self):
+        async def go():
+            agent = make_agent()
+            agent.candidates = [
+                agent_mod.Candidate('a', ['a']),
+                agent_mod.Candidate('b', ['b']),
+            ]
+            agent.cursor = 7
+            agent.cached = None
+
+            async def fake_dry_run(cand, ws=None, gen=None):
+                return cand.name == 'b'
+
+            agent._dry_run = fake_dry_run
+            found = await agent.probe_from(0)
+            return found, agent.cursor, agent.cached
+
+        found, cursor, cached = asyncio.run(go())
+        self.assertEqual(found[0], 1)
+        self.assertEqual(found[1].name, 'b')
+        self.assertEqual(cursor, 7, 'probe_from wrote the cursor')
+        self.assertIsNone(cached, 'probe_from wrote cached')
+
+    def test_paused_probe_does_not_clobber_the_new_clients_choice(self):
+        """Client A parks inside its probe; B attaches and picks a candidate.
+
+        A's probe result must be dropped, not committed over B's choice.
+        """
+
+        async def go():
+            agent = make_agent()
+            agent.candidates = [
+                agent_mod.Candidate('a', ['a']),
+                agent_mod.Candidate('b', ['b']),
+            ]
+            gate = asyncio.Event()
+
+            async def fake_dry_run(cand, ws=None, gen=None):
+                if cand.name == 'a':
+                    await gate.wait()
+                return True
+
+            agent._dry_run = fake_dry_run
+            first = FakeWS('/stream')
+            second = FakeWS('/stream')
+            agent.client = first
+            agent.client_gen = 1
+            agent.cursor = 0
+            agent.cached = None
+
+            task_a = asyncio.create_task(agent.start_ffmpeg(first, 1))
+            await settle(2)  # A is parked inside the dry-run for candidate 'a'
+
+            # B takes over and settles on candidate 'b'.
+            agent.client = second
+            agent.client_gen = 2
+            agent.cursor = 1
+            agent.cached = agent.candidates[1]
+
+            gate.set()
+            err = await asyncio.wait_for(task_a, timeout=5)
+            return err, agent.cursor, agent.cached.name
+
+        err, cursor, cached_name = asyncio.run(go())
+        self.assertEqual(err, 'superseded')
+        self.assertEqual(cached_name, 'b', "stale probe overwrote the live client's encoder")
+        self.assertEqual(cursor, 1, "stale probe overwrote the live client's cursor")
+
+    def test_stop_cancels_readers_before_awaiting_the_process(self):
+        """The reader is cancelled first, so it cannot outlive the teardown."""
+
+        killed: list = []
+
+        async def go():
+            agent = make_agent()
+            ws = FakeWS('/stream')
+            proc = FakeProc()  # never exits until released
+            agent.client = ws
+            agent.client_gen = 1
+            agent.proc = proc
+            agent.queue = asyncio.Queue(maxsize=4)
+
+            async def forever():
+                await asyncio.sleep(3600)
+
+            reader = asyncio.create_task(forever())
+            agent.tasks = [reader]
+            await settle(2)
+
+            stop = asyncio.create_task(agent.stop_ffmpeg(ws, 1))
+            await settle(4)  # stop is now parked on proc.wait()
+            cancelled_before_exit = reader.done()
+
+            proc.exit_gate.set()
+            await asyncio.wait_for(stop, timeout=5)
+            return cancelled_before_exit, reader.cancelled()
+
+        old_kill = agent_mod.kill_process
+        agent_mod.kill_process = lambda proc, force=False: killed.append(force)
+        try:
+            cancelled_before_exit, was_cancelled = asyncio.run(go())
+        finally:
+            agent_mod.kill_process = old_kill
+        self.assertTrue(
+            cancelled_before_exit,
+            'stop_ffmpeg awaited the process while its reader was still running',
+        )
+        self.assertTrue(was_cancelled)
+
+    def test_late_frame_from_a_stale_reader_misses_the_new_queue(self):
+        """A reader that survived the cancel must not reach the new pipeline."""
+
+        async def go():
+            agent = make_agent()
+            first = FakeWS('/stream')
+            second = FakeWS('/stream')
+            proc_a = FakeProc(returncode=0)
+            old_q = asyncio.Queue(maxsize=1)
+            agent.client = first
+            agent.client_gen = 1
+            agent.proc = proc_a
+            agent.queue = old_q
+            old_q.put_nowait(b'old')  # full, so a stale write would set drop state
+
+            await agent.stop_ffmpeg(first, 1)
+
+            # B attaches with a pipeline of its own.
+            new_q = asyncio.Queue(maxsize=agent_mod.QUEUE_MAX)
+            agent.client = second
+            agent.client_gen = 2
+            agent.proc = FakeProc(returncode=0)
+            agent.queue = new_q
+            agent.drop_until_key = False
+
+            # A's reader still holds (first, gen 1, proc_a, old_q).
+            await agent._enqueue(first, 1, proc_a, old_q, b'\x00\x00\x00\x01\x65', True, 0)
+            return new_q.qsize(), agent.drop_until_key
+
+        new_size, drop = asyncio.run(go())
+        self.assertEqual(new_size, 0, "a stale frame reached the live client's queue")
+        self.assertFalse(drop, "a stale frame flipped the live client's drop state")
+
+    def test_stale_stderr_does_not_overwrite_live_diagnostics(self):
+        async def go():
+            agent = make_agent()
+            first = FakeWS('/stream')
+            second = FakeWS('/stream')
+            agent.client = second
+            agent.client_gen = 2
+            agent.last_stderr = 'live error'
+            agent.record_stderr('stale error', ws=first, gen=1)
+            stale = agent.last_stderr
+            agent.record_stderr('newer error', ws=second, gen=2)
+            return stale, agent.last_stderr
+
+        stale, live = asyncio.run(go())
+        self.assertEqual(stale, 'live error')
+        self.assertEqual(live, 'newer error')
+
+    def test_watch_proc_ignores_an_exit_from_a_replaced_process(self):
+        """Process identity, not a global expected_exit flag, is the guard."""
+
+        async def go():
+            agent = make_agent()
+            ws = FakeWS('/stream')
+            agent.client = ws
+            agent.client_gen = 1
+            old_proc = FakeProc(returncode=0)
+            agent.proc = FakeProc()  # the live one
+            agent.cursor = 3
+            await asyncio.wait_for(agent._watch_proc(ws, 1, old_proc), timeout=5)
+            return agent.cursor, ws.json_sent(), ws.closed
+
+        cursor, sent, closed = asyncio.run(go())
+        self.assertEqual(cursor, 3, 'a replaced process advanced the live cursor')
+        self.assertEqual(sent, [])
+        self.assertEqual(closed, [])
+
+    def test_agent_has_no_global_expected_exit_flag(self):
+        async def go():
+            return hasattr(make_agent(), 'expected_exit')
+
+        self.assertFalse(asyncio.run(go()))
+
+
 if __name__ == '__main__':
     unittest.main()
