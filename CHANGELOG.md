@@ -1,5 +1,13 @@
 # Changelog (kit)
 
+## 2026-09-07 — release v2026.09.07.2: per-agent Orgo screens
+
+- **orgo-computer:** a profile can pin one of a computer's (up to four) screens
+  via plugin config `screen`, env `ORGO_SCREEN`, or `hermes orgo-computer set
+  --screen`; screenshot, click, type and key carry `?screen=`. Five agents can
+  share one Orgo computer without touching each other's desktop.
+- **computer-basics skill:** "Leave the computer clean" hygiene rule.
+
 ## 2026-09-07 — release v2026.09.07.1: three-reviewer hardening round
 
 Findings from Claude, Codex (GPT-6 Astra) and Grok 4.6 passes, built by Opus,
