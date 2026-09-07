@@ -2,7 +2,11 @@
 """High-performance H.264 screen-stream agent for the Computer viewer plugin.
 
 Python 3.10+. One third-party dependency: websockets>=13,<16.
-Serves Annex-B access units over WebSocket at /stream?token=<hex>.
+Serves Annex-B access units over WebSocket at /stream.
+
+Auth: send {"type":"auth","token":"<hex>"} as the first frame, within 5 s.
+?token=<hex> in the query string still works but is deprecated - a URL leaks
+into proxy logs, browser history and Referer headers.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ DRY_RUN_TIMEOUT_S = STALL_TIMEOUT_S
 QUEUE_MAX = 30
 MAX_MESSAGE = 2**20
 GOP_DIV = 2
+AUTH_TIMEOUT_S = 5.0
 
 # Close codes (spec 4.4 / 3)
 CLOSE_AUTH = 4401
@@ -541,7 +546,7 @@ def _ue(data: bytes, bitpos: int) -> tuple[Optional[int], int]:
             return None, bitpos
     else:
         return None, bitpos
-    val = (1 << zeros) - 1
+    suffix = 0
     for _ in range(zeros):
         if bitpos >= nbits:
             return None, bitpos
@@ -549,8 +554,8 @@ def _ue(data: bytes, bitpos: int) -> tuple[Optional[int], int]:
         bit_i = 7 - (bitpos % 8)
         bit = (data[byte_i] >> bit_i) & 1
         bitpos += 1
-        val = (val << 1) | bit
-    return val, bitpos
+        suffix = (suffix << 1) | bit
+    return suffix + ((1 << zeros) - 1), bitpos
 
 
 def is_i_slice(nal: bytes) -> bool:
@@ -692,6 +697,10 @@ class Agent:
         self.cursor = 0
         self.cached: Optional[Candidate] = None
         self.client = None
+        # Bumped on every attach. Anything that awaits then mutates shared
+        # state must re-check its captured generation first, or a superseded
+        # client can tear down / overwrite the live client's pipeline.
+        self.client_gen = 0
         self.proc: Optional[asyncio.subprocess.Process] = None
         self.tasks: list[asyncio.Task] = []
         self.queue: Optional[asyncio.Queue] = None
@@ -714,6 +723,10 @@ class Agent:
             'height': 0,
             'fps': self.fps,
         }
+
+    def owns(self, ws, gen: int) -> bool:
+        """True while (ws, gen) is still the attached client."""
+        return gen == self.client_gen and ws is self.client
 
     async def send_json(self, ws, payload: dict) -> None:
         await ws.send(json.dumps(payload, separators=(',', ':')))
@@ -788,7 +801,11 @@ class Agent:
         except Exception as exc:
             LOG.info('stderr drain ended: %s', exc)
 
-    async def stop_ffmpeg(self) -> None:
+    async def stop_ffmpeg(self, ws=None, gen: Optional[int] = None) -> None:
+        """Tear the pipeline down. With (ws, gen) only the owning client may."""
+        if gen is not None and not self.owns(ws, gen):
+            LOG.info('ignoring stale stop (gen %s, current %s)', gen, self.client_gen)
+            return
         proc = self.proc
         self.proc = None
         q = self.queue
@@ -815,8 +832,10 @@ class Agent:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        # expected_exit is only ever raised by this call, so always clear it.
         self.expected_exit = False
-        self.drop_until_key = False
+        if gen is None or self.owns(ws, gen):
+            self.drop_until_key = False
 
     def advance_after_death(self) -> None:
         self.death_mono = time.monotonic()
@@ -831,8 +850,10 @@ class Agent:
             self.cursor = nxt
             LOG.info('advance candidate cursor to %s', nxt)
 
-    async def start_ffmpeg(self, ws) -> Optional[str]:
+    async def start_ffmpeg(self, ws, gen: int) -> Optional[str]:
         """Spawn cached (or next) pipeline. Returns an error code or None on success."""
+        if not self.owns(ws, gen):
+            return 'superseded'
         if not os.path.isfile(self.ffmpeg):
             return 'no-encoder'
         if self.need_restart_gap:
@@ -844,23 +865,29 @@ class Agent:
                     await asyncio.sleep(wait_s)
                 except asyncio.CancelledError:
                     raise
-                if self.client is not ws:
-                    return 'capture-failed'
+                if not self.owns(ws, gen):
+                    return 'superseded'
             self.need_restart_gap = False
         if self.cached is None:
             await self.probe_from(self.cursor)
+            if not self.owns(ws, gen):
+                return 'superseded'
         if self.cached is None:
             await self.probe_from(0)
+            if not self.owns(ws, gen):
+                return 'superseded'
         if self.cached is None:
             return 'capture-failed'
         tried = 0
         while self.cached is not None and tried < max(len(self.candidates), 1):
             tried += 1
-            err = await self._spawn_pipeline(ws)
+            err = await self._spawn_pipeline(ws, gen)
             if err is None:
                 return None
-            if err in ('no-encoder', 'capture-failed'):
+            if err in ('no-encoder', 'capture-failed', 'superseded'):
                 return err
+            if not self.owns(ws, gen):
+                return 'superseded'
             # 'stall' -> try the next candidate instead of hanging forever
             nxt = self.cursor + 1
             if nxt >= len(self.candidates):
@@ -871,9 +898,13 @@ class Agent:
             self.cached = self.candidates[nxt]
         return 'capture-failed'
 
-    async def _spawn_pipeline(self, ws) -> Optional[str]:
+    async def _spawn_pipeline(self, ws, gen: int) -> Optional[str]:
         """None on success; 'stall' to try the next candidate; other codes are fatal."""
-        await self.stop_ffmpeg()
+        if not self.owns(ws, gen):
+            return 'superseded'
+        await self.stop_ffmpeg(ws, gen)
+        if not self.owns(ws, gen):
+            return 'superseded'
         cand = self.cached
         if cand is None:
             return 'capture-failed'
@@ -886,11 +917,23 @@ class Agent:
         except OSError as exc:
             LOG.warning('ffmpeg spawn failed: %s', exc)
             return 'capture-failed'
+        if not self.owns(ws, gen):
+            # Superseded while exec'ing: kill what we just created, touch nothing.
+            LOG.info('stale spawn (gen %s); killing the process it created', gen)
+            kill_process(proc, force=True)
+            return 'superseded'
         self.proc = proc
         self.spawn_mono = time.monotonic()
         stderr_task = asyncio.create_task(self._drain_stderr(proc), name='stderr')
         self.tasks = [stderr_task]
         first = await read_stdout_once(proc, STALL_TIMEOUT_S)
+        if not self.owns(ws, gen):
+            LOG.info('stale pipeline (gen %s); killing the process it created', gen)
+            if self.proc is proc:
+                self.proc = None
+            kill_process(proc, force=True)
+            stderr_task.cancel()
+            return 'superseded'
         if not first:
             if proc.returncode is None:
                 try:
@@ -899,7 +942,7 @@ class Agent:
                     pass
             if proc.returncode is None:
                 log_capture_stall('capture', cand.name)
-            await self.stop_ffmpeg()
+            await self.stop_ffmpeg(ws, gen)
             return 'stall'
         self.queue = asyncio.Queue(maxsize=QUEUE_MAX)
         self.drop_until_key = False
@@ -909,8 +952,15 @@ class Agent:
             await self.send_json(ws, self.hello_payload())
         except Exception as exc:
             LOG.warning('hello after spawn failed: %s', exc)
-            await self.stop_ffmpeg()
+            await self.stop_ffmpeg(ws, gen)
             return 'capture-failed'
+        if not self.owns(ws, gen):
+            LOG.info('stale pipeline (gen %s); killing the process it created', gen)
+            if self.proc is proc:
+                self.proc = None
+            kill_process(proc, force=True)
+            stderr_task.cancel()
+            return 'superseded'
         self.tasks = [
             stderr_task,
             asyncio.create_task(
@@ -1043,6 +1093,45 @@ class Agent:
             except Exception:
                 pass
 
+    async def authenticate(self, stream, qs: dict) -> bool:
+        """Legacy ?token=, else an in-band {"type":"auth"} first frame."""
+        got = (qs.get('token') or [''])[0]
+        if got:
+            if not tokens_match(got, self.token):
+                LOG.info('auth failed: bad token in query string')
+                return False
+            LOG.warning('token in query string is deprecated; send an auth frame instead')
+            return True
+        try:
+            message = await asyncio.wait_for(stream.__anext__(), timeout=AUTH_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            LOG.info('auth failed: no auth frame within %ss', int(AUTH_TIMEOUT_S))
+            return False
+        except StopAsyncIteration:
+            LOG.info('auth failed: client closed before authenticating')
+            return False
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            LOG.info('auth failed: could not read the first frame: %s', exc)
+            return False
+        if isinstance(message, (bytes, bytearray)):
+            LOG.info('auth failed: first frame is binary')
+            return False
+        try:
+            data = json.loads(message)
+        except (TypeError, ValueError):
+            LOG.info('auth failed: first frame is not JSON')
+            return False
+        if not isinstance(data, dict) or data.get('type') != 'auth':
+            LOG.info('auth failed: first frame is not an auth message')
+            return False
+        sent = data.get('token')
+        if not isinstance(sent, str) or not tokens_match(sent, self.token):
+            LOG.info('auth failed: bad token in auth frame')
+            return False
+        return True
+
     async def handler(self, websocket) -> None:
         path = ''
         try:
@@ -1055,15 +1144,16 @@ class Agent:
             await websocket.close(CLOSE_NOT_FOUND, 'not found')
             return
         qs = parse_qs(parsed.query)
-        got = (qs.get('token') or [''])[0]
-        if not tokens_match(got, self.token):
-            LOG.info('auth failed')
+        stream = websocket.__aiter__()
+        if not await self.authenticate(stream, qs):
             await websocket.close(CLOSE_AUTH, 'unauthorized')
             return
 
         async with self.lock:
             old = self.client
             self.client = websocket
+            self.client_gen += 1
+            gen = self.client_gen
             await self.stop_ffmpeg()
             if old is not None and old is not websocket:
                 try:
@@ -1078,9 +1168,13 @@ class Agent:
                     self.client = None
                 return
 
-        LOG.info('client attached')
+        LOG.info('client attached (gen %s)', gen)
         try:
-            async for message in websocket:
+            while True:
+                try:
+                    message = await stream.__anext__()
+                except StopAsyncIteration:
+                    break
                 if isinstance(message, (bytes, bytearray)):
                     continue
                 try:
@@ -1096,9 +1190,11 @@ class Agent:
                     except Exception:
                         break
                 elif kind == 'start':
-                    if self.client is not websocket:
+                    if not self.owns(websocket, gen):
                         break
-                    err = await self.start_ffmpeg(websocket)
+                    err = await self.start_ffmpeg(websocket, gen)
+                    if err == 'superseded':
+                        break
                     if err:
                         try:
                             await self.send_json(
@@ -1114,7 +1210,9 @@ class Agent:
                             pass
                         break
                 elif kind == 'stop':
-                    await self.stop_ffmpeg()
+                    if not self.owns(websocket, gen):
+                        break
+                    await self.stop_ffmpeg(websocket, gen)
         except Exception as exc:
             LOG.info('client loop ended: %s', exc)
         finally:

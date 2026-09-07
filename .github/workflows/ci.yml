@@ -34,8 +34,13 @@ jobs:
       - name: Orgo computer plugin tests
         run: python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
 
+      # -n 1: without it xargs passes every later path as an ARGUMENT to the
+      # first script, so only one file was ever parsed.
       - name: Shell syntax
-        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 bash -n
+        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n 1 bash -n
+
+      - name: HD agent tests
+        run: python3 computer-viewer/tests/test-hiperf-agent.py
 
       - name: Host-script bind tests
         run: bash computer-viewer/tests/test-bind.sh
@@ -63,3 +68,37 @@ jobs:
 
       - name: Installer tests
         run: bash tests/test-install.sh
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: PowerShell syntax
+        shell: pwsh
+        run: |
+          $failed = $false
+          $files = Get-ChildItem -Path . -Recurse -Filter '*.ps1' |
+            Where-Object { $_.FullName -notmatch '\\\.git\\' }
+          if (-not $files) { Write-Host 'no .ps1 files found'; exit 1 }
+          foreach ($f in $files) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors -and $errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "FAIL $($f.FullName)"
+              foreach ($e in $errors) {
+                Write-Host "  line $($e.Extent.StartLineNumber): $($e.Message)"
+              }
+            } else {
+              Write-Host "OK   $($f.FullName)"
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: HD agent tests
+        run: python3 computer-viewer/tests/test-hiperf-agent.py

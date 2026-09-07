@@ -102,6 +102,50 @@ script_dir() {
   fi
 }
 
+sha256_of() {
+  # Digest one file with whatever is installed. Non-zero if neither tool exists.
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -- "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+manifest_agent_sha() {
+  # MANIFEST.sha256 sits at the repo root, one level above RAW_REPO_URL.
+  local root="${RAW_REPO_URL%/computer-viewer}"
+  local pick='$2 == "computer-viewer/hiperf-agent.py" { print $1; found = 1; exit } END { if (!found) exit 1 }'
+  local sum=""
+  sum="$(curl -fsSL "${root}/MANIFEST.sha256" 2>/dev/null | awk "$pick" || true)"
+  if [ -z "$sum" ]; then
+    # Offline fallback: the MANIFEST that ships with a local checkout.
+    local here
+    here="$(script_dir)"
+    if [ -n "$here" ] && [ -f "${here}/../MANIFEST.sha256" ]; then
+      sum="$(awk "$pick" "${here}/../MANIFEST.sha256" || true)"
+    fi
+  fi
+  [ -n "$sum" ] || return 1
+  printf '%s' "$sum"
+}
+
+verify_agent_sha() {
+  local file="$1" want="$2" got=""
+  got="$(sha256_of "$file")" || {
+    echo "Neither shasum nor sha256sum is available; refusing an unverified hiperf-agent.py." >&2
+    return 1
+  }
+  if [ "$got" != "$want" ]; then
+    echo "hiperf-agent.py sha256 mismatch - refusing to install." >&2
+    echo "  manifest: ${want}" >&2
+    echo "  file:     ${got}" >&2
+    return 1
+  fi
+  return 0
+}
+
 ensure_token() {
   umask 077
   if [ -f "${TOKEN_FILE}" ]; then
@@ -206,18 +250,37 @@ if ! "${VENV_DIR}/bin/pip" install -q "${WEBSOCKETS_PIN}"; then
 fi
 
 echo "==> Fetching hiperf-agent.py"
-if curl -fsSL "${RAW_REPO_URL}/hiperf-agent.py" -o "${AGENT_PATH}"; then
-  echo "    downloaded from ${RAW_REPO_URL}/hiperf-agent.py"
+# Staged to a temp file and checked against MANIFEST.sha256 before it replaces
+# anything, so a tampered or truncated download cannot become the running agent.
+AGENT_SHA="$(manifest_agent_sha || true)"
+if [ -z "${AGENT_SHA}" ]; then
+  echo "Could not read the hiperf-agent.py digest from ${RAW_REPO_URL%/computer-viewer}/MANIFEST.sha256" >&2
+  echo "and no local MANIFEST.sha256 was found. Refusing to install an unverified agent." >&2
+  exit 1
+fi
+AGENT_TMP="${AGENT_PATH}.new"
+rm -f "${AGENT_TMP}"
+if curl -fsSL "${RAW_REPO_URL}/hiperf-agent.py" -o "${AGENT_TMP}"; then
+  AGENT_SRC="${RAW_REPO_URL}/hiperf-agent.py"
 else
+  rm -f "${AGENT_TMP}"
   HERE="$(script_dir)"
   if [ -n "$HERE" ] && [ -f "${HERE}/hiperf-agent.py" ]; then
-    cp "${HERE}/hiperf-agent.py" "${AGENT_PATH}"
-    echo "    copied local ${HERE}/hiperf-agent.py (download failed)"
+    cp "${HERE}/hiperf-agent.py" "${AGENT_TMP}"
+    AGENT_SRC="${HERE}/hiperf-agent.py (download failed)"
   else
     echo "Could not download hiperf-agent.py from ${RAW_REPO_URL} and no local copy was found." >&2
     exit 1
   fi
 fi
+if ! verify_agent_sha "${AGENT_TMP}" "${AGENT_SHA}"; then
+  rm -f "${AGENT_TMP}"
+  echo "    left ${AGENT_PATH} untouched" >&2
+  exit 1
+fi
+mv -f "${AGENT_TMP}" "${AGENT_PATH}"
+echo "    installed from ${AGENT_SRC}"
+echo "    sha256 ${AGENT_SHA} verified against MANIFEST.sha256"
 chmod 644 "${AGENT_PATH}"
 
 PYTHON_BIN="${VENV_DIR}/bin/python"
