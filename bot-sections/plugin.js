@@ -112,7 +112,7 @@ function sectionLadder() {
   return ladder
 }
 
-const CSS = /* css */ `
+const PLUGIN_CSS = /* css */ `
 body.hermes-bot-sections [${LIST_ATTR}] {
   display: flex;
   flex-direction: column;
@@ -1271,7 +1271,7 @@ function injectStyle() {
   if (document.getElementById(STYLE_ID)) return
   const el = document.createElement('style')
   el.id = STYLE_ID
-  el.textContent = CSS
+  el.textContent = PLUGIN_CSS
   ;(document.head || document.documentElement).appendChild(el)
 }
 

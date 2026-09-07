@@ -1147,14 +1147,10 @@ function startDomObserver() {
     childList: true,
     characterData: true,
     attributes: true,
-    attributeFilter: [
-      PANE_HIDDEN_ATTR,
-      'aria-selected',
-      'data-tree-tab',
-      'data-chat-surface',
-      'data-composer-target',
-      'data-session-anchor'
-    ]
+    // Same set bubble-mode watches: a tab caption that is retitled after mount
+    // has to re-run the gate, and the three chat-surface attributes this used
+    // to list are long gone from the DOM.
+    attributeFilter: [PANE_HIDDEN_ATTR, 'aria-selected', 'aria-label', 'data-tree-tab']
   })
 }
 

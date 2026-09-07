@@ -7,8 +7,19 @@ const pluginPath = new URL('./plugin.js', import.meta.url)
 const SOURCE = fs.readFileSync(pluginPath, 'utf8')
 
 const HOOKS =
-  '\nglobalThis.__testHooks = { applyAssignData, applyAssignFileText, findBotsPaneRoots,' +
-  ' sectionForKey, sectionLadder, getOverrides: () => overrides, getCustomSections: () => customSections }\n'
+  '\nglobalThis.__testHooks = { applyAssignData, applyAssignFileText, findBotsPaneRoots, cssAttr,' +
+  ' HEADER_ATTR, sectionForKey, sectionLadder, getOverrides: () => overrides,' +
+  ' getCustomSections: () => customSections }\n'
+
+/** The parts of CSS.escape a section name can actually hit. */
+function cssEscape(value) {
+  return String(value).replace(/[^\w-]/g, ch => '\\' + ch)
+}
+
+/** Undo CSS string escaping, the way a selector parser would. */
+function cssUnescape(value) {
+  return String(value).replace(/\\(.)/g, '$1')
+}
 
 function classList(...names) {
   const set = new Set(names)
@@ -28,9 +39,15 @@ function el({ className = '', textContent = '', classes = [], parentElement = nu
 
 function load({ spans = [] } = {}) {
   const warnings = []
+  const escaped = []
   const context = {
     __host: { state: {} },
-    CSS: { escape: value => value },
+    CSS: {
+      escape: value => {
+        escaped.push(value)
+        return cssEscape(value)
+      }
+    },
     console: { warn: message => warnings.push(message) },
     document: {
       body: { classList: { add() {}, contains: () => false, remove() {} } },
@@ -50,7 +67,7 @@ function load({ spans = [] } = {}) {
     .concat(HOOKS)
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
-  return { ...context.__testHooks, warnings }
+  return { ...context.__testHooks, warnings, escaped }
 }
 
 test('a valid bot-sections.json creates its sections and assigns its bots', () => {
@@ -163,4 +180,18 @@ test('findBotsPaneRoots() falls back to the grandparent when no flex column is f
 
   assert.equal(roots.length, 1)
   assert.equal(roots[0], grandparent)
+})
+
+test('a section name with a quote and a bracket still matches its own header', () => {
+  const kit = load()
+  const name = 'a"b]c'
+
+  const selector = `:scope > [${kit.HEADER_ATTR}="${kit.cssAttr(name)}"]`
+
+  // The module used to shadow the CSS Web API with its own stylesheet
+  // constant, so CSS.escape was never reached and the fallback regex ran.
+  assert.deepEqual(kit.escaped, [name])
+  const quoted = selector.match(/="(.*)"\]$/)
+  assert.ok(quoted, selector)
+  assert.equal(cssUnescape(quoted[1]), name)
 })
