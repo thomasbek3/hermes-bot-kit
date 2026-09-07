@@ -3,17 +3,24 @@ import fs from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
 
+import { botChatGateCases, buildGateDocument } from '../tests/bot-chat-gate.cases.mjs'
+
 const pluginPath = new URL('./plugin.js', import.meta.url)
 
-function loadSelection({ routines = true } = {}) {
+function loadSelection(setup = {}) {
+  const { bots = true, routines = true, now = null } = setup
+  const paneValues = {
+    'hermes-bots:pane': bots,
+    'hermes-bots:routines': routines
+  }
   const context = {
     __host: {
-      paneVisibility: id => ({ get: () => (id === 'hermes-bots:routines' ? routines : false) }),
+      paneVisibility: id => ({ get: () => Boolean(paneValues[id]) }),
       state: {}
     },
     CSS: { escape: value => value },
-    Date,
-    document: { querySelectorAll: () => [] },
+    Date: now ? { now } : Date,
+    document: buildGateDocument(setup),
     globalThis: null,
     setInterval: () => 0,
     setTimeout: () => 0
@@ -28,10 +35,13 @@ function loadSelection({ routines = true } = {}) {
     )
     .replace('export default {', 'globalThis.__plugin = {')
     .concat(
-      '\nglobalThis.__testHooks = { matchingStoredSnapshot, workspaceBotChatVisible, markLiveSources, clearLiveSources, isCompletedView }\n'
+      '\nglobalThis.__testHooks = { matchingStoredSnapshot, workspaceBotChatVisible, botModeChatVisible,' +
+        ' isCanonicalBotChatLabel, knownBotChatTabs, markLiveSources, clearLiveSources, isCompletedView,' +
+        ' viewKey, relativeTime }\n'
     )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
+  for (const id of setup.remembered || []) context.__testHooks.knownBotChatTabs.add(id)
   return context.__testHooks
 }
 
@@ -112,4 +122,35 @@ test('completed lists auto-hide by counts or terminal item statuses', () => {
   terminal.total = 0
   assert.equal(isCompletedView(terminal), true)
   assert.equal(isCompletedView(active), false)
+})
+
+test('the shared Bot Chat gate matrix holds for task-dock', () => {
+  for (const testCase of botChatGateCases) {
+    const { botModeChatVisible } = loadSelection(testCase.setup)
+    assert.equal(botModeChatVisible(), testCase.expect, testCase.name)
+  }
+})
+
+test('a decorated Bot Chat caption matches; a different session name does not', () => {
+  const { isCanonicalBotChatLabel } = loadSelection()
+
+  assert.equal(isCanonicalBotChatLabel('bot chat'), true)
+  assert.equal(isCanonicalBotChatLabel('bot chat, 2 unread'), true)
+  assert.equal(isCanonicalBotChatLabel('bot chat ×'), true)
+  assert.equal(isCanonicalBotChatLabel('bot chats'), false)
+})
+
+test('a stale snapshot ages instead of freezing at "just now"', () => {
+  let clock = 1_700_000_000_000
+  const { relativeTime, viewKey } = loadSelection({ now: () => clock })
+  const view = { ...snapshot(), capturedAt: clock }
+
+  assert.equal(relativeTime(view.capturedAt), 'just now')
+  const fresh = viewKey(view, true)
+
+  clock += 10 * 60 * 1000
+  assert.equal(relativeTime(view.capturedAt), '10m ago')
+  // The render key has to move too, or renderDock() short-circuits and the
+  // "last updated …" label keeps whatever text it was first given.
+  assert.notEqual(viewKey(view, true), fresh)
 })

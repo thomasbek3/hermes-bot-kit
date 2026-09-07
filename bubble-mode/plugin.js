@@ -23,7 +23,7 @@ const BOTS_GROUP_TAB_PREFIX = 'plugin-workspace:hermes-bots:group:'
 const SESSION_TILE_TAB_PREFIX = 'session-tile:'
 const PANE_HIDDEN_ATTR = 'data-pane-hidden'
 
-const CSS = /* css */ `
+const PLUGIN_CSS = /* css */ `
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"]:not(:has(textarea, [contenteditable="true"], input)) {
   align-items: flex-end;
 }
@@ -35,8 +35,8 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"] 
   padding: 0.5rem 0.875rem;
   border: none;
   border-radius: 18px 18px 4px 18px;
-  background: #4a4a4e;
-  color: #f2f2f3;
+  background: color-mix(in srgb, var(--ui-bg-elevated, #4a4a4e) 70%, var(--ui-text-primary, #f2f2f3) 12%);
+  color: var(--ui-text-primary, #f2f2f3);
   box-shadow: none;
 }
 
@@ -46,13 +46,13 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"] 
 }
 
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"] .composer-human-message [data-slot="aui_user-inline-code"] {
-  background: color-mix(in srgb, #fff 18%, transparent);
+  background: color-mix(in srgb, var(--ui-text-primary, #fff) 18%, transparent);
   color: inherit;
 }
 
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"] .composer-human-message button,
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_user-message-root"] .composer-human-message svg {
-  color: #f2f2f3;
+  color: var(--ui-text-primary, #f2f2f3);
 }
 
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md {
@@ -61,8 +61,8 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-co
   max-width: 72%;
   padding: 0.5rem 0.875rem;
   border-radius: 18px 18px 18px 4px;
-  background: #2b2b2e;
-  color: #e8e8ea;
+  background: var(--ui-chat-bubble-background, #2b2b2e);
+  color: var(--ui-text-primary, #e8e8ea);
 }
 
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-content"] > .aui-md:has(
@@ -103,7 +103,8 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_assistant-message-co
   max-width: 100%;
   padding: 0.5rem 0.875rem;
   border-radius: 18px 18px 18px 4px;
-  background: #2b2b2e;
+  background: var(--ui-chat-bubble-background, #2b2b2e);
+  color: var(--ui-text-primary, #e8e8ea);
   margin-top: 3px;
   margin-bottom: 3px;
 }
@@ -152,7 +153,7 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_response-loading"] {
   width: fit-content;
   padding: 0.7rem 0.8rem;
   border-radius: 16px;
-  background: #2b2b2e;
+  background: var(--ui-chat-bubble-background, #2b2b2e);
 }
 
 body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_response-loading"] > * {
@@ -166,15 +167,24 @@ body.hermes-bubble-mode [data-chat-surface] [data-slot="aui_response-loading"]::
   height: 6px;
   margin-right: 20px;
   border-radius: 50%;
-  background: #6b6b70;
-  box-shadow: 10px 0 0 #6b6b70, 20px 0 0 #6b6b70;
+  background: var(--ui-text-tertiary, #6b6b70);
+  box-shadow: 10px 0 0 var(--ui-text-tertiary, #6b6b70), 20px 0 0 var(--ui-text-tertiary, #6b6b70);
   animation: hermes-bubble-typing 1.2s infinite ease-in-out;
 }
 
 @keyframes hermes-bubble-typing {
-  0%, 90%, 100% { background: #b9b9bf; box-shadow: 10px 0 0 #6b6b70, 20px 0 0 #6b6b70; }
-  30% { background: #6b6b70; box-shadow: 10px 0 0 #b9b9bf, 20px 0 0 #6b6b70; }
-  60% { background: #6b6b70; box-shadow: 10px 0 0 #6b6b70, 20px 0 0 #b9b9bf; }
+  0%, 90%, 100% {
+    background: var(--ui-text-secondary, #b9b9bf);
+    box-shadow: 10px 0 0 var(--ui-text-tertiary, #6b6b70), 20px 0 0 var(--ui-text-tertiary, #6b6b70);
+  }
+  30% {
+    background: var(--ui-text-tertiary, #6b6b70);
+    box-shadow: 10px 0 0 var(--ui-text-secondary, #b9b9bf), 20px 0 0 var(--ui-text-tertiary, #6b6b70);
+  }
+  60% {
+    background: var(--ui-text-tertiary, #6b6b70);
+    box-shadow: 10px 0 0 var(--ui-text-tertiary, #6b6b70), 20px 0 0 var(--ui-text-secondary, #b9b9bf);
+  }
 }
 `
 
@@ -185,6 +195,15 @@ let applied = false
 let raf = 0
 let observer = null
 const unbinders = []
+
+// `ctx.storage.get` may hand back a promise. A read that resolves after the
+// user has toggled the setting — or after the plugin was disposed — must not
+// win. `regGen` changes on every register/dispose; the per-setting revisions
+// change on every local write. A late resolve applies only if both still
+// match what it captured when it started.
+let regGen = 0
+let enabledRev = 0
+let showWorkRev = 0
 
 function inHiddenPane(el) {
   return Boolean(el && typeof el.closest === 'function' && el.closest(`[${PANE_HIDDEN_ATTR}]`))
@@ -227,19 +246,6 @@ function groupChatFronted() {
   return false
 }
 
-function visibleBotChatSurface() {
-  if (typeof document === 'undefined') return false
-  const surfaces = document.querySelectorAll('[data-chat-surface]')
-  for (const el of surfaces) {
-    if (inHiddenPane(el)) continue
-    const target = el.getAttribute('data-composer-target') || ''
-    const anchor = el.getAttribute('data-session-anchor') || ''
-    if (target === 'main' || anchor === 'workspace') continue
-    if (target.startsWith('tile:') || anchor.startsWith('session-tile:')) return true
-  }
-  return false
-}
-
 const knownBotChatTabs = new Set()
 
 function rememberBotChatTab(id) {
@@ -253,9 +259,11 @@ function rememberBotChatTab(id) {
 }
 
 function readKnownBotChatTabs(ctx) {
+  const gen = regGen
   try {
     const value = ctx.storage?.get?.('knownBotChatTabs', [])
     const absorb = list => {
+      if (gen !== regGen) return
       if (Array.isArray(list)) for (const id of list) knownBotChatTabs.add(String(id))
       scheduleSync()
     }
@@ -264,6 +272,18 @@ function readKnownBotChatTabs(ctx) {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * The desktop decorates the canonical caption: unread counts ("Bot Chat, 2
+ * unread"), a close glyph, a dirty dot. Accept "bot chat" followed by
+ * anything that is not another letter, so decorations still match while a
+ * different session named "Bot Chats" does not.
+ */
+function isCanonicalBotChatLabel(label) {
+  if (label === 'bot chat') return true
+  if (!label.startsWith('bot chat')) return false
+  return !/\p{L}/u.test(label.charAt(8))
 }
 
 function canonicalBotChatTabSelected() {
@@ -284,7 +304,7 @@ function canonicalBotChatTabSelected() {
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase()
-    if (label === 'bot chat') {
+    if (isCanonicalBotChatLabel(label)) {
       rememberBotChatTab(id)
       return true
     }
@@ -356,11 +376,14 @@ function scheduleSync() {
 }
 
 function readEnabled(ctx) {
+  const gen = regGen
+  const rev = enabledRev
   try {
     const value = ctx.storage?.get?.(STORAGE_KEY, true)
     if (value && typeof value.then === 'function') {
       value
         .then(resolved => {
+          if (gen !== regGen || rev !== enabledRev) return
           enabled = resolved !== false
           scheduleSync()
         })
@@ -374,11 +397,14 @@ function readEnabled(ctx) {
 }
 
 function readShowWork(ctx) {
+  const gen = regGen
+  const rev = showWorkRev
   try {
     const value = ctx.storage?.get?.(SHOW_WORK_KEY, false)
     if (value && typeof value.then === 'function') {
       value
         .then(resolved => {
+          if (gen !== regGen || rev !== showWorkRev) return
           showWork = resolved === true
           scheduleSync()
         })
@@ -393,6 +419,7 @@ function readShowWork(ctx) {
 
 function toggleShowWork() {
   showWork = !showWork
+  showWorkRev += 1
   try {
     pluginCtx?.storage?.set?.(SHOW_WORK_KEY, showWork)
   } catch {
@@ -403,6 +430,7 @@ function toggleShowWork() {
 
 function writeEnabled(value) {
   enabled = Boolean(value)
+  enabledRev += 1
   try {
     pluginCtx?.storage?.set?.(STORAGE_KEY, enabled)
   } catch {
@@ -420,7 +448,7 @@ function injectStyle() {
   if (document.getElementById(STYLE_ID)) return
   const el = document.createElement('style')
   el.id = STYLE_ID
-  el.textContent = CSS
+  el.textContent = PLUGIN_CSS
   ;(document.head || document.documentElement).appendChild(el)
 }
 
@@ -450,18 +478,15 @@ function startDomObserver() {
     subtree: true,
     childList: true,
     attributes: true,
-    attributeFilter: [
-      PANE_HIDDEN_ATTR,
-      'aria-selected',
-      'data-tree-tab',
-      'data-chat-surface',
-      'data-composer-target',
-      'data-session-anchor'
-    ]
+    // `characterData` so a tab caption that is retitled after mount (the
+    // desktop renames the tile once the session resolves) re-runs the gate.
+    characterData: true,
+    attributeFilter: [PANE_HIDDEN_ATTR, 'aria-selected', 'aria-label', 'data-tree-tab']
   })
 }
 
 function dispose() {
+  regGen += 1
   if (raf && typeof cancelAnimationFrame === 'function') {
     cancelAnimationFrame(raf)
     raf = 0
@@ -490,6 +515,7 @@ export default {
   defaultEnabled: true,
   description: 'iMessage-style chat bubbles on Bot Mode chats only. Sessions stay unchanged.',
   register(ctx) {
+    regGen += 1
     pluginCtx = ctx
     enabled = readEnabled(ctx)
     showWork = readShowWork(ctx)
