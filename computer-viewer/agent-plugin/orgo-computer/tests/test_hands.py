@@ -150,6 +150,7 @@ class HandsTests(unittest.TestCase):
         os.environ.pop("ORGO_DEFAULT_COMPUTER_ID", None)
         os.environ.pop("ORGO_API_BASE_URL", None)
         os.environ.pop("ORGO_ALLOW_INSECURE_HTTP", None)
+        os.environ.pop("ORGO_SCREEN", None)
         tools.bind_context(None)
         tools._PROCESS_LOCKS.clear()
 
@@ -160,6 +161,8 @@ class HandsTests(unittest.TestCase):
         os.environ.pop("ORGO_COMPUTER_ID", None)
         os.environ.pop("ORGO_API_BASE_URL", None)
         os.environ.pop("ORGO_ALLOW_INSECURE_HTTP", None)
+        os.environ.pop("ORGO_SCREEN", None)
+        tools.bind_context(None)
 
     def test_pin_reads_orgo_computer_id(self):
         self.assertEqual(tools._resolve_computer_id(), PIN)
@@ -554,6 +557,107 @@ class HandsTests(unittest.TestCase):
         asyncio.run(main())
         self.assertFalse(tools._in_process_lock(PIN).locked())
         self.assertFalse(tools._run_lock_is_held(PIN))
+
+    def _bind_screen_config(self, screen):
+        class Ctx:
+            def get_config(self, key, default=None):
+                if key == "screen":
+                    return screen
+                return default
+
+        tools.bind_context(Ctx())
+
+    def _screen_router(self):
+        """Router that serves screenshot metadata, the image, and a click."""
+
+        def router(method, url, body):
+            if method == "GET" and "/screenshot" in url:
+                return FakeResponse(200, {"success": True, "image": "/api/storage/x.jpg"})
+            if method == "POST" and "/click" in url:
+                return FakeResponse(200, {"success": True, "action": "click"})
+            return FakeResponse(
+                200, payload=None, content=TINY_JPEG, content_type="image/jpeg"
+            )
+
+        return router
+
+    def test_screen_from_config_is_sent_on_screenshot_and_click(self):
+        self._bind_screen_config("screen-2")
+        fake = FakeHttpx(self._screen_router())
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            asyncio.run(tools.orgo_computer_screenshot({}))
+            shot_url = fake.client.gets[0]
+            asyncio.run(tools.orgo_computer_click({"x": 1, "y": 2}))
+            click_url = fake.client.posts[0][0]
+        self.assertTrue(shot_url.endswith("/screenshot?screen=screen-2"), shot_url)
+        self.assertTrue(click_url.endswith("/click?screen=screen-2"), click_url)
+
+    def test_screen_from_env_when_config_empty(self):
+        os.environ["ORGO_SCREEN"] = "env-screen"
+        self._bind_screen_config("")
+        fake = FakeHttpx(self._screen_router())
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            asyncio.run(tools.orgo_computer_type({"text": "hi"}))
+        url = fake.client.posts[0][0]
+        self.assertTrue(url.endswith("/type?screen=env-screen"), url)
+
+    def test_no_screen_param_when_unset(self):
+        fake = FakeHttpx(self._screen_router())
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            asyncio.run(tools.orgo_computer_screenshot({}))
+            shot_url = fake.client.gets[0]
+            asyncio.run(tools.orgo_computer_key({"key": "Return"}))
+            key_url = fake.client.posts[0][0]
+        self.assertNotIn("screen=", shot_url)
+        self.assertTrue(shot_url.endswith("/screenshot"), shot_url)
+        self.assertNotIn("screen=", key_url)
+        self.assertTrue(key_url.endswith("/key"), key_url)
+
+    def test_bash_never_carries_screen(self):
+        os.environ["ORGO_SCREEN"] = "screen-2"
+
+        def router(method, url, body):
+            return FakeResponse(200, {"output": "ok", "exit_code": 0})
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            asyncio.run(tools.orgo_computer_bash({"command": "whoami"}))
+        url = fake.client.posts[0][0]
+        self.assertNotIn("screen=", url)
+        self.assertTrue(url.endswith("/bash"), url)
+
+    def test_bad_screen_id_is_ignored(self):
+        os.environ["ORGO_SCREEN"] = "bad screen/../x"
+        self.assertEqual(tools._resolve_screen_id(), "")
+        self.assertEqual(tools._screen_query(), "")
+
+    def test_identity_reports_the_pinned_screen(self):
+        self._bind_screen_config("screen-2")
+        text = tools.computer_identity_section()
+        self.assertIn("Your screen on that computer is 'screen-2'", text)
+
+    def test_identity_omits_screen_when_unpinned(self):
+        self.assertNotIn("Your screen", tools.computer_identity_section())
+
+    def test_cli_set_writes_screen(self):
+        home = Path(self._home.name) / "profiles" / "parker"
+        home.mkdir(parents=True)
+        with patch.object(tools, "_profile_home", return_value=home):
+            path = tools.write_profile_computer_id("parker", PIN, screen="screen-3")
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        settings = data["plugins"]["entries"]["orgo-computer"]["settings"]
+        self.assertEqual(settings["computer_id"], PIN)
+        self.assertEqual(settings["screen"], "screen-3")
+
+    def test_cli_set_rejects_bad_screen(self):
+        home = Path(self._home.name) / "profiles" / "parker"
+        home.mkdir(parents=True)
+        with patch.object(tools, "_profile_home", return_value=home):
+            with self.assertRaises(tools.OrgoAgentRequestError) as caught:
+                tools.write_profile_computer_id("parker", PIN, screen="a b")
+        self.assertIn("Not a valid screen id", str(caught.exception))
 
     def test_schemas_exist(self):
         self.assertEqual(schemas.ORGO_COMPUTER_CLICK["name"], "orgo_computer_click")

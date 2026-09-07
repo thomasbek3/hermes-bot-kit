@@ -32,6 +32,21 @@ Humans use the repo `orgo-term` script (WebSocket PTY, no credits).
 Credentials and the computer UUID are not tool arguments. If no computer
 is pinned, tell the user to run `/computer`. Do not retry that same turn.
 
+One computer can run up to four screens. If this profile is pinned to a
+screen, screenshot/click/type/key touch only that screen; bash is shared
+by the whole machine.
+
+## Leave the computer clean
+
+Other agents share this machine. When your task ends:
+
+- Close the tabs and windows you opened. Leave what you found.
+- Use the one browser profile that is already signed in. Never start a
+  second profile.
+- Never quit the 1Password app. Closing a browser window is fine.
+- Do not leave downloads on the desktop. Move them or delete them.
+- Take one last screenshot and confirm only your own windows are left.
+
 ## Pairing the live view
 
 The human watches the same VM in the computer-viewer pane. Pin the same

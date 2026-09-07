@@ -18,7 +18,7 @@ import time
 from contextlib import AbstractAsyncContextManager, contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 try:
     import fcntl
@@ -76,6 +76,9 @@ COMPUTER_ID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+# One Orgo computer runs up to four screens; the boot screen is "default".
+# Screen ids are opaque strings, so accept a conservative slug shape only.
+SCREEN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ORGO_WORKSPACE_KEYS = ("projects", "workspaces", "data", "items", "results")
 ORGO_COMPUTER_KEYS = (
     "desktops",
@@ -231,6 +234,38 @@ def _resolve_computer_id() -> str:
     return ""
 
 
+def _resolve_screen_id() -> str:
+    """Screen pin, resolved like the computer pin: config, env, then empty.
+
+    Empty means the boot screen ("default"), which is what Orgo uses when the
+    query parameter is absent. Pinning one screen per Hermes profile lets
+    several agents share one computer without touching each other's desktop.
+    """
+    raw = _ctx_get("screen", default="")
+    candidates = []
+    if isinstance(raw, str) and raw.strip():
+        candidates.append(raw.strip())
+    env = os.environ.get("ORGO_SCREEN", "").strip()
+    if env:
+        candidates.append(env)
+    for candidate in candidates:
+        if SCREEN_ID_RE.fullmatch(candidate):
+            return candidate
+    return ""
+
+
+def _screen_query() -> str:
+    """Return the screen query string for screen-aware actions, else empty.
+
+    Orgo honours ?screen= on exactly six actions: screenshot, click, drag,
+    type, key, scroll. Never append this to bash, run, or any other endpoint.
+    """
+    screen = _resolve_screen_id()
+    if not screen:
+        return ""
+    return "?" + urlencode({"screen": screen})
+
+
 def hosted_run_enabled() -> bool:
     raw = _ctx_get("hosted_run", default=False)
     if isinstance(raw, bool):
@@ -284,6 +319,13 @@ def computer_identity_section() -> str:
         lines.append(
             "- orgo_computer_run: LAST RESORT hosted GUI agent. Spends Orgo "
             "AI credits. Only if bash and screenshot/click cannot do it."
+        )
+    screen = _resolve_screen_id()
+    if screen:
+        lines.append(
+            f"Your screen on that computer is '{screen}'. Screenshot, click, "
+            "type, and key press only touch that screen -- other agents have "
+            "their own screens on the same machine."
         )
     lines.append(
         "Never pass API keys or computer IDs as tool arguments. "
@@ -1174,6 +1216,7 @@ def merge_computer_id(
     config: dict[str, Any],
     computer_id: str,
     computer_name: Optional[str] = None,
+    screen: Optional[str] = None,
 ) -> None:
     plugins = config.get("plugins")
     if not isinstance(plugins, dict):
@@ -1194,12 +1237,15 @@ def merge_computer_id(
     settings["computer_id"] = computer_id
     if computer_name:
         settings["computer_name"] = str(computer_name).strip()[:200]
+    if screen:
+        settings["screen"] = str(screen).strip()
 
 
 def write_profile_computer_id(
     profile: str,
     computer_id: str,
     computer_name: Optional[str] = None,
+    screen: Optional[str] = None,
 ) -> Path:
     home = _profile_home(profile)
     if not home.is_dir():
@@ -1210,9 +1256,14 @@ def write_profile_computer_id(
         raise OrgoAgentRequestError(
             f"Not a valid computer UUID: {computer_id}"
         )
+    screen_id = str(screen or "").strip()
+    if screen_id and not SCREEN_ID_RE.fullmatch(screen_id):
+        raise OrgoAgentRequestError(
+            f"Not a valid screen id: {screen_id}"
+        )
     path = home / "config.yaml"
     data = _load_yaml(path)
-    merge_computer_id(data, computer_id, computer_name)
+    merge_computer_id(data, computer_id, computer_name, screen_id or None)
     _atomic_write_text(path, _dump_yaml(data))
     return path
 
@@ -1226,6 +1277,11 @@ def setup_cli(subparser: Any) -> None:
     )
     set_p.add_argument("profile", help="Profile name (use default for ~/.hermes)")
     set_p.add_argument("id", help="Orgo desktop UUID to pin")
+    set_p.add_argument(
+        "--screen",
+        default="",
+        help="Screen id on that computer (omit for the boot screen)",
+    )
     subparser.set_defaults(func=handle_cli)
 
 
@@ -1234,7 +1290,11 @@ def handle_cli(args: Any) -> int:
     if sub == "list":
         return _cli_list()
     if sub == "set":
-        return _cli_set(getattr(args, "profile", ""), getattr(args, "id", ""))
+        return _cli_set(
+            getattr(args, "profile", ""),
+            getattr(args, "id", ""),
+            getattr(args, "screen", ""),
+        )
     print("Usage: hermes orgo-computer <list|set>")
     return 2
 
@@ -1253,9 +1313,12 @@ def _cli_list() -> int:
     return 0
 
 
-def _cli_set(profile: str, computer_id: str) -> int:
+def _cli_set(profile: str, computer_id: str, screen: str = "") -> int:
+    screen_id = str(screen or "").strip()
     try:
-        path = write_profile_computer_id(profile, str(computer_id).strip())
+        path = write_profile_computer_id(
+            profile, str(computer_id).strip(), screen=screen_id or None
+        )
     except OrgoAgentRequestError as exc:
         print(str(exc))
         return 1
@@ -1263,7 +1326,10 @@ def _cli_set(profile: str, computer_id: str) -> int:
         logger.exception("orgo-computer set failed")
         print(f"Could not write config.yaml: {exc}")
         return 1
-    print(f"Pinned {computer_id} on profile '{profile or 'default'}' ({path})")
+    where = f" screen {screen_id}" if screen_id else ""
+    print(
+        f"Pinned {computer_id}{where} on profile '{profile or 'default'}' ({path})"
+    )
     return 0
 
 
@@ -1502,7 +1568,8 @@ async def _take_screenshot() -> dict[str, Any]:
     httpx, client = await _http_client(30.0)
     try:
         meta = await client.get(
-            f"{base}/computers/{quote(computer_id, safe='')}/screenshot",
+            f"{base}/computers/{quote(computer_id, safe='')}/screenshot"
+            f"{_screen_query()}",
             headers=_auth_headers(api_key),
         )
         payload = _read_json(meta, kind="screenshot")
@@ -1594,10 +1661,14 @@ async def orgo_computer_screenshot(args: dict, **kwargs: Any) -> Any:
 
 
 async def _post_hands(path: str, body: dict[str, Any], action: str) -> dict[str, Any]:
+    """POST one screen-aware action (click, type, key) to the pinned screen."""
     _refuse_if_run_locked()
     api_key = _require_api_key()
     computer_id = _require_computer_id()
-    url = f"{_api_base()}/computers/{quote(computer_id, safe='')}/{path}"
+    url = (
+        f"{_api_base()}/computers/{quote(computer_id, safe='')}/{path}"
+        f"{_screen_query()}"
+    )
     httpx, client = await _http_client(30.0)
     try:
         response = await client.post(
