@@ -55,17 +55,48 @@ TINY_JPEG = bytes.fromhex(
 
 
 class FakeResponse:
-    def __init__(self, status=200, payload=None, content=b"", content_type="application/json"):
+    def __init__(
+        self,
+        status=200,
+        payload=None,
+        content=b"",
+        content_type="application/json",
+        chunks=None,
+        content_length=None,
+    ):
         self.status_code = status
         self._payload = payload
         self.content = content
         self.is_success = 200 <= status < 300
         self.headers = {"content-type": content_type}
+        if content_length is not None:
+            self.headers["content-length"] = str(content_length)
+        self._chunks = chunks
+        self.read_started = False
 
     def json(self):
         if self._payload is None:
             raise ValueError("no json")
         return self._payload
+
+    async def aiter_bytes(self):
+        """Mimic httpx: the body is only produced once iteration starts."""
+        self.read_started = True
+        for chunk in self._chunks if self._chunks is not None else [self.content]:
+            yield chunk
+
+
+class FakeStream:
+    """`async with client.stream(...) as resp:` for FakeClient."""
+
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 class FakeClient:
@@ -74,11 +105,19 @@ class FakeClient:
         self.posts = []
         self.gets = []
         self.get_headers = []
+        self.streams = []
 
     async def get(self, url, headers=None):
         self.gets.append(url)
         self.get_headers.append(headers or {})
         return self.router("GET", url, None)
+
+    def stream(self, method, url, headers=None):
+        self.gets.append(url)
+        self.get_headers.append(headers or {})
+        response = self.router(method, url, None)
+        self.streams.append(response)
+        return FakeStream(response)
 
     async def post(self, url, headers=None, json=None):
         self.posts.append((url, json))
@@ -387,6 +426,134 @@ class HandsTests(unittest.TestCase):
         fake = FakeHttpx(lambda *a, **k: None)
         with patch.object(tools, "_import_httpx", return_value=fake):
             self.assertIs(tools._client_kwargs(5.0)["follow_redirects"], False)
+
+    def test_screenshot_rejects_oversized_content_length_without_reading(self):
+        body = FakeResponse(
+            200,
+            payload=None,
+            content=b"x" * 16,
+            content_type="image/jpeg",
+            content_length=tools.MAX_SCREENSHOT_BYTES + 1,
+        )
+
+        def router(method, url, body_json):
+            if url.endswith("/screenshot"):
+                return FakeResponse(200, {"success": True, "image": "/api/storage/x.jpg"})
+            return body
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            raw = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertIn("too large to attach", raw)
+        self.assertFalse(body.read_started)
+
+    def test_screenshot_aborts_when_chunks_exceed_cap(self):
+        chunk = b"x" * 100_000
+        count = (tools.MAX_SCREENSHOT_BYTES // len(chunk)) + 2
+        body = FakeResponse(
+            200,
+            payload=None,
+            content_type="image/jpeg",
+            chunks=[chunk] * count,
+        )
+
+        def router(method, url, body_json):
+            if url.endswith("/screenshot"):
+                return FakeResponse(200, {"success": True, "image": "/api/storage/x.jpg"})
+            return body
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            raw = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertIn("too large to attach", raw)
+        self.assertTrue(body.read_started)
+
+    def test_screenshot_streams_chunked_body(self):
+        half = len(TINY_JPEG) // 2
+        body = FakeResponse(
+            200,
+            payload=None,
+            content_type="image/jpeg",
+            chunks=[TINY_JPEG[:half], b"", TINY_JPEG[half:]],
+            content_length=len(TINY_JPEG),
+        )
+
+        def router(method, url, body_json):
+            if url.endswith("/screenshot"):
+                return FakeResponse(200, {"success": True, "image": "/api/storage/x.jpg"})
+            return body
+
+        fake = FakeHttpx(router)
+        with patch.object(tools, "_import_httpx", return_value=fake):
+            result = asyncio.run(tools.orgo_computer_screenshot({}))
+        self.assertTrue(result["_multimodal"])
+        self.assertIn("1x1", result["text_summary"])
+
+    def _hold_lock_file(self):
+        """Take the flock on the run-lock file from a second descriptor."""
+        handle = tools._lock_path(PIN).open("a+", encoding="utf-8")
+        tools.fcntl.flock(handle.fileno(), tools.fcntl.LOCK_EX | tools.fcntl.LOCK_NB)
+        return handle
+
+    def test_cancelled_wait_releases_the_run_lock(self):
+        if tools.fcntl is None:
+            self.skipTest("flock unavailable")
+        holder = self._hold_lock_file()
+
+        async def main():
+            lock = tools._ComputerRunLock(PIN, 30.0)
+            task = asyncio.ensure_future(lock.__aenter__())
+            await asyncio.sleep(0.4)
+            self.assertTrue(tools._in_process_lock(PIN).locked())
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertIsNone(lock._file)
+
+        try:
+            asyncio.run(main())
+            self.assertFalse(tools._in_process_lock(PIN).locked())
+        finally:
+            tools.fcntl.flock(holder.fileno(), tools.fcntl.LOCK_UN)
+            holder.close()
+        self.assertFalse(tools._run_lock_is_held(PIN))
+
+    def test_run_lock_timeout_raises_busy_not_attribute_error(self):
+        if tools.fcntl is None:
+            self.skipTest("flock unavailable")
+        holder = self._hold_lock_file()
+
+        async def main():
+            lock = tools._ComputerRunLock(PIN, 0.0)
+            with self.assertRaises(tools.OrgoAgentRequestError) as caught:
+                await lock.__aenter__()
+            self.assertIn("Another agent is controlling", str(caught.exception))
+
+        try:
+            asyncio.run(main())
+        finally:
+            tools.fcntl.flock(holder.fileno(), tools.fcntl.LOCK_UN)
+            holder.close()
+        self.assertFalse(tools._in_process_lock(PIN).locked())
+        self.assertFalse(tools._run_lock_is_held(PIN))
+
+    def test_run_lock_open_failure_releases_process_lock(self):
+        if tools.fcntl is None:
+            self.skipTest("flock unavailable")
+
+        def boom(*args, **kwargs):
+            raise OSError("cannot open lock file")
+
+        async def main():
+            lock = tools._ComputerRunLock(PIN, 5.0)
+            lock._path = SimpleNamespace(open=boom)
+            with self.assertRaises(OSError):
+                await lock.__aenter__()
+            self.assertIsNone(lock._file)
+
+        asyncio.run(main())
+        self.assertFalse(tools._in_process_lock(PIN).locked())
+        self.assertFalse(tools._run_lock_is_held(PIN))
 
     def test_schemas_exist(self):
         self.assertEqual(schemas.ORGO_COMPUTER_CLICK["name"], "orgo_computer_click")

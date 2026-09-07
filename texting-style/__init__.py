@@ -18,11 +18,16 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 # Must match tools/bot_mode_probe.py BOT_CHAT_TITLE (the desktop's
 # createCanonicalChat title and the `-c "Bot Chat"` resume target).
 BOT_CHAT_TITLE = "Bot Chat"
+
+# A failed session lookup (missing/locked/broken state.db) is retried after
+# this many seconds instead of being cached as "not a Bot Chat" forever.
+LOOKUP_RETRY_SECONDS = 30.0
 
 DOCTRINE = """## Texting register
 
@@ -91,12 +96,14 @@ def _candidate_dbs(profile_name: str) -> list:
 _db_for_session: dict = {}
 
 
-def _session_row(profile_name: str, session_id: str, columns: str) -> tuple:
+def _session_row(profile_name: str, session_id: str, columns: str):
     """Read columns for a session, searching candidate state.dbs until the
-    session id is found (cached). Empty tuple on any failure -- never crash
-    a prompt build."""
+    session id is found (cached). Returns the row as a tuple, or None when the
+    lookup could not be completed (no readable state.db, a locked or broken
+    database, or the session id was not found anywhere). Never crashes a
+    prompt build -- callers treat None as "unknown", not as "no"."""
     if not session_id:
-        return ()
+        return None
     known = _db_for_session.get(session_id)
     dbs = [known] if known else _candidate_dbs(profile_name)
     for db in dbs:
@@ -115,12 +122,16 @@ def _session_row(profile_name: str, session_id: str, columns: str) -> tuple:
                 _db_for_session.clear()
             _db_for_session[session_id] = db
             return tuple(row)
-    return ()
+    return None
 
 
-def _session_title(profile_name: str, session_id: str) -> str:
+def _session_title(profile_name: str, session_id: str):
+    """The session title, '' when the row exists but has no title, or None
+    when the lookup failed (so the caller can retry later)."""
     row = _session_row(profile_name, session_id, "title")
-    return str(row[0]) if row and row[0] is not None else ""
+    if row is None:
+        return None
+    return str(row[0]) if row[0] is not None else ""
 
 
 def _stored_prompt_has_doctrine(session_id: str) -> bool:
@@ -151,7 +162,7 @@ def register(ctx) -> None:
                 str(info.get("profile_name", "") or ""),
                 str(info.get("session_id", "") or ""),
             )
-            if title.strip() != BOT_CHAT_TITLE:
+            if title is None or title.strip() != BOT_CHAT_TITLE:
                 return ""
         text = DOCTRINE
         extra = str(_cfg("extra_rules", "") or "").strip()
@@ -174,15 +185,30 @@ def register(ctx) -> None:
     # per-turn context instead. Once an epoch rebuild bakes the section in,
     # the hook goes silent automatically.
     _title_cache: dict = {}
+    _title_retry_after: dict = {}
 
     def _is_bot_chat(session_id: str) -> bool:
+        """Cache confirmed answers forever; a failed lookup is only remembered
+        for LOOKUP_RETRY_SECONDS so a transient database problem cannot mute
+        the plugin for the life of the process."""
         if session_id in _title_cache:
             return _title_cache[session_id]
+        now = time.monotonic()
+        retry_after = _title_retry_after.get(session_id)
+        if retry_after is not None and now < retry_after:
+            return False
         title = _session_title("", session_id)
+        if title is None:
+            if len(_title_retry_after) > 512:
+                _title_retry_after.clear()
+            _title_retry_after[session_id] = now + LOOKUP_RETRY_SECONDS
+            _debug(f"lookup failed, retrying later (session={session_id!r})")
+            return False
+        _title_retry_after.pop(session_id, None)
         result = title.strip() == BOT_CHAT_TITLE
-        _title_cache[session_id] = result
         if len(_title_cache) > 512:
             _title_cache.clear()
+        _title_cache[session_id] = result
         return result
 
     def _debug(msg: str) -> None:
