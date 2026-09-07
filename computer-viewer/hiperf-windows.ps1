@@ -272,10 +272,23 @@ function Get-ManifestAgentSha {
         Write-Warning "Could not fetch $Root/MANIFEST.sha256: $_"
     }
     if (-not $lines -and $Here) {
-        # Offline fallback: the MANIFEST that ships with a local checkout.
-        $localManifest = Join-Path (Split-Path -Parent $Here) 'MANIFEST.sha256'
-        if (Test-Path -LiteralPath $localManifest) {
-            $lines = Get-Content -LiteralPath $localManifest
+        # Offline fallback. Two layouts: a clone keeps MANIFEST.sha256 one
+        # level up (repo root, next to computer-viewer/), and install.sh puts a
+        # copy two levels up (desktop-plugins/, next to computer-viewer/).
+        $parent = Split-Path -Parent $Here
+        $localManifests = @()
+        if ($parent) {
+            $localManifests += (Join-Path $parent 'MANIFEST.sha256')
+            $grandparent = Split-Path -Parent $parent
+            if ($grandparent) {
+                $localManifests += (Join-Path $grandparent 'MANIFEST.sha256')
+            }
+        }
+        foreach ($localManifest in $localManifests) {
+            if (Test-Path -LiteralPath $localManifest) {
+                $lines = Get-Content -LiteralPath $localManifest
+                break
+            }
         }
     }
     if (-not $lines) { return $null }

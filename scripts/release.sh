@@ -90,8 +90,9 @@ run_ci_tests() {
   node --check bot-sections/plugin.js
   node --check task-dock/plugin.js
   node --check computer-viewer/plugin.js
-  node --test bubble-mode/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
+  node --test bubble-mode/plugin.test.mjs bot-sections/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
   python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
+  python3 -m unittest discover -s texting-style/tests -p 'test_*.py'
   # -n 1: without it xargs passes every later path as an ARGUMENT to the
   # first script, so only one file was ever parsed.
   find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n 1 bash -n

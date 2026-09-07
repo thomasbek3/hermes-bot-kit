@@ -298,6 +298,11 @@ else
       install_file "${TMP_DIR}/${rel}" "${PLUGIN_ROOT}/${rel}"
     done < "${NEEDED_FILE}"
     if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
+      # The hiperf helper scripts verify hiperf-agent.py against
+      # MANIFEST.sha256, and fall back to a local copy when the network is
+      # unavailable. Without this they had nothing to fall back to: put the
+      # manifest one level above them, at desktop-plugins/MANIFEST.sha256.
+      install_file "${MANIFEST}" "${PLUGIN_ROOT}/MANIFEST.sha256"
       chmod +x "${PLUGIN_ROOT}/computer-viewer/"*.sh
     fi
   }

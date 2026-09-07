@@ -706,7 +706,6 @@ class Agent:
         self.queue: Optional[asyncio.Queue] = None
         self.drop_until_key = False
         self.last_stderr = ''
-        self.expected_exit = False
         self.spawn_mono = 0.0
         self.death_mono = 0.0
         self.need_restart_gap = False
@@ -728,22 +727,58 @@ class Agent:
         """True while (ws, gen) is still the attached client."""
         return gen == self.client_gen and ws is self.client
 
+    def pipeline_live(self, ws, gen: int, proc, queue) -> bool:
+        """True only while this exact (client, generation, process, queue) is live.
+
+        A reader task keeps running for a moment after its client is superseded
+        and its pipeline torn down; checking the captured identity (not just
+        self.*) is what keeps its late frames out of the new client's queue.
+        """
+        return self.owns(ws, gen) and self.proc is proc and self.queue is queue
+
     async def send_json(self, ws, payload: dict) -> None:
         await ws.send(json.dumps(payload, separators=(',', ':')))
 
-    async def probe_from(self, start_idx: int) -> Optional[Candidate]:
+    async def probe_from(
+        self, start_idx: int, ws=None, gen: Optional[int] = None
+    ) -> Optional[tuple[int, Candidate]]:
+        """Probe candidates from start_idx. PURE: returns (index, candidate).
+
+        Probing awaits, so the caller may be superseded while it runs. Writing
+        the winner straight into self.cursor/self.cached here would clobber the
+        choice of the client that took over; the caller re-checks ownership and
+        then calls commit_probe().
+        """
         n = len(self.candidates)
         for i in range(start_idx, n):
             cand = self.candidates[i]
-            ok = await self._dry_run(cand)
+            ok = await self._dry_run(cand, ws=ws, gen=gen)
             if ok:
-                self.cursor = i
-                self.cached = cand
                 LOG.info('pipeline ready: %s', cand.name)
-                return cand
+                return i, cand
             LOG.info('dry-run failed: %s', cand.name)
-        self.cached = None
         return None
+
+    def commit_probe(self, found: Optional[tuple[int, Candidate]]) -> None:
+        """Publish a probe_from() result. Callers check owns() first."""
+        if found is None:
+            self.cached = None
+            return
+        self.cursor, self.cached = found
+
+    def record_stderr(
+        self, text: str, ws=None, gen: Optional[int] = None, proc=None
+    ) -> None:
+        """Publish one ffmpeg stderr line as the current diagnostic.
+
+        Guarded so a superseded client's ffmpeg (or a leftover dry-run) cannot
+        overwrite the live client's error text between the read and the write.
+        """
+        if gen is not None and not self.owns(ws, gen):
+            return
+        if proc is not None and self.proc is not proc:
+            return
+        self.last_stderr = text
 
     async def _reap(self, proc: asyncio.subprocess.Process, stderr_task: Optional[asyncio.Task] = None) -> None:
         if proc.returncode is None:
@@ -758,7 +793,7 @@ class Agent:
             except Exception:
                 stderr_task.cancel()
 
-    async def _dry_run(self, cand: Candidate) -> bool:
+    async def _dry_run(self, cand: Candidate, ws=None, gen: Optional[int] = None) -> bool:
         argv = dry_run_argv(cand.argv)
         LOG.info('dry-run: %s', ' '.join(argv))
         try:
@@ -771,7 +806,7 @@ class Agent:
         except OSError as exc:
             LOG.warning('spawn failed (%s): %s', cand.name, exc)
             return False
-        stderr_task = asyncio.create_task(self._drain_stderr(proc, tag='dry-run'))
+        stderr_task = asyncio.create_task(self._drain_stderr(proc, tag='dry-run', ws=ws, gen=gen))
         chunk = await read_stdout_once(proc, STALL_TIMEOUT_S)
         if chunk:
             await self._reap(proc, stderr_task)
@@ -786,7 +821,14 @@ class Agent:
         await self._reap(proc, stderr_task)
         return False
 
-    async def _drain_stderr(self, proc: asyncio.subprocess.Process, tag: str = 'ffmpeg') -> None:
+    async def _drain_stderr(
+        self,
+        proc: asyncio.subprocess.Process,
+        tag: str = 'ffmpeg',
+        ws=None,
+        gen: Optional[int] = None,
+        live_proc: bool = False,
+    ) -> None:
         if proc.stderr is None:
             return
         try:
@@ -796,7 +838,7 @@ class Agent:
                     break
                 text = line.decode('utf-8', 'replace').rstrip()
                 if text:
-                    self.last_stderr = text
+                    self.record_stderr(text, ws=ws, gen=gen, proc=proc if live_proc else None)
                     LOG.info('%s: %s', tag, text)
         except Exception as exc:
             LOG.info('stderr drain ended: %s', exc)
@@ -812,12 +854,20 @@ class Agent:
         self.queue = None
         tasks = list(self.tasks)
         self.tasks = []
-        self.expected_exit = True
         if q is not None:
             try:
                 q.put_nowait(None)
             except Exception:
                 pass
+        # Cancel the readers BEFORE awaiting the process. Awaiting first left
+        # this pipeline's stdout reader running for seconds while a new client
+        # attached, and one of its frames was delivered through the new
+        # client's queue. Anything that survives the cancel still has to get
+        # past pipeline_live() before it can write.
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         if proc is not None and proc.returncode is None:
             kill_process(proc)
             try:
@@ -828,12 +878,6 @@ class Agent:
                     await asyncio.wait_for(proc.wait(), timeout=2)
                 except Exception:
                     pass
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        # expected_exit is only ever raised by this call, so always clear it.
-        self.expected_exit = False
         if gen is None or self.owns(ws, gen):
             self.drop_until_key = False
 
@@ -869,13 +913,15 @@ class Agent:
                     return 'superseded'
             self.need_restart_gap = False
         if self.cached is None:
-            await self.probe_from(self.cursor)
+            found = await self.probe_from(self.cursor, ws=ws, gen=gen)
             if not self.owns(ws, gen):
                 return 'superseded'
+            self.commit_probe(found)
         if self.cached is None:
-            await self.probe_from(0)
+            found = await self.probe_from(0, ws=ws, gen=gen)
             if not self.owns(ws, gen):
                 return 'superseded'
+            self.commit_probe(found)
         if self.cached is None:
             return 'capture-failed'
         tried = 0
@@ -924,16 +970,13 @@ class Agent:
             return 'superseded'
         self.proc = proc
         self.spawn_mono = time.monotonic()
-        stderr_task = asyncio.create_task(self._drain_stderr(proc), name='stderr')
+        stderr_task = asyncio.create_task(
+            self._drain_stderr(proc, ws=ws, gen=gen, live_proc=True), name='stderr'
+        )
         self.tasks = [stderr_task]
         first = await read_stdout_once(proc, STALL_TIMEOUT_S)
         if not self.owns(ws, gen):
-            LOG.info('stale pipeline (gen %s); killing the process it created', gen)
-            if self.proc is proc:
-                self.proc = None
-            kill_process(proc, force=True)
-            stderr_task.cancel()
-            return 'superseded'
+            return self._abandon(proc, stderr_task, gen)
         if not first:
             if proc.returncode is None:
                 try:
@@ -944,8 +987,10 @@ class Agent:
                 log_capture_stall('capture', cand.name)
             await self.stop_ffmpeg(ws, gen)
             return 'stall'
-        self.queue = asyncio.Queue(maxsize=QUEUE_MAX)
-        self.drop_until_key = False
+        # Kept local until the last ownership check: publishing the queue
+        # before the hello await let a superseded attempt leave its queue
+        # standing as self.queue.
+        queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX)
         assembler = AuAssembler()
         t0 = time.monotonic()
         try:
@@ -955,26 +1000,37 @@ class Agent:
             await self.stop_ffmpeg(ws, gen)
             return 'capture-failed'
         if not self.owns(ws, gen):
-            LOG.info('stale pipeline (gen %s); killing the process it created', gen)
-            if self.proc is proc:
-                self.proc = None
-            kill_process(proc, force=True)
-            stderr_task.cancel()
-            return 'superseded'
+            return self._abandon(proc, stderr_task, gen)
+        self.queue = queue
+        self.drop_until_key = False
         self.tasks = [
             stderr_task,
             asyncio.create_task(
-                self._read_stdout(ws, proc, assembler, t0, initial=first), name='stdout'
+                self._read_stdout(ws, gen, proc, queue, assembler, t0, initial=first),
+                name='stdout',
             ),
-            asyncio.create_task(self._writer(ws, self.queue), name='writer'),
-            asyncio.create_task(self._watch_proc(ws, proc), name='watch'),
+            asyncio.create_task(self._writer(ws, gen, queue), name='writer'),
+            asyncio.create_task(self._watch_proc(ws, gen, proc), name='watch'),
         ]
         return None
+
+    def _abandon(self, proc: asyncio.subprocess.Process, stderr_task: asyncio.Task, gen: int) -> str:
+        """Superseded mid-spawn: drop only what THIS attempt created."""
+        LOG.info('stale pipeline (gen %s); killing the process it created', gen)
+        if self.proc is proc:
+            self.proc = None
+        if self.tasks == [stderr_task]:
+            self.tasks = []
+        stderr_task.cancel()
+        kill_process(proc, force=True)
+        return 'superseded'
 
     async def _read_stdout(
         self,
         ws,
+        gen: int,
         proc: asyncio.subprocess.Process,
+        queue: asyncio.Queue,
         assembler: AuAssembler,
         t0: float,
         initial: bytes = b'',
@@ -984,6 +1040,8 @@ class Agent:
         buf = initial or b''
         try:
             while True:
+                if not self.pipeline_live(ws, gen, proc, queue):
+                    return
                 nals, buf = split_annexb(buf)
                 now = time.monotonic()
                 ts = int((now - t0) * 1_000_000)
@@ -994,7 +1052,7 @@ class Agent:
                     if emitted is None:
                         continue
                     au_bytes, is_key = emitted
-                    await self._enqueue(au_bytes, is_key, ts)
+                    await self._enqueue(ws, gen, proc, queue, au_bytes, is_key, ts)
                 if proc.stdout is None:
                     break
                 chunk = await proc.stdout.read(65536)
@@ -1010,16 +1068,28 @@ class Agent:
                     if ts < 0:
                         ts = 0
                     au_bytes, is_key = flushed
-                    await self._enqueue(au_bytes, is_key, ts)
+                    await self._enqueue(ws, gen, proc, queue, au_bytes, is_key, ts)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             LOG.info('stdout reader ended: %s', exc)
 
-    async def _enqueue(self, au_bytes: bytes, is_key: bool, ts: int) -> None:
-        q = self.queue
-        if q is None:
+    async def _enqueue(
+        self,
+        ws,
+        gen: int,
+        proc: asyncio.subprocess.Process,
+        queue: asyncio.Queue,
+        au_bytes: bytes,
+        is_key: bool,
+        ts: int,
+    ) -> None:
+        # One gate for the whole body: this coroutine never awaits, so nothing
+        # can be superseded between here and the last write. Both the frame and
+        # the drop-state below belong to the captured pipeline only.
+        if not self.pipeline_live(ws, gen, proc, queue):
             return
+        q = queue
         flags = 1 if is_key else 0
         packet = struct.pack('>BQ', flags, ts) + au_bytes
         if self.drop_until_key:
@@ -1050,13 +1120,13 @@ class Agent:
                 except asyncio.QueueFull:
                     pass
 
-    async def _writer(self, ws, queue: asyncio.Queue) -> None:
+    async def _writer(self, ws, gen: int, queue: asyncio.Queue) -> None:
         try:
             while True:
                 item = await queue.get()
                 if item is None:
                     return
-                if self.client is not ws:
+                if not self.owns(ws, gen) or self.queue is not queue:
                     return
                 await ws.send(item)
         except asyncio.CancelledError:
@@ -1064,19 +1134,22 @@ class Agent:
         except Exception as exc:
             LOG.info('writer ended: %s', exc)
 
-    async def _watch_proc(self, ws, proc: asyncio.subprocess.Process) -> None:
+    async def _watch_proc(self, ws, gen: int, proc: asyncio.subprocess.Process) -> None:
         try:
             rc = await proc.wait()
         except asyncio.CancelledError:
             raise
-        if self.expected_exit:
-            return
+        # Process identity is the whole guard: stop_ffmpeg() clears self.proc
+        # before it kills anything, so a deliberate teardown (and any older
+        # pipeline's exit) lands here with self.proc already changed. That
+        # replaces the global expected_exit flag, which a second client could
+        # see raised by the first client's teardown.
         if self.proc is not proc:
             return
         LOG.warning('ffmpeg exited rc=%s last=%s', rc, self.last_stderr)
         self.proc = None
         self.advance_after_death()
-        if self.client is ws:
+        if self.owns(ws, gen):
             try:
                 await self.send_json(
                     ws,
@@ -1247,7 +1320,12 @@ async def amain(args: argparse.Namespace) -> None:
         LOG.error('no pipeline candidates for this OS')
         sys.exit(2)
     LOG.info('probing %s candidates', len(agent.candidates))
-    await agent.probe_from(0)
+    # Same rule as the per-client probes: probe purely, then commit. Nothing
+    # can be attached yet (the server is not listening), but if that ever
+    # changes the commit must not overwrite a real client's choice.
+    found = await agent.probe_from(0)
+    if agent.client is None:
+        agent.commit_probe(found)
     if agent.cached is None:
         LOG.warning('no pipeline passed dry-run; agent will answer capture-failed until one works')
 
