@@ -20,7 +20,7 @@ TOKEN_FILE="${HERMES_CV}/hiperf-token.txt"
 UNIT_DIR="${HOME}/.config/systemd/user"
 UNIT_FILE="${UNIT_DIR}/hermes-cv-hiperf.service"
 LISTEN_PORT=6090
-RAW_REPO_URL='https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/computer-viewer'
+RAW_REPO_URL='https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.2/computer-viewer'
 WEBSOCKETS_PIN='websockets>=13,<16'
 
 echo "Computer viewer - high-performance stream (Linux)"

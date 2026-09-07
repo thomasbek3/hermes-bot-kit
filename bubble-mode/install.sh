@@ -2,12 +2,12 @@
 # Install Bubble Mode only. Thin wrapper over the kit's root install.sh so the
 # same pinned tag + MANIFEST.sha256 verification applies.
 #
-#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.1/bubble-mode/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.2/bubble-mode/install.sh | bash
 #
 # or from a clone:  bash bubble-mode/install.sh
 set -euo pipefail
 
-KIT_REF="${KIT_REF:-v2026.09.07.1}"
+KIT_REF="${KIT_REF:-v2026.09.07.2}"
 export KIT_REF
 export KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1
 
