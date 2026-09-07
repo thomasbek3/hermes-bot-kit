@@ -1,5 +1,38 @@
 # Changelog (kit)
 
+## 2026-09-07 — release v2026.09.07.1: three-reviewer hardening round
+
+Findings from Claude, Codex (GPT-6 Astra) and Grok 4.6 passes, built by Opus,
+reviewed and re-reviewed. Highlights:
+
+- **Computer viewer.** noVNC bundle now actually loads from `vendor/` (the
+  v2026.09.06/07 plugin looked one folder up and silently used the CDN); a
+  tampered or unloadable bundle fails closed and is never cached; the status
+  line and error bodies name the real reason. RSA server keys are pinned on
+  first contact and a changed key disconnects (Advanced: "Forget pinned
+  server key"); pins survive probe success and auto-reconnect. The HD token
+  travels as the first WebSocket frame, not in the URL. Bare hostnames are no
+  longer mistaken for API keys; public `host:port` never falls back to a
+  plain-http page; the unauthenticated session fetch refuses redirects;
+  remote clipboard sync is gated on the per-computer clipboard switch. The
+  H.264 Exp-Golomb reader was returning inflated values (JS and Python).
+- **HD agent + host scripts.** In-band auth frame (query-string token still
+  accepted, deprecated); ownership-gated pipeline so a superseded viewer can
+  never touch the live one; `hiperf-agent.py` download is digest-checked
+  against the manifest (which the kit now installs alongside the plugins);
+  Linux upgrades restart live units; Windows installers are pinned by hash
+  (TightVNC, UltraVNC, Amyuni ZIP + extracted exe).
+- **Bubble Mode / Task Dock / Bot Sections.** Settings reads cannot undo a
+  newer toggle; decorated captions ("Bot Chat, 2 unread") still match; theme
+  tokens instead of hard-coded dark colours; dead detection code removed;
+  task ages no longer freeze; a module constant that shadowed `CSS.escape`
+  renamed in all three plugins; first bot-sections tests; shared Bot Chat
+  gate test matrix.
+- **Python plugins.** Orgo control lock is cancellation-safe; screenshot size
+  cap enforced while streaming; texting-style retries failed title lookups.
+- **CI.** Syntax check parses every shell file; PowerShell files parsed on
+  windows-latest; all suites run (58 JS, 26 HD agent, 27 orgo, 7 texting).
+
 ## 2026-09-06 — release v2026.09.06: pinned installs, verified manifest, vendored noVNC (issues #5 #10)
 
 - **Installs are pinned and verified** (#10, #5). Every one-liner fetches from
