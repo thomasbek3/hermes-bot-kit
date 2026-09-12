@@ -40,6 +40,16 @@ def _load_plugin_modules():
 
 schemas, tools = _load_plugin_modules()
 
+# write_profile_computer_id edits config.yaml through PyYAML. The plugin says so
+# itself (OrgoAgentRequestError "PyYAML is required to update config.yaml"), so a
+# machine without it skips that one case instead of failing the suite.
+try:  # pragma: no cover - import probe
+    import yaml as _yaml  # noqa: F401
+
+    _HAS_YAML = True
+except ImportError:  # pragma: no cover
+    _HAS_YAML = False
+
 
 PIN = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 TINY_JPEG = bytes.fromhex(
@@ -639,6 +649,7 @@ class HandsTests(unittest.TestCase):
     def test_identity_omits_screen_when_unpinned(self):
         self.assertNotIn("Your screen", tools.computer_identity_section())
 
+    @unittest.skipUnless(_HAS_YAML, "PyYAML is required to write config.yaml")
     def test_cli_set_writes_screen(self):
         home = Path(self._home.name) / "profiles" / "parker"
         home.mkdir(parents=True)

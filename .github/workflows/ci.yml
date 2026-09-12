@@ -31,6 +31,9 @@ jobs:
       - name: Plugin unit tests
         run: node --test bubble-mode/plugin.test.mjs bot-sections/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
 
+      - name: Install PyYAML (the orgo-computer config writer needs it)
+        run: python3 -m pip install --disable-pip-version-check --quiet pyyaml
+
       - name: Orgo computer plugin tests
         run: python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
 
