@@ -392,15 +392,12 @@ plugin verifies that file's SHA-256 before loading it, and only then falls back
 to the CDN. A copy left next to `plugin.js` by an older release is still read
 (and hash-checked) if `vendor/` has none.
 
-Named Hermes profile:
-
-```bash
-mkdir -p ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/vendor
-cp plugin.js ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/plugin.js
-cp vendor/novnc-rfb.mjs ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/vendor/novnc-rfb.mjs
-cp connect-mac.sh connect-linux.sh hiperf-mac.sh hiperf-agent.py ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/
-chmod +x ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/connect-*.sh ~/.hermes/profiles/<name>/desktop-plugins/computer-viewer/hiperf-*.sh
-```
+One install covers every profile — do not copy this into
+`~/.hermes/profiles/<name>/desktop-plugins/`. Since hermes-agent `284d220ba4`
+the desktop-plugin root is APP-level (`electron/desktop-plugins-root.ts`:
+`desktopPluginsRoot()` resolves `<HERMES_HOME>/desktop-plugins` and
+`migrateProfileScopedDesktopPlugins()` moves any profile-scoped leftovers up on
+the next launch). The Orgo agent plugin below is the per-profile half.
 
 Windows (typical):
 

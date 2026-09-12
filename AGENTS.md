@@ -19,11 +19,21 @@ KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fs
 KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.2/install.sh)"   # Task Dock only
 ```
 
-Into a named Hermes profile instead of the default home:
+Into a non-default Hermes home (a separate `~/.hermes`-shaped tree, e.g. a
+second install):
 
 ```bash
-HERMES_HOME="$HOME/.hermes/profiles/<name>" bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.2/install.sh)"
+HERMES_HOME="/path/to/other/.hermes" bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.2/install.sh)"
 ```
+
+Do **not** point `HERMES_HOME` at `~/.hermes/profiles/<name>` for these desktop
+plugins. Since hermes-agent `284d220ba4` the desktop-plugin root is APP-level,
+never profile-scoped (`electron/desktop-plugins-root.ts`): a desktop plugin
+extends the app, not an agent, so one install serves every profile, and
+`migrateProfileScopedDesktopPlugins()` MOVES anything left in
+`profiles/<name>/desktop-plugins/` up to `~/.hermes/desktop-plugins/` on the
+next launch. The Python halves (`orgo-computer`, `texting-style`) are still
+per-profile — their own installers handle that.
 
 The script exits non-zero and installs nothing if a downloaded plugin fails
 its sanity check (`node --check` + content marker).

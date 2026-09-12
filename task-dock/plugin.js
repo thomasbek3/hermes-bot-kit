@@ -26,6 +26,24 @@ const SESSION_TILE_TAB_PREFIX = 'session-tile:'
 const PANE_HIDDEN_ATTR = 'data-pane-hidden'
 
 const TASKS_HEADER_RE = /Tasks\s+(\d+)\s*\/\s*(\d+)/
+/**
+ * A real stock widget header IS the label — `Tasks ${done}/${total}` (plus the
+ * running spinner's braille frames, which trail it). Anchoring at the start is
+ * what separates a header from a sentence that merely mentions a count.
+ */
+const TASKS_HEADER_LABEL_RE = /^Tasks\s+\d+\s*\/\s*\d+/
+/**
+ * The app's OWN widgets that share the composer status stack with the stock
+ * Tasks list: the session automation controls (goal / loop / heartbeat) and the
+ * subagent roster. Their bodies render user- and agent-authored prose inside
+ * plain `<span>`s — a goal criterion, a loop's `until` clause — so text like
+ * "Until condition: Tasks 3/3 done" used to read as a Tasks header to the scan
+ * below, which then hid that control's body and published a dock built from
+ * someone's sentence. Task Dock owns the stock Tasks list and nothing else in
+ * that stack: it yields to these, never the reverse.
+ */
+const FOREIGN_WIDGET_SELECTOR =
+  '[data-slot^="session-control-"],[data-slot="composer-subagents"],[data-slot="composer-subagent-detail"],[data-slot="subagent-transcript"]'
 const CAPTURE_MS = 1000
 const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000
 const ITEM_TEXT_MAX = 300
@@ -289,6 +307,30 @@ function ownDock(el) {
   return Boolean(el && typeof el.closest === 'function' && el.closest(`[${DOCK_ATTR}]`))
 }
 
+/** True when `el` sits inside one of the app's own status-stack widgets. */
+function inForeignWidget(el) {
+  if (!el || typeof el.closest !== 'function') return false
+  try {
+    return Boolean(el.closest(FOREIGN_WIDGET_SELECTOR))
+  } catch {
+    // An older engine without `[attr^=]` support in closest(): behave exactly
+    // as before rather than refusing to capture anything.
+    return false
+  }
+}
+
+/** True when `el` CONTAINS one of the app's own widgets — a section resolved
+ *  that wide is not the Tasks widget, and hiding it would take a session
+ *  control down with it. */
+function wrapsForeignWidget(el) {
+  if (!el || typeof el.querySelector !== 'function') return false
+  try {
+    return Boolean(el.querySelector(FOREIGN_WIDGET_SELECTOR))
+  } catch {
+    return false
+  }
+}
+
 function paneStoreGet(paneId) {
   if (typeof host.paneVisibility !== 'function') return undefined
   try {
@@ -480,10 +522,10 @@ function findTasksHeaders(root) {
   for (const nodes of passes) {
     const matches = []
     for (const el of nodes) {
-      if (ownDock(el) || inHiddenPane(el)) continue
+      if (ownDock(el) || inHiddenPane(el) || inForeignWidget(el)) continue
       const text = normText(el.textContent)
       if (text.length > 64) continue
-      if (TASKS_HEADER_RE.test(text)) matches.push(el)
+      if (TASKS_HEADER_LABEL_RE.test(text)) matches.push(el)
     }
     if (matches.length) return matches
   }
@@ -675,7 +717,17 @@ function clearLiveSources() {
 
 function markLiveSources(sections) {
   const next = new Set(
-    Array.from(sections || []).filter(section => section && typeof section.setAttribute === 'function')
+    Array.from(sections || []).filter(
+      section =>
+        section &&
+        typeof section.setAttribute === 'function' &&
+        // Last line of defence: never hide a node that carries one of the app's
+        // own widgets. If the stock markup ever reshapes so the resolved
+        // "section" is a shared ancestor, the dock duplicates the list rather
+        // than swallowing the session controls.
+        !inForeignWidget(section) &&
+        !wrapsForeignWidget(section)
+    )
   )
   for (const source of sourceSectionEls) {
     if (next.has(source)) continue
