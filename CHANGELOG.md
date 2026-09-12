@@ -1,5 +1,33 @@
 # Changelog (kit)
 
+## 2026-09-12 — release v2026.09.12: verified against Hermes 0.21.2
+
+Re-verified the whole kit against hermes-agent `284d220ba4` (v0.21.2, 2026-09-11),
+1221 commits on from the previous stamp. One real collision found and fixed.
+
+- **Task Dock yields to the new composer session controls.** Hermes 0.21.2 added
+  session automation controls (goal / loop / heartbeat) into the same composer
+  status stack that carries the stock Tasks widget. Task Dock scanned that whole
+  subtree with an unanchored `Tasks N/M` match against text, and those controls
+  render user- and agent-authored prose in plain spans — so a loop "until" clause
+  or a goal criterion reading "Tasks 3/3 done" was taken for a Tasks header, the
+  control's body was hidden by the plugin's own rule, and a dock was published
+  from someone's sentence. Header matching now anchors, the app's own status-stack
+  widgets are skipped, and the hide pass refuses any node inside or containing
+  one. Task Dock owns the stock Tasks list and nothing else in that stack.
+- **Computer viewer:** `pl-0.5` went unused upstream, so it no longer exists in
+  the app's compiled stylesheet and had silently zeroed one button's padding;
+  swapped for `px-0.5` (same geometry).
+- **Docs:** the desktop-plugin root is no longer profile-scoped — Hermes now
+  resolves `<HERMES_HOME>/desktop-plugins` and migrates anything left under
+  `profiles/*`. AGENTS.md and the computer-viewer README said otherwise. The
+  Python halves are still per-profile.
+- Unchanged and re-confirmed against the new build: zero SDK exports removed, the
+  plugin contract, the runtime loader's import allowlist, the
+  `desktopPluginsRoot` / `readPluginSource` bridge the vendored noVNC loader
+  needs, every DOM anchor and `data-slot`, the Bot Chat caption and the
+  routines-pane gate, and both Python plugins' doctor runs.
+
 ## 2026-09-07 — release v2026.09.07.2: per-agent Orgo screens
 
 - **orgo-computer:** a profile can pin one of a computer's (up to four) screens
