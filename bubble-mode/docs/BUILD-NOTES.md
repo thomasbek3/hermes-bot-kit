@@ -5,6 +5,8 @@ Plugin idioms: `~/.hermes/desktop-plugins/computer-viewer/plugin.js`, bundled `s
 
 This plugin cannot import hermes-bots module state. Every signal below is something a disk plugin can observe through `@hermes/plugin-sdk` or the live DOM.
 
+**Gate reality at hermes-agent `284d220ba4` (2026-09-11):** the Bots home pane is gone upstream, so step 2 below (`plugin-workspace:hermes-bots:home`) is history, not a live check — the shipped gate is `hermes-bots:pane` visible, no group tab fronted, then the canonical "Bot Chat" tab or the `hermes-bots:routines` ownership tile. Also new upstream: session automation controls (goal / loop / heartbeat) now share `[data-slot="composer-status-stack"]` with the stock Tasks widget; kit plugins must leave anything under `[data-slot^="session-control-"]` alone.
+
 ---
 
 ## 1. Why hermes-bots' own atoms are unreachable

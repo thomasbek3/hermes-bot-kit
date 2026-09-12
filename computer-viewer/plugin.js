@@ -4701,7 +4701,13 @@ function ComputerSwitcher({ endpoints, current, conn }) {
         title: conn.desktopName || undefined,
         'aria-label': 'Switch computer',
         className:
-          'flex min-w-0 flex-1 items-center gap-1 rounded-sm border-0 bg-transparent py-0.5 pl-0.5 pr-1 text-left text-[0.72rem] hover:bg-(--ui-surface-hover)'
+          // `px-0.5 pr-1`, not `pl-0.5 pr-1`: a disk plugin's classes are never
+          // scanned by the app's Tailwind build, so only utilities the app
+          // itself still uses exist in the compiled sheet. `pl-0.5` went unused
+          // upstream (gone at hermes-agent 284d220ba4), which silently zeroed
+          // this padding; `px-0.5` is still emitted and `pr-1` overrides its
+          // right half, so the geometry is unchanged.
+          'flex min-w-0 flex-1 items-center gap-1 rounded-sm border-0 bg-transparent py-0.5 px-0.5 pr-1 text-left text-[0.72rem] hover:bg-(--ui-surface-hover)'
       },
       el(StatusDot, { tone: toneFor(conn.phase, conn.attempt) }),
       el('span', { className: 'min-w-0 truncate font-medium' }, nameLabel),

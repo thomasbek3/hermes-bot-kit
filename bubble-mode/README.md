@@ -83,7 +83,7 @@ makes the bot *write* like a texter in the same chats this plugin makes
 
 ## Compatibility & upstream state
 
-- **Built and verified against Hermes Desktop v0.20.5 AND v0.20.6+ (macOS, 2026-09)** — 2.1.1 carries dual detection: the 0.20.5 tab-strip path and the 0.20.6 Bot Mode redesign path (workspace-hosted chat, gated on the stable Scheduled Jobs ownership tile so transcript remounts cannot flash the styling off); also verified on a 2026-09-05 main-branch build (hermes-agent `9dd6634c56`), and upstream head (`14ca27fa06`, 2026-09-06) has an identical plugin contract.
+- **Built and verified against Hermes Desktop v0.20.5 AND v0.20.6+ (macOS, 2026-09)** — 2.1.1 carries dual detection: the 0.20.5 tab-strip path and the 0.20.6 Bot Mode redesign path (workspace-hosted chat, gated on the stable Scheduled Jobs ownership tile so transcript remounts cannot flash the styling off); also verified on a 2026-09-11 main-branch build (hermes-agent `284d220ba4`, v0.21.2) — the SDK exports, plugin contract, runtime loader, and every DOM anchor this plugin reads are unchanged there, and the gate is untouched.
   Also verified on a build carrying the pending upstream pane fixes
   ([hermes-agent#95956](https://github.com/NousResearch/hermes-agent/pull/95956),
   [hermes-agent#95352](https://github.com/NousResearch/hermes-agent/pull/95352))
