@@ -62,7 +62,7 @@ const PASSWORD_CAVEAT =
 const MIXED_CONTENT_HINT = 'Insecure ws:// to a public host will likely be blocked. Use wss://.'
 const PUBLIC_HOST_SECURE_HINT =
   'A host on the public internet needs wss:// (or an https:// viewer page) — plain ws:// and http:// are refused.'
-const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.2/computer-viewer'
+const RAW_REPO_URL = 'https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/computer-viewer'
 const SNAPSHOT_CAP = 8
 const HIPERF_BACKOFF_MS = [2000, 4000, 8000]
 const HIPERF_IDLE = { phase: 'off', code: null, fps: 0, mbps: 0, rtt: 0, url: '' }

@@ -27,7 +27,7 @@ every visible item is completed/cancelled), the dock auto-hides.
 Covered by the kit installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.07.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh | bash
 ```
 
 Skip just this plugin: `KIT_SKIP_TASK_DOCK=1` in front of that command.
