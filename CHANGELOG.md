@@ -1,5 +1,17 @@
 # Changelog (kit)
 
+## Unreleased — connection-qualified Computer Viewer bindings
+
+- Computer Viewer now binds automatic endpoints by focused Desktop
+  `connectionId::profile`, so same-name profiles on different registered
+  connections do not collide.
+- Existing profile-only mappings remain a migration fallback; qualified
+  mappings take precedence, and unavailable focused ownership uses only the
+  configured global endpoint. For a qualified key, a string selects an endpoint,
+  `null` explicitly selects the global endpoint, and `false` explicitly assigns
+  no computer. An absent key uses the profile-only mapping before global fallback;
+  older profile-only scopes also accept `false` as no computer.
+
 ## 2026-09-12 — release v2026.09.12: verified against Hermes 0.21.2
 
 Re-verified the whole kit against hermes-agent `284d220ba4` (v0.21.2, 2026-09-11),

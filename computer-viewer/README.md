@@ -208,6 +208,12 @@ drives another. Pair each profile with the same machine in the viewer's
 per-bot endpoint and you get the full picture — watch the pane while the bot
 works inside it.
 
+Bindings selected for a connection-qualified owner use three explicit states:
+`false` means **No computer assigned** (fail closed), `null` means **Use global
+default**, and an absent key falls back to the older profile-only mapping before
+using the global default. Older profile-only scopes accept the same `false`
+value; choosing global there keeps the existing delete-on-global behavior.
+
 One Orgo computer can run up to four screens, so several bots can share one
 box without stepping on each other. Pin a screen per profile with the plugin
 config `screen` (or the env var `ORGO_SCREEN`, or
@@ -818,9 +824,24 @@ Iframe expanded controls are Reload, Open in browser, and Collapse.
 
 ### Per-bot endpoints
 
-Effective endpoint = `perBotEndpoint[focusedProfile] ?? globalEndpointId`.
-Switching the focused chat to a profile that resolves to a **different**
-endpoint disconnects and reconnects. The same endpoint is left alone.
+The normal bind scope is the focused Desktop owner, written as
+`perBotEndpoint[connectionId::profile]`. For example, `gateway-a::default`
+and `gateway-b::default` are independent bindings even though both profiles are
+named `default`. The settings label shows the selected `connection / profile`
+scope.
+
+Resolution is connection-qualified binding first, then the legacy
+`perBotEndpoint[profile]` mapping, then `globalEndpointId`. Existing profile-only
+mappings therefore keep working until you replace them. The global default
+remains available from Settings. If a newer SDK reports an absent or ambiguous
+focused owner, the plugin uses only the configured global default rather than
+using unrelated connection/profile atoms. A global default can still connect;
+choose **No computer assigned** for a known owner to prevent a connection.
+
+On older SDKs without `focusedSessionOwner`, the existing focused-profile/
+active-profile behavior remains in use and new binds use the profile-only key.
+Switching the focused owner to a different endpoint disconnects and reconnects;
+the same endpoint is left alone.
 
 `autoConnect` (default on) connects when the pane becomes visible and
 disconnects when it is hidden or the plugin is disabled. An explicit

@@ -5,6 +5,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- Automatic endpoint bindings use the focused Desktop connection and profile,
+  separating same-name profiles on different gateways. Existing profile-only
+  bindings remain a compatibility fallback. Explicit `null` selects the global
+  default and `false` assigns no computer.
+
 ### Security
 
 - Bearer tokens go only to the configured API origin, over https unless the

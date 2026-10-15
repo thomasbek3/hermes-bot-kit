@@ -981,18 +981,106 @@ function phaseLine(state) {
   }
 }
 
-function readProfileName() {
+function bindingKey(owner) {
+  return owner && owner.connectionId ? `${owner.connectionId}::${owner.profile}` : null
+}
+
+function globalEndpointId(settings) {
+  return settings && typeof settings.globalEndpointId === 'string' ? settings.globalEndpointId : null
+}
+
+function resolveBindingEndpointId(settings, owner) {
+  const mappings = settings && settings.perBotEndpoint && typeof settings.perBotEndpoint === 'object'
+    ? settings.perBotEndpoint
+    : {}
+  const qualifiedKey = bindingKey(owner)
+  if (qualifiedKey && Object.prototype.hasOwnProperty.call(mappings, qualifiedKey)) {
+    const value = mappings[qualifiedKey]
+    if (value === false) return null
+    if (value === null) return globalEndpointId(settings)
+    if (typeof value === 'string' && value) return value
+    return globalEndpointId(settings)
+  }
+  if (owner && mappings[owner.profile] === false) return null
+  if (owner && typeof mappings[owner.profile] === 'string' && mappings[owner.profile]) return mappings[owner.profile]
+  return globalEndpointId(settings)
+}
+
+function bindingSelectionValue(settings, scope) {
+  const mappings = settings && settings.perBotEndpoint && typeof settings.perBotEndpoint === 'object'
+    ? settings.perBotEndpoint
+    : {}
+  const key = bindingStorageKey(scope)
+  if (key && Object.prototype.hasOwnProperty.call(mappings, key)) {
+    const value = mappings[key]
+    if (value === false) return '__none__'
+    if (typeof value === 'string' && value) return value
+    return '__global__'
+  }
+  if (scope && scope.connectionId && Object.prototype.hasOwnProperty.call(mappings, scope.profile)) {
+    const legacyValue = mappings[scope.profile]
+    if (legacyValue === false) return '__none__'
+    if (typeof legacyValue === 'string' && legacyValue) return legacyValue
+  }
+  return '__global__'
+}
+
+function updateBindingSelection(settings, scope, value) {
+  const key = bindingStorageKey(scope)
+  if (!key) return settings
+  const perBotEndpoint = { ...(settings && settings.perBotEndpoint) }
+  if (value === '__none__') {
+    perBotEndpoint[key] = false
+  } else if (value === '__global__') {
+    if (scope && scope.connectionId) perBotEndpoint[key] = null
+    else delete perBotEndpoint[key]
+  } else {
+    perBotEndpoint[key] = value
+  }
+  return { ...settings, perBotEndpoint }
+}
+
+function readBindingScope() {
+  const ownerAtom = host.state.focusedSessionOwner
+  if (ownerAtom && typeof ownerAtom.get === 'function') {
+    try {
+      const owner = ownerAtom.get()
+      if (!owner || typeof owner !== 'object') return null
+      const connectionId = String(owner.connectionId || '').trim()
+      const profile = String(owner.profile || '').trim()
+      return connectionId && profile ? { connectionId, profile } : null
+    } catch {
+      return null
+    }
+  }
+  let profile = null
   try {
     const focused = host.state.focusedSessionProfile && host.state.focusedSessionProfile.get()
-    if (focused) return focused
+    if (focused) profile = focused
   } catch {
     /* older SDK */
   }
-  try {
-    return host.state.profile.get() || 'default'
-  } catch {
-    return 'default'
+  if (!profile) {
+    try {
+      profile = host.state.profile.get()
+    } catch {
+      profile = 'default'
+    }
   }
+  return { connectionId: null, profile: profile || 'default' }
+}
+
+function bindingStorageKey(scope) {
+  return scope && scope.connectionId ? bindingKey(scope) : scope && scope.profile
+}
+
+function bindingScopeLabel(scope) {
+  if (!scope) return 'current connection unavailable (global fallback)'
+  return scope.connectionId ? `${scope.connectionId} / ${scope.profile}` : scope.profile
+}
+
+function readProfileName() {
+  return readBindingScope()?.profile || 'default'
 }
 
 // useValue (@nanostores/react useStore) calls store.get() then store.listen().
@@ -1218,9 +1306,8 @@ function loadSettingsFrom(ctx) {
 
 function resolveEndpoint() {
   const settings = $settings.get()
-  const profile = readProfileName()
-  const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profile] : null
-  const id = overrideId || settings.globalEndpointId
+  const owner = readBindingScope()
+  const id = resolveBindingEndpointId(settings, owner)
   if (!id) return null
   return settings.endpoints.find(item => item.id === id) || null
 }
@@ -2583,6 +2670,9 @@ function attachEngine(ctx) {
       /* ignore */
     }
   })
+  if (host.state.focusedSessionOwner && typeof host.state.focusedSessionOwner.listen === 'function') {
+    unsubs.push(host.state.focusedSessionOwner.listen(() => syncConnection()))
+  }
   if (host.state.focusedSessionProfile && typeof host.state.focusedSessionProfile.listen === 'function') {
     unsubs.push(host.state.focusedSessionProfile.listen(() => syncConnection()))
   }
@@ -4177,7 +4267,7 @@ function EndpointEditor({
   )
 }
 
-function SettingsDialog({ profileName }) {
+function SettingsDialog() {
   const settings = useValue($settings)
   const ui = useValue($ui)
   const conn = useValue(engine.state)
@@ -4218,7 +4308,8 @@ function SettingsDialog({ profileName }) {
   }, [ui.settingsOpen, ui.settingsIntent])
 
   const editing = draft
-  const perBotValue = settings.perBotEndpoint[profileName] || '__global__'
+  const scope = readBindingScope()
+  const perBotValue = bindingSelectionValue(settings, scope)
 
   function saveAndConnect(nextDraft) {
     if (!nextDraft) return
@@ -4268,16 +4359,13 @@ function SettingsDialog({ profileName }) {
         el(DialogTitle, {}, 'Computer endpoints'),
         el(DialogDescription, {}, 'Paste a computer address to connect. Passwords stay in plugin storage.')
       ),
-      el(Field, { label: `Endpoint for ${profileName}` },
+      el(Field, { label: `Endpoint for ${bindingScopeLabel(scope)}` },
         el(
           Select,
           {
             value: perBotValue,
             onValueChange: value => {
-              const perBotEndpoint = { ...settings.perBotEndpoint }
-              if (!value || value === '__global__') delete perBotEndpoint[profileName]
-              else perBotEndpoint[profileName] = value
-              persistSettings({ ...settings, perBotEndpoint })
+              persistSettings(updateBindingSelection(settings, scope, value))
             }
           },
           el(SelectTrigger, { className: 'w-full' }, el(SelectValue, { placeholder: 'Use global default' })),
@@ -4285,6 +4373,7 @@ function SettingsDialog({ profileName }) {
             SelectContent,
             {},
             el(SelectItem, { key: '__global__', value: '__global__' }, 'Use global default'),
+            el(SelectItem, { key: '__none__', value: '__none__' }, 'No computer assigned'),
             settings.endpoints.map(item =>
               el(SelectItem, { key: item.id, value: item.id }, item.name || 'Untitled')
             )
@@ -4765,13 +4854,13 @@ function ComputerPane() {
   const hiperfState = useValue($hiperf)
   const lastFrames = useValue($lastFrames)
   const placeTick = useValue($placeTick)
-  const focused = useValue(safeAtom(host.state.focusedSessionProfile))
-  const profile = useValue(safeAtom(host.state.profile))
+  useValue(safeAtom(host.state.focusedSessionOwner))
+  useValue(safeAtom(host.state.focusedSessionProfile))
+  useValue(safeAtom(host.state.profile))
   const viewport = useValue(safeAtom(host.state.viewport))
-  const profileName = focused || profile || 'default'
-  const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profileName] : null
-  const endpointId = overrideId || settings.globalEndpointId
-  const endpoint = endpointId ? settings.endpoints.find(item => item.id === endpointId) || null : null
+  const scope = readBindingScope()
+  const profileName = bindingScopeLabel(scope)
+  const endpoint = resolveEndpoint()
   const slotRef = useRef(null)
   const iframeMode = Boolean(endpoint && endpoint.mode === 'iframe')
   const aspect = conn.fbW && conn.fbH ? `${conn.fbW} / ${conn.fbH}` : '16 / 10'
@@ -4953,19 +5042,17 @@ function ComputerPane() {
           )
         : null
     ),
-    el(SettingsDialog, { profileName })
+    el(SettingsDialog)
   )
 }
 
 function ComputerStatusItem() {
   const conn = useValue(engine.state)
   const settings = useValue($settings)
-  const focused = useValue(safeAtom(host.state.focusedSessionProfile))
-  const profile = useValue(safeAtom(host.state.profile))
-  const profileName = focused || profile || 'default'
-  const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profileName] : null
-  const endpointId = overrideId || settings.globalEndpointId
-  const endpoint = endpointId ? settings.endpoints.find(item => item.id === endpointId) || null : null
+  useValue(safeAtom(host.state.focusedSessionOwner))
+  useValue(safeAtom(host.state.focusedSessionProfile))
+  useValue(safeAtom(host.state.profile))
+  const endpoint = resolveEndpoint()
   const iframeMode = Boolean(endpoint && endpoint.mode === 'iframe')
   return el(
     Fragment,
