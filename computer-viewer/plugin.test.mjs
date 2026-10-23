@@ -573,7 +573,7 @@ test('classifyAddress treats a bare hostname as a host, not an API key', () => {
   assert.equal(host.kind, 'probe')
   assert.equal(host.connectEnabled, true)
 
-  const key = t.classifyAddress('sk_live_abc123456789')
+  const key = t.classifyAddress('sk_test_FAKE')
   assert.equal(key.kind, 'api-key')
 })
 
