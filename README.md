@@ -44,6 +44,13 @@ Desktop plugins plus an optional agent plugin, one install:
 <p align="center"><em>The kit in one screen: iMessage-style Bot Chat, named roster sections, and the live Computer pane.</em></p>
 
 
+## Experimental inspiration
+
+[Inner Circle](inner-circle/) is a personal, bot-centric Hermes preset shared
+for inspiration: sage chat, portrait folders and less session clutter. The
+complete implementation is maintained separately; this is an invitation to
+review and reuse it if useful. It is opt-in and not part of this installer.
+
 ## Install
 
 One command, the desktop plugins (idempotent, no sudo, agents can run it unattended):
