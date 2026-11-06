@@ -428,6 +428,7 @@ function rowIdentities(btn) {
       break
     }
   }
+  if (parts.length >= 4 && ids.length) return ids
   const span = btn.querySelector('span.font-medium')
   push(span && span.textContent)
   if (parts[0] && parts[0].charAt(0) !== '@') push(parts[0])
