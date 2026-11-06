@@ -85,7 +85,8 @@ coding agents read that file automatically.)
 
 - **Hermes Desktop ≥ 0.20.5**. Source contracts re-checked against stable
   **v0.23.0** (`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`, 2026-11-07).
-  See [compatibility and verification limits](docs/COMPATIBILITY.md).
+  See [compatibility, upgrade notes and verification limits](docs/COMPATIBILITY.md)
+  for gateway-specific bindings, verification, and the limits of these checks.
 - The desktop plugins are single-file disk plugins: no build step, no core
   patches, hot-reloadable, and they fail safe (if a Hermes update renames
   internal hooks, they render stock instead of breaking).

@@ -454,24 +454,31 @@ function visibleChatSurface() {
 
 function readProfileName() {
   try {
-    const focused = host.state.focusedSessionProfile && host.state.focusedSessionProfile.get()
+    const store = host.state.focusedSessionOwner
+    if (store && typeof store.get === 'function') {
+      const owner = store.get()
+      if (!owner?.connectionId || !owner?.profile) return null
+      return owner.connectionId === 'local'
+        ? owner.profile
+        : `gateway:${encodeURIComponent(owner.connectionId)}:${encodeURIComponent(owner.profile)}`
+    }
+    const focused = host.state.focusedSessionProfile?.get?.()
     if (focused) return focused
+    return host.state.profile?.get?.() || 'default'
   } catch {
-    /* older SDK */
-  }
-  try {
-    return host.state.profile.get() || 'default'
-  } catch {
-    return 'default'
+    return null
   }
 }
 
+function normalizeBotKey(value) {
+  const key = String(value || '').trim()
+  return key.startsWith('gateway:') ? key : key.toLowerCase().replace(/^@/, '')
+}
+
 function currentBotKey() {
-  const key = String(readProfileName() || '')
-    .trim()
-    .toLowerCase()
-    .replace(/^@/, '')
-  return key || 'default'
+  const profile = readProfileName()
+  if (!profile) return null
+  return normalizeBotKey(profile) || 'default'
 }
 
 function sessionIdFrom(surface) {
@@ -796,8 +803,8 @@ function usableSnapshot(snap) {
 function matchingStoredSnapshot(raw, bot, sessionId) {
   const snap = usableSnapshot(raw)
   if (!snap) return null
-  const expectedBot = String(bot || '').trim().toLowerCase()
-  const snapshotBot = String(snap.bot || '').trim().toLowerCase()
+  const expectedBot = normalizeBotKey(bot)
+  const snapshotBot = normalizeBotKey(snap.bot)
   if (!expectedBot || !snapshotBot || snapshotBot !== expectedBot) return null
   const expectedSession = String(sessionId || '')
   if (!expectedSession || !snap.sessionId || snap.sessionId !== expectedSession) return null
@@ -845,7 +852,7 @@ function absorbSnapshots(value) {
     for (const [key, raw] of Object.entries(value)) {
       const snap = normalizeSnapshot(raw)
       if (!snap) continue
-      next[String(key).toLowerCase()] = snap
+      next[normalizeBotKey(key)] = snap
     }
   }
   snapshots = next
@@ -1062,6 +1069,11 @@ function sync() {
 
     const surface = visibleChatSurface()
     const bot = currentBotKey()
+    if (!bot) {
+      clearLiveSources()
+      detachDock()
+      return
+    }
     const sessionId = sessionIdFrom(surface)
     const live = surface ? captureLive(surface, bot, sessionId) : null
     if (live) acceptLive(live)
@@ -1276,6 +1288,8 @@ export default {
     watchPane(BOTS_PANE_ID, scheduleSync)
     watchPane(ROUTINES_PANE_ID, scheduleSync)
     watchStore(host.state?.focusedStoredSessionId || host.state?.activeSessionId, scheduleSync)
+    watchStore(host.state?.focusedSessionOwner, scheduleSync)
+    watchStore(host.state?.connectionId, scheduleSync)
     watchStore(host.state?.focusedSessionProfile, scheduleSync)
     watchStore(host.state?.profile, scheduleSync)
 

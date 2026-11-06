@@ -42,14 +42,14 @@ function loadSelection(setup = {}) {
     )
     .replace('export default {', 'globalThis.__plugin = {')
     .concat(
-      '\nglobalThis.__testHooks = { matchingStoredSnapshot, workspaceBotChatVisible, botModeChatVisible,' +
+      '\nglobalThis.__testHooks = { currentBotKey, readProfileName, workspaceBotChatVisible, matchingStoredSnapshot, botModeChatVisible,' +
         ' isCanonicalBotChatLabel, knownBotChatTabs, markLiveSources, clearLiveSources, isCompletedView,' +
         ' viewKey, relativeTime, startDomObserver, findTasksHeaders, tasksSection }\n'
     )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
   for (const id of setup.remembered || []) context.__testHooks.knownBotChatTabs.add(id)
-  return { ...context.__testHooks, observed }
+  return { ...context.__testHooks, observed, host: context.__host }
 }
 
 function snapshot({ bot = 'gamer-boy', sessionId = 'gamer-session' } = {}) {
@@ -312,4 +312,26 @@ test('no plugin utility class is one upstream stopped emitting', () => {
     const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '')
     assert.equal(/(^|[\s'"`])pl-0\.5([\s'"`]|$)/m.test(src), false, `${file} still uses pl-0.5`)
   }
+})
+
+
+test('task cache separates gateway owners, preserves local keys and refuses unresolved owners', () => {
+  const t = loadSelection()
+  let owner = { connectionId: 'Mini-A', profile: 'pricing' }
+  t.host.state.focusedSessionOwner = { get: () => owner }
+  const first = t.currentBotKey()
+  owner = { connectionId: 'Mini-B', profile: 'pricing' }
+  assert.notEqual(t.currentBotKey(), first)
+  owner = { connectionId: 'local', profile: 'pricing' }
+  assert.equal(t.currentBotKey(), 'pricing')
+  owner = null
+  assert.equal(t.currentBotKey(), null)
+})
+
+
+test('same session ids on case-distinct gateway owners cannot reuse a task snapshot', () => {
+  const t = loadSelection()
+  const raw = snapshot({ bot: 'gateway:Mini-A:pricing', sessionId: 'shared-id' })
+  assert.equal(t.matchingStoredSnapshot(raw, 'gateway:mini-a:pricing', 'shared-id'), null)
+  assert.ok(t.matchingStoredSnapshot(raw, 'gateway:Mini-A:pricing', 'shared-id'))
 })

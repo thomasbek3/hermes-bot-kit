@@ -89,8 +89,12 @@ Verify: `hermes plugins list` shows `texting-style enabled`. Takes effect on
 the next message in each Bot Chat (a pre_llm_call backfill hook covers
 existing eternal sessions whose frozen prompt predates the plugin) — but the
 NEW PLUGIN CODE only loads when the agent process restarts: after
-install/update, restart Hermes Desktop or gracefully restart the exact per-profile serve process after verifying
-its ownership (do not use broad process-name kills). Debug: `TS_DEBUG=1` logs hook decisions to
+install/update, restart the owning gateway with `hermes --profile <name> gateway restart`.
+On v0.23, Desktop attaches to persistent gateways: closing Desktop does not
+stop them. For a remote agent, run the command on its owning machine. On older
+builds, restart Hermes Desktop or gracefully restart the exact per-profile serve
+process after verifying its ownership.
+Preserve in-flight work and use the supported graceful restart; never use broad process kills. Debug: `TS_DEBUG=1` logs hook decisions to
 `/tmp/texting-style-debug.log`. Uninstall: remove
 `<profile-home>/plugins/texting-style` and its `plugins.enabled` entry.
 
@@ -123,6 +127,9 @@ storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` 
 
 - Requires Hermes Desktop ≥ 0.20.5. On older builds the Computer pane is
   zero-size; there is no workaround, update the app.
+- On Hermes v0.23, Desktop attaches to persistent gateways. Agent-plugin
+  changes require a graceful restart of the owning gateway, including on
+  remote machines. Desktop plugin changes only need Reload plugins.
 - Desktop Bot Chats are served by long-lived per-profile
   `hermes --profile <name> serve` daemons that SURVIVE app restarts. If a
   plugin change "doesn't take", verify the exact daemon owner and gracefully

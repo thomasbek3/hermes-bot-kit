@@ -7,7 +7,7 @@ const pluginPath = new URL('./plugin.js', import.meta.url)
 const SOURCE = fs.readFileSync(pluginPath, 'utf8')
 
 const HOOKS =
-  '\nglobalThis.__testHooks = { applyAssignData, applyAssignFileText, findBotsPaneRoots, cssAttr,' +
+  '\nglobalThis.__testHooks = { rowIdentities, applyAssignData, applyAssignFileText, findBotsPaneRoots, cssAttr,' +
   ' HEADER_ATTR, sectionForKey, sectionLadder, getOverrides: () => overrides,' +
   ' getCustomSections: () => customSections }\n'
 
@@ -194,4 +194,13 @@ test('a section name with a quote and a bracket still matches its own header', (
   const quoted = selector.match(/="(.*)"\]$/)
   assert.ok(quoted, selector)
   assert.equal(cssUnescape(quoted[1]), name)
+})
+
+
+test('fleet rows use the gateway-disambiguated handle without display-name aliases', () => {
+  const { rowIdentities } = load()
+  const row = handle => ({ getAttribute: () => `Pricing · @${handle} · Mini · Ready`,
+    querySelector: () => ({ textContent: 'Pricing' }) })
+  assert.deepEqual(Array.from(rowIdentities(row('pricing-mini'))), ['pricing-mini'])
+  assert.deepEqual(Array.from(rowIdentities(row('pricing-studio'))), ['pricing-studio'])
 })

@@ -983,15 +983,19 @@ function phaseLine(state) {
 
 function readProfileName() {
   try {
-    const focused = host.state.focusedSessionProfile && host.state.focusedSessionProfile.get()
+    const store = host.state.focusedSessionOwner
+    if (store && typeof store.get === 'function') {
+      const owner = store.get()
+      if (!owner?.connectionId || !owner?.profile) return null
+      return owner.connectionId === 'local'
+        ? owner.profile
+        : `gateway:${encodeURIComponent(owner.connectionId)}:${encodeURIComponent(owner.profile)}`
+    }
+    const focused = host.state.focusedSessionProfile?.get?.()
     if (focused) return focused
+    return host.state.profile?.get?.() || 'default'
   } catch {
-    /* older SDK */
-  }
-  try {
-    return host.state.profile.get() || 'default'
-  } catch {
-    return 'default'
+    return null
   }
 }
 
@@ -1219,6 +1223,7 @@ function loadSettingsFrom(ctx) {
 function resolveEndpoint() {
   const settings = $settings.get()
   const profile = readProfileName()
+  if (!profile) return null
   const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profile] : null
   const id = overrideId || settings.globalEndpointId
   if (!id) return null
@@ -2583,6 +2588,9 @@ function attachEngine(ctx) {
       /* ignore */
     }
   })
+  for (const store of [host.state.focusedSessionOwner, host.state.connectionId]) {
+    if (typeof store?.listen === 'function') unsubs.push(store.listen(() => syncConnection()))
+  }
   if (host.state.focusedSessionProfile && typeof host.state.focusedSessionProfile.listen === 'function') {
     unsubs.push(host.state.focusedSessionProfile.listen(() => syncConnection()))
   }
@@ -4268,12 +4276,14 @@ function SettingsDialog({ profileName }) {
         el(DialogTitle, {}, 'Computer endpoints'),
         el(DialogDescription, {}, 'Paste a computer address to connect. Passwords stay in plugin storage.')
       ),
-      el(Field, { label: `Endpoint for ${profileName}` },
+      el(Field, { label: `Endpoint for ${host.state.focusedSessionOwner?.get?.()?.profile || profileName || 'unresolved agent'}` },
         el(
           Select,
           {
+            disabled: !profileName,
             value: perBotValue,
             onValueChange: value => {
+              if (!profileName) return
               const perBotEndpoint = { ...settings.perBotEndpoint }
               if (!value || value === '__global__') delete perBotEndpoint[profileName]
               else perBotEndpoint[profileName] = value
@@ -4765,12 +4775,14 @@ function ComputerPane() {
   const hiperfState = useValue($hiperf)
   const lastFrames = useValue($lastFrames)
   const placeTick = useValue($placeTick)
-  const focused = useValue(safeAtom(host.state.focusedSessionProfile))
-  const profile = useValue(safeAtom(host.state.profile))
+  useValue(safeAtom(host.state.focusedSessionProfile))
+  useValue(safeAtom(host.state.profile))
   const viewport = useValue(safeAtom(host.state.viewport))
-  const profileName = focused || profile || 'default'
+  useValue(safeAtom(host.state.focusedSessionOwner))
+  useValue(safeAtom(host.state.connectionId))
+  const profileName = readProfileName()
   const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profileName] : null
-  const endpointId = overrideId || settings.globalEndpointId
+  const endpointId = profileName ? overrideId || settings.globalEndpointId : null
   const endpoint = endpointId ? settings.endpoints.find(item => item.id === endpointId) || null : null
   const slotRef = useRef(null)
   const iframeMode = Boolean(endpoint && endpoint.mode === 'iframe')
@@ -4960,11 +4972,13 @@ function ComputerPane() {
 function ComputerStatusItem() {
   const conn = useValue(engine.state)
   const settings = useValue($settings)
-  const focused = useValue(safeAtom(host.state.focusedSessionProfile))
-  const profile = useValue(safeAtom(host.state.profile))
-  const profileName = focused || profile || 'default'
+  useValue(safeAtom(host.state.focusedSessionProfile))
+  useValue(safeAtom(host.state.profile))
+  useValue(safeAtom(host.state.focusedSessionOwner))
+  useValue(safeAtom(host.state.connectionId))
+  const profileName = readProfileName()
   const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profileName] : null
-  const endpointId = overrideId || settings.globalEndpointId
+  const endpointId = profileName ? overrideId || settings.globalEndpointId : null
   const endpoint = endpointId ? settings.endpoints.find(item => item.id === endpointId) || null : null
   const iframeMode = Boolean(endpoint && endpoint.mode === 'iframe')
   return el(

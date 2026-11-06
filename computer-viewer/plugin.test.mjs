@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch, rfbSourceOrder, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint }\n'
+        '\nglobalThis.__t = { readProfileName, resolveEndpoint, settings: $settings, credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch, rfbSourceOrder, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -915,4 +915,21 @@ test('connect() reports why the vendored viewer lost, not a generic body', async
   assert.equal(state.code, 'cdn-blocked')
   assert.match(state.detail, /noVNC couldn't be fetched from the CDN/)
   assert.match(state.detail, /vendored file missing/)
+})
+
+
+test('computer bindings stay on the focused gateway even when profile names collide', () => {
+  const { t, context } = loadPlugin()
+  let owner = { connectionId: 'mini', profile: 'pricing' }
+  context.__host.state.focusedSessionOwner = { get: () => owner }
+  context.__host.state.profile = { get: () => 'pricing' }
+  t.settings.set({ endpoints: [{ id: 'local' }, { id: 'remote' }], globalEndpointId: null,
+    perBotEndpoint: { pricing: 'local', 'gateway:mini:pricing': 'remote' } })
+  assert.equal(t.resolveEndpoint().id, 'remote')
+  owner = { connectionId: 'other', profile: 'pricing' }
+  assert.equal(t.resolveEndpoint(), null)
+  owner = { connectionId: 'local', profile: 'pricing' }
+  assert.equal(t.resolveEndpoint().id, 'local')
+  owner = null
+  assert.equal(t.resolveEndpoint(), null)
 })

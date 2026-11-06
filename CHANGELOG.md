@@ -1,5 +1,15 @@
 # Changelog (kit)
 
+## Unreleased — Hermes v0.23.0 multi-gateway compatibility
+
+- Computer bindings and Task Dock snapshots follow the focused gateway/profile
+  owner. Same-named agents on different machines cannot inherit each other's
+  binding or task cache. Unresolved owners fail closed. Local settings survive.
+- Bot Sections uses disambiguated handles on fleet rows rather than shared
+  display-name aliases.
+- Added multi-gateway regressions and a real-source SDK import check.
+- Updated persistent-gateway restart instructions. See docs/COMPATIBILITY.md.
+
 ## 2026-09-12 — release v2026.09.12: verified against Hermes 0.21.2
 
 Re-verified the whole kit against hermes-agent `284d220ba4` (v0.21.2, 2026-09-11),
