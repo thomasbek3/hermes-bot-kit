@@ -23,7 +23,7 @@ jobs:
           path: upstream
           sparse-checkout: |
             apps/desktop/src
-            hermes_cli/plugins.py
+            /hermes_cli/plugins*.py
             tools/bot_mode_probe.py
           sparse-checkout-cone-mode: false
       - uses: actions/setup-python@v5

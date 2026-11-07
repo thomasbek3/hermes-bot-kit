@@ -32,6 +32,9 @@ for relative, tokens in {
     'apps/desktop/src/sdk/index.ts': ('focusedSessionProfile', 'paneVisibility', 'profile:', 'viewport:'),
 }.items():
     content = (upstream / relative).read_text()
+    if relative == 'hermes_cli/plugins.py':
+        # Newer Hermes splits PluginContext out while retaining the public facade.
+        content += '\n'.join(p.read_text() for p in (upstream / 'hermes_cli').glob('plugins_*.py'))
     for token in tokens:
         if token not in content:
             errors.append(f'{relative}: missing contract: {token}')
