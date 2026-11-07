@@ -83,10 +83,9 @@ coding agents read that file automatically.)
 
 ## Requirements
 
-- **Hermes Desktop ≥ 0.20.5**, verified against **v0.20.6** and a main-branch
-  build from 2026-09-11 (hermes-agent `284d220ba4`, v0.21.2) — every SDK
-  export, the plugin contract, the runtime loader's import allowlist, and every
-  DOM anchor the plugins read were re-checked against that build.
+- **Hermes Desktop ≥ 0.20.5**. Source contracts re-checked against stable
+  **v0.23.0** (`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`, 2026-11-07).
+  See [compatibility and verification limits](docs/COMPATIBILITY.md).
 - The desktop plugins are single-file disk plugins: no build step, no core
   patches, hot-reloadable, and they fail safe (if a Hermes update renames
   internal hooks, they render stock instead of breaking).

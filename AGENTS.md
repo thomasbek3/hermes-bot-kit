@@ -89,9 +89,8 @@ Verify: `hermes plugins list` shows `texting-style enabled`. Takes effect on
 the next message in each Bot Chat (a pre_llm_call backfill hook covers
 existing eternal sessions whose frozen prompt predates the plugin) — but the
 NEW PLUGIN CODE only loads when the agent process restarts: after
-install/update, restart Hermes Desktop or kill the per-profile serve
-daemons (`pkill -f "hermes --profile <name> serve"`; they respawn on
-demand). Debug: `TS_DEBUG=1` logs hook decisions to
+install/update, restart Hermes Desktop or gracefully restart the exact per-profile serve process after verifying
+its ownership (do not use broad process-name kills). Debug: `TS_DEBUG=1` logs hook decisions to
 `/tmp/texting-style-debug.log`. Uninstall: remove
 `<profile-home>/plugins/texting-style` and its `plugins.enabled` entry.
 
@@ -126,7 +125,8 @@ storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` 
   zero-size; there is no workaround, update the app.
 - Desktop Bot Chats are served by long-lived per-profile
   `hermes --profile <name> serve` daemons that SURVIVE app restarts. If a
-  plugin change "doesn't take", kill those daemons (they respawn on demand)
+  plugin change "doesn't take", verify the exact daemon owner and gracefully
+  restart only that process (it respawns on demand)
   — do not keep redeploying files.
 - "Bot Chat" is the desktop's canonical per-bot conversation (session
   literally titled `Bot Chat`, user-locked). Both bubble-mode's visuals and
