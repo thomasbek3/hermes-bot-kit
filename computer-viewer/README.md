@@ -195,15 +195,15 @@ Install into one or every Hermes profile:
 
 ```bash
 bash install-agent-plugin.sh            # all profiles, prompts once for the key
-bash install-agent-plugin.sh --profiles default,parker --yes --api-key-stdin <<< "$ORGO_API_KEY"
-bash install-agent-plugin.sh --profiles default,parker --yes --api-key-file ~/.config/orgo/api-key
+bash install-agent-plugin.sh --profiles default,helper --yes --api-key-stdin <<< "$ORGO_API_KEY"
+bash install-agent-plugin.sh --profiles default,helper --yes --api-key-file ~/.config/orgo/api-key
 ```
 
 The key never appears in argv or shell history this way. `--api-key KEY` still
 works but is discouraged (visible in the process list and shell history).
 
 Then pin a computer per profile with `/computer` in that chat. The plugin is
-per-profile on purpose: parker's bot can drive one Orgo box while alfred's
+per-profile on purpose: one bot can drive one Orgo box while another bot's
 drives another. Pair each profile with the same machine in the viewer's
 per-bot endpoint and you get the full picture — watch the pane while the bot
 works inside it.
@@ -227,7 +227,7 @@ Everything else is included in the monthly plan:
 
 - **`orgo_computer_bash`** — open a URL, install, files, processes.
 - **Screenshot / click / type / key** — the bot looks at the desktop and
-  clicks itself (Grok Bot / OpenMausBot style).
+  clicks itself (Grok Bot style).
 - **`orgo-term` / `orgo-hands`** — human CLI for the same free pipes.
 
 Measured on a real Orgo box (Google News headlines visible):

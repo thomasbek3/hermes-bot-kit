@@ -162,7 +162,7 @@ Guards (bubble-mode / computer-viewer style):
 - Create once per `(list, section)`; re-append only when
   `header.parentNode !== list`.
 - `order = sectionBase - 1`; bots in that section get `sectionBase`
-  (Apollo 10 / OMH 20 / HQ 30 / Unassigned 40; hidden wrapper pinned at
+  (Acme 10 / Globex 20 / HQ 30 / Unassigned 40; hidden wrapper pinned at
   10000). Equal `order` keeps source recency inside a section.
 - Empty sections `hidden`.
 - Headers whose parent is no longer a live bot-row list are removed.

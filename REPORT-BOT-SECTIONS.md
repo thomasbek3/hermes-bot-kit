@@ -122,4 +122,4 @@ No contradiction that blocked the build; the four deltas above are implemented a
 
 ## Not done (needs the human)
 
-Reload plugins in Hermes Desktop (or restart the app). Confirm the Bots roster shows Apollo / OMH / HQ / Unassigned, gateway headings still work, Sessions is untouched, toggle off restores stock, cycle persists. This agent did not install into `~/.hermes/` and did not launch the app.
+Reload plugins in Hermes Desktop (or restart the app). Confirm the Bots roster shows Acme / Globex / HQ / Unassigned, gateway headings still work, Sessions is untouched, toggle off restores stock, cycle persists. This agent did not install into `~/.hermes/` and did not launch the app.

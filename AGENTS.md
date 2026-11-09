@@ -19,6 +19,9 @@ KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fs
 KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh)"   # Task Dock only
 ```
 
+Every line above also installs Grokbot Override (switched off); add
+`KIT_SKIP_GROKBOT=1` to leave it out.
+
 Into a non-default Hermes home (a separate `~/.hermes`-shaped tree, e.g. a
 second install):
 
@@ -45,10 +48,11 @@ test -f ~/.hermes/desktop-plugins/bubble-mode/plugin.js && echo bubble-mode OK
 test -f ~/.hermes/desktop-plugins/computer-viewer/plugin.js && echo computer-viewer OK
 test -f ~/.hermes/desktop-plugins/bot-sections/plugin.js && echo bot-sections OK
 test -f ~/.hermes/desktop-plugins/task-dock/plugin.js && echo task-dock OK
+test -f ~/.hermes/desktop-plugins/grokbot-override/plugin.js && echo grokbot-override OK
 ```
 
 Folder names must be exactly `bubble-mode`, `computer-viewer`,
-`bot-sections`, and `task-dock` (they must match the plugin ids). Do not
+`bot-sections`, `task-dock` and `grokbot-override` (they must match the plugin ids). Do not
 rename them.
 
 ## After installing — needs the human or a running app
@@ -66,9 +70,14 @@ it. Then:
   palette → "Bubble Mode: toggle".
 - **Bot Sections** is active immediately in the Bots roster. Toggle:
   palette → "Bot Sections: toggle". Cycle a bot:
-  palette → "Bot Sections: cycle <bot>".
+  palette → "Bot Sections: cycle <bot>". The Sessions tab is hidden by
+  default (Bots only); show it: palette → "Bot Sections: Sessions tab toggle".
 - **Task Dock** is active immediately in Bot Mode chats. Toggle:
   palette → "Task Dock: toggle".
+- **Grokbot Override** is installed switched **off**; stock Bot Mode is
+  unchanged until the user turns it on: palette → "Grokbot Override: toggle"
+  (the same command switches back). It is a preview; do not turn it on for
+  the user unless they ask.
 - **Computer viewer** must be enabled once in Settings → Plugins
   (inventory name: **Computer**), then a computer added in the pane. Endpoint
   setup (cloud boxes, spare machines, HD mode) is interactive and documented
@@ -82,7 +91,7 @@ and enables itself in each profile's `config.yaml`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/texting-style/install.sh | bash          # all profiles
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/texting-style/install.sh | bash -s -- --profiles default,parker
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/texting-style/install.sh | bash -s -- --profiles default,helper
 ```
 
 Verify: `hermes plugins list` shows `texting-style enabled`. Takes effect on
@@ -112,12 +121,12 @@ the user's say-so.
 ## Uninstall
 
 ```bash
-rm -rf ~/.hermes/desktop-plugins/bubble-mode ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/bot-sections ~/.hermes/desktop-plugins/task-dock
+rm -rf ~/.hermes/desktop-plugins/bubble-mode ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/bot-sections ~/.hermes/desktop-plugins/task-dock ~/.hermes/desktop-plugins/grokbot-override
 ```
 
 Then reload plugins (same as above). Plugin settings live in Hermes plugin
 storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` /
-`hermes.plugin.bot-sections.*` / `hermes.plugin.task-dock.*`.
+`hermes.plugin.bot-sections.*` / `hermes.plugin.task-dock.*` / `hermes.plugin.grokbot-override.*`.
 
 ## Facts that prevent wasted debugging
 

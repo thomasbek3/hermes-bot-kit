@@ -1,0 +1,19 @@
+{
+  "name": "grokbot-override",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Grok-Bot-style Bot Mode screen for Hermes Desktop, on the Hermes engine.",
+  "type": "module",
+  "license": "MIT AND Apache-2.0",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "jsdom": "29.1.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "slack-check",
+  "label": "Slack check",
+  "description": "Backend route that tests a profile's Slack bot connection with Slack's read-only auth.test. Tokens never leave the backend.",
+  "icon": "Plug",
+  "version": "1.0.0",
+  "tab": { "path": "/slack-check", "hidden": true },
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}

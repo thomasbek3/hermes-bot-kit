@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.0 — 2026-11-08
+
+- **Bots only** (on by default): hides the SESSIONS tab so the sidebar
+  shows just the Bots roster — strip, minimized rail, and narrow overlay.
+  A selected Sessions tab is switched to Bots once per selection change
+  (SDK `host.revealPane`, Enter on the Bots tab as the fallback; the narrow
+  overlay always uses its own tab). Minimized zones are not restored.
+- Palette: **Bot Sections: Sessions tab toggle** (persisted as `botsOnly`).
+  Off removes the injected style immediately; plugin dispose removes it too.
+- Fail safe: nothing is hidden unless a Bots tab is present on that surface.
+  Display only — sessions are never touched.
+
+
 ## 1.5.0 — 2026-08-31
 
 - Agent-writable assignments file at `<hermesHome>/bot-sections.json`
@@ -141,7 +154,7 @@
 
 ## 1.0.0 — 2026-08-29
 
-- First release. Named group headers in the Bot Mode roster (Apollo / OMH /
+- First release. Named group headers in the Bot Mode roster (Acme / Globex /
   HQ, plus automatic Unassigned), driven by a `SECTIONS` config block and
   per-bot palette cycle commands.
 - Annotates React-owned bot rows (`data-bot-section` + CSS `order`); appends

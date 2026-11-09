@@ -86,6 +86,18 @@ if awk '$2 == "computer-viewer/vendor/novnc-rfb.mjs" { found=1 } END { exit foun
 fi
 echo "OK  happy path"
 
+# Grokbot Override: the default-off build lands under the plugin's own name,
+# so the override stays off until it is toggled on from the palette.
+grokbot_dest="${home}/desktop-plugins/grokbot-override/plugin.js"
+[ -f "${grokbot_dest}" ] || fail "missing ${grokbot_dest}"
+expected=$(manifest_hash "grokbot-override/plugin.default-off.js") || fail "grokbot default-off build not in MANIFEST.sha256"
+[ "${expected}" = "$(file_sha256 "${grokbot_dest}")" ] || fail "grokbot-override/plugin.js is not the default-off build"
+grep -q 'var DEFAULT_ON = true ? false : true;' "${grokbot_dest}" || fail "installed Grokbot Override does not start off"
+if [ -e "${home}/desktop-plugins/grokbot-override/plugin.default-off.js" ]; then
+  fail "the build's source name was installed too"
+fi
+echo "OK  Grokbot Override installed switched off"
+
 # The helper scripts' offline digest check needs a manifest next to them.
 manifest_dest="${home}/desktop-plugins/MANIFEST.sha256"
 [ -f "${manifest_dest}" ] || fail "MANIFEST.sha256 was not installed to desktop-plugins/"
@@ -157,6 +169,29 @@ if [ -e "${skip_home}/desktop-plugins/task-dock" ]; then
   fail "skip: task-dock was installed"
 fi
 echo "OK  KIT_SKIP_TASK_DOCK"
+
+# KIT_SKIP_GROKBOT=1 skips exactly that plugin
+skip_home=$(new_home)
+HERMES_HOME="${skip_home}" KIT_SOURCE_DIR="${ROOT}" KIT_SKIP_GROKBOT=1 bash "${INSTALLER}" >/dev/null
+[ -f "${skip_home}/desktop-plugins/task-dock/plugin.js" ] || fail "skip: task-dock missing"
+if [ -e "${skip_home}/desktop-plugins/grokbot-override" ]; then
+  fail "skip: grokbot-override was installed"
+fi
+echo "OK  KIT_SKIP_GROKBOT"
+
+# A release whose manifest predates Grokbot Override installs the rest.
+old=$(mktemp -d)
+CLEANUP+=("${old}")
+copy_tree "${old}"
+grep -v ' grokbot-override/' "${old}/MANIFEST.sha256" > "${old}/MANIFEST.next"
+mv "${old}/MANIFEST.next" "${old}/MANIFEST.sha256"
+old_home=$(new_home)
+HERMES_HOME="${old_home}" KIT_SOURCE_DIR="${old}" bash "${INSTALLER}" >/dev/null 2>&1 || fail "install from an older manifest failed"
+[ -f "${old_home}/desktop-plugins/task-dock/plugin.js" ] || fail "older manifest: task-dock missing"
+if [ -e "${old_home}/desktop-plugins/grokbot-override" ]; then
+  fail "older manifest: grokbot-override was installed"
+fi
+echo "OK  older manifest without Grokbot Override"
 
 # Rerun is idempotent (no new .bak.* when nothing changed)
 bak_before=$(find "${home}" -name '*.bak.*' | wc -l | tr -d ' ')

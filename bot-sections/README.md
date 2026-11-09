@@ -10,17 +10,17 @@ named group headers with bots listed under them, plus an automatic
 
 ```
 Bots
-  Apollo          8
-    pricing
-    pooly
+  Acme            8
+    notes
+    lists
     …
-  OMH             3
-    galen
-    health
-    sentinel
+  Globex          3
+    intake
+    welcome
+    helper
   HQ              7
-    jarvis
-    alfred
+    scholar
+    planner
     …
   Unassigned      n
     (everyone else)
@@ -83,7 +83,7 @@ Three layers, first match wins:
 
 1. **Palette cycle** — `⌘⇧P → Bot Sections: cycle <bot>`. One command per
    bot in the config block (and any extra keys you have persisted). Each run
-   advances that bot along `Apollo → OMH → HQ → Unassigned → Apollo → …`
+   advances that bot along `Acme → Globex → HQ → Unassigned → Acme → …`
    and stores the choice in plugin storage (`sectionOverrides`). The command
    detail shows the current section.
 2. **Config block** at the top of `plugin.js` (`SECTIONS.order` +
@@ -96,6 +96,24 @@ Three layers, first match wins:
 Master switch: **⌘⇧P → Bot Sections: toggle** (persists). Off = stock
 roster.
 
+## Bots only
+
+On by default since 1.6.0: the left sidebar shows only the Bots roster —
+the **SESSIONS** tab in the `SESSIONS | BOTS` strip is hidden, in the docked
+strip, the minimized rail, and the narrow-window overlay. If Sessions ends up
+selected (startup, a layout restore, the new-session shortcut), the plugin
+switches to Bots once per selection change; a minimized sidebar is left
+minimized.
+
+- **Toggle:** **⌘⇧P → Bot Sections: Sessions tab toggle** (detail shows
+  `hidden` / `shown`; persists). Off removes the hiding immediately. It is
+  independent of the sections master switch.
+- **Display only.** No session is deleted, archived, or unregistered; the
+  Sessions pane is still there, just without its tab.
+- **Fails safe.** Sessions is hidden only while a Bots tab exists on the same
+  surface. If the Bots pane is closed or a Hermes update changes the layout,
+  the Sessions tab simply shows again — never an empty sidebar.
+
 ## Assignments file
 
 Agents (e.g. your chief-of-staff bot) can write this file to place bots
@@ -107,8 +125,8 @@ inside the plugin folder — typically `~/.hermes/bot-sections.json`).
 
 ```json
 {
-  "sections": ["APOLLO", "PAVERTURF", "CREATOR"],
-  "assign": { "foreman": "PAVERTURF", "atlas": "APOLLO", "muse": "CREATOR" }
+  "sections": ["ACME", "GLOBEX", "CREATOR"],
+  "assign": { "intake": "GLOBEX", "notes": "ACME", "helper": "CREATOR" }
 }
 ```
 

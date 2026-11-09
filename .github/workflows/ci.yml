@@ -27,9 +27,22 @@ jobs:
           node --check bot-sections/plugin.js
           node --check task-dock/plugin.js
           node --check computer-viewer/plugin.js
+          node --check grokbot-override/plugin.js
+          node --check grokbot-override/plugin.default-off.js
 
       - name: Plugin unit tests
-        run: node --test bubble-mode/plugin.test.mjs bot-sections/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
+        run: node --test bubble-mode/plugin.test.mjs bot-sections/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs grokbot-override/test/*.test.mjs
+
+      # The committed single-file plugin.js must match its src/, it must load
+      # and run the way Hermes's runtime loader runs it (test/loader-*.test.mjs:
+      # shim modules, production React, a DOM), and the UI must server-render (test/render.test.mjs and the app-layer tests in
+      # test/review-r2-app.test.mjs and test/review-r3-app.test.mjs need the dev
+      # dependencies).
+      - name: Grokbot Override build is current and renders
+        run: |
+          npm ci --prefix grokbot-override --no-audit --no-fund
+          npm run --prefix grokbot-override check
+          node --test grokbot-override/test/*.test.mjs
 
       - name: Install PyYAML (the orgo-computer config writer needs it)
         run: python3 -m pip install --disable-pip-version-check --quiet pyyaml

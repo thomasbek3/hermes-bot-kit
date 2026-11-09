@@ -1,0 +1,19 @@
+name: slack-platform
+label: Slack HTTP transport
+kind: platform
+version: 0.1.0
+description: Adds Events API transport to the existing Slack platform.
+author: Thomas Bekkers
+optional_env:
+  - name: SLACK_CONNECTION_MODE
+    description: Set to http to receive signed Events API requests.
+  - name: SLACK_SIGNING_SECRET
+    description: Slack application signing secret.
+    password: true
+  - name: SLACK_APP_ID
+    description: Slack application ID.
+  - name: SLACK_CLIENT_ID
+    description: Slack OAuth client ID.
+  - name: SLACK_CLIENT_SECRET
+    description: Slack OAuth client secret.
+    password: true
