@@ -1,5 +1,72 @@
 # Changelog (kit)
 
+## Unreleased
+
+- **Grokbot Override in the installer**: `install.sh` now installs it **switched off**
+  (`grokbot-override/plugin.default-off.js`, verified against `MANIFEST.sha256`, installed as
+  `desktop-plugins/grokbot-override/plugin.js`); **Grokbot Override: toggle** turns it on.
+  `KIT_SKIP_GROKBOT=1` skips it. The avatar silhouettes were replaced with twelve original shapes, and
+  `plugin.js` now carries the MIT notice for the layout CSS in `src/ui/styles-ref.ts`.
+- **Grokbot Override (preview)**: a chat-app Bot Mode screen (`grokbot-override/`) built from
+  source (`src/`, esbuild) into a committed single-file `plugin.js`. Same canonical Bot Chat
+  as Bot Mode, read-only open path, toggle back to stock at any time. Capability parity: `grokbot-override/PARITY.md`.
+- **Grokbot Override v2 (chat + roster parity merged)**: the roster-side parity (filter menu, retry for
+  unreachable sources, pin / hide / show hidden, row context menu, create a bot, needs-attention badge,
+  cron create / edit / run / remove, the bot's computer, profile config, model picker, context / cost
+  meter) and the chat-side parity in one build, wired together: a new bot's Bot Chat is born through the
+  chat side's `createCanonicalChat` with the intro (once); **Open in new tab** opens a second override chat
+  tab; **+ → New group chat…** opens the gateway group-chat form; a member's failed group turn badges its
+  row; the profile panel lists the bot's group chats instead of handing off to stock. Every roster dialog,
+  the Bot screen and the status-bar meter render inside the override's error boundary. One loader-faithful
+  test harness (`test/hermes-loader.mjs`): a smoke test of every surface (with and without the SDK's
+  dialog / menu parts) and a click-through (roster → chat → repeated bot switches → profile → every dialog).
+- **Grokbot Override chat parity (no handoff to stock in normal use)**: Bot Chat creation like Bot Mode
+  (registry first, adopt on conflict, eager title); submission ids with a safe Retry of uncertain sends;
+  clarify / sudo / secret / vault / connection prompts answered in the chat; full tool detail and
+  owner-safe media; slash commands and skills, the `/new` guard and `complete.slash`; @mention notes and
+  completions; edit / regenerate / rewind and reactions; voice input transcribed on the bot's own backend;
+  chats side by side; unread dots and activity toasts; gateway group chats (rooms, posting, members'
+  approvals, stop / continue, create / rename / disband). Tests: `grokbot-override/test/parity-*.test.mjs`
+  and `test/loader-*.test.mjs`. Classic (desktop-orchestrated) rooms still open only in stock Bot Mode.
+- **Grokbot Override fix: live Transcript crash**: switching bots crashed the chat tab and then the
+  whole Hermes window ("l is not a function at Transcript"): a `useEffect` returned `true`, which React
+  calls as the effect's cleanup when the transcript unmounts. Fixed, and both panes now render inside
+  the override's own error boundary (inline error, **Try again**, **Turn override off**), so nothing
+  can reach Hermes's root again. New loader-faithful tests (`test/hermes-loader.mjs`,
+  `test/loader-*.test.mjs`) load the built `plugin.js` exactly as Hermes's runtime loader does
+  (shim modules over the app's React namespaces, the loader's specifier rewrite, production React and
+  react-dom, jsdom) and drive Roster click → open chat → Transcript for a local and a remote bot.
+- **Grokbot Override review round 1**: an open chat on a pooled connection now holds a
+  `host.retainProfile` lease for its whole life (the socket no longer closes between calls and
+  reaps the runtime); stale approval reads can no longer disable a waiting approval; the idle
+  refresh keeps earlier pages and unsent bubbles; resumed streams extend the right bubble;
+  markdown renders in the owner-safe mode; late file reads cannot land on another bot; clarify /
+  secret waits and `@mentions` hand off to Bot Mode; the profile panel is a drawer in narrow panes;
+  `plugin.js` embeds every licence text it owes. Regression tests in
+  `grokbot-override/test/review-r1.test.mjs`.
+- **Grokbot Override review round 2**: a cron toggle that finishes after switching bots can no
+  longer reload, relabel or re-arm the other bot's panel; events that land while a chat attaches are
+  held and reconciled with the gateway (`session.active_list`, a fresh snapshot) instead of dropped,
+  sequenced frames apply once, and a lost runtime re-attaches by itself; a completion can no longer be
+  undone by a late `prompt.submit` receipt, and a busy watchdog settles turns the gateway reports idle;
+  a route that cannot be held open makes no session call; closing the Chat tab or switching bots
+  releases the chat (an in-flight send or running turn finishes first, bounded); handing a draft to
+  Bot Mode never replaces an unsent stock draft without asking and is blocked while attachments are
+  selected; failed sends keep their payload (restored to the composer, or **Retry**), and an
+  uncertain one is "delivery unknown" until the history says otherwise; the narrow-pane profile
+  drawer manages focus. Regression tests in `grokbot-override/test/review-r2*.test.mjs`.
+- **Grokbot Override review round 3 (never send twice)**: a failed send is "not sent" only for the
+  refusals Hermes's gateway contract defines (classified from the structured error, wrapped or not;
+  `src/core/delivery.js`); 4090 `SESSION_OWNER_UNCONFIRMED`, timeouts and unknown errors are
+  "delivery unknown", which is never restored to the composer and never offered for a resend, only a
+  read-only **Check again** and **Open in Hermes Bot Mode** (the idle refresh also resolves it); a
+  canonical 4001 refusal is no longer mistaken for a reaped runtime. A restored draft keeps its image
+  staging, a removed image is detached before it can ride along with later text, and staging-only
+  gateways get images in `prompt.submit` `attachments`. A replay-gap snapshot now recreates the live
+  bubble (only the unshown segment). PARITY marks C6, C7, C28 and R16 Partial and R17 Fallback, with the
+  unread/toast gap stated; README documents the supported Hermes commit and the 30-minute cap.
+  Regression tests in `grokbot-override/test/review-r3*.test.mjs`.
+
 ## 2026-09-12 — release v2026.09.12: verified against Hermes 0.21.2
 
 Re-verified the whole kit against hermes-agent `284d220ba4` (v0.21.2, 2026-09-11),

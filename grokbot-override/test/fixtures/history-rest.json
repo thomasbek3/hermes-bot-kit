@@ -1,0 +1,23 @@
+{
+  "_sources": [
+    "hermes-agent apps/desktop/src/lib/chat-messages.test.ts (assistant tool_calls rows, tool rows, timestamps in seconds)",
+    "hermes-agent apps/desktop/src/types/hermes.ts SessionMessage (display_content, display_kind, numeric id)",
+    "hermes-agent tui_gateway/contracts/common.py TranscriptMessage (resume projection: text, name, context, row_id)"
+  ],
+  "rest": [
+    { "id": 11, "role": "user", "content": "tell me about the lake cabin", "timestamp": 1762560000 },
+    { "id": 12, "role": "assistant", "content": "On it, pulling the canonical page.", "timestamp": 1762560003 },
+    { "id": 13, "role": "assistant", "content": "", "timestamp": 1762560004, "tool_calls": [{ "id": "tc", "function": { "name": "terminal", "arguments": "{\"command\":\"ls notes/\"}" } }] },
+    { "id": 14, "role": "tool", "tool_call_id": "tc", "content": "ok", "timestamp": 1762560005 },
+    { "id": 15, "role": "assistant", "content": [{ "type": "text", "text": "The lake cabin sleeps four." }], "reasoning": "Look it up.", "timestamp": 1762560009 },
+    { "id": 16, "role": "user", "content": "[hidden scaffold]", "display_kind": "hidden", "timestamp": 1762560010 },
+    { "id": 17, "role": "user", "content": "raw", "display_content": "how is it going?", "timestamp": 1762646400 },
+    { "id": 18, "role": "assistant", "content": "", "display_kind": "process_complete", "display_metadata": "{\"display_text\":\"Background job finished\"}", "timestamp": 1762646401 },
+    { "id": 19, "role": "system", "content": "system prompt", "timestamp": 1762646402 }
+  ],
+  "resume": [
+    { "role": "user", "text": "yo", "row_id": 1, "timestamp": 1762560000 },
+    { "role": "tool", "name": "web_search", "context": "hermes desktop", "tool_call_id": "c1", "row_id": 2 },
+    { "role": "assistant", "text": "Found it.", "row_id": 3 }
+  ]
+}

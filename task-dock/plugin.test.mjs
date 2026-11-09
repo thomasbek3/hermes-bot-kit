@@ -67,8 +67,8 @@ test('stored tasks restore only when bot and session ownership both match', () =
   const { matchingStoredSnapshot } = loadSelection()
 
   assert.ok(matchingStoredSnapshot(snapshot(), 'gamer-boy', 'gamer-session'))
-  assert.equal(matchingStoredSnapshot(snapshot(), 'gamer-boy', 'alfred-session'), null)
-  assert.equal(matchingStoredSnapshot(snapshot(), 'alfred', 'gamer-session'), null)
+  assert.equal(matchingStoredSnapshot(snapshot(), 'gamer-boy', 'helper-session'), null)
+  assert.equal(matchingStoredSnapshot(snapshot(), 'helper', 'gamer-session'), null)
 })
 
 test('stored tasks stay hidden while session ownership is unresolved', () => {

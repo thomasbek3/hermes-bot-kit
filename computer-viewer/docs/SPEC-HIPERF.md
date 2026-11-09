@@ -242,7 +242,7 @@ Audio · WebRTC/UDP transport · TLS on the agent (private networks only, enforc
 12. Enable HD in settings while RFB is already connected → streaming starts with no VNC reconnect; disable while streaming → canvas removed, VNC quality restored (visible sharpening), socket closed, RFB generation unchanged.
 13. Switcher snapshots and the Screenshot button during streaming show the HD frame, not quality-0 VNC mush.
 14. Plugin disable while streaming: WS closed, decoder closed, no orphan canvas in the DOM, no console errors; re-enable reconnects cleanly.
-15. macOS (AI-Mac-Mini, after its VNC setup is done): TCC granted path shows video; TCC denied path shows `capture-failed` fallback (not an opaque black layer over VNC).
+15. macOS (Remote Mac, after its VNC setup is done): TCC granted path shows video; TCC denied path shows `capture-failed` fallback (not an opaque black layer over VNC).
 
 ---
 

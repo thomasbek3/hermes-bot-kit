@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install the Hermes Bot Kit desktop plugins: Bubble Mode + Computer viewer
-# + Bot Sections + Task Dock. Safe for agents to run unattended: idempotent,
-# no prompts, no sudo, backs up any existing copy before overwriting.
+# + Bot Sections + Task Dock + Grokbot Override (installed switched off; turn
+# it on from the command palette). Safe for agents to run unattended:
+# idempotent, no prompts, no sudo, backs up any existing copy before overwriting.
 #
 #   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh | bash
 #
@@ -16,11 +17,13 @@
 #   KIT_SKIP_COMPUTER=1    skip the Computer viewer
 #   KIT_SKIP_SECTIONS=1    skip Bot Sections
 #   KIT_SKIP_TASK_DOCK=1   skip Task Dock
+#   KIT_SKIP_GROKBOT=1     skip Grokbot Override
 set -euo pipefail
 
 KIT_REF="${KIT_REF:-v2026.09.12}"
 RAW_BASE="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
 PLUGIN_ROOT="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"
+GROKBOT_REL="grokbot-override/plugin.default-off.js"
 
 usage() {
   cat <<'EOF'
@@ -39,6 +42,7 @@ Env knobs:
   KIT_SKIP_COMPUTER=1    skip the Computer viewer
   KIT_SKIP_SECTIONS=1    skip Bot Sections
   KIT_SKIP_TASK_DOCK=1   skip Task Dock
+  KIT_SKIP_GROKBOT=1     skip Grokbot Override (installed switched off)
 EOF
 }
 
@@ -127,6 +131,7 @@ js_marker() {
     computer-viewer/plugin.js) printf '%s\n' "computer-viewer" ;;
     bot-sections/plugin.js) printf '%s\n' "hermes-bot-sections-style" ;;
     task-dock/plugin.js) printf '%s\n' "hermes-task-dock-style" ;;
+    "${GROKBOT_REL}") printf '%s\n' "grokbot-override-style" ;;
   esac
 }
 
@@ -136,6 +141,16 @@ js_label() {
     computer-viewer/plugin.js) printf '%s\n' "Computer viewer" ;;
     bot-sections/plugin.js) printf '%s\n' "Bot Sections" ;;
     task-dock/plugin.js) printf '%s\n' "Task Dock" ;;
+    "${GROKBOT_REL}") printf '%s\n' "Grokbot Override" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Where a staged file lands under desktop-plugins/. Grokbot Override ships a
+# build whose toggle starts off; it is installed under the plugin's own name.
+dest_rel() {
+  case "$1" in
+    "${GROKBOT_REL}") printf '%s\n' "grokbot-override/plugin.js" ;;
     *) printf '%s\n' "$1" ;;
   esac
 }
@@ -173,6 +188,7 @@ rollback_this_run() {
   rmdir "${PLUGIN_ROOT}/bubble-mode" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/bot-sections" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/task-dock" 2>/dev/null || true
+  rmdir "${PLUGIN_ROOT}/grokbot-override" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/computer-viewer/vendor" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/computer-viewer" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}" 2>/dev/null || true
@@ -212,6 +228,9 @@ fi
 if [ "${KIT_SKIP_TASK_DOCK:-0}" != "1" ]; then
   need "task-dock/plugin.js"
 fi
+if [ "${KIT_SKIP_GROKBOT:-0}" != "1" ]; then
+  need "${GROKBOT_REL}"
+fi
 
 if [ ! -s "${NEEDED_FILE}" ]; then
   echo "install.sh: nothing to install (all plugins skipped)"
@@ -229,6 +248,18 @@ else
 
   if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ] && manifest_has "computer-viewer/vendor/novnc-rfb.mjs"; then
     need "computer-viewer/vendor/novnc-rfb.mjs"
+  fi
+
+  # Releases before Grokbot Override joined the installer do not list it.
+  GROKBOT_INSTALLED=0
+  if grep -qxF "${GROKBOT_REL}" "${NEEDED_FILE}"; then
+    if manifest_has "${GROKBOT_REL}"; then
+      GROKBOT_INSTALLED=1
+    else
+      echo "install.sh: ${KIT_REF} has no Grokbot Override in its manifest; skipping it." >&2
+      grep -vxF "${GROKBOT_REL}" "${NEEDED_FILE}" > "${NEEDED_FILE}.next" || true
+      mv "${NEEDED_FILE}.next" "${NEEDED_FILE}"
+    fi
   fi
 
   while IFS= read -r rel; do
@@ -295,7 +326,7 @@ else
     local rel
     while IFS= read -r rel; do
       [ -n "${rel}" ] || continue
-      install_file "${TMP_DIR}/${rel}" "${PLUGIN_ROOT}/${rel}"
+      install_file "${TMP_DIR}/${rel}" "${PLUGIN_ROOT}/$(dest_rel "${rel}")"
     done < "${NEEDED_FILE}"
     if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
       # The hiperf helper scripts verify hiperf-agent.py against
@@ -323,6 +354,9 @@ else
   if [ "${KIT_SKIP_TASK_DOCK:-0}" != "1" ]; then
     echo "Task Dock        -> ${PLUGIN_ROOT}/task-dock/plugin.js"
   fi
+  if [ "${GROKBOT_INSTALLED}" = "1" ]; then
+    echo "Grokbot Override -> ${PLUGIN_ROOT}/grokbot-override/plugin.js (installed switched off)"
+  fi
 fi
 
 echo
@@ -330,4 +364,5 @@ echo "Finish: in Hermes Desktop press Cmd+Shift+P -> 'Reload plugins' (or restar
 echo "Bubble Mode toggle: Cmd+Shift+P -> 'Bubble Mode: toggle'."
 echo "Bot Sections toggle: Cmd+Shift+P -> 'Bot Sections: toggle'."
 echo "Task Dock toggle: Cmd+Shift+P -> 'Task Dock: toggle'."
+echo "Grokbot Override (starts off): Cmd+Shift+P -> 'Grokbot Override: toggle'; run it again for stock Bot Mode."
 echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""orgo-hands: OpenMausBot-style direct control of an Orgo computer.
+"""orgo-hands: Grok-Bot-style direct control of an Orgo computer.
 
 Brain stays here. These are dumb buttons: screen / click / type / key.
 Uses Orgo REST only — never /v1/chat/completions, never AI credits.

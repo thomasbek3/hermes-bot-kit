@@ -1,0 +1,46 @@
+{
+  "_sources": [
+    "hermes-agent apps/desktop/src/app/session/hooks/use-message-stream/segment-identity-replay.test.tsx (start/delta/interim/tool frames, the re-sent segment)",
+    "hermes-agent apps/desktop/src/app/session/hooks/use-message-stream/interim-sealing.test.tsx (message.interim already_streamed, message.complete)",
+    "hermes-agent apps/desktop/src/app/session/hooks/use-message-stream/completion-boundaries.test.tsx (start, delta, complete with the same text)",
+    "hermes-agent tui_gateway/contracts/events.py (payload field names)"
+  ],
+  "session_id": "segment-identity-replay",
+  "plain_turn": [
+    { "type": "message.start", "payload": {} },
+    { "type": "message.delta", "payload": { "text": "The answer is " } },
+    { "type": "message.delta", "payload": { "text": "unchanged." } },
+    { "type": "message.complete", "payload": { "text": "The answer is unchanged." } }
+  ],
+  "replayed_segment": [
+    { "type": "message.start", "payload": { "turn_id": "turn-a" } },
+    { "type": "message.delta", "payload": { "offset": 0, "segment": 0, "text": "Commentar", "turn_id": "turn-a" } },
+    { "type": "message.delta", "payload": { "offset": 9, "segment": 0, "text": "y before the tool, streamed once.", "turn_id": "turn-a" } },
+    { "type": "message.interim", "payload": { "already_streamed": true, "segment": 0, "text": "Commentary before the tool, streamed once.", "turn_id": "turn-a" } },
+    { "type": "tool.start", "payload": { "name": "terminal", "tool_id": "call-1" } },
+    { "type": "message.start", "payload": { "turn_id": "turn-a" } },
+    { "type": "message.delta", "payload": { "offset": 0, "segment": 0, "text": "Commentar", "turn_id": "turn-a" } },
+    { "type": "message.delta", "payload": { "offset": 9, "segment": 0, "text": "y before the tool, streamed once.", "turn_id": "turn-a" } },
+    { "type": "tool.complete", "payload": { "name": "terminal", "result": "ok", "tool_id": "call-1", "duration_s": 1.4, "summary": "exit 0" } },
+    { "type": "message.delta", "payload": { "offset": 0, "segment": 1, "text": "A different final answer.", "turn_id": "turn-a" } },
+    { "type": "message.complete", "payload": { "text": "A different final answer." } }
+  ],
+  "reasoning_then_reply": [
+    { "type": "message.start", "payload": {} },
+    { "type": "reasoning.delta", "payload": { "text": "Check the log " } },
+    { "type": "reasoning.delta", "payload": { "text": "first." } },
+    { "type": "tool.start", "payload": { "name": "read_file", "tool_id": "call-r", "context": "/var/log/app.log", "labels": [{ "kind": "tool", "app": "Files", "action": "read", "emoji": "", "text": "Inspecting app.log", "name": "read_file" }] } },
+    { "type": "tool.complete", "payload": { "name": "read_file", "tool_id": "call-r", "result": "ok" } },
+    { "type": "message.delta", "payload": { "text": "The log is clean." } },
+    { "type": "message.complete", "payload": { "text": "The log is clean.", "reasoning": "Check the log first." } }
+  ],
+  "failed_turn": [
+    { "type": "message.start", "payload": {} },
+    { "type": "message.complete", "payload": { "text": "", "status": "error", "error": "provider returned 429" } }
+  ],
+  "reused_final": [
+    { "type": "message.start", "payload": {} },
+    { "type": "message.interim", "payload": { "text": "Done, see above.", "already_streamed": false } },
+    { "type": "message.complete", "payload": { "text": "Done, see above.", "response_reused": true } }
+  ]
+}

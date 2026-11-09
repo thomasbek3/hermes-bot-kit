@@ -90,6 +90,8 @@ run_ci_tests() {
   node --check bot-sections/plugin.js
   node --check task-dock/plugin.js
   node --check computer-viewer/plugin.js
+  node --check grokbot-override/plugin.js
+  node --check grokbot-override/plugin.default-off.js
   node --test bubble-mode/plugin.test.mjs bot-sections/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
   python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
   python3 -m unittest discover -s texting-style/tests -p 'test_*.py'

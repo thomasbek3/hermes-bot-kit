@@ -1,4 +1,4 @@
-# SPEC: OpenMausBot-style hands on the Orgo computer
+# SPEC: Grok-Bot-style hands on the Orgo computer
 
 Status: **implementation spec** (Fable FAIL 2026-08-25 folded in).
 Brain stays on the Mac. The Orgo box is a computer with dumb buttons.

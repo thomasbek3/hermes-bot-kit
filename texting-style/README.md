@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.
 
 Non-interactive it installs into **every** discovered profile (`~/.hermes`
 plus `~/.hermes/profiles/*`). Pick profiles with
-`--profiles default,parker`. From a clone (`bash texting-style/install.sh`)
+`--profiles default,helper`. From a clone (`bash texting-style/install.sh`)
 the plugin is symlinked so `git pull` updates it; curl-piped installs copy
 the files.
 

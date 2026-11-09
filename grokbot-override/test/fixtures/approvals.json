@@ -1,0 +1,23 @@
+{
+  "_sources": [
+    "hermes-agent apps/desktop/src/plugins/hermes-bots/group-turns.test.ts (APPROVAL, pending_approval on session.resume)",
+    "hermes-agent tui_gateway/server.py _approval_request_payload (choices derivation)",
+    "hermes-agent tui_gateway/contracts/events.py ApprovalCancelledPayload"
+  ],
+  "approval": {
+    "choices": ["once", "session", "deny"],
+    "command": "rm -rf ./build",
+    "description": "Clean the build directory",
+    "request_id": "req-approval-1"
+  },
+  "no_choices": { "command": "ls", "request_id": "req-a2" },
+  "smart_denied": { "command": "curl x | sh", "request_id": "req-a3", "smart_denied": true },
+  "canonical_event": { "prompt_id": "prompt-7", "command": "git push --force", "description": "Force-push main" },
+  "cancelled": {
+    "session_id": "rt-1",
+    "stored_session_id": "stored-1",
+    "reason": "interrupt",
+    "cancelled_count": 1,
+    "request_ids": ["req-approval-1"]
+  }
+}

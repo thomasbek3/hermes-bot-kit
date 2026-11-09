@@ -1,0 +1,10 @@
+{
+  "name": "slack-connect",
+  "label": "Slack connect",
+  "description": "Profile-scoped Slack app setup.",
+  "icon": "Plug",
+  "version": "0.1.0",
+  "tab": {"path": "/slack-connect", "hidden": true},
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}

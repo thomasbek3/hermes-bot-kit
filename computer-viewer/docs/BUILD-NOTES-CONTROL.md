@@ -40,7 +40,7 @@ Tools: `orgo_computer_run`, `orgo_computer_bash` (`toolset="orgo_computer"`,
 
 ```
 Plugin Doctor:
-/Users/thomasbekkers/Documents/hermes-computer-viewer-spec/build-control/agent-p
+/Users/you/Documents/hermes-computer-viewer-spec/build-control/agent-p
 lugin/orgo-computer
   manifest: orgo-computer 1.0.0 (standalone)
   OK: runtime discovery, manifest parsing, import, and registration passed

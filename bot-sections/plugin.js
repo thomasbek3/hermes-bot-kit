@@ -19,11 +19,25 @@ const ASSIGN_FILE = 'bot-sections.json'
 const ASSIGN_POLL_MS = 5000
 
 const BOTS_PANE_ID = 'hermes-bots:pane'
+const SESSIONS_PANE_ID = 'sessions'
 const PANE_HIDDEN_ATTR = 'data-pane-hidden'
 const HEADER_ATTR = 'data-hermes-bot-section-header'
 const LIST_ATTR = 'data-hermes-bot-section-list'
 const PIN_ATTR = 'data-hermes-bot-section-pin'
 const ROW_SECTION_ATTR = 'data-bot-section'
+
+// "Bots only": hide the SESSIONS tab so the sidebar shows just the Bots
+// roster. Display only — sessions are never touched or unregistered. Tabs
+// render as [data-tree-tab] in the zone strip and the minimized rail, and as
+// [data-narrow-overlay-tab] in the narrow-window overlay strip.
+const STORAGE_BOTS_ONLY = 'botsOnly'
+const BOTS_ONLY_STYLE_ID = 'hermes-bot-sections-bots-only'
+const TREE_TAB_ATTR = 'data-tree-tab'
+const OVERLAY_TAB_ATTR = 'data-narrow-overlay-tab'
+const TAB_SURFACES = [TREE_TAB_ATTR, OVERLAY_TAB_ATTR]
+// Sessions re-selected this soon after our own switch is the app insisting
+// (layout restore, a shortcut) — leave it rather than fight it.
+const BOTS_ONLY_RESELECT_GUARD_MS = 1000
 
 const UNASSIGNED = 'Unassigned'
 const ORDER_STEP = 10
@@ -1123,6 +1137,11 @@ function setBodyClass(on) {
 
 function sync() {
   try {
+    syncBotsOnly()
+  } catch {
+    /* fail safe — leave the Sessions tab visible */
+  }
+  try {
     const next = Boolean(enabled && botsPaneActive())
     if (next) {
       if (!applied) setBodyClass(true)
@@ -1147,6 +1166,153 @@ function scheduleSync() {
     raf = 0
     sync()
   })
+}
+
+let botsOnly = true
+let botsOnlyHydrated = false
+const botsOnlyState = Object.create(null)
+for (const attr of TAB_SURFACES) botsOnlyState[attr] = { selected: false, at: 0 }
+
+function resetBotsOnlyState() {
+  for (const attr of TAB_SURFACES) botsOnlyState[attr].selected = false
+}
+
+function liveTabs(attr, paneId) {
+  if (typeof document === 'undefined') return []
+  try {
+    return Array.from(document.querySelectorAll(`[${attr}="${cssAttr(paneId)}"]`)).filter(tab => !inHiddenPane(tab))
+  } catch {
+    return []
+  }
+}
+
+function botsOnlyCss(surfaces) {
+  return surfaces.map(attr => `[${attr}="${SESSIONS_PANE_ID}"]{display:none!important}`).join('\n')
+}
+
+function writeBotsOnlyStyle(css) {
+  let el = document.getElementById(BOTS_ONLY_STYLE_ID)
+  if (!el) {
+    el = document.createElement('style')
+    el.id = BOTS_ONLY_STYLE_ID
+    ;(document.head || document.documentElement).appendChild(el)
+  }
+  if (el.textContent !== css) el.textContent = css
+}
+
+function removeBotsOnlyStyle() {
+  if (typeof document === 'undefined') return
+  try {
+    document.getElementById(BOTS_ONLY_STYLE_ID)?.remove()
+  } catch {
+    /* already gone */
+  }
+}
+
+/** Press Enter on a tab: PaneTab's own keyboard activation path. A plain
+ *  click() does not activate a strip tab (the strip activates on pointer
+ *  down/tap), so this is the DOM fallback for every surface. */
+function pressTab(tab) {
+  if (!tab || typeof tab.dispatchEvent !== 'function' || typeof KeyboardEvent !== 'function') return false
+  try {
+    tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    return true
+  } catch {
+    return false
+  }
+}
+
+function activateBotsTab(attr) {
+  // The layout tree has an SDK door; the narrow overlay's reveal is local
+  // React state, so it only answers to its own tab.
+  if (attr === TREE_TAB_ATTR && typeof host.revealPane === 'function') {
+    try {
+      host.revealPane(BOTS_PANE_ID)
+      return true
+    } catch {
+      /* fall through to the DOM path */
+    }
+  }
+  return pressTab(liveTabs(attr, BOTS_PANE_ID)[0])
+}
+
+/** A selected Sessions tab whose content is actually on screen. A minimized
+ *  zone keeps aria-selected on its tab (the vertical rail, or data-active
+ *  "false" on the strip) — switching there would un-minimize the user's
+ *  zone, so it is left alone; the rail just shows the Bots tab. */
+function sessionsShowing(attr) {
+  for (const tab of liveTabs(attr, SESSIONS_PANE_ID)) {
+    if (tab.getAttribute('aria-selected') !== 'true') continue
+    if (tab.hasAttribute?.('data-vertical')) continue
+    if (tab.getAttribute('data-active') === 'false') continue
+    return true
+  }
+  return false
+}
+
+function syncBotsOnly() {
+  if (typeof document === 'undefined') return
+  const on = botsOnly && botsOnlyHydrated
+  // FAIL SAFE: hide Sessions on a surface only while that surface has a
+  // Bots tab to fall back to — never an empty sidebar.
+  const surfaces = on ? TAB_SURFACES.filter(attr => liveTabs(attr, BOTS_PANE_ID).length > 0) : []
+  if (!surfaces.length) {
+    removeBotsOnlyStyle()
+    resetBotsOnlyState()
+    return
+  }
+  writeBotsOnlyStyle(botsOnlyCss(surfaces))
+  for (const attr of TAB_SURFACES) {
+    const state = botsOnlyState[attr]
+    if (!surfaces.includes(attr) || !sessionsShowing(attr)) {
+      state.selected = false
+      continue
+    }
+    // At most one switch per selection change: no retry while Sessions
+    // stays selected, and none if the app re-selects it right after ours.
+    if (state.selected) continue
+    state.selected = true
+    const now = Date.now()
+    if (state.at && now - state.at < BOTS_ONLY_RESELECT_GUARD_MS) continue
+    state.at = now
+    activateBotsTab(attr)
+  }
+}
+
+function setBotsOnly(value) {
+  botsOnly = Boolean(value)
+  botsOnlyHydrated = true
+  try {
+    pluginCtx?.storage?.set?.(STORAGE_BOTS_ONLY, botsOnly)
+  } catch {
+    /* storage unavailable — holds for this window */
+  }
+  if (!botsOnly) {
+    // Off removes every effect now, not on the next frame.
+    removeBotsOnlyStyle()
+    resetBotsOnlyState()
+  }
+  scheduleSync()
+}
+
+function readBotsOnly(ctx) {
+  const absorb = value => {
+    botsOnly = value !== false
+    botsOnlyHydrated = true
+    scheduleSync()
+  }
+  try {
+    const value = ctx.storage?.get?.(STORAGE_BOTS_ONLY, true)
+    if (value && typeof value.then === 'function') {
+      // Nothing is hidden until the stored choice is known, so a user who
+      // turned it off never sees a flash of Bots only.
+      value.then(absorb).catch(() => absorb(true))
+      return
+    }
+    absorb(value)
+  } catch {
+    absorb(true)
+  }
 }
 
 function readEnabled(ctx) {
@@ -1505,13 +1671,15 @@ function dispose() {
   setBodyClass(false)
   clearAnnotations()
   removeStyle()
+  removeBotsOnlyStyle()
+  resetBotsOnlyState()
 }
 
 export default {
   id: PLUGIN_ID,
   name: 'Bot Sections',
   defaultEnabled: true,
-  description: 'Named group headers in the Bot Mode roster. Sessions stay unchanged.',
+  description: 'Named group headers in the Bot Mode roster, and a Bots-only sidebar (Sessions tab hidden; sessions untouched).',
   register(ctx) {
     pluginCtx = ctx
     enabled = readEnabled(ctx)
@@ -1521,6 +1689,7 @@ export default {
     readSeedFlag(ctx)
     readOverrides(ctx)
     readAssignFileLastApplied(ctx)
+    readBotsOnly(ctx)
     injectStyle()
 
     watchPane(BOTS_PANE_ID, scheduleSync)
@@ -1546,6 +1715,20 @@ export default {
         detailVariant: 'state',
         keepOpen: true,
         run: () => toggleEnabled()
+      }
+    })
+
+    ctx.register({
+      id: 'palette-sessions-tab-toggle',
+      area: PALETTE_AREA,
+      data: {
+        id: `${PLUGIN_ID}.sessions-tab-toggle`,
+        label: 'Bot Sections: Sessions tab toggle',
+        keywords: ['bots only', 'sessions', 'tab', 'hide', 'show', 'sidebar', 'bot', 'roster'],
+        detail: () => (botsOnly ? 'hidden' : 'shown'),
+        detailVariant: 'state',
+        keepOpen: true,
+        run: () => setBotsOnly(!botsOnly)
       }
     })
 

@@ -1,4 +1,4 @@
-"""Mocked contract tests for OpenMausBot-style Orgo hands."""
+"""Mocked contract tests for Grok-Bot-style Orgo hands."""
 
 from __future__ import annotations
 
@@ -651,10 +651,10 @@ class HandsTests(unittest.TestCase):
 
     @unittest.skipUnless(_HAS_YAML, "PyYAML is required to write config.yaml")
     def test_cli_set_writes_screen(self):
-        home = Path(self._home.name) / "profiles" / "parker"
+        home = Path(self._home.name) / "profiles" / "helper"
         home.mkdir(parents=True)
         with patch.object(tools, "_profile_home", return_value=home):
-            path = tools.write_profile_computer_id("parker", PIN, screen="screen-3")
+            path = tools.write_profile_computer_id("helper", PIN, screen="screen-3")
         import yaml
 
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -663,11 +663,11 @@ class HandsTests(unittest.TestCase):
         self.assertEqual(settings["screen"], "screen-3")
 
     def test_cli_set_rejects_bad_screen(self):
-        home = Path(self._home.name) / "profiles" / "parker"
+        home = Path(self._home.name) / "profiles" / "helper"
         home.mkdir(parents=True)
         with patch.object(tools, "_profile_home", return_value=home):
             with self.assertRaises(tools.OrgoAgentRequestError) as caught:
-                tools.write_profile_computer_id("parker", PIN, screen="a b")
+                tools.write_profile_computer_id("helper", PIN, screen="a b")
         self.assertIn("Not a valid screen id", str(caught.exception))
 
     def test_schemas_exist(self):
