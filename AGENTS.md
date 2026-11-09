@@ -7,16 +7,16 @@ backed up (`*.bak.<timestamp>`) before overwrite.
 ## Install the desktop plugins (default)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh | bash
 ```
 
 Install just one:
 
 ```bash
-KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh)"   # Bubble Mode only
-KIT_SKIP_BUBBLES=1  KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh)"   # Computer viewer only
-KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh)"   # Bot Sections only
-KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh)"   # Task Dock only
+KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh)"   # Bubble Mode only
+KIT_SKIP_BUBBLES=1  KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh)"   # Computer viewer only
+KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh)"   # Bot Sections only
+KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh)"   # Task Dock only
 ```
 
 Every line above also installs Grokbot Override (switched off); add
@@ -26,7 +26,7 @@ Into a non-default Hermes home (a separate `~/.hermes`-shaped tree, e.g. a
 second install):
 
 ```bash
-HERMES_HOME="/path/to/other/.hermes" bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh)"
+HERMES_HOME="/path/to/other/.hermes" bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh)"
 ```
 
 Do **not** point `HERMES_HOME` at `~/.hermes/profiles/<name>` for these desktop
@@ -90,8 +90,8 @@ Makes bots reply in a short SMS register. Installs into Hermes profile homes
 and enables itself in each profile's `config.yaml`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/texting-style/install.sh | bash          # all profiles
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/texting-style/install.sh | bash -s -- --profiles default,helper
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/texting-style/install.sh | bash          # all profiles
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/texting-style/install.sh | bash -s -- --profiles default,helper
 ```
 
 Verify: `hermes plugins list` shows `texting-style enabled`. Takes effect on

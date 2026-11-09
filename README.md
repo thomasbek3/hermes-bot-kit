@@ -50,7 +50,7 @@ Desktop plugins plus an optional agent plugin, one install:
 One command, the desktop plugins (idempotent, no sudo, agents can run it unattended):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh | bash
 ```
 
 Then in Hermes Desktop: **⌘K → Reload plugins** (or restart the app).
@@ -79,7 +79,7 @@ front of the command, or use each plugin's own install instructions.
 profile), so it has its own one-liner:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.09.12/texting-style/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/texting-style/install.sh | bash
 ```
 
 **Installing via an AI agent?** Point it at [AGENTS.md](AGENTS.md) — exact
