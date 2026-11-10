@@ -140,7 +140,17 @@ next reloads them.
   last 10 minutes.
 - OAuth callbacks need a single-use, signed, 10 minute `state`; the workspace
   in Slack's answer must match the one the app was created in.
-- The relay rate-limits per client and logs only the method, a sanitized path,
+- The relay rate-limits unauthenticated requests per client (60 at once, then 1
+  per second). Behind the loopback proxy the client is the right-most
+  `X-Forwarded-For` address. Only outcomes that do not authenticate are charged
+  (unknown key or path, bad signature or state, malformed body, health checks);
+  a validly signed Slack request or an OAuth callback with a valid state is
+  always processed, so other traffic cannot lock Slack out.
+- Slack's team name is reduced to printable text (no control characters,
+  quotes, backslash, backtick or `$`, at most 100 characters) and the
+  installer's user id must be a plain Slack id before either is written to the
+  bot's `.env`.
+- The relay logs only the method, a sanitized path,
   the status and whether the request was a URL check. It never logs bodies,
   query strings or tokens. Log: `~/Library/Logs/hermes-slack-ingress.log`
   (macOS) or `~/.local/state/hermes-slack-ingress.log` (Linux).
