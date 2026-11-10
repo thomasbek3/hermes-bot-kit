@@ -115,3 +115,19 @@ export const IconSpark = () => (
     <path d="M12 4v4M12 16v4M4 12h4M16 12h4M6.5 6.5l2.5 2.5M15 15l2.5 2.5M6.5 17.5 9 15M15 9l2.5-2.5" />
   </svg>
 )
+
+/** A file a bot sent (ui/Media.tsx FileCard): a page with a folded corner;
+ *  `lines` adds text lines for text files. */
+export const IconDocument = ({ lines = false }: { lines?: boolean }) => (
+  <svg {...base} strokeWidth={1.6}>
+    <path d="M7 3.5h6.5L18 8v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1-1.5Z" />
+    <path d="M13.5 3.5V8H18" />
+    {lines ? <path d="M9 12h6M9 15h6M9 18h4" /> : null}
+  </svg>
+)
+
+export const IconDownload = () => (
+  <svg {...base}>
+    <path d="M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5 19.5h14" />
+  </svg>
+)

@@ -245,6 +245,39 @@ const ADAPT_SRC = /* css */ `
 /* Small images and emoji inside a line of text sit on the text. */
 .md .aui-md :is(p, li) > img { display: inline-block; height: 1.15em; width: auto; vertical-align: -0.2em; border-radius: 3px; }
 .gbo-media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+/* Files a bot sends (ui/Media.tsx FileCard): one card each under the
+   bubble, stacked 8px apart; a white rounded card with a soft ring and
+   shadow (a ring only in dark), a grey document tile, the name in medium
+   weight, the size small and grey; a round download button on hover. */
+.gbo-files { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 6px; max-width: 100%; }
+.gbo-file-card {
+  position: relative; display: flex; align-items: center; width: 220px; max-width: 100%; min-width: 0; border-radius: 16px;
+  background: var(--color-bg-elevated); color: var(--color-text-primary); box-shadow: var(--shadow-card);
+}
+.gbo-file-card-main {
+  display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; padding: 12px 14px; border: 0; border-radius: inherit;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.gbo-file-card-main:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+.gbo-file-card.is-error .gbo-file-card-main { cursor: default; }
+.gbo-file-card-icon {
+  flex: none; display: grid; place-items: center; width: 36px; height: 44px; border-radius: 8px;
+  background: var(--color-bg-subtle); box-shadow: var(--color-border-tertiary) 0 0 0 0.5px inset; color: var(--color-text-quaternary);
+}
+.gbo-file-card-icon svg { width: 24px; height: 24px; }
+.gbo-file-card-text { display: flex; flex-direction: column; min-width: 0; }
+.gbo-file-card-name { font-size: 14px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gbo-file-card-size { font-size: 12px; line-height: 16px; letter-spacing: 0.12px; color: var(--color-text-tertiary); }
+.gbo-file-card-save {
+  flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin-right: 12px; padding: 0; border: 0; border-radius: var(--radius-full);
+  background: transparent; color: var(--color-text-secondary); cursor: pointer; opacity: 0; transition: opacity 120ms var(--ease-out), background 120ms var(--ease-out);
+}
+.gbo-file-card-save svg { width: 18px; height: 18px; }
+.gbo-file-card:hover .gbo-file-card-save, .gbo-file-card:focus-within .gbo-file-card-save { opacity: 1; }
+.gbo-file-card-save:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.gbo-file-preview-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.gbo-file-preview { max-height: min(60vh, 560px); overflow: auto; margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--color-code-block); color: var(--color-text-primary); }
+pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Fenced code blocks (ui/CodeBlock.tsx): the bubble's grey block with a
    header strip (language left, Copy pill right) so the pill never covers
    text; long lines wrap instead of running off the bubble; full height up

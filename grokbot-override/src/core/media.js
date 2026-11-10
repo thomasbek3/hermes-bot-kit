@@ -130,3 +130,83 @@ export function mediaReadRequest(path, scope) {
     ...(scope?.profile ? { profile: scope.profile } : {})
   }
 }
+
+// ── file cards (a non-media file the bot sends: ui/Media.tsx FileCard) ──
+
+/** "240 B", "1.8kB", "24kB", "3.1MB" (decimal units, as Finder shows). */
+export function formatBytes(bytes) {
+  const n = Math.max(0, Math.round(Number(bytes) || 0))
+  if (n < 1000) return `${n} B`
+  const units = ['kB', 'MB', 'GB', 'TB']
+  let value = n / 1000
+  let unit = 0
+  for (;;) {
+    const shown = value < 10 ? Math.round(value * 10) / 10 : Math.round(value)
+    if (shown < 1000 || unit === units.length - 1) return `${String(shown)}${units[unit]}`
+    value /= 1000
+    unit += 1
+  }
+}
+
+/** A long file name cut in the middle, keeping its extension:
+ *  "hermes-handoff-notes.md" -> "hermes-ha….md". */
+export function middleTruncate(name, max = 14) {
+  const value = String(name || '')
+  if (value.length <= max) return value
+  const dot = value.lastIndexOf('.')
+  const ext = dot > 0 && value.length - dot <= 8 ? value.slice(dot) : ''
+  const head = Math.max(1, max - ext.length - 1)
+  return `${value.slice(0, head)}…${ext}`
+}
+
+const TEXT_EXT = new Set([
+  'md', 'markdown', 'txt', 'text', 'log', 'json', 'jsonl', 'csv', 'tsv', 'yaml', 'yml', 'toml', 'ini', 'xml',
+  'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'h', 'cc', 'cpp', 'hpp',
+  'cs', 'php', 'sh', 'bash', 'zsh', 'fish', 'sql', 'css', 'scss', 'html', 'htm', 'vue', 'svelte', 'lua', 'r', 'diff', 'patch'
+])
+
+/** 'markdown' (rendered), 'text' (monospace) or '' (not previewed: click saves). */
+export function previewKind(name) {
+  const ext = String(name || '').split('.').pop()?.toLowerCase() || ''
+  if (!String(name || '').includes('.')) return ''
+  if (ext === 'md' || ext === 'markdown') return 'markdown'
+  return TEXT_EXT.has(ext) ? 'text' : ''
+}
+
+function dataUrlParts(url) {
+  const value = String(url || '')
+  const comma = value.indexOf(',')
+  if (!value.startsWith('data:') || comma < 0) return null
+  return { base64: /;base64$/i.test(value.slice(0, comma)), body: value.slice(comma + 1) }
+}
+
+/** The byte size of a data: URL's payload (null when it is not one). */
+export function dataUrlBytes(url) {
+  const parts = dataUrlParts(url)
+  if (!parts) return null
+  if (parts.base64) {
+    const clean = parts.body.replace(/\s+/g, '')
+    const pad = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0
+    return Math.max(0, Math.floor((clean.length * 3) / 4) - pad)
+  }
+  try {
+    return new TextEncoder().encode(decodeURIComponent(parts.body)).length
+  } catch {
+    return parts.body.length
+  }
+}
+
+/** A data: URL's payload as UTF-8 text ('' when it is not one). */
+export function dataUrlText(url) {
+  const parts = dataUrlParts(url)
+  if (!parts) return ''
+  try {
+    if (!parts.base64) return decodeURIComponent(parts.body)
+    const binary = atob(parts.body.replace(/\s+/g, ''))
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+    return new TextDecoder('utf-8').decode(bytes)
+  } catch {
+    return ''
+  }
+}

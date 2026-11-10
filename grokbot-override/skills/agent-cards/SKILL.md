@@ -159,6 +159,19 @@ Never set `resolved` before you have acted.
    message arrives, stop the work and mark the card `error` with a short reason, or `done` if nothing
    was left to do.
 
+## Long text the user will copy
+
+A handoff, a prompt, a spec, or any block over about 15 lines: write it to a `.md` file in your working
+directory for this chat, and send it with a line of its own:
+
+```
+MEDIA:/absolute/path/to/handoff.md
+```
+
+Use the file's absolute path. In the bubble, write one short sentence about what the file is. Do not
+paste the text into the reply as a giant code block: the Desktop chat shows the file as a card the user
+can open, copy all of, or download.
+
 ## Other channels
 
 On Slack, Telegram, the CLI or any channel that is not the Desktop chat, never write a `::card` line:

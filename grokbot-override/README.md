@@ -18,7 +18,9 @@ palette's **Grokbot Override: show work rows** turns them on (the same command h
 seen when you open a chat. The sidebar footer shows your initials and name (this computer's account name, the only
 one Hermes gives plugins; "You" without it) and a round button that opens Hermes Settings. The transcript stays put
 while you scroll past live cards, and message actions float beside the message on hover. Code blocks in a bot's reply show in full (a
-long one folds behind **Show more**) with a **Copy** button. When a bot chooses not to reply
+long one folds behind **Show more**) with a **Copy** button. A file the bot sends (a `MEDIA:` line naming a
+document, not an image or a recording) is a card under its bubble: the name, its size, a download button on
+hover; clicking a text file (`.md`, `.txt`, `.json`, `.csv`, code) opens it with **Copy all** and **Download**. When a bot chooses not to reply
 (it answers with `[SILENT]` or `NO_REPLY`), nothing is shown: no bubble, no preview line, no unread dot.
 
 <p align="center">
@@ -105,7 +107,8 @@ In the override's chat a bot can show cards instead of describing things in pros
 - **Approval, task and email-draft cards need the agent-cards skill.** The bot writes a small `card.v1` JSON
   file in its working directory and puts one `::card{…}` line in its reply; the card updates live as the bot
   rewrites the file, and a button click goes back to the bot as a hidden message. The skill that teaches
-  this is [`skills/agent-cards/SKILL.md`](skills/agent-cards/SKILL.md). Install it with the kit's root `install.sh`, from a clone
+  this is [`skills/agent-cards/SKILL.md`](skills/agent-cards/SKILL.md); it also tells the bot to send long text the
+  user will copy (a handoff, a prompt, a spec) as a `.md` file card instead of a giant code block. Install it with the kit's root `install.sh`, from a clone
   (off by default):
 
   ```bash
