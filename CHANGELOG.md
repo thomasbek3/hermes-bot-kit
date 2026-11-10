@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Grokbot Override: the model sheet opens at once, with Effort and Speed (2026-11-10)**: the bot's **Model**
+  sheet waited for the whole model catalogue (`model.options`, every provider, on the bot's own machine) before
+  it drew anything, and asked for it again for every bot and every two minutes. It now draws at once with the
+  bot's provider, model, reasoning effort and speed filled in; the catalogue loads behind it, once per machine
+  for the app session (shared by every bot and sheet there, refreshed in the background when older than two
+  minutes), and fills the lists when it arrives. New **Effort** and **Speed** selects (second row of the same
+  grid) offer only what Hermes and the picked model support (`agent.reasoning_effort`: Off … Max per the
+  route; `agent.service_tier`: Standard / Fast / Ultrafast per the model's capabilities); a model without
+  them shows the select greyed out with "Not supported by this model". **Default** removes the key. One Save
+  writes all four to the bot's own profile. The sheet's reads and every profile write now dial the bot's
+  backend at user-action priority, as stock does.
 - **Grokbot Override: files a bot sends are cards (2026-11-10)**: a file named on a `MEDIA:` line showed as
   a small chip inside the bubble. It is now a card of its own under the bubble, like Grok Bot's: a document
   icon, the name (cut in the middle when long), the size, and a download button on hover. Clicking a text

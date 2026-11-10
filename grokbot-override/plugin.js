@@ -14350,6 +14350,7 @@ function backendTargetProfile(route, fallbackProfile = "default") {
   if (!route) return fallbackProfile;
   return route.targetProfile || route.profile;
 }
+var PROFILE_WRITE_METHODS = /* @__PURE__ */ new Set(["profiles.configure", "profiles.create", "profiles.set_asset"]);
 function scopedBotParams(route, method, params) {
   const logical = route.profile;
   const target = backendTargetProfile(route, logical);
@@ -14412,9 +14413,10 @@ function createBotRequester(host3, { activeConnectionId: activeConnectionId2 } =
         throw new Error(`Cannot route ${method} for ${route.connectionId}::${route.profile}`);
       }
       const routed = scopedBotParams(route, method, params);
+      const spawnPriority = options.spawnPriority ?? (PROFILE_WRITE_METHODS.has(method) ? "foreground" : void 0);
       try {
-        if (options.spawnPriority) {
-          return await host3.requestProfile(route, method, routed, options.timeoutMs, { spawnPriority: options.spawnPriority });
+        if (spawnPriority) {
+          return await host3.requestProfile(route, method, routed, options.timeoutMs, { spawnPriority });
         }
         return options.timeoutMs === void 0 ? await host3.requestProfile(route, method, routed) : await host3.requestProfile(route, method, routed, options.timeoutMs);
       } catch (error) {
@@ -14523,8 +14525,8 @@ function stripEdgePunctuation(text3) {
 function candidates(text3) {
   const stripped = typeof text3 === "string" ? text3.trim() : "";
   if (!stripped || stripped.length > MARKER_LENGTH_CAP) return [];
-  const bare = stripEdgePunctuation(stripped);
-  return (bare === stripped ? [stripped] : [stripped, bare]).map(canonical);
+  const bare2 = stripEdgePunctuation(stripped);
+  return (bare2 === stripped ? [stripped] : [stripped, bare2]).map(canonical);
 }
 function isSilenceReply(text3) {
   return candidates(text3).some((c2) => MARKERS.has(c2));
@@ -19603,8 +19605,8 @@ function cronJobRestPath(job, suffix = "") {
 function scheduleLabel(schedule) {
   const once = /^once in (.+)$/.exec(schedule || "");
   if (once) return `Once in ${once[1]}`;
-  const bare = /^(\d+)([mhd])$/.exec(schedule || "");
-  if (bare) return `Once in ${bare[1]}${bare[2]}`;
+  const bare2 = /^(\d+)([mhd])$/.exec(schedule || "");
+  if (bare2) return `Once in ${bare2[1]}${bare2[2]}`;
   const match = /^every (\d+)m$/.exec(schedule || "");
   if (match) {
     const minutes = Number(match[1]);
@@ -19654,6 +19656,199 @@ function routineDetailRows(job) {
 function routineDetailIssue(job) {
   const first = [job?.last_fire_error, job?.last_delivery_error, job?.paused_reason].find((v) => typeof v === "string" && v.trim());
   return first ? first.trim() : null;
+}
+
+// src/core/modelSheet.js
+var EFFORT_KEY = "agent.reasoning_effort";
+var SPEED_KEY = "agent.service_tier";
+var DEFAULT = "";
+var OPENAI_COMPAT_WIRE_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+var CODEX_GPT56_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
+var CODEX_LEGACY_EFFORTS = ["none", "low", "medium", "high", "xhigh"];
+var CODEX_ASTRA_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var ASTRA_MODEL_IDS = /* @__PURE__ */ new Set(["gpt-6-astra", "gpt-6-astra-900k"]);
+var GPT6_TIER_PREFIXES = ["gpt-6-sol", "gpt-6-luna"];
+var NO_DISABLE_TIER_PREFIXES = ["gpt-6.1-sol"];
+var DAYBREAK_MODEL_IDS = /* @__PURE__ */ new Set(["gpt-daybreak-blue-latest", "gpt-daybreak-blue-latest-900k"]);
+var EFFORT_LABELS = {
+  none: "Off",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+  ultra: "Ultra"
+};
+var SPEED_LABELS = {
+  normal: "Standard",
+  fast: "Fast",
+  ultrafast: "Ultrafast",
+  auto: "Fast for the first minute of a turn",
+  cold: "Fast on the first turn only"
+};
+var UNSUPPORTED_HINT = "Not supported by this model";
+var bare = (model) => String(model || "").trim().toLowerCase().split("/").pop();
+function codexSupportedEfforts(model) {
+  const id = bare(model);
+  if (ASTRA_MODEL_IDS.has(id) || NO_DISABLE_TIER_PREFIXES.some((p) => id.startsWith(p))) return CODEX_ASTRA_EFFORTS;
+  return id.includes("gpt-5.6") || GPT6_TIER_PREFIXES.some((p) => id.startsWith(p)) || DAYBREAK_MODEL_IDS.has(id) ? CODEX_GPT56_EFFORTS : CODEX_LEGACY_EFFORTS;
+}
+function routeSupportedEfforts(provider, model) {
+  return String(provider || "").trim().toLowerCase() === "openai-codex" ? codexSupportedEfforts(model) : OPENAI_COMPAT_WIRE_EFFORTS;
+}
+function normalizeEffort(raw) {
+  if (raw === false) return "none";
+  if (raw && typeof raw === "object") {
+    if (raw.enabled === false) return "none";
+    return normalizeEffort(raw.effort);
+  }
+  const word = String(raw ?? "").trim().toLowerCase();
+  if (!word) return DEFAULT;
+  if (word === "false" || word === "disabled") return "none";
+  return word;
+}
+function normalizeSpeed(raw) {
+  const word = String(raw ?? "").trim().toLowerCase();
+  if (!word) return DEFAULT;
+  if (["normal", "default", "standard", "off", "none"].includes(word)) return "normal";
+  if (["fast", "priority", "on"].includes(word)) return "fast";
+  if (word === "ultra") return "ultrafast";
+  return word;
+}
+function settingsFromConfig(result) {
+  const agent = result?.config?.agent;
+  const a2 = agent && typeof agent === "object" ? agent : {};
+  return { effort: normalizeEffort(a2.reasoning_effort), speed: normalizeSpeed(a2.service_tier) };
+}
+function modelCaps(providerRow, model) {
+  const caps = providerRow?.capabilities;
+  if (!caps || !model) return null;
+  return caps[model] || null;
+}
+var keepCurrent = (options, current, labels) => {
+  if (!current || options.some(([id]) => id === current)) return options;
+  return [...options, [current, `${labels[current] || current} (current)`]];
+};
+function effortChoices({ provider, model, caps, current = DEFAULT }) {
+  if (caps === void 0) {
+    return { supported: true, pending: true, options: keepCurrent([[DEFAULT, "Default"]], current, EFFORT_LABELS) };
+  }
+  if (caps && caps.reasoning === false) {
+    return { supported: false, pending: false, options: keepCurrent([[DEFAULT, "Default"]], current, EFFORT_LABELS) };
+  }
+  let levels = routeSupportedEfforts(provider, model);
+  if (caps && caps.can_disable_reasoning === false) levels = levels.filter((l) => l !== "none");
+  const options = [[DEFAULT, "Default"], ...levels.map((l) => [l, EFFORT_LABELS[l] || l])];
+  return { supported: true, pending: false, options: keepCurrent(options, current, EFFORT_LABELS) };
+}
+function speedChoices({ caps, current = DEFAULT }) {
+  if (caps === void 0) {
+    return { supported: true, pending: true, options: keepCurrent([[DEFAULT, "Default"]], current, SPEED_LABELS) };
+  }
+  const fast = Boolean(caps?.fast);
+  const ultrafast = Boolean(caps?.ultrafast);
+  if (!fast && !ultrafast) {
+    return { supported: false, pending: false, options: keepCurrent([[DEFAULT, "Default"]], current, SPEED_LABELS) };
+  }
+  const options = [[DEFAULT, "Default"], ["normal", SPEED_LABELS.normal]];
+  if (fast) options.push(["fast", SPEED_LABELS.fast]);
+  if (ultrafast) options.push(["ultrafast", SPEED_LABELS.ultrafast]);
+  return { supported: true, pending: false, options: keepCurrent(options, current, SPEED_LABELS) };
+}
+function sheetSavePlan(bot, before, next) {
+  const steps = [];
+  const modelChanged = String(before?.provider || "") !== String(next.provider || "") || String(before?.model || "") !== String(next.model || "");
+  if (modelChanged) steps.push({ field: "model" });
+  for (const [field, key, rpcKey] of [
+    ["effort", EFFORT_KEY, "reasoning"],
+    ["speed", SPEED_KEY, "fast"]
+  ]) {
+    const was = String(before?.[field] ?? DEFAULT);
+    const now = String(next[field] ?? DEFAULT);
+    if (was === now) continue;
+    if (now === DEFAULT) {
+      steps.push({ field, method: "cli.exec", params: { argv: ["--profile", bot.name, "config", "unset", key] } });
+    } else {
+      steps.push({ field, method: "config.set", params: { key: rpcKey, value: now, profile: bot.name, scope: "global" } });
+    }
+  }
+  return steps;
+}
+function stepSucceeded(step, result) {
+  if (step.method === "cli.exec") {
+    if (result?.blocked === true) return false;
+    if (result?.code === 0) return true;
+    const text3 = `${result?.stdout || ""} ${result?.stderr || ""} ${result?.output || ""}`;
+    return /not set/i.test(text3);
+  }
+  if (result?.error) return false;
+  return result != null;
+}
+var CATALOGUE_STALE_MS = 12e4;
+function catalogueKey(route) {
+  return route ? `route:${route.connectionId}` : "active";
+}
+function createCatalogue({ now = () => Date.now(), staleMs = CATALOGUE_STALE_MS } = {}) {
+  const entries = /* @__PURE__ */ new Map();
+  const inflight = /* @__PURE__ */ new Map();
+  const listeners = /* @__PURE__ */ new Set();
+  const emit = (key) => listeners.forEach((fn) => fn(key));
+  const put = (key, value) => {
+    const bySlug = /* @__PURE__ */ new Map();
+    for (const row of value?.providers || []) if (row && row.slug) bySlug.set(row.slug, row);
+    entries.set(key, { at: now(), value, bySlug });
+    emit(key);
+  };
+  const fetchInto = (key, fetch) => {
+    if (inflight.has(key)) return inflight.get(key);
+    let started;
+    try {
+      started = Promise.resolve(fetch());
+    } catch (error) {
+      started = Promise.reject(error);
+    }
+    const run = started.then((value) => {
+      put(key, value);
+      return value;
+    }).finally(() => inflight.delete(key));
+    inflight.set(key, run);
+    return run;
+  };
+  return {
+    peek(key) {
+      return entries.get(key)?.value ?? null;
+    },
+    fresh(key) {
+      const hit = entries.get(key);
+      return Boolean(hit) && now() - hit.at < staleMs;
+    },
+    provider(key, slug) {
+      return entries.get(key)?.bySlug.get(slug) ?? null;
+    },
+    prime(key, value) {
+      put(key, value);
+    },
+    load(key, fetch) {
+      const hit = entries.get(key);
+      if (hit) {
+        if (now() - hit.at >= staleMs) fetchInto(key, fetch).catch(() => void 0);
+        return Promise.resolve(hit.value);
+      }
+      return fetchInto(key, fetch);
+    },
+    inflight(key) {
+      return inflight.has(key);
+    },
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    clear() {
+      entries.clear();
+      inflight.clear();
+    }
+  };
 }
 
 // src/core/profileConfig.js
@@ -20188,6 +20383,8 @@ var roster2 = {
   running: createStore({}),
   /** The panel's Model row: roster key -> the bot's configured model. */
   models: createStore({}),
+  /** The model sheet's Effort and Speed: roster key -> the profile's values. */
+  modelSettings: createStore({}),
   /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
    *  the first unread bot message (null: none; absent: not decided), and the
    *  per-bot seen watermark (ms; plugin storage `seenAt`). */
@@ -20443,13 +20640,13 @@ function setBotModel(bot, patch) {
   const key = rowKey(bot);
   roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", error: null, ...all[key], ...patch, loading: false, loaded: true } }));
 }
-async function loadBotModel(bot, { force = false } = {}) {
+async function loadBotModel(bot, { force = false, foreground = false } = {}) {
   const key = rowKey(bot);
   const have = roster2.models.get()[key];
   if (have && !force && (have.loading || have.loaded)) return;
   roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", error: null, loaded: false, ...all[key], loading: true } }));
   try {
-    const res = await request(bot, "profiles.describe", { name: bot.name });
+    const res = await request(bot, "profiles.describe", { name: bot.name }, foreground ? FOREGROUND : {});
     setBotModel(bot, { provider: String(res?.model?.provider || ""), model: String(res?.model?.default || ""), error: null });
   } catch (error) {
     roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }));
@@ -20457,6 +20654,52 @@ async function loadBotModel(bot, { force = false } = {}) {
 }
 function saveBotModel(bot, value) {
   return saveAdvanced(bot, { ...emptyAdvancedState(), loaded: true, provider: value.provider, model: value.model, dirtyModel: true });
+}
+var FOREGROUND = { spawnPriority: "foreground" };
+function setBotModelSettings(bot, patch) {
+  const key = rowKey(bot);
+  roster2.modelSettings.set((all) => ({ ...all, [key]: { effort: "", speed: "", error: null, ...all[key], ...patch, loading: false, loaded: true } }));
+}
+async function loadBotModelSettings(bot, { force = false, foreground = false } = {}) {
+  const key = rowKey(bot);
+  const have = roster2.modelSettings.get()[key];
+  if (have && !force && (have.loading || have.loaded)) return;
+  roster2.modelSettings.set((all) => ({ ...all, [key]: { effort: "", speed: "", error: null, loaded: false, ...all[key], loading: true } }));
+  try {
+    const res = await request(bot, "config.get", { key: "full", profile: bot.name }, foreground ? FOREGROUND : {});
+    setBotModelSettings(bot, { ...settingsFromConfig(res), error: null });
+  } catch (error) {
+    roster2.modelSettings.set((all) => ({ ...all, [key]: { effort: "", speed: "", ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }));
+  }
+}
+async function saveBotModelSheet(bot, before, next) {
+  const applied = {};
+  const errors = {};
+  let confirmation = null;
+  const backend = { name: resolveBotConnectionRoute(bot).route?.targetProfile || bot.name };
+  for (const step of sheetSavePlan(backend, before, next)) {
+    if (step.field === "model") {
+      const res = await saveBotModel(bot, { provider: next.provider, model: next.model });
+      applied.model = res?.applied?.model === true;
+      confirmation = res?.confirmation || null;
+      if (!applied.model) break;
+      continue;
+    }
+    try {
+      const res = await request(bot, step.method, step.params, FOREGROUND);
+      applied[step.field] = stepSucceeded(step, res);
+      if (!applied[step.field]) errors[step.field] = String(res?.output || res?.hint || "refused").trim();
+    } catch (error) {
+      applied[step.field] = false;
+      errors[step.field] = String(error?.message || error);
+    }
+  }
+  const settings = {};
+  if (applied.effort) settings.effort = next.effort;
+  if (applied.speed) settings.speed = next.speed;
+  if (Object.keys(settings).length) setBotModelSettings(bot, settings);
+  if (Object.values(applied).some((ok) => !ok)) void loadBotModelSettings(bot, { force: true });
+  return { ok: Object.values(applied).every(Boolean), applied, confirmation, errors };
 }
 async function searchSkills(query) {
   const res = await host2.request("skills.manage", { action: "search", query: String(query || "").trim() });
@@ -22288,6 +22531,8 @@ var ROSTER_CSS = (
 .gbo-textarea.is-mono { font: 12px/18px var(--gbo-mono); min-height: 140px; }
 .gbo-select { appearance: none; padding-right: 26px; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px; background-repeat: no-repeat; }
 .gbo-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.gbo-model-grid { row-gap: 14px; }
+.gbo-select:disabled, .gbo-input:disabled { opacity: .55; cursor: default; }
 .gbo-check { display: flex; align-items: center; gap: 8px; font: var(--gbo-text-body-sm); color: var(--gbo-fg); cursor: pointer; min-width: 0; }
 .gbo-check input { width: 15px; height: 15px; accent-color: var(--gbo-ring); flex: none; margin: 0; }
 .gbo-check .gbo-check-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -26313,47 +26558,64 @@ function JobRemoveDialog({ bot, job, onClose }) {
 
 // src/ui/ProfileConfig.tsx
 import * as React12 from "react";
-import { jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
-var modelCache = /* @__PURE__ */ new Map();
-var MODEL_OPTIONS_STALE_MS = 12e4;
+import { Fragment as Fragment8, jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
+var modelCatalogue = createCatalogue();
 function modelKey(bot) {
-  return bot ? `${bot.connectionId || ""}::${bot.name}` : "active";
+  let route = null;
+  try {
+    route = bot ? resolveBotConnectionRoute(bot).route : null;
+  } catch {
+    route = null;
+  }
+  return catalogueKey(route);
 }
 function primeModelOptions(bot, value) {
-  modelCache.set(modelKey(bot), { at: Date.now(), value });
+  modelCatalogue.prime(modelKey(bot), value);
 }
-function useModelOptions(bot) {
+function useModelOptions(bot, { foreground = false } = {}) {
   const key = modelKey(bot);
-  const [state, setState] = React12.useState(() => {
-    const hit = modelCache.get(key);
-    return hit && Date.now() - hit.at < MODEL_OPTIONS_STALE_MS ? { loading: false, error: null, data: hit.value } : { loading: true, error: null, data: null };
-  });
+  const read = () => {
+    const data = modelCatalogue.peek(key);
+    return data ? { loading: false, error: null, data } : null;
+  };
+  const [state, setState] = React12.useState(() => read() || { loading: true, error: null, data: null });
   React12.useEffect(() => {
-    const hit = modelCache.get(key);
-    if (hit && Date.now() - hit.at < MODEL_OPTIONS_STALE_MS) return;
     let live = true;
-    boundedFetch(request(bot, "model.options", modelOptionsParams())).then((value) => {
-      modelCache.set(key, { at: Date.now(), value });
-      if (live) setState({ loading: false, error: null, data: value });
-    }).catch((error) => live && setState({ loading: false, error: String(error?.message || error), data: null }));
+    const now = read();
+    if (now) setState(now);
+    const off = modelCatalogue.subscribe((changed) => {
+      if (live && changed === key) setState(read() || { loading: true, error: null, data: null });
+    });
+    modelCatalogue.load(key, () => boundedFetch(request(bot, "model.options", modelOptionsParams(), foreground ? { spawnPriority: "foreground" } : {}))).then((data) => live && setState({ loading: false, error: null, data })).catch((error) => live && !modelCatalogue.peek(key) && setState({ loading: false, error: String(error?.message || error), data: null }));
     return () => {
       live = false;
+      off();
     };
   }, [key]);
   return state;
 }
-function ModelPicker({ bot, value, onChange }) {
-  const { loading, error, data } = useModelOptions(bot);
+var NONE = "__default__";
+var CUSTOM = "__custom__";
+function ModelPicker({
+  bot,
+  value,
+  onChange,
+  foreground,
+  disabled,
+  children
+}) {
+  const { loading, error, data } = useModelOptions(bot, { foreground });
   const [manual, setManual] = React12.useState(null);
   const providers = usableProviders(data);
   const known = !value.provider || providers.some((p) => providerMatches(p, value.provider));
-  const freeText = manual ?? !known;
-  if (loading) return /* @__PURE__ */ jsx13("div", { className: "gbo-form-note", children: "Loading models…" });
-  if (error || !providers.length || freeText) {
+  const freeText = loading ? false : manual ?? !known;
+  const grid = children ? "gbo-row2 gbo-model-grid" : "gbo-row2";
+  if (!loading && (error || !providers.length || freeText)) {
     return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
-      /* @__PURE__ */ jsxs12("div", { className: "gbo-row2", children: [
-        /* @__PURE__ */ jsx13(Field, { label: "Provider", children: /* @__PURE__ */ jsx13("input", { className: "gbo-input", value: value.provider, placeholder: "nous / openrouter / …", onChange: (e2) => onChange({ provider: e2.target.value }) }) }),
-        /* @__PURE__ */ jsx13(Field, { label: "Model", children: /* @__PURE__ */ jsx13("input", { className: "gbo-input", value: value.model, placeholder: "provider/model-name", onChange: (e2) => onChange({ model: e2.target.value }) }) })
+      /* @__PURE__ */ jsxs12("div", { className: grid, children: [
+        /* @__PURE__ */ jsx13(Field, { label: "Provider", children: /* @__PURE__ */ jsx13("input", { className: "gbo-input", value: value.provider, disabled, placeholder: "nous / openrouter / …", onChange: (e2) => onChange({ provider: e2.target.value }) }) }),
+        /* @__PURE__ */ jsx13(Field, { label: "Model", children: /* @__PURE__ */ jsx13("input", { className: "gbo-input", value: value.model, disabled, placeholder: "provider/model-name", onChange: (e2) => onChange({ model: e2.target.value }) }) }),
+        children
       ] }),
       providers.length ? /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setManual(false), children: "Back to the lists" }) : error ? /* @__PURE__ */ jsxs12("span", { className: "gbo-field-hint", children: [
         "The model list did not load (",
@@ -26364,35 +26626,49 @@ function ModelPicker({ bot, value, onChange }) {
   }
   const active = providers.find((p) => providerMatches(p, value.provider)) || null;
   const models = active ? providerModels(active) : [];
-  const NONE = "__default__";
-  const CUSTOM = "__custom__";
-  return /* @__PURE__ */ jsxs12("div", { className: "gbo-row2", children: [
+  const providerOptions = loading ? [[NONE, "Default (the profile’s own)"], ...value.provider ? [[value.provider, value.provider]] : []] : [[NONE, "Default (the profile’s own)"], ...providers.map((p) => [p.slug, p.name || p.slug]), [CUSTOM, "Custom…"]];
+  const modelOptions = (models.includes(value.model) || !value.model ? models : [value.model, ...models]).map((m) => [m, m]);
+  return /* @__PURE__ */ jsxs12("div", { className: grid, "aria-busy": loading || void 0, children: [
     /* @__PURE__ */ jsx13(Field, { label: "Provider", children: /* @__PURE__ */ jsx13(
       Select,
       {
         label: "Provider",
-        value: active ? active.slug : NONE,
+        value: loading ? value.provider || NONE : active ? active.slug : NONE,
+        disabled,
         onChange: (v) => {
           if (v === NONE) onChange({ provider: "", model: "" });
           else if (v === CUSTOM) setManual(true);
-          else {
+          else if (!loading) {
             const prov = providers.find((p) => p.slug === v);
             onChange({ provider: v, model: providerModels(prov)[0] || "" });
           }
         },
-        options: [[NONE, "Default (the profile’s own)"], ...providers.map((p) => [p.slug, p.name || p.slug]), [CUSTOM, "Custom…"]]
+        options: providerOptions
       }
     ) }),
-    /* @__PURE__ */ jsx13(Field, { label: "Model", children: /* @__PURE__ */ jsx13(
-      Select,
-      {
-        label: "Model",
-        value: value.model,
-        disabled: !active,
-        onChange: (v) => onChange({ model: v }),
-        options: (models.includes(value.model) || !value.model ? models : [value.model, ...models]).map((m) => [m, m])
-      }
-    ) })
+    /* @__PURE__ */ jsx13(Field, { label: "Model", children: /* @__PURE__ */ jsx13(Select, { label: "Model", value: value.model, disabled: disabled || !loading && !active, onChange: (v) => onChange({ model: v }), options: modelOptions }) }),
+    children
+  ] });
+}
+function ModelExtraFields({
+  bot,
+  provider,
+  model,
+  effort,
+  speed,
+  disabled,
+  onChange
+}) {
+  const { loading, data } = useModelOptions(bot, { foreground: true });
+  const providers = usableProviders(data);
+  const row = providers.find((p) => providerMatches(p, provider)) || null;
+  const caps = loading ? void 0 : model ? modelCaps(row, model) : null;
+  const e2 = effortChoices({ provider: row?.slug || provider, model, caps, current: effort });
+  const s = speedChoices({ caps, current: speed });
+  const hint = (choice) => choice.supported ? choice.pending ? "Loading options…" : " " : UNSUPPORTED_HINT;
+  return /* @__PURE__ */ jsxs12(Fragment8, { children: [
+    /* @__PURE__ */ jsx13(Field, { label: "Effort", hint: hint(e2), children: /* @__PURE__ */ jsx13(Select, { label: "Effort", value: effort, disabled: disabled || !e2.supported, onChange: (v) => onChange({ effort: v }), options: e2.options }) }),
+    /* @__PURE__ */ jsx13(Field, { label: "Speed", hint: hint(s), children: /* @__PURE__ */ jsx13(Select, { label: "Speed", value: speed, disabled: disabled || !s.supported, onChange: (v) => onChange({ speed: v }), options: s.options }) })
   ] });
 }
 function SkillsHub({ bot, onInstalled }) {
@@ -27295,7 +27571,7 @@ function enableSlackProvisioning(bot) {
 
 // src/ui/SlackConnect.tsx
 import * as React13 from "react";
-import { Fragment as Fragment8, jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
+import { Fragment as Fragment9, jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
 function SlackConnect({ bot, name, initial, onClose }) {
   const [workspaces, setWorkspaces] = React13.useState(initial.workspaces);
   const [selected, setSelected] = React13.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
@@ -27438,12 +27714,12 @@ function SlackConnect({ bot, name, initial, onClose }) {
       name,
       " from Slack until it is added again."
     ] });
-    footer = /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       cancel,
       /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary gbo-slack-remove-primary", disabled: busy, onClick: () => void remove(), children: "Remove" })
     ] });
   } else if (connected) {
-    body = /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    body = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       /* @__PURE__ */ jsxs13("p", { className: "gbo-sheet-text", children: [
         "You can DM or @mention ",
         name,
@@ -27453,7 +27729,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
       ] }),
       testResult ? /* @__PURE__ */ jsx14("div", { className: "gbo-sheet-note", role: "status", children: testResult }) : null
     ] });
-    footer = /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: () => void testConnection(), children: busy ? "Testing…" : "Test connection" }),
       /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", disabled: busy, onClick: () => setConfirm(true), children: "Remove from Slack" }),
       /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: onClose, children: "Done" })
@@ -27463,7 +27739,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
       phase === "installed" ? "Slack is installed. Waiting for the bot connection…" : "Finish in Slack… Allow the bot in the browser tab that just opened.",
       timedOut ? " The connection timed out. Select Cancel to remove the incomplete app." : ""
     ] });
-    footer = /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       cancel,
       phase === "installed" ? /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", onClick: () => setConfirm(true), children: "Remove from Slack" }) : authorize ? /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(authorize), children: "Open again ↗" }) : null
     ] });
@@ -27472,7 +27748,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
       phase === "denied" ? "Slack install was cancelled." : "Slack setup needs attention.",
       " Remove the incomplete app before trying again."
     ] });
-    footer = /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       cancel,
       /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: () => void remove(), children: "Remove and try again" })
     ] });
@@ -27489,12 +27765,12 @@ function SlackConnect({ bot, name, initial, onClose }) {
         /* @__PURE__ */ jsx14("input", { className: "gbo-input", type: "password", autoComplete: "off", spellCheck: false, value: refresh, onChange: (e2) => setRefresh(e2.target.value) })
       ] })
     ] });
-    footer = /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       cancel,
       /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || Boolean(refreshTokenError(refresh)), onClick: () => void add2(), children: "Add" })
     ] });
   } else {
-    body = /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    body = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       /* @__PURE__ */ jsxs13("p", { className: "gbo-sheet-text", children: [
         "You can DM or @mention ",
         name,
@@ -27507,7 +27783,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
       ] }, w.team_id)),
       /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-link-btn gbo-slack-add-workspace", onClick: () => setAdding(true), children: "+ Connect another workspace" })
     ] });
-    footer = /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       cancel,
       /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || !selected, onClick: () => void connect(), children: "Connect ↗" })
     ] });
@@ -27519,7 +27795,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
 }
 
 // src/ui/SlackSetup.tsx
-import { Fragment as Fragment9, jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
 var SlackMark = ({ size = 18 }) => /* @__PURE__ */ jsxs14("svg", { width: size, height: size, viewBox: "0 0 24 24", "aria-hidden": true, className: "gbo-slack-mark", children: [
   /* @__PURE__ */ jsx15("rect", { x: "3", y: "8.5", width: "8.5", height: "3", rx: "1.5", fill: "#36C5F0" }),
   /* @__PURE__ */ jsx15("rect", { x: "8.5", y: "3", width: "3", height: "4.5", rx: "1.5", fill: "#36C5F0" }),
@@ -27620,7 +27896,7 @@ function LegacySlackStatusDialog({ bot, onClose }) {
       emblem: /* @__PURE__ */ jsx15(Emblem, {}),
       title: `${name} is in Slack`,
       subtitle: "Uses its own Slack app",
-      footer: /* @__PURE__ */ jsxs14(Fragment9, { children: [
+      footer: /* @__PURE__ */ jsxs14(Fragment10, { children: [
         testable ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-sheet-cancel", disabled: testing, onClick: () => void test(), children: testing ? "Testing…" : "Test connection" }) : /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }),
         /* @__PURE__ */ jsxs14("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(SLACK_OPEN_URL), children: [
           "Open Slack ",
@@ -27789,7 +28065,7 @@ function LegacySlackDialog({ bot, initial, onClose }) {
       " ",
       /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-link-btn", onClick: () => setStage("tokens"), children: "I already have the app" })
     ] });
-    footer = /* @__PURE__ */ jsxs14(Fragment9, { children: [
+    footer = /* @__PURE__ */ jsxs14(Fragment10, { children: [
       cancel(),
       /* @__PURE__ */ jsxs14(
         "button",
@@ -27863,12 +28139,12 @@ function LegacySlackDialog({ bot, initial, onClose }) {
         ]
       }
     );
-    footer = /* @__PURE__ */ jsxs14(Fragment9, { children: [
+    footer = /* @__PURE__ */ jsxs14(Fragment10, { children: [
       cancel(),
       /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-sheet-primary", disabled: !ready || busy, onClick: () => void connect(), children: busy ? "Connecting…" : "Connect" })
     ] });
   } else if (stage === "restart" || stage === "restarting" || stage === "restart-timeout") {
-    body = /* @__PURE__ */ jsxs14(Fragment9, { children: [
+    body = /* @__PURE__ */ jsxs14(Fragment10, { children: [
       /* @__PURE__ */ jsx15("div", { className: "gbo-sheet-note", children: slackConnectedText(name, { hotServed: false }) }),
       stage === "restart" ? /* @__PURE__ */ jsx15("div", { className: "gbo-sheet-warn", children: slackRestartWarning(name) }) : null,
       stage === "restarting" ? /* @__PURE__ */ jsxs14("div", { className: "gbo-sheet-note", children: [
@@ -27878,12 +28154,12 @@ function LegacySlackDialog({ bot, initial, onClose }) {
       ] }) : null,
       stage === "restart-timeout" ? /* @__PURE__ */ jsx15("div", { className: "gbo-sheet-note", children: SLACK_RESTART_TIMEOUT_TEXT }) : null
     ] });
-    footer = /* @__PURE__ */ jsxs14(Fragment9, { children: [
+    footer = /* @__PURE__ */ jsxs14(Fragment10, { children: [
       cancel(stage === "restart" ? "Cancel" : "Close"),
       stage === "restart-timeout" ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-sheet-primary", onClick: () => void waitThenTest(), children: "Check again" }) : /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || stage === "restarting", onClick: () => void restart(), children: busy || stage === "restarting" ? "Restarting…" : "Restart now" })
     ] });
   } else {
-    body = /* @__PURE__ */ jsxs14(Fragment9, { children: [
+    body = /* @__PURE__ */ jsxs14(Fragment10, { children: [
       note ? /* @__PURE__ */ jsxs14("div", { className: "gbo-form-error", children: [
         "Saved, but the check failed: ",
         note
@@ -27896,7 +28172,7 @@ function LegacySlackDialog({ bot, initial, onClose }) {
         ] }, row.request_id))
       ] })
     ] });
-    footer = /* @__PURE__ */ jsxs14(Fragment9, { children: [
+    footer = /* @__PURE__ */ jsxs14(Fragment10, { children: [
       /* @__PURE__ */ jsx15("span", {}),
       /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-sheet-primary", onClick: close, children: "Done" })
     ] });
@@ -27943,7 +28219,7 @@ function SlackStatusDialog({ bot, onClose }) {
 }
 
 // src/ui/BotDialogs.tsx
-import { Fragment as Fragment10, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
+import { Fragment as Fragment11, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
 var hostSeq = 0;
 var hosts = [];
 var hostChange = /* @__PURE__ */ new Set();
@@ -27990,7 +28266,7 @@ function RosterDialogs() {
           "This permanently deletes ",
           /* @__PURE__ */ jsx16("strong", { children: dialog.bot.name }),
           " and its Hermes profile",
-          dialog.bot.path ? /* @__PURE__ */ jsxs15(Fragment10, { children: [
+          dialog.bot.path ? /* @__PURE__ */ jsxs15(Fragment11, { children: [
             " at ",
             /* @__PURE__ */ jsx16("code", { children: dialog.bot.path })
           ] }) : null,
@@ -28077,7 +28353,7 @@ function AvatarPicker({ name, title, description, look, setLook }) {
         ]
       }
     ),
-    tab === "face" ? /* @__PURE__ */ jsxs15(Fragment10, { children: [
+    tab === "face" ? /* @__PURE__ */ jsxs15(Fragment11, { children: [
       blobatarMarkup("x", 8) !== null ? /* @__PURE__ */ jsx16("div", { className: "gbo-face-grid", children: BLOB_KINDS.map((k) => /* @__PURE__ */ jsx16(
         "button",
         {
@@ -28198,7 +28474,7 @@ function EditProfileDialog({ bot: row, onClose }) {
       onClose,
       title: "Edit profile",
       description: `${displayName(bot, null)} · profile ${bot.name}${bot.connectionLabel ? ` on ${bot.connectionLabel}` : ""}`,
-      footer: /* @__PURE__ */ jsxs15(Fragment10, { children: [
+      footer: /* @__PURE__ */ jsxs15(Fragment11, { children: [
         /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
         /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void submit(), children: busy ? "Saving…" : "Save" })
       ] }),
@@ -28231,7 +28507,7 @@ function ConfigDialog({ bot, initial, onClose }) {
       onClose,
       title: `${displayName(bot, metaFor(bot))}: skills, tools and model`,
       description: "Changes are written to the bot’s own Hermes profile on save.",
-      footer: /* @__PURE__ */ jsxs15(Fragment10, { children: [
+      footer: /* @__PURE__ */ jsxs15(Fragment11, { children: [
         /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
         /* @__PURE__ */ jsx16(
           "button",
@@ -28265,26 +28541,38 @@ function ConfigDialog({ bot, initial, onClose }) {
   );
 }
 function ModelDialog({ bot, onClose }) {
-  const current = useStore(roster2.models)[rowKey(bot)];
-  const [value, setValue] = React15.useState(() => current?.loaded ? { provider: current.provider, model: current.model } : null);
-  const [dirty, setDirty] = React15.useState(false);
+  const key = rowKey(bot);
+  const current = useStore(roster2.models)[key];
+  const settings = useStore(roster2.modelSettings)[key];
+  const [edits, setEdits] = React15.useState({});
   const [busy, setBusy] = React15.useState(false);
   const [error, setError] = React15.useState(null);
   React15.useEffect(() => {
-    void loadBotModel(bot);
-  }, [rowKey(bot)]);
-  React15.useEffect(() => {
-    if (!value && current?.loaded) setValue({ provider: current.provider, model: current.model });
-  }, [current?.loaded]);
+    void loadBotModel(bot, { foreground: true });
+    void loadBotModelSettings(bot, { foreground: true });
+  }, [key]);
+  const before = {
+    provider: current?.provider || "",
+    model: current?.model || "",
+    effort: settings?.effort || "",
+    speed: settings?.speed || ""
+  };
+  const value = { ...before, ...edits };
+  const modelReady = Boolean(current?.loaded);
+  const settingsReady = Boolean(settings?.loaded);
+  const dirty = Object.keys(edits).some((k) => edits[k] !== before[k]);
   const save = async () => {
-    if (!value) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await saveBotModel(bot, value);
-      if (res?.applied?.model === true) onClose();
-      else if (res?.confirmation?.accepted === false) setError("Not saved: the model was not confirmed.");
-      else setError("Not saved: model");
+      const res = await saveBotModelSheet(bot, before, value);
+      if (res?.ok) onClose();
+      else if (res?.applied?.model === false && res?.confirmation?.accepted === false) setError("Not saved: the model was not confirmed.");
+      else {
+        const failed = Object.entries(res?.applied || {}).filter(([, ok]) => !ok).map(([k]) => res?.errors?.[k] ? `${k} (${res.errors[k]})` : k);
+        setError(`Not saved: ${failed.join(", ") || "model"}`);
+        setEdits((e2) => Object.fromEntries(Object.entries(e2).filter(([k]) => res?.applied?.[k === "provider" ? "model" : k] !== true)));
+      }
     } catch (err2) {
       setError(String(err2?.message || err2));
     } finally {
@@ -28299,25 +28587,41 @@ function ModelDialog({ bot, onClose }) {
       onClose,
       title: `${displayName(bot, metaFor(bot))}: model`,
       description: "Written to the bot’s own Hermes profile on save.",
-      footer: /* @__PURE__ */ jsxs15(Fragment10, { children: [
+      footer: /* @__PURE__ */ jsxs15(Fragment11, { children: [
         /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !dirty || !value, onClick: () => void save(), children: busy ? "Saving…" : "Save" })
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !dirty || !modelReady, onClick: () => void save(), children: busy ? "Saving…" : "Save" })
       ] }),
       children: [
-        value ? /* @__PURE__ */ jsx16(
+        /* @__PURE__ */ jsx16(
           ModelPicker,
           {
             bot,
-            value,
-            onChange: (patch) => {
-              setDirty(true);
-              setValue((v) => ({ ...v || { provider: "", model: "" }, ...patch }));
-            }
+            foreground: true,
+            disabled: !modelReady,
+            value: { provider: value.provider, model: value.model },
+            onChange: (patch) => setEdits((e2) => ({ ...e2, ...patch })),
+            children: /* @__PURE__ */ jsx16(
+              ModelExtraFields,
+              {
+                bot,
+                provider: value.provider,
+                model: value.model,
+                effort: value.effort,
+                speed: value.speed,
+                disabled: !settingsReady,
+                onChange: (patch) => setEdits((e2) => ({ ...e2, ...patch }))
+              }
+            )
           }
-        ) : current?.error ? /* @__PURE__ */ jsxs15("div", { className: "gbo-form-error", children: [
+        ),
+        current?.error && !modelReady ? /* @__PURE__ */ jsxs15("div", { className: "gbo-form-error", children: [
           "Could not read the bot’s model: ",
           current.error
-        ] }) : /* @__PURE__ */ jsx16("div", { className: "gbo-form-note", children: "Loading the bot’s model…" }),
+        ] }) : null,
+        settings?.error && !settingsReady ? /* @__PURE__ */ jsxs15("div", { className: "gbo-form-error", children: [
+          "Could not read the bot’s effort and speed: ",
+          settings.error
+        ] }) : null,
         error ? /* @__PURE__ */ jsx16("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
@@ -28366,7 +28670,7 @@ function GroupsDialog({ bot, onClose }) {
       onClose,
       title: "Groups",
       description: `Groups ${who} belongs to. A bot can be in several.`,
-      footer: /* @__PURE__ */ jsxs15(Fragment10, { children: [
+      footer: /* @__PURE__ */ jsxs15(Fragment11, { children: [
         current.length ? /* @__PURE__ */ jsx16(
           "button",
           {
@@ -28492,7 +28796,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
       onClose,
       title: "New bot",
       description: "A named agent with its own memory, skills and Bot Chat.",
-      footer: /* @__PURE__ */ jsxs15(Fragment10, { children: [
+      footer: /* @__PURE__ */ jsxs15(Fragment11, { children: [
         /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
         /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !valid || taken, onClick: () => void submit(), children: busy ? "Creating…" : "Create bot" })
       ] }),
@@ -28510,7 +28814,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
             ]
           }
         ),
-        tab === "general" ? /* @__PURE__ */ jsxs15(Fragment10, { children: [
+        tab === "general" ? /* @__PURE__ */ jsxs15(Fragment11, { children: [
           /* @__PURE__ */ jsx16(AvatarPicker, { name: slug, title: botTitle, description, look, setLook }),
           /* @__PURE__ */ jsxs15("div", { className: "gbo-row2", children: [
             /* @__PURE__ */ jsx16(Field, { label: "Name", hint: name && !valid ? "Letters, digits, - and _ only" : taken ? "A bot with this name already exists there" : slug && slug !== name.trim() ? `Profile id: ${slug}` : void 0, children: /* @__PURE__ */ jsx16("input", { className: "gbo-input", autoFocus: true, value: name, placeholder: "scout", onChange: (e2) => setName(e2.target.value) }) }),
@@ -28527,7 +28831,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
             }
           ) }) : null
         ] }) : null,
-        tab === "model" ? /* @__PURE__ */ jsxs15(Fragment10, { children: [
+        tab === "model" ? /* @__PURE__ */ jsxs15(Fragment11, { children: [
           remote ? null : /* @__PURE__ */ jsx16(Field, { label: "Start from", hint: "Copies config, skills and SOUL from that profile.", children: /* @__PURE__ */ jsx16(Select, { label: "Start from", value: cloneFrom, onChange: setCloneFrom, options: [["default", "Hermes (default profile)"], ...localBots.filter((b2) => b2.name !== "default").map((b2) => [b2.name, displayName(b2, metaFor(b2))]), ["__none__", "A fresh profile"]] }) }),
           /* @__PURE__ */ jsx16(ModelPicker, { bot: remote ? { name: "default", connectionId: target, remoteSource: true, sourceScoped: true, route: { connectionId: target, mode: "remote", profile: "default", targetProfile: "default" } } : null, value: model, onChange: (patch) => setModel((m) => ({ ...m, ...patch })) }),
           /* @__PURE__ */ jsx16(Field, { label: "SOUL (optional)", hint: "Leave empty for an identity built from the name and description.", children: /* @__PURE__ */ jsx16("textarea", { className: "gbo-textarea is-mono", value: soul, onChange: (e2) => setSoul(e2.target.value) }) }),
@@ -28538,7 +28842,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
           "Could not read the starting profile’s capabilities (",
           capsError,
           "). You can change them after creating the bot."
-        ] }) : !caps ? /* @__PURE__ */ jsx16("div", { className: "gbo-form-note", children: "Loading…" }) : /* @__PURE__ */ jsx16(Fragment10, { children: ["skills", "toolsets", "mcp"].map((kind) => /* @__PURE__ */ jsx16(Field, { label: kind === "mcp" ? "MCP servers" : kind === "skills" ? "Skills" : "Toolsets", children: /* @__PURE__ */ jsx16("div", { className: `gbo-check-list${kind === "mcp" ? " is-one" : ""}`, children: (caps[kind] || []).map((x) => /* @__PURE__ */ jsx16(Check, { title: x.description || x.name, checked: Boolean(x.enabled), onChange: (v) => toggleCap(kind, x.name, v), children: x.name }, x.name)) }) }, kind)) }) : null,
+        ] }) : !caps ? /* @__PURE__ */ jsx16("div", { className: "gbo-form-note", children: "Loading…" }) : /* @__PURE__ */ jsx16(Fragment11, { children: ["skills", "toolsets", "mcp"].map((kind) => /* @__PURE__ */ jsx16(Field, { label: kind === "mcp" ? "MCP servers" : kind === "skills" ? "Skills" : "Toolsets", children: /* @__PURE__ */ jsx16("div", { className: `gbo-check-list${kind === "mcp" ? " is-one" : ""}`, children: (caps[kind] || []).map((x) => /* @__PURE__ */ jsx16(Check, { title: x.description || x.name, checked: Boolean(x.enabled), onChange: (v) => toggleCap(kind, x.name, v), children: x.name }, x.name)) }) }, kind)) }) : null,
         error ? /* @__PURE__ */ jsx16("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
@@ -29079,7 +29383,7 @@ function newMenuEntries() {
 }
 
 // src/ui/Screen.tsx
-import { Fragment as Fragment11, jsx as jsx19, jsxs as jsxs17 } from "react/jsx-runtime";
+import { Fragment as Fragment12, jsx as jsx19, jsxs as jsxs17 } from "react/jsx-runtime";
 var stores = /* @__PURE__ */ new Map();
 function screenStore(bot) {
   const key = rowKey(bot);
@@ -29367,7 +29671,7 @@ function BotScreen({ bot }) {
     );
   } else {
     const humanOther = lease?.holder === "human" && !iHold;
-    content = /* @__PURE__ */ jsxs17(Fragment11, { children: [
+    content = /* @__PURE__ */ jsxs17(Fragment12, { children: [
       /* @__PURE__ */ jsxs17("div", { className: "gbo-screen-bar", children: [
         /* @__PURE__ */ jsxs17("strong", { children: [
           who,
@@ -29385,7 +29689,7 @@ function BotScreen({ bot }) {
         /* @__PURE__ */ jsx19("span", { className: "gbo-spacer" }),
         lease?.holder === "human" && lease.reason ? /* @__PURE__ */ jsx19("span", { className: "gbo-screen-tag is-reason", title: lease.reason, children: lease.reason }) : null,
         /* @__PURE__ */ jsx19("span", { className: `gbo-screen-tag${iHold ? " is-you" : ""}`, children: iHold ? "You have control" : humanOther ? "Someone else has control" : "The bot has control" }),
-        iHold ? /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-small", disabled: busy, onClick: () => void handBack(), children: "Hand back" }) : /* @__PURE__ */ jsxs17(Fragment11, { children: [
+        iHold ? /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-small", disabled: busy, onClick: () => void handBack(), children: "Hand back" }) : /* @__PURE__ */ jsxs17(Fragment12, { children: [
           humanOther ? /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-small", disabled: busy, title: "Take control back from a viewer that is gone", onClick: () => void handBack(true), children: "Force hand back" }) : null,
           /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-small is-primary", disabled: busy || conn === "attaching" || !viewer, onClick: () => void takeOver(), children: "Take over" })
         ] }),
@@ -29554,6 +29858,7 @@ function ModelCard({ bot }) {
   const current = useStore(roster2.models)[key];
   React19.useEffect(() => {
     void loadBotModel(bot);
+    void loadBotModelSettings(bot);
   }, [key]);
   const value = current?.loaded ? current.model || "Default" : current?.error ? "Unavailable" : "…";
   const title = current?.loaded ? `Model: ${current.model ? [current.provider, current.model].filter(Boolean).join(" · ") : "the profile’s default"}` : current?.error ? `Model: could not read it (${current.error})` : "Model";
@@ -29713,7 +30018,7 @@ function ProfilePanel({ bot, onClose }) {
 
 // src/ui/Prompts.tsx
 import * as React20 from "react";
-import { Fragment as Fragment12, jsx as jsx22, jsxs as jsxs20 } from "react/jsx-runtime";
+import { Fragment as Fragment13, jsx as jsx22, jsxs as jsxs20 } from "react/jsx-runtime";
 var TITLES = {
   sudo: "needs your administrator password",
   secret: "needs a secret value",
@@ -29954,7 +30259,7 @@ function ConnectionCard({ waiting, onRespond }) {
   const busy = Boolean(waiting.answering);
   const forms = React20.useRef({});
   const targets = waiting.targets || [];
-  return /* @__PURE__ */ jsxs20(Fragment12, { children: [
+  return /* @__PURE__ */ jsxs20(Fragment13, { children: [
     targets.length === 0 ? /* @__PURE__ */ jsx22("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
     targets.map((target) => {
       const name = String(target?.name || "");
@@ -30118,7 +30423,7 @@ function ToolGroup({ item, bot }) {
 }
 
 // src/ui/Chat.tsx
-import { Fragment as Fragment13, jsx as jsx24, jsxs as jsxs22 } from "react/jsx-runtime";
+import { Fragment as Fragment14, jsx as jsx24, jsxs as jsxs22 } from "react/jsx-runtime";
 function Thinking({ text: text3 }) {
   return /* @__PURE__ */ jsxs22("details", { className: "gbo-think", children: [
     /* @__PURE__ */ jsxs22("summary", { children: [
@@ -30210,7 +30515,7 @@ function AssistantBody({ item, bot, pos }) {
   }
   if (!segments || !scope) return /* @__PURE__ */ jsx24(BotProse, { bot, text: item.text, pos, time });
   const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
-  return /* @__PURE__ */ jsx24(Fragment13, { children: segments.map(
+  return /* @__PURE__ */ jsx24(Fragment14, { children: segments.map(
     (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx24(BotProse, { bot, text: segment.text, pos, time: index === lastProse ? time : null }, index) : /* @__PURE__ */ jsx24(DirectiveBlock, { segment, poll: scope.recent.has(item.id), scope }, index)
   ) });
 }
@@ -30503,7 +30808,7 @@ function ProfileDrawer({ bot, onClose, backgroundRef }) {
     if (!ref.current) return;
     return trapFocus(ref.current, { background: backgroundRef.current });
   }, [backgroundRef]);
-  return /* @__PURE__ */ jsxs22(Fragment13, { children: [
+  return /* @__PURE__ */ jsxs22(Fragment14, { children: [
     /* @__PURE__ */ jsx24("div", { className: "gbo-scrim", "aria-hidden": "true", onClick: onClose }),
     /* @__PURE__ */ jsxs22(
       "div",
@@ -30641,7 +30946,7 @@ function UnreadDot({ bot }) {
 }
 
 // src/ui/Roster.tsx
-import { Fragment as Fragment15, jsx as jsx26, jsxs as jsxs23 } from "react/jsx-runtime";
+import { Fragment as Fragment16, jsx as jsx26, jsxs as jsxs23 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
   const [now, setNow] = React24.useState(() => Date.now());
   React24.useEffect(() => {
@@ -30946,7 +31251,7 @@ function RosterPane() {
         /* @__PURE__ */ jsx26("strong", { children: "All bots are hidden" }),
         /* @__PURE__ */ jsx26("span", { children: "Hidden bots keep working; they are just not listed." }),
         /* @__PURE__ */ jsx26("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
-      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx26("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs23(Fragment15, { children: [
+      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx26("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs23(Fragment16, { children: [
         ownCount === 0 ? newSectionField : null,
         list.map((section, index) => {
           const isCollapsed = section.own ? section.collapsed : collapsed.includes(section.name);

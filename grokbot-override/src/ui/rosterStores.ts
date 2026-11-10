@@ -28,6 +28,16 @@ export interface BotModel {
   error: null | string
 }
 
+/** A bot's reasoning effort and speed as its profile config holds them
+ *  ('' = not set, core/modelSheet.js). */
+export interface BotModelSettings {
+  loading: boolean
+  loaded: boolean
+  effort: string
+  speed: string
+  error: null | string
+}
+
 export const roster2 = {
   /** R6: session-only, like stock's pane state. */
   filters: createStore<{ kind: string; activity: string; gateway: string }>({ ...DEFAULT_FILTERS }),
@@ -47,6 +57,8 @@ export const roster2 = {
   running: createStore<Record<string, boolean>>({}),
   /** The panel's Model row: roster key -> the bot's configured model. */
   models: createStore<Record<string, BotModel>>({}),
+  /** The model sheet's Effort and Speed: roster key -> the profile's values. */
+  modelSettings: createStore<Record<string, BotModelSettings>>({}),
   /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
    *  the first unread bot message (null: none; absent: not decided), and the
    *  per-bot seen watermark (ms; plugin storage `seenAt`). */

@@ -5,6 +5,7 @@
 import { attentionFromEvent, clearAttention, noteAttention } from '../core/attention.js'
 import { botMetaKey, effectiveMeta, overlayEntry, pruneOverlay, readServerBotMeta, saveBotMetaPatch } from '../core/botMeta.js'
 import { cronAddParams, cronEditUpdates, cronJobRestPath, cronRemoveParams, CRON_TRIGGER_REQUEST_TIMEOUT_MS, isStoredJobFor } from '../core/cronOps.js'
+import { settingsFromConfig, sheetSavePlan, stepSucceeded } from '../core/modelSheet.js'
 import { applyAdvancedConfig, emptyAdvancedState, loadAdvanced } from '../core/profileConfig.js'
 import {
   capabilityPayload,
@@ -25,7 +26,7 @@ import { rowKey } from '../core/roster.js'
 import { botRestScope, botWorkspaceOwnerKey, createBotRequester, resolveBotConnectionRoute, stockOpenTarget } from '../core/routing.js'
 import { mergeUsage, usageFromEvent } from '../core/usage.js'
 import { activeConnection, app, backToOverride, beginStockHandoff, loadCron, reloadRoster, selectBot } from './app'
-import { roster2, type BotModel } from './rosterStores'
+import { roster2, type BotModel, type BotModelSettings } from './rosterStores'
 import { host, queryClient } from './sdk'
 
 let requester: any = null
@@ -340,13 +341,15 @@ function setBotModel(bot: any, patch: Partial<BotModel>) {
 /** The bot's configured model for the panel's Model row: the same
  *  profiles.describe read the config screens open with (its model section
  *  only), on the bot's own route. Read once per bot unless `force`. */
-export async function loadBotModel(bot: any, { force = false }: { force?: boolean } = {}) {
+export async function loadBotModel(bot: any, { force = false, foreground = false }: { force?: boolean; foreground?: boolean } = {}) {
   const key = rowKey(bot)
   const have = roster2.models.get()[key]
   if (have && !force && (have.loading || have.loaded)) return
   roster2.models.set(all => ({ ...all, [key]: { provider: '', model: '', error: null, loaded: false, ...all[key], loading: true } }))
   try {
-    const res: any = await request(bot, 'profiles.describe', { name: bot.name })
+    // The sheet opening is a user gesture: its read takes the pool's
+    // interactive slot instead of queuing behind warm bot backends.
+    const res: any = await request(bot, 'profiles.describe', { name: bot.name }, foreground ? FOREGROUND : {})
     setBotModel(bot, { provider: String(res?.model?.provider || ''), model: String(res?.model?.default || ''), error: null })
   } catch (error: any) {
     roster2.models.set(all => ({ ...all, [key]: { provider: '', model: '', ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }))
@@ -364,6 +367,82 @@ export function saveBotModel(bot: any, value: { provider: string; model: string 
 /** Seed a bot's Model row (the preview and tests). */
 export function primeBotModel(bot: any, value: { provider: string; model: string }) {
   setBotModel(bot, { ...value, error: null })
+}
+
+const FOREGROUND = { spawnPriority: 'foreground' } as const
+
+function setBotModelSettings(bot: any, patch: Partial<BotModelSettings>) {
+  const key = rowKey(bot)
+  roster2.modelSettings.set(all => ({ ...all, [key]: { effort: '', speed: '', error: null, ...all[key], ...patch, loading: false, loaded: true } }))
+}
+
+/** The sheet's Effort and Speed: `agent.reasoning_effort` and
+ *  `agent.service_tier` from the bot's own profile config (`config.get full`
+ *  is the user config without defaults, so a missing key reads as Default).
+ *  Only those two values are kept. Read once per bot unless `force`. */
+export async function loadBotModelSettings(bot: any, { force = false, foreground = false }: { force?: boolean; foreground?: boolean } = {}) {
+  const key = rowKey(bot)
+  const have = roster2.modelSettings.get()[key]
+  if (have && !force && (have.loading || have.loaded)) return
+  roster2.modelSettings.set(all => ({ ...all, [key]: { effort: '', speed: '', error: null, loaded: false, ...all[key], loading: true } }))
+  try {
+    const res: any = await request(bot, 'config.get', { key: 'full', profile: bot.name }, foreground ? FOREGROUND : {})
+    setBotModelSettings(bot, { ...settingsFromConfig(res), error: null })
+  } catch (error: any) {
+    roster2.modelSettings.set(all => ({ ...all, [key]: { effort: '', speed: '', ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }))
+  }
+}
+
+/** Seed a bot's Effort and Speed (the preview and tests). */
+export function primeBotModelSettings(bot: any, value: { effort: string; speed: string }) {
+  setBotModelSettings(bot, { ...value, error: null })
+}
+
+export interface ModelSheetValue {
+  provider: string
+  model: string
+  effort: string
+  speed: string
+}
+
+/**
+ * The model sheet's one Save: the model the way saveBotModel writes it, then
+ * effort and speed (core/modelSheet.js sheetSavePlan), each only when it
+ * changed. Every write dials foreground (a user action, like stock's
+ * PROFILE_WRITE_METHODS). A refused or failed model stops the save there,
+ * since Hermes checks Fast against the profile's model. Returns
+ * `{ ok, applied: {model?, effort?, speed?}, confirmation?, errors }`.
+ */
+export async function saveBotModelSheet(bot: any, before: ModelSheetValue, next: ModelSheetValue) {
+  const applied: Record<string, boolean> = {}
+  const errors: Record<string, string> = {}
+  let confirmation: any = null
+  // `hermes --profile <name>` runs on the bot's own machine: the route's
+  // backend profile name (config.set's `profile` is rewritten the same way).
+  const backend = { name: resolveBotConnectionRoute(bot).route?.targetProfile || bot.name }
+  for (const step of sheetSavePlan(backend, before, next) as any[]) {
+    if (step.field === 'model') {
+      const res: any = await saveBotModel(bot, { provider: next.provider, model: next.model })
+      applied.model = res?.applied?.model === true
+      confirmation = res?.confirmation || null
+      if (!applied.model) break
+      continue
+    }
+    try {
+      const res = await request(bot, step.method, step.params, FOREGROUND)
+      applied[step.field] = stepSucceeded(step, res)
+      if (!applied[step.field]) errors[step.field] = String((res as any)?.output || (res as any)?.hint || 'refused').trim()
+    } catch (error: any) {
+      applied[step.field] = false
+      errors[step.field] = String(error?.message || error)
+    }
+  }
+  const settings: Partial<BotModelSettings> = {}
+  if (applied.effort) settings.effort = next.effort
+  if (applied.speed) settings.speed = next.speed
+  if (Object.keys(settings).length) setBotModelSettings(bot, settings)
+  if (Object.values(applied).some(ok => !ok)) void loadBotModelSettings(bot, { force: true })
+  return { ok: Object.values(applied).every(Boolean), applied, confirmation, errors }
 }
 
 /** skills-hub.tsx:146 search (shared hub, active gateway) / :170 install (bot route). */

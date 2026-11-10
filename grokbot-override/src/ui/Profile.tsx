@@ -18,7 +18,7 @@ import { IconChevronDown, IconClock, IconPlus, IconScreen, IconX } from './icons
 import { IconEdit, IconPlay, IconRefresh, IconSettings, IconTrash, IconUsers } from './iconsRoster'
 import { botFor, openNewGroupForm } from './Rooms'
 import { openDialog, roster2 } from './rosterStores'
-import { loadBotModel, runJob } from './rosterActions'
+import { loadBotModel, loadBotModelSettings, runJob } from './rosterActions'
 import { openBotScreen } from './Screen'
 import { SlackStatusCard, SuggestedSlack } from './SlackSetup'
 import { useStore } from './store'
@@ -45,6 +45,8 @@ function ModelCard({ bot }: { bot: any }) {
   const current = useStore(roster2.models)[key]
   React.useEffect(() => {
     void loadBotModel(bot)
+    // Effort and speed too, so the model sheet opens with all four values.
+    void loadBotModelSettings(bot)
   }, [key])
   const value = current?.loaded ? current.model || 'Default' : current?.error ? 'Unavailable' : '…'
   const title = current?.loaded ? `Model: ${current.model ? [current.provider, current.model].filter(Boolean).join(' · ') : 'the profile’s default'}` : current?.error ? `Model: could not read it (${current.error})` : 'Model'

@@ -4,66 +4,103 @@
 
 import * as React from 'react'
 
+import { catalogueKey, createCatalogue, effortChoices, modelCaps, speedChoices, UNSUPPORTED_HINT } from '../core/modelSheet.js'
 import { boundedFetch, mcpNeedsSetup, modelOptionsParams, providerMatches, providerModels, toggleEntry, usableProviders } from '../core/profileConfig.js'
 import { resolveBotConnectionRoute } from '../core/routing.js'
 import { Check, Field, Select } from './kit'
 import { installSkill, loadProfileConfig, request, searchSkills } from './rosterActions'
 import { host, sdk } from './sdk'
 
-const modelCache = new Map<string, { at: number; value: any }>()
-const MODEL_OPTIONS_STALE_MS = 120_000
+/** The model catalogue (model.options) for the app session: one per
+ *  connection, shared by every bot on it and every sheet that opens
+ *  (core/modelSheet.js createCatalogue). A fresh copy is used as is; a stale
+ *  one (over 2 min, stock's model-picker staleTime) is shown at once and
+ *  refreshed in the background. */
+export const modelCatalogue = createCatalogue()
 
 function modelKey(bot: any) {
-  return bot ? `${bot.connectionId || ''}::${bot.name}` : 'active'
+  let route = null
+  try {
+    route = bot ? resolveBotConnectionRoute(bot).route : null
+  } catch {
+    route = null
+  }
+  return catalogueKey(route)
 }
 
 /** Seed the model.options cache (a list read elsewhere; the smoke test). */
 export function primeModelOptions(bot: any, value: any) {
-  modelCache.set(modelKey(bot), { at: Date.now(), value })
+  modelCatalogue.prime(modelKey(bot), value)
 }
 
-/** model.options on the bot's own route, cached 2 min like stock's query
- *  (model-picker.tsx:66 staleTime 120000, no forced refresh). */
-function useModelOptions(bot: any) {
+/** model.options on the bot's own route through the shared catalogue. The
+ *  sheet passes `foreground` (a user gesture). Never blocks a render: the
+ *  state says `loading` until the first copy for this connection arrives. */
+export function useModelOptions(bot: any, { foreground = false }: { foreground?: boolean } = {}) {
   const key = modelKey(bot)
-  const [state, setState] = React.useState<{ loading: boolean; error: null | string; data: any }>(() => {
-    const hit = modelCache.get(key)
-    return hit && Date.now() - hit.at < MODEL_OPTIONS_STALE_MS ? { loading: false, error: null, data: hit.value } : { loading: true, error: null, data: null }
-  })
+  const read = () => {
+    const data = modelCatalogue.peek(key)
+    return data ? { loading: false, error: null, data } : null
+  }
+  const [state, setState] = React.useState<{ loading: boolean; error: null | string; data: any }>(() => read() || { loading: true, error: null, data: null })
   React.useEffect(() => {
-    const hit = modelCache.get(key)
-    if (hit && Date.now() - hit.at < MODEL_OPTIONS_STALE_MS) return
     let live = true
-    boundedFetch(request(bot, 'model.options', modelOptionsParams()))
-      .then((value: any) => {
-        modelCache.set(key, { at: Date.now(), value })
-        if (live) setState({ loading: false, error: null, data: value })
-      })
-      .catch((error: any) => live && setState({ loading: false, error: String(error?.message || error), data: null }))
+    const now = read()
+    if (now) setState(now)
+    const off = modelCatalogue.subscribe((changed: string) => {
+      if (live && changed === key) setState(read() || { loading: true, error: null, data: null })
+    })
+    modelCatalogue
+      .load(key, () => boundedFetch(request(bot, 'model.options', modelOptionsParams(), foreground ? { spawnPriority: 'foreground' } : {})))
+      .then((data: any) => live && setState({ loading: false, error: null, data }))
+      .catch((error: any) => live && !modelCatalogue.peek(key) && setState({ loading: false, error: String(error?.message || error), data: null }))
     return () => {
       live = false
+      off()
     }
   }, [key])
   return state
 }
 
-export function ModelPicker({ bot, value, onChange }: { bot: any; value: { provider: string; model: string }; onChange: (patch: { provider?: string; model?: string }) => void }) {
-  const { loading, error, data } = useModelOptions(bot)
+const NONE = '__default__'
+const CUSTOM = '__custom__'
+
+/** Provider and Model. While the catalogue is still on its way the two
+ *  selects already show the bot's current values (only those, plus Default),
+ *  so the sheet is usable at once; the lists fill when it arrives. Extra
+ *  fields (`children`) go in the same two-column grid. */
+export function ModelPicker({
+  bot,
+  value,
+  onChange,
+  foreground,
+  disabled,
+  children
+}: {
+  bot: any
+  value: { provider: string; model: string }
+  onChange: (patch: { provider?: string; model?: string }) => void
+  foreground?: boolean
+  disabled?: boolean
+  children?: React.ReactNode
+}) {
+  const { loading, error, data } = useModelOptions(bot, { foreground })
   const [manual, setManual] = React.useState<boolean | null>(null)
   const providers = usableProviders(data)
   const known = !value.provider || providers.some((p: any) => providerMatches(p, value.provider))
-  const freeText = manual ?? !known
-  if (loading) return <div className="gbo-form-note">Loading models…</div>
-  if (error || !providers.length || freeText) {
+  const freeText = loading ? false : (manual ?? !known)
+  const grid = children ? 'gbo-row2 gbo-model-grid' : 'gbo-row2'
+  if (!loading && (error || !providers.length || freeText)) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div className="gbo-row2">
+        <div className={grid}>
           <Field label="Provider">
-            <input className="gbo-input" value={value.provider} placeholder="nous / openrouter / …" onChange={e => onChange({ provider: e.target.value })} />
+            <input className="gbo-input" value={value.provider} disabled={disabled} placeholder="nous / openrouter / …" onChange={e => onChange({ provider: e.target.value })} />
           </Field>
           <Field label="Model">
-            <input className="gbo-input" value={value.model} placeholder="provider/model-name" onChange={e => onChange({ model: e.target.value })} />
+            <input className="gbo-input" value={value.model} disabled={disabled} placeholder="provider/model-name" onChange={e => onChange({ model: e.target.value })} />
           </Field>
+          {children}
         </div>
         {providers.length ? (
           <button type="button" className="gbo-link-btn" style={{ alignSelf: 'flex-start' }} onClick={() => setManual(false)}>
@@ -77,35 +114,77 @@ export function ModelPicker({ bot, value, onChange }: { bot: any; value: { provi
   }
   const active = providers.find((p: any) => providerMatches(p, value.provider)) || null
   const models = active ? providerModels(active) : []
-  const NONE = '__default__'
-  const CUSTOM = '__custom__'
+  const providerOptions: Array<[string, string]> = loading
+    ? [[NONE, 'Default (the profile’s own)'], ...(value.provider ? [[value.provider, value.provider] as [string, string]] : [])]
+    : [[NONE, 'Default (the profile’s own)'], ...providers.map((p: any) => [p.slug, p.name || p.slug] as [string, string]), [CUSTOM, 'Custom…']]
+  const modelOptions: Array<[string, string]> = (models.includes(value.model) || !value.model ? models : [value.model, ...models]).map((m: string) => [m, m] as [string, string])
   return (
-    <div className="gbo-row2">
+    <div className={grid} aria-busy={loading || undefined}>
       <Field label="Provider">
         <Select
           label="Provider"
-          value={active ? active.slug : NONE}
+          value={loading ? value.provider || NONE : active ? active.slug : NONE}
+          disabled={disabled}
           onChange={v => {
             if (v === NONE) onChange({ provider: '', model: '' })
             else if (v === CUSTOM) setManual(true)
-            else {
+            else if (!loading) {
               const prov = providers.find((p: any) => p.slug === v)
               onChange({ provider: v, model: providerModels(prov)[0] || '' })
             }
           }}
-          options={[[NONE, 'Default (the profile’s own)'], ...providers.map((p: any) => [p.slug, p.name || p.slug] as [string, string]), [CUSTOM, 'Custom…']]}
+          options={providerOptions}
         />
       </Field>
       <Field label="Model">
-        <Select
-          label="Model"
-          value={value.model}
-          disabled={!active}
-          onChange={v => onChange({ model: v })}
-          options={(models.includes(value.model) || !value.model ? models : [value.model, ...models]).map((m: string) => [m, m] as [string, string])}
-        />
+        <Select label="Model" value={value.model} disabled={disabled || (!loading && !active)} onChange={v => onChange({ model: v })} options={modelOptions} />
       </Field>
+      {children}
     </div>
+  )
+}
+
+/** Effort and Speed for the model the sheet has picked, from the same
+ *  catalogue row (capabilities[model]); before it arrives they show the
+ *  bot's current values. A model without the dial gets the select disabled
+ *  with a short hint, never hidden, so the grid keeps its shape. */
+export function ModelExtraFields({
+  bot,
+  provider,
+  model,
+  effort,
+  speed,
+  disabled,
+  onChange
+}: {
+  bot: any
+  provider: string
+  model: string
+  effort: string
+  speed: string
+  disabled?: boolean
+  onChange: (patch: { effort?: string; speed?: string }) => void
+}) {
+  // Mounted inside ModelPicker's grid, so its effect runs first: it starts
+  // the (shared) catalogue read, foreground like the sheet's other reads.
+  const { loading, data } = useModelOptions(bot, { foreground: true })
+  const providers = usableProviders(data)
+  const row = providers.find((p: any) => providerMatches(p, provider)) || null
+  // Unknown until the catalogue arrives; afterwards a model it does not
+  // describe (Default, custom) gets the unrestricted Hermes defaults.
+  const caps = loading ? undefined : model ? modelCaps(row, model) : null
+  const e = effortChoices({ provider: row?.slug || provider, model, caps, current: effort })
+  const s = speedChoices({ caps, current: speed })
+  const hint = (choice: any) => (choice.supported ? (choice.pending ? 'Loading options…' : '\u00a0') : UNSUPPORTED_HINT)
+  return (
+    <>
+      <Field label="Effort" hint={hint(e)}>
+        <Select label="Effort" value={effort} disabled={disabled || !e.supported} onChange={v => onChange({ effort: v })} options={e.options} />
+      </Field>
+      <Field label="Speed" hint={hint(s)}>
+        <Select label="Speed" value={speed} disabled={disabled || !s.supported} onChange={v => onChange({ speed: v })} options={s.options} />
+      </Field>
+    </>
   )
 }
 

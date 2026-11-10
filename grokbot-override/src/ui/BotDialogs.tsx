@@ -16,7 +16,7 @@ import { BotAvatar, botColor } from './Avatar'
 import { OverrideBoundary } from './Boundary'
 import { JobDetailDialog, JobDialog, JobRemoveDialog } from './CronDialogs'
 import { Check, Confirm, Dialog, Field, Select, Tabs } from './kit'
-import { AdvancedConfig, ModelPicker } from './ProfileConfig'
+import { AdvancedConfig, ModelExtraFields, ModelPicker } from './ProfileConfig'
 import {
   createBot,
   deleteBot,
@@ -25,10 +25,12 @@ import {
   groupHasRoom,
   listConnections,
   loadBotModel,
+  loadBotModelSettings,
+  type ModelSheetValue,
   loadCreateCatalog,
   probeImageGeneration,
   saveAdvanced,
-  saveBotModel,
+  saveBotModelSheet,
   saveMeta,
   saveProfileEdits,
   setConfirmAsker
@@ -416,29 +418,48 @@ export function ConfigDialog({ bot, initial, onClose }: { bot: any; initial?: an
   )
 }
 
-/** The panel's Model row: the same ModelPicker as the config screen, for
- *  the model only, saved the same way (rosterActions saveBotModel). */
+/** The panel's Model row: provider, model, reasoning effort and speed for one
+ *  bot, written to its own profile in one Save (rosterActions
+ *  saveBotModelSheet). It opens at once: the values come from the stores the
+ *  panel row already filled (profiles.describe, config.get), the catalogue
+ *  from the shared cache, and anything still on its way fills in place. */
 export function ModelDialog({ bot, onClose }: { bot: any; onClose: () => void }) {
-  const current = useStore(roster2.models)[rowKey(bot)]
-  const [value, setValue] = React.useState<null | { provider: string; model: string }>(() => (current?.loaded ? { provider: current.provider, model: current.model } : null))
-  const [dirty, setDirty] = React.useState(false)
+  const key = rowKey(bot)
+  const current = useStore(roster2.models)[key]
+  const settings = useStore(roster2.modelSettings)[key]
+  // The values the sheet opened on (what Save compares against), and the edits.
+  const [edits, setEdits] = React.useState<Partial<ModelSheetValue>>({})
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<null | string>(null)
   React.useEffect(() => {
-    void loadBotModel(bot)
-  }, [rowKey(bot)])
-  React.useEffect(() => {
-    if (!value && current?.loaded) setValue({ provider: current.provider, model: current.model })
-  }, [current?.loaded])
+    void loadBotModel(bot, { foreground: true })
+    void loadBotModelSettings(bot, { foreground: true })
+  }, [key])
+  const before: ModelSheetValue = {
+    provider: current?.provider || '',
+    model: current?.model || '',
+    effort: settings?.effort || '',
+    speed: settings?.speed || ''
+  }
+  const value: ModelSheetValue = { ...before, ...edits }
+  const modelReady = Boolean(current?.loaded)
+  const settingsReady = Boolean(settings?.loaded)
+  const dirty = Object.keys(edits).some(k => (edits as any)[k] !== (before as any)[k])
   const save = async () => {
-    if (!value) return
     setBusy(true)
     setError(null)
     try {
-      const res = await saveBotModel(bot, value)
-      if (res?.applied?.model === true) onClose()
-      else if (res?.confirmation?.accepted === false) setError('Not saved: the model was not confirmed.')
-      else setError('Not saved: model')
+      const res: any = await saveBotModelSheet(bot, before, value)
+      if (res?.ok) onClose()
+      else if (res?.applied?.model === false && res?.confirmation?.accepted === false) setError('Not saved: the model was not confirmed.')
+      else {
+        const failed = Object.entries(res?.applied || {})
+          .filter(([, ok]) => !ok)
+          .map(([k]) => (res?.errors?.[k] ? `${k} (${res.errors[k]})` : k))
+        setError(`Not saved: ${failed.join(', ') || 'model'}`)
+        // What did save is now the bot's value; keep only the edits that failed.
+        setEdits(e => Object.fromEntries(Object.entries(e).filter(([k]) => res?.applied?.[k === 'provider' ? 'model' : k] !== true)))
+      }
     } catch (err: any) {
       setError(String(err?.message || err))
     } finally {
@@ -457,26 +478,31 @@ export function ModelDialog({ bot, onClose }: { bot: any; onClose: () => void })
           <button type="button" className="gbo-btn is-ghost" disabled={busy} onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="gbo-btn is-primary" disabled={busy || !dirty || !value} onClick={() => void save()}>
+          <button type="button" className="gbo-btn is-primary" disabled={busy || !dirty || !modelReady} onClick={() => void save()}>
             {busy ? 'Saving…' : 'Save'}
           </button>
         </>
       }
     >
-      {value ? (
-        <ModelPicker
+      <ModelPicker
+        bot={bot}
+        foreground
+        disabled={!modelReady}
+        value={{ provider: value.provider, model: value.model }}
+        onChange={patch => setEdits(e => ({ ...e, ...patch }))}
+      >
+        <ModelExtraFields
           bot={bot}
-          value={value}
-          onChange={patch => {
-            setDirty(true)
-            setValue(v => ({ ...(v || { provider: '', model: '' }), ...patch }))
-          }}
+          provider={value.provider}
+          model={value.model}
+          effort={value.effort}
+          speed={value.speed}
+          disabled={!settingsReady}
+          onChange={patch => setEdits(e => ({ ...e, ...patch }))}
         />
-      ) : current?.error ? (
-        <div className="gbo-form-error">Could not read the bot’s model: {current.error}</div>
-      ) : (
-        <div className="gbo-form-note">Loading the bot’s model…</div>
-      )}
+      </ModelPicker>
+      {current?.error && !modelReady ? <div className="gbo-form-error">Could not read the bot’s model: {current.error}</div> : null}
+      {settings?.error && !settingsReady ? <div className="gbo-form-error">Could not read the bot’s effort and speed: {settings.error}</div> : null}
       {error ? <div className="gbo-form-error">{error}</div> : null}
     </Dialog>
   )

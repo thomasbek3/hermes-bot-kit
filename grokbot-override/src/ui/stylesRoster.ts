@@ -109,6 +109,8 @@ export const ROSTER_CSS = /* css */ `
 .gbo-textarea.is-mono { font: 12px/18px var(--gbo-mono); min-height: 140px; }
 .gbo-select { appearance: none; padding-right: 26px; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px; background-repeat: no-repeat; }
 .gbo-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.gbo-model-grid { row-gap: 14px; }
+.gbo-select:disabled, .gbo-input:disabled { opacity: .55; cursor: default; }
 .gbo-check { display: flex; align-items: center; gap: 8px; font: var(--gbo-text-body-sm); color: var(--gbo-fg); cursor: pointer; min-width: 0; }
 .gbo-check input { width: 15px; height: 15px; accent-color: var(--gbo-ring); flex: none; margin: 0; }
 .gbo-check .gbo-check-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

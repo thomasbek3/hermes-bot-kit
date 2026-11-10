@@ -282,6 +282,10 @@ export function renderElement(component: any, props: any) {
 // Test seams (roster-side parity): actions and their stores, on the fake SDK.
 export * as rosterApi from '../src/ui/rosterActions'
 export * as rosterStoresApi from '../src/ui/rosterStores'
+// The model sheet (provider, model, effort, speed) and its shared catalogue.
+export { ModelDialog } from '../src/ui/BotDialogs'
+export { modelCatalogue } from '../src/ui/ProfileConfig'
+export * as modelSheetApi from '../src/core/modelSheet.js'
 
 /** Every avatar shape in every swatch colour, on the light and dark sidebar
  *  greys, as one page (the contact sheet). */

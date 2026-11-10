@@ -57,6 +57,9 @@ export function backendTargetProfile(route, fallbackProfile = 'default') {
   return route.targetProfile || route.profile
 }
 
+/** routing.ts PROFILE_WRITE_METHODS */
+export const PROFILE_WRITE_METHODS = new Set(['profiles.configure', 'profiles.create', 'profiles.set_asset'])
+
 function scopedBotParams(route, method, params) {
   const logical = route.profile
   const target = backendTargetProfile(route, logical)
@@ -152,9 +155,13 @@ export function createBotRequester(host, { activeConnectionId } = {}) {
         throw new Error(`Cannot route ${method} for ${route.connectionId}::${route.profile}`)
       }
       const routed = scopedBotParams(route, method, params)
+      // routing.ts:233: a profile write is always a user action, so it dials
+      // foreground unless the caller says otherwise (a background write
+      // queues behind warm bot backends and can time out).
+      const spawnPriority = options.spawnPriority ?? (PROFILE_WRITE_METHODS.has(method) ? 'foreground' : undefined)
       try {
-        if (options.spawnPriority) {
-          return await host.requestProfile(route, method, routed, options.timeoutMs, { spawnPriority: options.spawnPriority })
+        if (spawnPriority) {
+          return await host.requestProfile(route, method, routed, options.timeoutMs, { spawnPriority })
         }
         return options.timeoutMs === undefined
           ? await host.requestProfile(route, method, routed)
