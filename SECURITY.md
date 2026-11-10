@@ -40,3 +40,46 @@ within a few days.
   except to the endpoint you configure.
 - Social-engineering reports ("the AI told me to run...") are out of scope
   here — file them with Hermes Agent core.
+
+## Audit
+
+**Date:** 2026-11-09.
+
+**Method:** a multi-phase source audit of the whole repository (mapping,
+focused hunts, an independent check of every candidate, a final review), run
+as a quick, partial pass. No code was executed; every check was source review.
+
+**Result:** no confirmed vulnerabilities. Eight leads could not be settled
+from source alone (they depend on Hermes, proxy or Windows behaviour). This
+change set closes all eight in source anyway:
+
+1. Orgo tool approvals now show the full argument with control characters
+   escaped, up to 2000 characters, with an explicit "more characters" marker.
+2. `C:\usbmmidd_v2` (run by a SYSTEM startup task) gets a protected
+   Administrators/SYSTEM ACL, and an existing folder with any other owner
+   stops the install.
+3. The HD agent tree and venv under `C:\ProgramData\hermes-cv` get a
+   protected ACL, so other local users cannot add files the logon task runs.
+4. The Windows HD token file is readable only by the install user,
+   Administrators and SYSTEM.
+5. A `::preview` page can no longer send a hidden message without the user:
+   it shows the text with Send / Dismiss unless the user just clicked into it.
+6. A connection's sign-in link opens only for `https:` (or `http:` to this
+   machine); anything else is shown as text.
+7. Remote images in bot replies load only when the user clicks Load.
+8. The Slack relay's rate limit is per client behind the proxy and never
+   blocks requests that carry a valid Slack signature or OAuth state.
+
+Also tightened in the same change set: preview frames have no network, card
+buttons show what they send, Slack-supplied text is cleaned before it is
+saved, the Slack HTTP listener stays on loopback unless allowed, noVNC loads
+only from the verified vendored copy, `C:\ffmpeg` is used only when safe, and
+the CI workflows have read-only permissions and actions pinned to commits.
+
+**Not covered** (this pass does not claim these are safe): the Bot Sections,
+Task Dock and Bubble Mode desktop plugins; the Orgo agent-plugin installer;
+the Orgo CLI helpers `orgo-hands` and `orgo-term`; the computer-viewer noVNC
+loader; the root-level legacy installer shims and per-plugin install scripts;
+the gateway tool-approval cards in the Grokbot Override desktop UI; Grokbot
+Override scheduled routines (cron); the relay service installer and Tailscale
+Funnel exposure; the texting-style backend plugin hooks.
