@@ -141,6 +141,12 @@ pane's unread tracker pauses while the override is on screen; the override runs 
 | C29 | Voice input | app `use-mic-recorder.ts`, `api/system.ts` `transcribeAudio` | Implemented | Recorded in this window (`requestMicrophoneAccess`, `getUserMedia`, `MediaRecorder`), transcribed with `POST /api/audio/transcribe {data_url, mime_type}` pinned to the **bot's** connection and profile with stock's timeout rule (not `voice.record`, which captures on the gateway's machine); the words go into the draft, never sent by themselves. Microphone errors use stock's copy. The mic records only while its Stop button is on screen: one acquisition per click (a pending one shows "Starting the microphone…"), and leaving the chat, unmounting or switching bots during the permission prompt, `getUserMedia` or transcription stops every track of a late stream at once and drops a late transcript (review v2-r1 #1). `src/core/voice.js`, `src/ui/Voice.tsx`; tests `test/loader-composer.test.mjs`, `test/review-v2-r1-voice.test.mjs` (loader, fake media; no microphone hardware). Stock first tries a client-direct STT provider and relays otherwise; the override always uses the relay, the same backend endpoint stock falls back to. |
 | C30 | Empty-chat greeting (`chat.empty`) | `chat-empty.tsx` | Implemented | Minimal: avatar + name. |
 
+Beyond stock (Grok Bot, not in Hermes Bot Mode, so not a parity row): **email draft cards** for the kit's
+`email-drafts` agent plugin. A bot's `email_draft_create` tool result becomes a card in the chat (shown with
+work rows hidden), read and written through the bot's own gateway and route (`plugin.email-drafts.api`, or
+the plugin's `/email-drafts` command through `slash.exec`), sent once on **Send**. `src/core/emailDrafts.js`,
+`src/ui/EmailDraft.tsx`; tests `test/email-drafts*.test.mjs`.
+
 ## Right panel (profile)
 
 | # | Bot Mode capability | Source | Status | Notes |

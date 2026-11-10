@@ -1201,6 +1201,19 @@ export function createChatController(bot, deps, options = {}) {
    * `prefill` is text a directive asks to put back in the composer. Output
    * shows as a command card in the transcript (local, never stored).
    */
+  /** A plugin's own gateway method for this chat's bot, on its attached
+   *  runtime and its own route (a remote bot's call goes to its machine):
+   *  `plugin.<id>.<name>` (plugin RPC) or `slash.exec` (a plugin slash
+   *  command). Used by the email draft card (core/emailDrafts.js); anything
+   *  else is refused here. */
+  async function pluginRequest(method, params = {}, options = {}) {
+    if (disposed) throw new Error('This chat is closed')
+    if (method !== 'slash.exec' && !/^plugin\.[a-z0-9_-]{1,64}\.[A-Za-z0-9_.-]+$/.test(String(method))) {
+      throw new Error(`Not a plugin method: ${method}`)
+    }
+    return withRuntime(runtimeId => deps.requestForBot(bot, method, { ...params, session_id: runtimeId }, options))
+  }
+
   async function runSlash(text, depth = 0) {
     const parsed = parseSlash(text)
     if (!parsed) return { ok: false }
@@ -2255,6 +2268,7 @@ export function createChatController(bot, deps, options = {}) {
     react,
     runSlash,
     completeSlash,
+    pluginRequest,
     sendIntent,
     answerPrompt,
     pickClarify,

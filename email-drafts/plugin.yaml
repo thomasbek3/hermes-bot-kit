@@ -1,0 +1,98 @@
+manifest_version: 2
+api_version: 1
+name: email-drafts
+version: 1.0.0
+description: Bots write email as drafts; you send them from a card in the chat (Gmail or SMTP), with per-bot allowed-recipient rules
+requires_hermes: ">=0.23.0"
+author: Thomas Bekkers
+license: MIT
+homepage: https://github.com/thomasbek3/hermes-bot-kit
+tags: [email, drafts, approval, gmail, smtp, desktop]
+provides_tools:
+  - email_draft_create
+  - email_draft_update
+  - email_draft_status
+# The Gmail client is the user's own Google Cloud "Desktop app" OAuth client.
+# Hermes runs the sign-in (`hermes auth add email-drafts:google`), stores and
+# refreshes the grant, and attaches it to requests made through
+# credentialed_provider_request. gmail.send is the only scope: the plugin can
+# send mail as the signed-in account and cannot read the mailbox.
+optional_env:
+  - name: EMAIL_DRAFTS_GOOGLE_CLIENT_ID
+    description: "Client ID of your own Google Cloud OAuth client (Desktop app) for Gmail sending"
+    url: "https://console.cloud.google.com/apis/credentials"
+  - name: EMAIL_DRAFTS_GOOGLE_CLIENT_SECRET
+    description: "Client secret of that OAuth client"
+    secret: true
+  - name: EMAIL_DRAFTS_SMTP_PASSWORD
+    description: "SMTP password (or app password) when the sender is smtp"
+    secret: true
+oauth:
+  - id: google
+    authorize_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    scopes:
+      - https://www.googleapis.com/auth/gmail.send
+    client_id_env: EMAIL_DRAFTS_GOOGLE_CLIENT_ID
+    client_secret_env: EMAIL_DRAFTS_GOOGLE_CLIENT_SECRET
+    hosts: [gmail.googleapis.com]
+    authorize_params: {access_type: offline, prompt: consent}
+config_schema:
+  sender:
+    type: str
+    choices: [gmail, smtp]
+    default: gmail
+    label: "Send with"
+    description: "gmail: the Google account signed in with `hermes auth add email-drafts:google`. smtp: the server below."
+  from_address:
+    type: str
+    default: ""
+    label: "From address"
+    description: "The address drafts are sent from (for Gmail, the signed-in account or one of its verified send-as addresses)."
+  from_name:
+    type: str
+    default: ""
+    label: "From name"
+    description: "Display name shown to recipients (optional)."
+  signature:
+    type: str
+    default: ""
+    label: "Signature"
+    description: "Plain-text signature added under the body of every email this bot sends. Use \\n for new lines."
+  attachment_dirs:
+    type: list
+    default: []
+    label: "Extra attachment folders"
+    description: "Absolute folders whose files may be attached, besides the bot's working directory (which never counts when it is your home folder)."
+  google_client_id:
+    type: secret
+    env: EMAIL_DRAFTS_GOOGLE_CLIENT_ID
+    label: "Google OAuth client ID"
+    description: "Your own Google Cloud OAuth client (type Desktop app) for Gmail. Then run `hermes auth add email-drafts:google` once."
+  google_client_secret:
+    type: secret
+    env: EMAIL_DRAFTS_GOOGLE_CLIENT_SECRET
+    label: "Google OAuth client secret"
+  smtp_host:
+    type: str
+    default: ""
+    label: "SMTP host"
+  smtp_port:
+    type: int
+    default: 587
+    label: "SMTP port"
+  smtp_security:
+    type: str
+    choices: [starttls, ssl]
+    default: starttls
+    label: "SMTP security"
+    description: "starttls (port 587) or ssl (port 465). Plain-text SMTP is not offered."
+  smtp_username:
+    type: str
+    default: ""
+    label: "SMTP username"
+  smtp_password:
+    type: secret
+    env: EMAIL_DRAFTS_SMTP_PASSWORD
+    label: "SMTP password"
+    description: "Stored by Hermes like a provider key; read with the profile's secret scope."

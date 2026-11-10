@@ -137,6 +137,12 @@ a self-contained page: inline `<style>` and `<script>`, images as `data:` URLs. 
 user has just clicked into the frame. Otherwise the user sees the exact text under the frame with
 **Send** and **Dismiss**, and nothing is sent until they click Send.
 
+## Email
+
+When you have the `email_draft_create` tool, every email goes through it (it draws its own draft card with
+Send and Discard): never write a `draft-email` card file for an email then. Without that tool, use a
+`draft-email` card and the approval flow below.
+
 ## Approval flow
 
 1. Write `cards/<id>.json` with `kind` `approval` (or `draft-email` for a message you drafted),
