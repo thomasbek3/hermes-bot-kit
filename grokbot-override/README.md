@@ -97,7 +97,9 @@ merely restores the last bot offers **Start Bot Chat** instead.
 In the override's chat a bot can show cards instead of describing things in prose.
 
 - **Question cards work out of the box.** They come from Hermes's built-in `clarify` tool: the question,
-  lettered choices, a typed answer in the composer, multi-select and several questions with **Answer**.
+  lettered choices, a typed answer in the composer, multi-select with **Answer**. Several questions come one
+  at a time, like Grok Bot: a click picks a row, **Next** moves on, **Back** goes back, **Skip** skips that
+  question, and **Done** on the last one sends every answer.
 - **Approval, task and email-draft cards need the agent-cards skill.** The bot writes a small `card.v1` JSON
   file in its working directory and puts one `::card{…}` line in its reply; the card updates live as the bot
   rewrites the file, and a button click goes back to the bot as a hidden message. The skill that teaches

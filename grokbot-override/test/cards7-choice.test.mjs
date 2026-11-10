@@ -21,9 +21,12 @@ test('letters, bare choices, typed answers and the settled item', () => {
   assert.deepEqual(clarifyTextAnswer(one, '  maybe  '), { picks: { q: 'maybe' }, complete: true })
   assert.deepEqual(clarifyTextAnswer(one, '   '), { picks: {}, complete: false })
   const two = { id: 'c2', questions: [{ qid: 'a', question: 'A?', choices: ['x', 'y'], multiSelect: true }, { qid: 'b', question: 'B?', choices: null, multiSelect: false }], picks: { a: ['x'] } }
-  assert.deepEqual(clarifyTextAnswer(two, 'because'), { picks: { a: ['x'], b: 'because' }, complete: true })
-  assert.deepEqual(clarifyTextAnswer({ ...two, picks: {} }, 'z'), { picks: { a: ['z'] }, complete: false }, 'a multi-select question adds the text to its picks')
-  assert.deepEqual(clarifyTextAnswer({ ...two, picks: { a: ['x'], b: 'old' } }, 'new').picks.b, 'new', 'all answered: the last question takes it')
+  // Several questions page: the text answers the question on screen.
+  assert.deepEqual(clarifyTextAnswer({ ...two, page: 1 }, 'because'), { picks: { a: ['x'], b: 'because' }, complete: true }, 'the last page: complete')
+  assert.deepEqual(clarifyTextAnswer({ ...two, picks: {} }, 'z'), { picks: { a: ['z'] }, complete: false, page: 1 }, 'a multi-select question adds the text to its picks; the card moves on')
+  assert.deepEqual(clarifyTextAnswer(two, 'w'), { picks: { a: ['x', 'w'] }, complete: false, page: 1 }, 'page 1 by default')
+  assert.deepEqual(clarifyTextAnswer({ ...two, picks: { a: ['x'], b: 'old' }, page: 1 }, 'new').picks.b, 'new', 'a typed answer replaces the pick on screen')
+  assert.deepEqual(clarifyTextAnswer({ ...two, locked: { a: ['y'] }, picks: {} }, 'soon'), { picks: { a: ['y'], b: 'soon' }, complete: true }, 'a locked question is not a page')
   const settled = clarifySettledItem(one, { q: 'Yes' }, 'ok', 5)
   assert.deepEqual(settled, { kind: 'clarify', id: 'clarify:c1', requestId: 'c1', questions: one.questions, answers: { q: 'Yes' }, status: 'answered', at: 5 })
   assert.equal(clarifySettledItem(one, { q: null }, 'ok').status, 'skipped')
@@ -74,7 +77,7 @@ test('typed text answers the open question through clarify.lock, never prompt.su
   chat.dispose()
 })
 
-test('several questions: picks wait on the card, typed text fills the next one, Answer sends all', async () => {
+test('several questions: picks wait on the card, typed text answers the page on screen, Done sends all', async () => {
   const gw = gateway({
     'session.resume': running({
       open_requests: [{ id: 'c3', method: 'clarify', params: { questions: [{ qid: 'a', question: 'Which days?', choices: ['Mon', 'Tue', 'Wed'], multi_select: true }, { qid: 'b', question: 'Why?' }, { qid: 'c', question: 'Where?', choices: ['Home', 'Office'] }] } }]
@@ -85,7 +88,10 @@ test('several questions: picks wait on the card, typed text fills the next one, 
   await chat.open()
   assert.equal(chat.pickClarify('a', ['Mon', 'Wed']), true)
   assert.equal(chat.pickClarify('nope', 'x'), false, 'an unknown question is ignored')
+  assert.equal(chat.pageClarify(1), true, 'Next')
+  assert.equal(chat.pageClarify(7), false, 'no such page')
   assert.deepEqual(await chat.answerClarifyText('team sync'), { ok: true, status: 'picked' })
+  assert.equal(chat.get().chat.waiting.page, 2, 'the typed answer moved the card to the next question')
   assert.deepEqual(chat.get().chat.waiting.picks, { a: ['Mon', 'Wed'], b: 'team sync' })
   assert.equal(lockCalls(gw).length, 0, 'nothing sent while a question is open')
   chat.pickClarify('c', 'Office')

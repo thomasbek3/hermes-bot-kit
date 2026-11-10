@@ -15997,15 +15997,39 @@ function clarifyFilled(value) {
 function clarifyPicks(waiting) {
   return { ...waiting?.locked || {}, ...waiting?.picks || {} };
 }
+function clarifyLocked(waiting, qid) {
+  const locked = waiting?.locked;
+  return Boolean(locked && typeof locked === "object" && Object.prototype.hasOwnProperty.call(locked, qid));
+}
+function clarifyOpenPages(waiting) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
+  return questions.map((q, i) => clarifyLocked(waiting, q.qid) ? -1 : i).filter((i) => i >= 0);
+}
+function clarifyPage(waiting) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
+  const open = clarifyOpenPages(waiting);
+  if (open.includes(waiting?.page)) return waiting.page;
+  return open.length ? open[0] : Math.max(0, questions.length - 1);
+}
 function clarifyTextAnswer(waiting, text3) {
   const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
   const value = str(text3).trim();
   const picks = clarifyPicks(waiting);
   if (!questions.length || !value) return { picks, complete: false };
-  const target = questions.find((q) => !clarifyFilled(picks[q.qid])) || questions[questions.length - 1];
+  const page = clarifyPage(waiting);
+  const target = questions[page];
   const current = picks[target.qid];
   picks[target.qid] = target.multiSelect ? [...Array.isArray(current) ? current.filter((v) => v !== value) : [], value] : value;
-  return { picks, complete: questions.every((q) => clarifyFilled(picks[q.qid])) };
+  const next = clarifyOpenPages(waiting).find((i) => i > page);
+  return next === void 0 ? { picks, complete: true } : { picks, complete: false, page: next };
+}
+function keepCardProgress(previous, next) {
+  if (!next || next.kind !== "clarify" || !previous || previous.kind !== "clarify" || previous.id !== next.id) return next;
+  return {
+    ...next,
+    ...previous.picks ? { picks: previous.picks } : {},
+    ...previous.page !== void 0 ? { page: previous.page } : {}
+  };
 }
 function clarifySettledItem(waiting, answer, status, at) {
   const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
@@ -16261,7 +16285,7 @@ function applyEvent(state, event, now = Date.now()) {
       return id ? { ...state, items: settleApprovals(state.items, [id]) } : state;
     }
     case "clarify.request": {
-      const waiting = inputRequestFrom("clarify", payload);
+      const waiting = keepCardProgress(state.waiting, inputRequestFrom("clarify", payload));
       return waiting ? { ...state, busy: true, waiting } : state;
     }
     case "clarify.settled": {
@@ -16992,6 +17016,7 @@ function createChatController(bot, deps, options = {}) {
           if (waiting) break;
         }
         if (!waiting && snapshot?.pending_connection) waiting = inputRequestFrom("connection", snapshot.pending_connection);
+        waiting = keepCardProgress(chat.waiting, waiting);
       }
       const live = initial ? bubbleId ? { ...emptyLive(), bubbleId } : emptyLive() : { ...chat.live, bubbleId };
       return { ...chat, items, busy: running, live, waiting };
@@ -17279,19 +17304,27 @@ function createChatController(bot, deps, options = {}) {
       return { ok: false, unsupported };
     }
   }
-  function pickClarify(qid, value) {
+  function pickClarify(qid, value, page) {
     const waiting = state.chat.waiting;
     if (!waiting || waiting.kind !== "clarify" || waiting.answering) return false;
     if (!(waiting.questions || []).some((q) => q.qid === qid)) return false;
-    patchWaiting(waiting, { picks: { ...waiting.picks || {}, [qid]: value } });
+    const paging = page !== void 0 && clarifyOpenPages(waiting).includes(page) ? { page } : {};
+    patchWaiting(waiting, { picks: { ...waiting.picks || {}, [qid]: value }, ...paging });
+    return true;
+  }
+  function pageClarify(page) {
+    const waiting = state.chat.waiting;
+    if (!waiting || waiting.kind !== "clarify" || waiting.answering) return false;
+    if (!clarifyOpenPages(waiting).includes(page)) return false;
+    patchWaiting(waiting, { page });
     return true;
   }
   async function answerClarifyText(text3) {
     const waiting = state.chat.waiting;
     if (!waiting || waiting.kind !== "clarify" || waiting.answering) return { ok: false, error: "No question is waiting for an answer" };
-    const { picks, complete } = clarifyTextAnswer(waiting, text3);
+    const { picks, complete, page } = clarifyTextAnswer(waiting, text3);
     if (!complete) {
-      patchWaiting(waiting, { picks: { ...waiting.picks || {}, ...picks } });
+      patchWaiting(waiting, { picks: { ...waiting.picks || {}, ...picks }, ...page !== void 0 ? { page } : {} });
       return { ok: true, status: "picked" };
     }
     const result = await answerPrompt(picks);
@@ -18204,6 +18237,7 @@ ${body}` : body);
     sendIntent,
     answerPrompt,
     pickClarify,
+    pageClarify,
     answerClarifyText,
     respondConnection,
     pollApprovals,
@@ -21580,6 +21614,19 @@ var ADAPT_SRC = (
 .gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
 .gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
 .gbo-ask .gbo-card-error { padding: 0 8px 4px; }
+/* Several questions: one page at a time (Grok Bot). Every page sits in the
+   same grid cell so the card keeps the tallest page's height; only the
+   current one shows. A pick is the letter badge in blue, nothing else. */
+.gbo-ask-pages { display: grid; }
+.gbo-ask-pages > .gbo-ask-q { grid-area: 1 / 1; margin-top: 0; }
+.gbo-ask-pages > .gbo-ask-q.is-ghost { visibility: hidden; }
+.gbo-ask.is-paged .gbo-ask-row.is-on .gbo-ask-key { background: #3b82f6; color: #fff; box-shadow: none; }
+.gbo-ask-actions.is-paged { padding: 6px 2px 4px 8px; }
+.gbo-ask-actions.is-paged .gbo-pill-btn { height: 34px; padding: 6px 14px; box-shadow: none; }
+.gbo-ask-actions.is-paged .gbo-pill-btn.is-primary { margin-right: 0; }
+.gbo-ask-dots { display: flex; align-items: center; gap: 6px; margin-right: auto; }
+.gbo-ask-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-border-secondary); }
+.gbo-ask-dot.is-current { background: var(--color-text-tertiary); }
 /* Live ::card and ::preview directives in the open chat. A card sits in the
    choice card's shell (flat fill, radius, padding, type sizes), roomy: at
    least about 300px, at most a bubble's width. The title is the bold
@@ -29241,67 +29288,131 @@ function ChoiceCard({
   settled = null,
   busy = false,
   name = "",
+  page,
+  pages,
   onPick,
+  onPage,
   onAnswer,
   footer = null
 }) {
   const live = !settled;
   const single = questions.length === 1 && !questions[0].multiSelect && Boolean(questions[0].choices);
+  const paged = live && questions.length > 1;
+  const open = pages && pages.length ? pages : questions.map((_, i) => i);
+  const current = paged ? page !== void 0 && open.includes(page) ? page : open[0] : -1;
+  const step = open.indexOf(current);
+  const nextPage = step >= 0 && step < open.length - 1 ? open[step + 1] : void 0;
+  const prevPage = step > 0 ? open[step - 1] : void 0;
   const complete = questions.every((q) => clarifyFilled(picks[q.qid]));
   const answerWith = (overrides = {}) => onAnswer?.(Object.fromEntries(questions.map((q) => [q.qid, q.qid in overrides ? overrides[q.qid] : picks[q.qid] ?? null])));
+  const forward = (overrides = {}) => {
+    if (nextPage === void 0) return answerWith(overrides);
+    const qid = questions[current]?.qid;
+    if (qid && qid in overrides) return onPick?.(qid, overrides[qid], nextPage);
+    onPage?.(nextPage);
+  };
   const baseId = React19.useId();
+  const shown = paged ? [current, ...questions.map((_, i) => i).filter((i) => i !== current)] : questions.map((_, i) => i);
+  const block = (qi) => {
+    const q = questions[qi];
+    const ghost = paged && qi !== current;
+    const value = picks[q.qid];
+    const chosen = Array.isArray(value) ? value : typeof value === "string" && value ? [value] : [];
+    const labels = (q.choices || []).map((choice) => bareChoice(choice));
+    const typed = chosen.filter((v) => !labels.includes(v));
+    const titleId = `${baseId}-q${qi}`;
+    return /* @__PURE__ */ jsxs19(
+      "div",
+      {
+        className: `gbo-ask-q${ghost ? " is-ghost" : ""}`,
+        "aria-hidden": ghost || void 0,
+        inert: ghost || void 0,
+        children: [
+          /* @__PURE__ */ jsx21("div", { className: "gbo-ask-title", id: ghost ? void 0 : titleId, children: q.question }),
+          q.choices ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-rows", role: q.multiSelect ? "group" : "radiogroup", "aria-labelledby": ghost ? void 0 : titleId, children: q.choices.map((choice, i) => {
+            const label = labels[i];
+            const on = chosen.includes(label);
+            return /* @__PURE__ */ jsxs19(
+              "button",
+              {
+                type: "button",
+                role: q.multiSelect ? "checkbox" : "radio",
+                "aria-checked": on,
+                disabled: !live || busy || ghost,
+                tabIndex: ghost ? -1 : void 0,
+                className: `gbo-ask-row${on ? " is-on" : ""}`,
+                onClick: () => {
+                  if (single) return answerWith({ [q.qid]: label });
+                  if (!q.multiSelect) return onPick?.(q.qid, label);
+                  onPick?.(q.qid, on ? chosen.filter((v) => v !== label) : [...chosen, label]);
+                },
+                children: [
+                  /* @__PURE__ */ jsx21("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
+                  /* @__PURE__ */ jsx21("span", { className: "gbo-ask-label", children: label }),
+                  choice !== label ? /* @__PURE__ */ jsx21("span", { className: "gbo-ask-tag", children: "Recommended" }) : null,
+                  on && !paged ? /* @__PURE__ */ jsx21("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx21(IconCheck, {}) }) : null
+                ]
+              },
+              choice
+            );
+          }) }) : null,
+          typed.map((text3, j) => /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-row is-on is-typed", role: "note", "aria-label": `Your answer: ${text3}`, children: [
+            /* @__PURE__ */ jsx21("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(labels.length + j) }),
+            /* @__PURE__ */ jsx21("span", { className: "gbo-ask-label", children: text3 }),
+            !paged ? /* @__PURE__ */ jsx21("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx21(IconCheck, {}) }) : null
+          ] }, text3)),
+          live && !q.choices && !typed.length ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-hint", children: "Type your answer below." }) : null
+        ]
+      },
+      q.qid
+    );
+  };
   return /* @__PURE__ */ jsxs19(
     "div",
     {
-      className: `gbo-ask${live ? "" : " is-settled"}${busy ? " is-busy" : ""}`,
+      className: `gbo-ask${live ? "" : " is-settled"}${busy ? " is-busy" : ""}${paged ? " is-paged" : ""}`,
       role: "group",
       "aria-label": name ? `Question from ${name}` : "Question",
       "aria-busy": busy || void 0,
       children: [
-        questions.map((q, qi) => {
-          const value = picks[q.qid];
-          const chosen = Array.isArray(value) ? value : typeof value === "string" && value ? [value] : [];
-          const labels = (q.choices || []).map((choice) => bareChoice(choice));
-          const typed = chosen.filter((v) => !labels.includes(v));
-          const titleId = `${baseId}-q${qi}`;
-          return /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-q", children: [
-            /* @__PURE__ */ jsx21("div", { className: "gbo-ask-title", id: titleId, children: q.question }),
-            q.choices ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-rows", role: q.multiSelect ? "group" : "radiogroup", "aria-labelledby": titleId, children: q.choices.map((choice, i) => {
-              const label = labels[i];
-              const on = chosen.includes(label);
-              return /* @__PURE__ */ jsxs19(
-                "button",
-                {
-                  type: "button",
-                  role: q.multiSelect ? "checkbox" : "radio",
-                  "aria-checked": on,
-                  disabled: !live || busy,
-                  className: `gbo-ask-row${on ? " is-on" : ""}`,
-                  onClick: () => {
-                    if (single) return answerWith({ [q.qid]: label });
-                    if (!q.multiSelect) return onPick?.(q.qid, label);
-                    onPick?.(q.qid, on ? chosen.filter((v) => v !== label) : [...chosen, label]);
-                  },
-                  children: [
-                    /* @__PURE__ */ jsx21("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
-                    /* @__PURE__ */ jsx21("span", { className: "gbo-ask-label", children: label }),
-                    choice !== label ? /* @__PURE__ */ jsx21("span", { className: "gbo-ask-tag", children: "Recommended" }) : null,
-                    on ? /* @__PURE__ */ jsx21("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx21(IconCheck, {}) }) : null
-                  ]
-                },
-                choice
-              );
-            }) }) : null,
-            typed.map((text3, j) => /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-row is-on is-typed", role: "note", "aria-label": `Your answer: ${text3}`, children: [
-              /* @__PURE__ */ jsx21("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(labels.length + j) }),
-              /* @__PURE__ */ jsx21("span", { className: "gbo-ask-label", children: text3 }),
-              /* @__PURE__ */ jsx21("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx21(IconCheck, {}) })
-            ] }, text3)),
-            live && !q.choices && !typed.length ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-hint", children: "Type your answer below." }) : null
-          ] }, q.qid);
-        }),
-        live ? /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-actions", children: [
-          !single ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !complete, onClick: () => answerWith(), children: busy ? "Sending…" : "Answer" }) : null,
+        paged ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-pages", children: shown.map(block) }) : shown.map(block),
+        paged ? /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-actions is-paged", children: [
+          /* @__PURE__ */ jsx21("div", { className: "gbo-ask-dots", role: "img", "aria-label": `Question ${step + 1} of ${open.length}`, children: open.map((i) => /* @__PURE__ */ jsx21("span", { className: `gbo-ask-dot${i === current ? " is-current" : ""}` }, i)) }),
+          prevPage !== void 0 ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", disabled: busy, title: busy ? "Sending your answers…" : void 0, onClick: () => onPage?.(prevPage), children: "Back" }) : null,
+          /* @__PURE__ */ jsx21(
+            "button",
+            {
+              type: "button",
+              className: "gbo-pill-btn",
+              disabled: busy,
+              title: busy ? "Sending your answers…" : "Skip this question",
+              onClick: () => forward({ [questions[current].qid]: null }),
+              children: "Skip"
+            }
+          ),
+          /* @__PURE__ */ jsx21(
+            "button",
+            {
+              type: "button",
+              className: "gbo-pill-btn is-primary is-next",
+              disabled: busy,
+              title: busy ? "Sending your answers…" : void 0,
+              onClick: () => forward(),
+              children: busy ? "Sending…" : nextPage === void 0 ? "Done" : "Next"
+            }
+          )
+        ] }) : live ? /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-actions", children: [
+          !single ? /* @__PURE__ */ jsx21(
+            "button",
+            {
+              type: "button",
+              className: "gbo-pill-btn is-primary",
+              disabled: busy || !complete,
+              title: busy ? "Sending your answer…" : !complete ? "Pick at least one choice first" : void 0,
+              onClick: () => answerWith(),
+              children: busy ? "Sending…" : "Answer"
+            }
+          ) : null,
           /* @__PURE__ */ jsx21(
             "button",
             {
@@ -29464,7 +29575,10 @@ function WaitingCard({ waiting, bot, name, controller: controller2 }) {
         picks: clarifyPicks(waiting),
         busy: Boolean(waiting.answering),
         name,
-        onPick: (qid, value) => void controller2?.pickClarify(qid, value),
+        page: clarifyPage(waiting),
+        pages: clarifyOpenPages(waiting),
+        onPick: (qid, value, page) => void controller2?.pickClarify(qid, value, page),
+        onPage: (page) => void controller2?.pageClarify(page),
         onAnswer: answer,
         footer: /* @__PURE__ */ jsx21(Footer, { waiting, bot })
       },

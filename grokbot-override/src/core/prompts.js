@@ -146,20 +146,58 @@ export function clarifyPicks(waiting) {
   return { ...(waiting?.locked || {}), ...(waiting?.picks || {}) }
 }
 
+/** True when the gateway already locked question `qid` (`waiting.locked`). */
+export function clarifyLocked(waiting, qid) {
+  const locked = waiting?.locked
+  return Boolean(locked && typeof locked === 'object' && Object.prototype.hasOwnProperty.call(locked, qid))
+}
+
+/** The question indexes a card with several questions pages through: every
+ *  question the gateway has not locked yet. */
+export function clarifyOpenPages(waiting) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : []
+  return questions.map((q, i) => (clarifyLocked(waiting, q.qid) ? -1 : i)).filter(i => i >= 0)
+}
+
+/** The page (question index) a card with several questions shows: the
+ *  controller's `waiting.page` when it is an open question, else the first
+ *  open one (the last question when every one is locked). */
+export function clarifyPage(waiting) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : []
+  const open = clarifyOpenPages(waiting)
+  if (open.includes(waiting?.page)) return waiting.page
+  return open.length ? open[0] : Math.max(0, questions.length - 1)
+}
+
 /** Typed text from the composer as the answer to an open clarify card (the
- *  free-text "Other" answer). It goes to the first question with no pick yet
- *  (the last question when all have one); a multi-select question adds it to
- *  its picks. Returns `{ picks, complete }`: send when `complete`, otherwise
- *  keep the picks and wait for the remaining questions. */
+ *  free-text "Other" answer); a multi-select question adds it to its picks.
+ *  One question: it answers it. Several (a paged card): it answers the
+ *  question on screen (clarifyPage), then the card moves to the next open
+ *  page, or is complete on the last one (questions left unanswered go as
+ *  skipped). Returns `{ picks, complete, page? }`: send when `complete`,
+ *  otherwise keep the picks, show `page` and wait for the rest. */
 export function clarifyTextAnswer(waiting, text) {
   const questions = Array.isArray(waiting?.questions) ? waiting.questions : []
   const value = str(text).trim()
   const picks = clarifyPicks(waiting)
   if (!questions.length || !value) return { picks, complete: false }
-  const target = questions.find(q => !clarifyFilled(picks[q.qid])) || questions[questions.length - 1]
+  const page = clarifyPage(waiting)
+  const target = questions[page]
   const current = picks[target.qid]
   picks[target.qid] = target.multiSelect ? [...(Array.isArray(current) ? current.filter(v => v !== value) : []), value] : value
-  return { picks, complete: questions.every(q => clarifyFilled(picks[q.qid])) }
+  const next = clarifyOpenPages(waiting).find(i => i > page)
+  return next === undefined ? { picks, complete: true } : { picks, complete: false, page: next }
+}
+
+/** The same clarify request seen again (a snapshot repair, a repeated
+ *  frame): keep what was picked here and the page on screen. */
+export function keepCardProgress(previous, next) {
+  if (!next || next.kind !== 'clarify' || !previous || previous.kind !== 'clarify' || previous.id !== next.id) return next
+  return {
+    ...next,
+    ...(previous.picks ? { picks: previous.picks } : {}),
+    ...(previous.page !== undefined ? { page: previous.page } : {})
+  }
 }
 
 /** The settled card left in the transcript once a clarify request was
