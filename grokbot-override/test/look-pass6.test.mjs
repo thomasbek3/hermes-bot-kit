@@ -99,7 +99,7 @@ test('panel: no Context block; one Model card (label, model name, chevron) betwe
   const row = html.match(/<button type="button" class="panel-row panel-row--setting gbo-model-row"[^>]*>([\s\S]*?)<\/button>/)
   assert.ok(row, 'the Model row')
   assert.match(row[1], /<span class="panel-row__title">Model<\/span>/)
-  assert.match(row[1], /<span class="gbo-model-name">atlas-large<\/span>/)
+  assert.match(row[1], /<span class="gbo-model-name">demo-large<\/span>/)
   assert.match(row[1], /<path d="m6 9 6 6 6-6"/, 'a chevron')
   assert.ok(html.indexOf('gbo-model-row') > html.indexOf('Bot’s computer') && html.indexOf('gbo-model-row') < html.indexOf('>Profile<'), 'in the old Context spot')
   // A profile with no model of its own reads Default; not read yet, an ellipsis.
@@ -112,15 +112,15 @@ test('panel: no Context block; one Model card (label, model name, chevron) betwe
 test('Model row: reads profiles.describe once on the bot\'s route; an error reads Unavailable', { skip }, async t => {
   const { rosterApi, rosterStoresApi, renderElement, ProfilePanel, calls, handlers } = await load(t)
   const bot = remote('scout')
-  handlers['profiles.describe'] = () => ({ model: { provider: 'example', default: 'atlas-small' } })
+  handlers['profiles.describe'] = () => ({ model: { provider: 'example', default: 'demo-small' } })
   await rosterApi.loadBotModel(bot)
   await rosterApi.loadBotModel(bot)
   const reads = calls.filter(c => c.method === 'profiles.describe')
   assert.equal(reads.length, 1, 'read once')
   assert.deepEqual(reads[0].params, { name: 'scout' })
   assert.equal(reads[0].route?.connectionId, 'mini', 'on the bot\'s own route')
-  assert.deepEqual({ ...rosterStoresApi.roster2.models.get()['mini::scout'] }, { loading: false, loaded: true, provider: 'example', model: 'atlas-small', error: null })
-  assert.match(renderElement(ProfilePanel, { bot }), /gbo-model-name">atlas-small</)
+  assert.deepEqual({ ...rosterStoresApi.roster2.models.get()['mini::scout'] }, { loading: false, loaded: true, provider: 'example', model: 'demo-small', error: null })
+  assert.match(renderElement(ProfilePanel, { bot }), /gbo-model-name">demo-small</)
   const down = remote('down')
   handlers['profiles.describe'] = () => {
     throw new Error('socket closed')
@@ -142,15 +142,15 @@ test('Model row click opens the model dialog for that bot', { skip }, async t =>
 test('Model save: the model section alone through profiles.configure, as the config screen saves it; the row follows', { skip }, async t => {
   const { rosterApi, rosterStoresApi, calls, handlers } = await load(t)
   const bot = remote('scout')
-  rosterApi.primeBotModel(bot, { provider: 'example', model: 'atlas-small' })
+  rosterApi.primeBotModel(bot, { provider: 'example', model: 'demo-small' })
   handlers['profiles.configure'] = () => ({ applied: { model: true } })
-  const res = await rosterApi.saveBotModel(bot, { provider: 'example', model: 'atlas-large' })
+  const res = await rosterApi.saveBotModel(bot, { provider: 'example', model: 'demo-large' })
   assert.equal(res.ok, true)
   const writes = calls.filter(c => c.method === 'profiles.configure')
   assert.equal(writes.length, 1)
-  assert.deepEqual(writes[0].params, { name: 'scout', model: 'atlas-large', provider: 'example' }, 'no skills, toolsets, MCP or SOUL')
+  assert.deepEqual(writes[0].params, { name: 'scout', model: 'demo-large', provider: 'example' }, 'no skills, toolsets, MCP or SOUL')
   assert.equal(writes[0].route?.connectionId, 'mini')
-  assert.equal(rosterStoresApi.roster2.models.get()['mini::scout'].model, 'atlas-large')
+  assert.equal(rosterStoresApi.roster2.models.get()['mini::scout'].model, 'demo-large')
 
   // Default (both emptied): the same `config unset model` as the config screen.
   calls.length = 0
@@ -165,20 +165,20 @@ test('Model save: the model section alone through profiles.configure, as the con
   // A failed write re-reads the row instead of guessing.
   calls.length = 0
   handlers['profiles.configure'] = () => ({ applied: { model: false } })
-  handlers['profiles.describe'] = () => ({ model: { provider: 'example', default: 'atlas-small' } })
-  await rosterApi.saveBotModel(bot, { provider: 'example', model: 'atlas-large' })
+  handlers['profiles.describe'] = () => ({ model: { provider: 'example', default: 'demo-small' } })
+  await rosterApi.saveBotModel(bot, { provider: 'example', model: 'demo-large' })
   await settle()
   assert.ok(calls.some(c => c.method === 'profiles.describe'))
-  assert.equal(rosterStoresApi.roster2.models.get()['mini::scout'].model, 'atlas-small')
+  assert.equal(rosterStoresApi.roster2.models.get()['mini::scout'].model, 'demo-small')
 })
 
 test('the config screen\'s model save updates the panel row too', { skip }, async t => {
   const { rosterApi, rosterStoresApi, handlers } = await load(t)
   const bot = remote('scout')
-  rosterApi.primeBotModel(bot, { provider: 'example', model: 'atlas-small' })
+  rosterApi.primeBotModel(bot, { provider: 'example', model: 'demo-small' })
   handlers['profiles.configure'] = () => ({ applied: { model: true, skills: true } })
-  await rosterApi.saveAdvanced(bot, { loaded: true, provider: 'example', model: 'atlas-large', skills: [{ name: 'web', enabled: false }], toolsets: [], mcp: [], soul: '', dirtyModel: true, dirtySkills: true })
-  assert.equal(rosterStoresApi.roster2.models.get()['mini::scout'].model, 'atlas-large')
+  await rosterApi.saveAdvanced(bot, { loaded: true, provider: 'example', model: 'demo-large', skills: [{ name: 'web', enabled: false }], toolsets: [], mcp: [], soul: '', dirtyModel: true, dirtySkills: true })
+  assert.equal(rosterStoresApi.roster2.models.get()['mini::scout'].model, 'demo-large')
 })
 
 test('the usage block is gone from the code; the status-bar chip stays', () => {

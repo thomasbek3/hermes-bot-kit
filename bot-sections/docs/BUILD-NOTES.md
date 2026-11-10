@@ -101,7 +101,7 @@ const rowTooltip = [displayName(bot, meta), `@${handle}`, gatewayLabel, sourceSt
   .join(' · ')
 ```
 
-Example: `Pricing · @pricing · This device · Available`.
+Example: `Planner · @planner · This device · Available`.
 
 `botHandle` (`data.ts`): profile name, except the primary profile `'default'`
 surfaces as `'hermes'`. `displayName` (`labels.ts`) is the title /

@@ -137,7 +137,7 @@ const ROSTER = [
 ]
 
 test('C20 the identification note is stock\'s, word for word; the bubble keeps the user\'s text', async () => {
-  const tagged = mentionedBots('ask @research-buddy and @cos@mini, mail me@x.com', ROSTER, BOT)
+  const tagged = mentionedBots('ask @research-buddy and @cos@mini, mail me@example.com', ROSTER, BOT)
   assert.deepEqual(tagged.map(b => b.name), ['research', 'cos'])
   const note = mentionNote(tagged)
   assert.equal(

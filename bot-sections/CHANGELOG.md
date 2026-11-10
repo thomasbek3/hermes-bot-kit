@@ -148,7 +148,7 @@
 - Click a section header to collapse/expand it (persisted per install;
   caret rotates).
 - Double-click a header to rename it in place — emoji welcome
-  ("🏠 Airbnb Operations"). Section IDs (config keys, cycle commands) stay
+  ("🏠 Home Projects"). Section IDs (config keys, cycle commands) stay
   stable; only the displayed label changes. Enter commits, Escape cancels.
 
 

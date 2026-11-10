@@ -11,7 +11,7 @@ import { RosterPane } from '../src/ui/Roster'
 import { CSS } from '../src/ui/styles'
 import { rowKey } from '../src/core/roster.js'
 import { overrideChromeCss } from '../src/core/stock.js'
-import { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CHAT_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, ROSTER, SHORT_ITEMS, USER_ITEMS } from './fixtures'
+import { CARDS_DEMO_FILES, CARDS_DEMO_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CHAT_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, ROSTER, SHORT_ITEMS, USER_ITEMS } from './fixtures'
 import { BOT_SWATCHES } from '../src/core/colors.js'
 import { ShapeFace } from '../src/ui/Avatar'
 import { AVATAR_SHAPES, avatarShapeFor } from '../src/ui/avatarShapes'
@@ -170,8 +170,8 @@ export function render({
   slack.hidden.set(slackOption?.hidden ? [rowKey(bot)] : [])
   roster2.dialog.set(dialog ? { ...dialog, bot } : null)
   // The panel's Model row and its picker: an invented demo model.
-  primeBotModel(bot, { provider: 'example', model: 'atlas-large' })
-  primeModelOptions(bot, { providers: [{ slug: 'example', name: 'Example', models: ['atlas-large', 'atlas-small'], authenticated: true }] })
+  primeBotModel(bot, { provider: 'example', model: 'demo-large' })
+  primeModelOptions(bot, { providers: [{ slug: 'example', name: 'Example', models: ['demo-large', 'demo-small'], authenticated: true }] })
   roster2.newLine.set({ markers: newLine ? { [rowKey(bot)]: newLine } : {}, seen: {} })
   app.selectedKey.set(selected ? rowKey(bot) : '')
   app.panelOpen.set(panelOpen)
@@ -242,13 +242,13 @@ export function render({
       panes
     )
   )
-  const connectSheet = connectPreview ? renderToStaticMarkup(<SlackConnect bot={bot} name={bot.display_name} initial={{workspaces: [{team_id:'T1', team_name:'Example Workspace'}], status: {phase:connectPreview, mode:'http', team_name:'Example Workspace'}}} onClose={() => {}} />) : ''
+  const connectSheet = connectPreview ? renderToStaticMarkup(<SlackConnect bot={bot} name={bot.display_name} initial={{workspaces: [{team_id:'T1', team_name:'Acme Team'}], status: {phase:connectPreview, mode:'http', team_name:'Acme Team'}}} onClose={() => {}} />) : ''
   const host = hostCss ? `<link rel="stylesheet" href="${hostCss}">` : ''
   // A live frame is the override switched on: its window-chrome style too.
   const chrome = frame?.lights ? `\n${overrideChromeCss()}` : ''
   return `<!doctype html><html class="${theme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8">${host}<style>${CSS}\n${PAGE_CSS}${chrome}</style></head><body>${body}${connectSheet}</body></html>`
 }
-export { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CSS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS }
+export { CARDS_DEMO_FILES, CARDS_DEMO_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CSS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS }
 
 // Test seams (review r2): the real app module and UI pieces, on the fake SDK.
 export * as appApi from '../src/ui/app'

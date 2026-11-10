@@ -159,22 +159,22 @@ function botsOnlyStyle(kit) {
 test('a valid bot-sections.json creates its sections and assigns its bots', () => {
   const kit = load()
 
-  kit.applyAssignFileText(JSON.stringify({ sections: ['Airbnb Ops'], assign: { helper: 'Airbnb Ops' } }))
+  kit.applyAssignFileText(JSON.stringify({ sections: ['Home Projects'], assign: { helper: 'Home Projects' } }))
 
-  assert.deepEqual({ ...kit.getOverrides() }, { helper: 'Airbnb Ops' })
-  assert.ok(kit.sectionLadder().includes('Airbnb Ops'))
-  assert.equal(kit.sectionForKey('helper'), 'Airbnb Ops')
-  assert.equal(kit.sectionForKey('@Helper'), 'Airbnb Ops')
+  assert.deepEqual({ ...kit.getOverrides() }, { helper: 'Home Projects' })
+  assert.ok(kit.sectionLadder().includes('Home Projects'))
+  assert.equal(kit.sectionForKey('helper'), 'Home Projects')
+  assert.equal(kit.sectionForKey('@Helper'), 'Home Projects')
   assert.equal(kit.sectionForKey('nobody'), 'Unassigned')
 })
 
 test('a section named only in assign is created on the spot', () => {
   const kit = load()
 
-  kit.applyAssignFileText(JSON.stringify({ assign: { pricing: 'Revenue' } }))
+  kit.applyAssignFileText(JSON.stringify({ assign: { planner: 'Revenue' } }))
 
   assert.ok(kit.getCustomSections().includes('Revenue'))
-  assert.equal(kit.sectionForKey('pricing'), 'Revenue')
+  assert.equal(kit.sectionForKey('planner'), 'Revenue')
 })
 
 test('malformed bot-sections.json is ignored, warned once, and leaves the layout alone', () => {

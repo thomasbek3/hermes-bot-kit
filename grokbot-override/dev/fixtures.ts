@@ -185,3 +185,27 @@ export const LIVE_EMAIL_ITEMS = [
   DIRECTIVE_ITEMS[0],
   { kind: 'assistant', id: 'd-a1', text: 'Drafted it. Nothing goes out until you say so.\n\n::card{id="c-7f3a" kind="draft-email" file="cards/c-7f3a.json"}', at: night + 30_000 }
 ]
+
+/** The README's cards picture: a question card the bot asked with the
+ *  built-in clarify tool (answered), then a live approval card waiting for
+ *  the go-ahead. Demo content. */
+export const CARDS_DEMO_ITEMS = [
+  { kind: 'user', id: 'q-u1', text: 'can you book the lake cabin for one night?', at: night },
+  { kind: 'clarify', id: 'clarify:q-c1', requestId: 'q-c1', questions: [{ qid: 'night', question: 'Which night works?', choices: ['Thursday', 'Friday', 'Saturday'], multiSelect: false }], answers: { night: 'Friday' }, status: 'answered', at: night + 20_000 },
+  { kind: 'assistant', id: 'q-a1', text: 'Friday it is. Nothing is booked until you say so.\n\n::card{id="c-9b" kind="approval" file="cards/c-9b.json"}', at: night + 40_000 }
+]
+export const CARDS_DEMO_FILES: Record<string, any> = {
+  'cards/c-9b.json': {
+    text: JSON.stringify({
+      schema: 'card.v1',
+      kind: 'approval',
+      title: 'Book the lake cabin',
+      status: { state: 'awaiting-approval' },
+      body: [{ type: 'kv', rows: [['Night', 'Friday'], ['Guests', '2'], ['Total', '$180, free cancellation']] }],
+      actions: [
+        { label: 'Book it', style: 'primary', send: 'APPROVE c-9b book the cabin' },
+        { label: 'Not yet', send: 'HOLD c-9b' }
+      ]
+    })
+  }
+}

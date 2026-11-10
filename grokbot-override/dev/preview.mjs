@@ -47,6 +47,12 @@ function hostCss() {
  *  payloads shaped like GET /api/messaging/platforms and /api/status; the
  *  served case is a bot on a remote host: a working multiplexed Slack with
  *  no per-profile row, state pending_restart). */
+/** A connected Slack entry (GET /api/messaging/platforms), for the hero. */
+function slackConnected() {
+  const vars = [{ key: 'SLACK_BOT_TOKEN', required: true, is_set: true }, { key: 'SLACK_APP_TOKEN', required: true, is_set: true }]
+  return { id: 'slack', name: 'Slack', enabled: true, configured: true, gateway_running: true, state: 'connected', env_vars: vars, updated_at: '2026-11-09T17:40:00Z', home_channel: { platform: 'slack', chat_id: 'C0123456789', name: 'bots' } }
+}
+
 function slackPages() {
   const vars = set => [
     { key: 'SLACK_BOT_TOKEN', required: true, is_set: set },
@@ -84,7 +90,7 @@ function slackPages() {
 
 mkdirSync(outDir, { recursive: true })
 const file = await bundlePreview()
-const { render, renderAvatarSheet, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
+const { render, renderAvatarSheet, CARDS_DEMO_FILES, CARDS_DEMO_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
 const host = live ? hostCss() : ''
 if (live && !host) console.warn('no Hermes stylesheet found: rendering without the host cascade')
 // ROSTER indexes: 0 travel, 1 scholar, 4 recipes (pink), 5 sunny (yellow).
@@ -107,7 +113,14 @@ const pages = live ? {
   'light-chat.html': { theme: 'light' },
   'light-chat-work-shown.html': { theme: 'light', showWork: true },
   'light-empty.html': { theme: 'light', items: [], busy: false },
-  // The README screenshots: light-pink.html (light.png), dark-short.html (dark.png).
+  // The README pictures (screenshots/): the hero window in both themes (a
+  // pinned bot, the open chat, the panel with Scheduled, Slack Connected and
+  // the Model row), a question card and a live approval card in one chat.
+  'light-hero.html': { theme: 'light', botIndex: 1, items: MD_ITEMS, busy: false, hasMore: false, pins: ['scholar', 'recipes', 'sunny'], userName: 'Alex Rivera', slack: { platform: slackConnected() } },
+  'dark-hero.html': { theme: 'dark', botIndex: 1, items: MD_ITEMS, busy: false, hasMore: false, pins: ['scholar', 'recipes', 'sunny'], userName: 'Alex Rivera', slack: { platform: slackConnected() } },
+  'light-cards-demo.html': { theme: 'light', botIndex: 0, items: CARDS_DEMO_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alex Rivera', directiveFiles: CARDS_DEMO_FILES },
+  'dark-cards-demo.html': { theme: 'dark', botIndex: 0, items: CARDS_DEMO_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alex Rivera', directiveFiles: CARDS_DEMO_FILES },
+  // Older README pictures: light-pink.html (light.png), dark-short.html (dark.png).
   'light-pink.html': { theme: 'light', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'], userName: 'Alex Rivera' },
   'dark-pink.html': { theme: 'dark', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar'] },
   'light-yellow.html': { theme: 'light', botIndex: 5, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'] },
