@@ -15,6 +15,7 @@ import { cornerClass, groupMessages } from '../core/groups.js'
 import { clock, withDividers } from '../core/time.js'
 import { withNewMarker } from '../core/newMarker.js'
 import { activityLabel, visibleItems } from '../core/workRows.js'
+import { withEmailDrafts } from '../core/emailDrafts.js'
 import { app, canToggleSidebar, type ChatSlot, findBot, freshBot, mainSlot, metaFor, noteTranscript, openBotInNewTab, openInBotMode, resetPanelWidth, selectBot, setPanelOpen, startPanelResize, stockHandoffProblem, toggleSidebar } from './app'
 import { roster2 } from './rosterStores'
 import { BotAvatar, botColor } from './Avatar'
@@ -22,6 +23,7 @@ import { Composer } from './Composer'
 import { IconChevron, IconOpen, IconPanel, IconSidebar, IconX } from './icons'
 import { MenuButton } from './kit'
 import { DirectiveBlock, DirectiveContext, type DirectiveScope, useDirectiveSegments } from './Directives'
+import { EmailDraftCard } from './EmailDraft'
 import { BotProse } from './Media'
 import { AssistantActions, Reactions, UserActions } from './MessageActions'
 import { ProfilePanel } from './Profile'
@@ -273,6 +275,8 @@ function Item({
       return <ToolGroup item={item} bot={bot} />
     case 'approval':
       return <ApprovalCard item={item} onAnswer={onAnswer} />
+    case 'email-draft':
+      return <EmailDraftCard item={item} bot={bot} controller={controller} />
     case 'clarify':
       return <SettledChoiceCard item={item} />
     case 'notice':
@@ -395,7 +399,7 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
     newLine.note()
   }
   const decorated = React.useMemo(
-    () => groupMessages(withNewMarker(withDividers(visibleItems(items, showWork)), newLine.id)),
+    () => groupMessages(withNewMarker(withDividers(visibleItems(withEmailDrafts(items), showWork)), newLine.id)),
     [items, showWork, newLine.id]
   )
   const controller = useController()

@@ -396,6 +396,7 @@ const CALL_SITES = [
   ['core/session.js', 'looksUnsupported', 3, 'read-only: reconcile via snapshot, answer/connection card says "not available here"'],
   ['core/session.js', 'isSessionGoneError', 4, 're-attach (read), forget local staging of a reaped runtime, Stop is moot'],
   ['core/create-chat.js', 'titleFailure', 1, 'adopt on conflict; compat kickoff only on refused'],
+  ['core/emailDrafts.js', 'isMethodNotServed', 1, 'plugin RPC not served (nothing ran): the same call once through the plugin slash command'],
   ['core/rooms.js', 'roomPostFailure', 1, 'give the words back only on admitted:false; else same-event-id retry'],
   ['core/botMeta.js', 'looksUnsupported', 1, 'read-only verdict: keep the save local (no server write)'],
   ['ui/app.ts', 'looksUnsupported', 1, 'read-only: room list shows none'],

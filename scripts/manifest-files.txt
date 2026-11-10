@@ -10,6 +10,14 @@ computer-viewer/hiperf-agent.py
 computer-viewer/vendor/novnc-rfb.mjs
 texting-style/plugin.yaml
 texting-style/__init__.py
+email-drafts/plugin.yaml
+email-drafts/__init__.py
+email-drafts/attachments.py
+email-drafts/engine.py
+email-drafts/schemas.py
+email-drafts/senders.py
+email-drafts/store.py
+email-drafts/skills/email-drafts/SKILL.md
 computer-viewer/agent-plugin/orgo-computer/__init__.py
 computer-viewer/agent-plugin/orgo-computer/plugin.yaml
 computer-viewer/agent-plugin/orgo-computer/schemas.py

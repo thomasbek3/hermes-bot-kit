@@ -33,6 +33,7 @@
 
 import { ADAPT_CSS } from './styles-adapt'
 import { CHAT_CSS } from './styles-chat'
+import { EMAIL_DRAFT_CSS } from './styles-email-drafts'
 import { REF_STYLES } from './styles-ref'
 import { ROSTER_CSS } from './stylesRoster'
 
@@ -254,6 +255,8 @@ export const CSS = /* css */ `
   + CHAT_CSS
   // Roster-side parity surfaces (menus, dialogs, cron, config, screen, meter).
   + ROSTER_CSS
+  // Email draft cards (ui/EmailDraft.tsx).
+  + EMAIL_DRAFT_CSS
   // The override's glue in the reference idiom (pins, filters, jobs, Slack,
   // markdown inside bubbles, work rows, hover actions); last, so it wins ties.
   + ADAPT_CSS

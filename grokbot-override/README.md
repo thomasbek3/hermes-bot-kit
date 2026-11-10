@@ -133,6 +133,17 @@ In the override's chat a bot can show cards instead of describing things in pros
   images as `data:` URLs. A page's `window.hermes.send` / `data-hermes-send` message goes out at once only
   right after you clicked into that frame; otherwise the exact text waits under the frame with **Send** and
   **Dismiss**.
+- **Email drafts need the kit's `email-drafts` agent plugin** ([`../email-drafts`](../email-drafts/README.md),
+  per profile). A bot's `email_draft_create` result becomes a card like Grok Bot's, even with work rows hidden:
+  the subject, From, "In reply to", editable To and Cc (placeholder `name@example.com`), the editable body with
+  the bot's signature under it, attachments as file cards (click one to open the file viewer), and a footer with the rules menu (**Allow
+  recipient**, **Needs approval**, **Disable drafts for <bot>**, **Manage rules**) on the left and **Discard**
+  / **Send** on the right. **Send** sends what the card shows, once (a double click, a lost reply or a bot
+  edit in between never sends twice); then "Sent · <time>", read-only. A failure shows the error with
+  **Retry**. The card reads and writes the draft on the bot's own gateway and route (a remote bot's mail is
+  sent by its machine): `plugin.email-drafts.api`, or `/email-drafts api …` through `slash.exec` on a gateway
+  without plugin RPC. Without the plugin the bot has no draft tool, and the agent-cards `draft-email` card
+  (below) still works.
 - **What bot output can do on its own.** A card row shows the message it sends under its label when the two
   differ. A web image in a reply (`![…](https://…)`) is not fetched until you click **Load** on its
   "Image from <host>" placeholder; files from the bot's own machine show at once. A connection's

@@ -59,6 +59,10 @@ jobs:
       - name: Texting-style tests
         run: python3 -m unittest discover -s texting-style/tests -p 'test_*.py'
 
+      # Fake Gmail and SMTP backends: no email is sent.
+      - name: Email-drafts tests
+        run: python3 -m unittest discover -s email-drafts/tests -p 'test_*.py'
+
       # -n 1: without it xargs passes every later path as an ARGUMENT to the
       # first script, so only one file was ever parsed.
       - name: Shell syntax

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **email-drafts: bots write email as drafts you send from the chat (2026-11-10)**: a new per-profile agent
+  plugin, [`email-drafts`](email-drafts/README.md). A bot gets `email_draft_create`, `email_draft_update` and
+  `email_draft_status`, and **no send tool**. Its draft shows in the Grokbot Override chat as a card like Grok
+  Bot's: subject, From, "In reply to", editable To and Cc, the editable body with the bot's signature under it,
+  attachments as file cards (click one to preview it), the rules menu (**Allow recipient**, **Needs approval**, **Disable drafts for
+  <bot>**, **Manage rules**) and **Discard** / **Send**. Nothing is sent until you click **Send**, or, when you
+  allowed every recipient for that bot, automatically ("Sent automatically · allowed recipient"). Sending goes
+  through Gmail with your own Google OAuth client signed in by Hermes (`hermes auth add email-drafts:google`,
+  `gmail.send` scope only; the plugin never holds the token) or SMTP over TLS with the password read from
+  Hermes's secret scope. A draft is sent at most once (a file-locked `sending` claim, the card's revision, one
+  click in flight; a lost reply is never re-sent); a failure shows the error with **Retry**. Attachments are
+  limited to the bot's working directory and folders you list (symlinks resolved, hidden files refused,
+  checked again at send). Scheduled runs only create drafts and never wait. Every send, discard and rule
+  change is in an audit log with who caused it. The card talks to the bot's own gateway and route, so a
+  remote bot's mail is sent by its machine (`plugin.email-drafts.api`, or `/email-drafts api` through
+  `slash.exec`). Needs Hermes 0.23.0 or newer. Tests use fake Gmail and SMTP backends.
 - **Grokbot Override: click a file to preview it (2026-11-10)**: a file card now opens a large viewer over the
   chat, like Grok Bot's: close X top left, the file name in a pill, the row count and a download button top right;
   Escape closes it and puts focus back on the card. Spreadsheets (`.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`) show as
