@@ -66,7 +66,4 @@ export function refreshTokenError(value) {
   return null
 }
 
-export function isSlackAuthorizationUrl(value) {
-  try { const url = new URL(value); return url.protocol === 'https:' && url.hostname === 'slack.com' && url.pathname === '/oauth/v2/authorize' }
-  catch { return false }
-}
+export { isSlackAuthorizationUrl } from './urls.js'

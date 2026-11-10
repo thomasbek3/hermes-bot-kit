@@ -12,11 +12,12 @@ import { buildSections, displayName, handleOf, previewOf, rowKey, sourceUnreacha
 import { pinState, withoutPinned } from '../core/pins.js'
 import { deriveRosterView, unreachableSources } from '../core/rosterView.js'
 import { shortAge } from '../core/time.js'
-import { app, canToggleSidebar, metaFor, selectBot, toggleSection, toggleSidebar, warmBot } from './app'
+import { footerPerson } from '../core/person.js'
+import { app, canOpenSettings, canToggleSidebar, loadUserName, metaFor, openSettings, selectBot, toggleSection, toggleSidebar, warmBot } from './app'
 import { BotAvatar } from './Avatar'
 import { RosterDialogs } from './BotDialogs'
 import { IconChevronDown, IconPin, IconPlus, IconSearch, IconSidebar } from './icons'
-import { IconEyeOff, IconFilter, IconRefresh, IconWarn } from './iconsRoster'
+import { IconEyeOff, IconFilter, IconRefresh, IconSettings, IconWarn } from './iconsRoster'
 import { ContextMenuFor, MenuButton } from './kit'
 import { attentionFor, retrySources } from './rosterActions'
 import { botMenuEntries, filterMenuEntries, newMenuEntries } from './RosterMenus'
@@ -138,6 +139,29 @@ function useRosterShown(ref: React.RefObject<HTMLDivElement | null>) {
   }, [ref])
 }
 
+/** Mark the roster while it is driven by the pointer (data-gbo-pointer), so
+ *  a focus that Chromium still calls :focus-visible after a click, a closed
+ *  menu or a dialog's focus hand-back draws no ring on the selected pin or
+ *  row. Tab or an arrow key clears it: keyboard focus keeps its ring. */
+const NAV_KEYS = new Set(['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'])
+function usePointerMode(ref: React.RefObject<HTMLDivElement | null>) {
+  React.useEffect(() => {
+    const el = ref.current
+    const doc = el?.ownerDocument
+    if (!el || !doc) return
+    const onPointer = () => el.setAttribute('data-gbo-pointer', '')
+    const onKey = (event: KeyboardEvent) => {
+      if (NAV_KEYS.has(event.key)) el.removeAttribute('data-gbo-pointer')
+    }
+    doc.addEventListener('pointerdown', onPointer, true)
+    doc.addEventListener('keydown', onKey, true)
+    return () => {
+      doc.removeEventListener('pointerdown', onPointer, true)
+      doc.removeEventListener('keydown', onKey, true)
+    }
+  }, [ref])
+}
+
 export function RosterPane() {
   useStore(app.roster)
   const query = useStore(app.query)
@@ -150,10 +174,13 @@ export function RosterPane() {
   useStore(roster2.metaWrites)
   useStore(roster2.attention)
   const pins = useStore(app.pinnedBots)
+  const person = footerPerson(useStore(app.userName))
+  React.useEffect(() => loadUserName(), [])
   const [searching, setSearching] = React.useState(false)
   const now = useNow()
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   useRosterShown(rootRef)
+  usePointerMode(rootRef)
   const roster = app.roster.get()
   const workingKey = chat && chat.chat?.busy ? rowKey(chat.bot) : ''
   // R14 group rooms are the roster's group rows (R6 Groups only / Bots only).
@@ -345,14 +372,21 @@ export function RosterPane() {
         )}
         {showGroups ? <RoomsSection query={query} /> : null}
       </OverlayScroll>
-      <div className="sidebar__footer gbo-roster-foot">
+      <div className="sidebar__footer gbo-roster-foot" title={roster.rows.length ? `${roster.rows.length} bots` : undefined}>
         <div className="sidebar__fade" />
         <div className="account">
           <span className="account__btn">
-            <span className="account__initials gbo-user-dot" aria-hidden="true">You</span>
-            <span className="account__name gbo-user-name">{roster.rows.length ? `${roster.rows.length} bots` : 'Bots'}</span>
+            <span className="account__initials gbo-user-dot" aria-hidden="true">{person.initials}</span>
+            {person.known ? <span className="account__name gbo-user-name">{person.name}</span> : null}
           </span>
         </div>
+        {/* Only actions that really exist: Hermes Settings, when the host
+            offers the plugin door to it. */}
+        {canOpenSettings() ? (
+          <button type="button" className="icon-btn gbo-foot-btn" title="Hermes settings" aria-label="Open Hermes settings" onClick={() => void openSettings()}>
+            <IconSettings />
+          </button>
+        ) : null}
       </div>
       <RosterDialogs />
     </div>

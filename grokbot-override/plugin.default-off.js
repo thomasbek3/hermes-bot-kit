@@ -9761,8 +9761,8 @@ var init_novnc_rfb = __esm({
         }
       }
       // Encrypt 8 bytes of text
-      enc8(text) {
-        const b2 = text.slice();
+      enc8(text2) {
+        const b2 = text2.slice();
         let i = 0, l, r, x;
         l = b2[i++] << 24 | b2[i++] << 16 | b2[i++] << 8 | b2[i++];
         r = b2[i++] << 24 | b2[i++] << 16 | b2[i++] << 8 | b2[i++];
@@ -11956,23 +11956,23 @@ var init_novnc_rfb = __esm({
       blur() {
         this._canvas.blur();
       }
-      clipboardPasteFrom(text) {
+      clipboardPasteFrom(text2) {
         if (this._rfbConnectionState !== "connected" || this._viewOnly) {
           return;
         }
         if (this._clipboardServerCapabilitiesFormats[extendedClipboardFormatText] && this._clipboardServerCapabilitiesActions[extendedClipboardActionNotify]) {
-          this._clipboardText = text;
+          this._clipboardText = text2;
           _RFB.messages.extendedClipboardNotify(this._sock, [extendedClipboardFormatText]);
         } else {
           let length, i;
           let data;
           length = 0;
-          for (let codePoint of text) {
+          for (let codePoint of text2) {
             length++;
           }
           data = new Uint8Array(length);
           i = 0;
-          for (let codePoint of text) {
+          for (let codePoint of text2) {
             let code = codePoint.codePointAt(0);
             if (code > 255) {
               code = 63;
@@ -13446,13 +13446,13 @@ var init_novnc_rfb = __esm({
           return false;
         }
         if (length >= 0) {
-          const text = this._sock.rQshiftStr(length);
+          const text2 = this._sock.rQshiftStr(length);
           if (this._viewOnly) {
             return true;
           }
           this.dispatchEvent(new CustomEvent(
             "clipboard",
-            { detail: { text } }
+            { detail: { text: text2 } }
           ));
         } else {
           length = Math.abs(length);
@@ -14092,15 +14092,15 @@ var init_novnc_rfb = __esm({
             throw new Error("Unsupported extended clipboard format for Provide message.");
           }
           inData[i] = inData[i].replace(/\r\n|\r|\n/gm, "\r\n");
-          let text = encodeUTF8(inData[i] + "\0");
+          let text2 = encodeUTF8(inData[i] + "\0");
           dataToDeflate.push(
-            text.length >> 24 & 255,
-            text.length >> 16 & 255,
-            text.length >> 8 & 255,
-            text.length & 255
+            text2.length >> 24 & 255,
+            text2.length >> 16 & 255,
+            text2.length >> 8 & 255,
+            text2.length & 255
           );
-          for (let j = 0; j < text.length; j++) {
-            dataToDeflate.push(text.charCodeAt(j));
+          for (let j = 0; j < text2.length; j++) {
+            dataToDeflate.push(text2.charCodeAt(j));
           }
         }
         let deflatedData = deflator.deflate(new Uint8Array(dataToDeflate));
@@ -14507,8 +14507,8 @@ function expectHistory(summary) {
 
 // src/core/tools.js
 var TOOL_TEXT_MAX = 64e3;
-function clip(text, max = TOOL_TEXT_MAX) {
-  const value = typeof text === "string" ? text : text == null ? "" : safeJson(text);
+function clip(text2, max = TOOL_TEXT_MAX) {
+  const value = typeof text2 === "string" ? text2 : text2 == null ? "" : safeJson(text2);
   return value.length > max ? `${value.slice(0, max)}
 … (${value.length - max} more characters)` : value;
 }
@@ -14583,16 +14583,16 @@ function parseMetadata(value) {
   if (!value) return null;
   if (typeof value === "object") return value;
   try {
-    const parsed = JSON.parse(String(value));
-    return parsed && typeof parsed === "object" ? parsed : null;
+    const parsed2 = JSON.parse(String(value));
+    return parsed2 && typeof parsed2 === "object" ? parsed2 : null;
   } catch {
     return null;
   }
 }
 function rowText(row) {
   if (row?.display_content !== void 0 && row?.display_content !== null) {
-    const text = contentText(row.display_content);
-    if (text) return text;
+    const text2 = contentText(row.display_content);
+    if (text2) return text2;
   }
   if (typeof row?.text === "string") return row.text;
   return contentText(row?.content);
@@ -14642,8 +14642,8 @@ function parseToolCalls(row) {
     }
     const labels = storedLabels[id];
     const context = args && typeof args === "object" ? firstArgPreview(args) : "";
-    const text = argsText(args);
-    return { id, name, label: toolLabel({ name, labels, context }), status: "done", ...text ? { args: text } : {} };
+    const text2 = argsText(args);
+    return { id, name, label: toolLabel({ name, labels, context }), status: "done", ...text2 ? { args: text2 } : {} };
   }).filter(Boolean);
 }
 function firstArgPreview(args) {
@@ -14654,16 +14654,16 @@ function firstArgPreview(args) {
 }
 var SYSTEM_NOTICE_KINDS = /* @__PURE__ */ new Set(["model_switch", "personality_switch", "failed_turn", "auto_continue", "internal_notification"]);
 var PARTIAL_FAILED_TURN_NOTICE = "This turn did not complete. Some actions may already have run; verify their effects before resending.";
-function isSystemNotice(kind, role, text) {
+function isSystemNotice(kind, role, text2) {
   if (!SYSTEM_NOTICE_KINDS.has(kind)) return false;
-  return !(kind === "failed_turn" && role === "assistant" && text === PARTIAL_FAILED_TURN_NOTICE);
+  return !(kind === "failed_turn" && role === "assistant" && text2 === PARTIAL_FAILED_TURN_NOTICE);
 }
 function failedTurnError(meta) {
   if (!meta) return "";
   if (typeof meta.error === "string" && meta.error.trim()) return meta.error.trim();
   const surface = meta.error_surface && typeof meta.error_surface === "object" ? meta.error_surface : null;
-  const text = surface && (typeof surface.message === "string" && surface.message.trim() ? surface.message : typeof surface.code === "string" ? surface.code : "");
-  return text ? text.trim() : "";
+  const text2 = surface && (typeof surface.message === "string" && surface.message.trim() ? surface.message : typeof surface.code === "string" ? surface.code : "");
+  return text2 ? text2.trim() : "";
 }
 function historyToItems(rows, { idPrefix = "h:" } = {}) {
   const items = [];
@@ -14689,10 +14689,10 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
         flushTools();
         items.push({ kind: "error", id: `${rowId(row, index, idPrefix)}-error`, text: failure, at });
       }
-      const text = meta && typeof meta.display_text === "string" && meta.display_text || rowText(row);
-      if (text.trim()) {
+      const text2 = meta && typeof meta.display_text === "string" && meta.display_text || rowText(row);
+      if (text2.trim()) {
         flushTools();
-        items.push({ kind: "notice", id: rowId(row, index, idPrefix), text: text.trim(), at, ...isSystemNotice(kind, role, text.trim()) ? { system: kind } : {} });
+        items.push({ kind: "notice", id: rowId(row, index, idPrefix), text: text2.trim(), at, ...isSystemNotice(kind, role, text2.trim()) ? { system: kind } : {} });
       }
       return;
     }
@@ -14712,11 +14712,11 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
     }
     if (role === "assistant") {
       const calls = parseToolCalls(row);
-      const text = rowText(row).trim();
+      const text2 = rowText(row).trim();
       const reasoning = rowReasoning(row);
-      if (text || reasoning) {
+      if (text2 || reasoning) {
         flushTools();
-        items.push({ kind: "assistant", id: rowId(row, index, idPrefix), text, at, ...reasoning ? { reasoning } : {}, ...rowExtras(row) });
+        items.push({ kind: "assistant", id: rowId(row, index, idPrefix), text: text2, at, ...reasoning ? { reasoning } : {}, ...rowExtras(row) });
       }
       if (calls.length) {
         const group = toolGroup(at);
@@ -14726,13 +14726,13 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
     }
     if (role === "user") {
       flushTools();
-      const text = rowText(row);
+      const text2 = rowText(row);
       const images = contentImages(row.display_content ?? row.content);
-      if (!text.trim() && !images) return;
+      if (!text2.trim() && !images) return;
       items.push({
         kind: "user",
         id: rowId(row, index, idPrefix),
-        text,
+        text: text2,
         at,
         ...images ? { attachments: Array.from({ length: images }, () => ({ kind: "image", name: "image" })) } : {},
         ...rowExtras(row)
@@ -15087,7 +15087,7 @@ function filePath(path) {
     return value.replace(/^file:\/\//i, "");
   }
 }
-function extractMedia(text) {
+function extractMedia(text2) {
   const media = [];
   const seen = /* @__PURE__ */ new Set();
   const add2 = (path, remote = false) => {
@@ -15101,7 +15101,7 @@ function extractMedia(text) {
     const { path, punctuation } = quoted ? { path: unq, punctuation: "" } : splitPunctuation(unq);
     return plausible(path) ? { path, punctuation } : null;
   };
-  let out = String(text || "").replace(MEDIA_LINE_RE, (whole, lead, value) => {
+  let out = String(text2 || "").replace(MEDIA_LINE_RE, (whole, lead, value) => {
     const hit = take(value);
     if (!hit) return whole;
     add2(hit.path);
@@ -15126,12 +15126,227 @@ function extractMedia(text) {
   });
   return { text: out.replace(/\n{3,}/g, "\n\n").trim(), media };
 }
+function remoteImageHost(url) {
+  try {
+    return new URL(String(url)).host;
+  } catch {
+    return "";
+  }
+}
 function mediaReadRequest(path, scope) {
   return {
     path: `/api/fs/read-data-url?path=${encodeURIComponent(filePath(path))}`,
     ...scope?.connectionId ? { connectionId: scope.connectionId } : {},
     ...scope?.profile ? { profile: scope.profile } : {}
   };
+}
+
+// src/core/directives.js
+var DIRECTIVE_NAMES = Object.freeze(["card", "preview"]);
+var BODY_MAX = 2048;
+var DIRECTIVE_RE = new RegExp(String.raw`(^|\s)::(card|preview)\{([^{}\n]{0,${BODY_MAX}})\}`, "g");
+var ATTR_RE = /([a-z][\w-]{0,63})=(?:"([^"]*)"|'([^']*)'|([^\s"'{}]+))/gi;
+var FENCE_RE = /^\s{0,3}(```+|~~~+)/;
+function parseDirectiveAttrs(body) {
+  const attrs = {};
+  for (const pair of String(body || "").matchAll(ATTR_RE)) {
+    attrs[pair[1].toLowerCase()] = (pair[2] ?? pair[3] ?? pair[4] ?? "").replace(/^<(https?:\/\/[^<>\s]+)>$/i, "$1");
+  }
+  return attrs;
+}
+function splitDirectives(text2) {
+  const raw = String(text2 || "");
+  if (!raw.includes("::")) return null;
+  const out = [];
+  let prose = "";
+  let found = false;
+  let fence = "";
+  const push = (chunk) => {
+    prose += chunk;
+  };
+  const flush = () => {
+    if (prose.trim()) out.push({ kind: "prose", text: prose.replace(/^\n+|\s+$/g, "") });
+    prose = "";
+  };
+  const lines = raw.split("\n");
+  lines.forEach((line, index) => {
+    const nl = index < lines.length - 1 ? "\n" : "";
+    const fenceMark = FENCE_RE.exec(line);
+    if (fence) {
+      if (fenceMark && fenceMark[1][0] === fence[0] && fenceMark[1].length >= fence.length) fence = "";
+      push(line + nl);
+      return;
+    }
+    if (fenceMark) {
+      fence = fenceMark[1];
+      push(line + nl);
+      return;
+    }
+    let last = 0;
+    let hit = false;
+    for (const match of line.matchAll(DIRECTIVE_RE)) {
+      const start2 = match.index + match[1].length;
+      if ((line.slice(0, start2).match(/`/g) || []).length % 2 === 1) continue;
+      push(line.slice(last, start2));
+      flush();
+      out.push({ kind: "directive", name: match[2], attrs: parseDirectiveAttrs(match[3]), source: line.slice(start2, match.index + match[0].length) });
+      last = match.index + match[0].length;
+      hit = true;
+      found = true;
+    }
+    push(hit ? line.slice(last).trim() ? line.slice(last) + nl : nl : line + nl);
+  });
+  flush();
+  return found ? out : null;
+}
+function workspaceRelPath(file) {
+  if (typeof file !== "string") return null;
+  const raw = file.trim();
+  if (!raw) return null;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return null;
+  if (raw.startsWith("/") || raw.startsWith("\\") || raw.startsWith("~")) return null;
+  const parts = [];
+  for (const part of raw.replace(/\\/g, "/").split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") return null;
+    parts.push(part);
+  }
+  return parts.length ? parts.join("/") : null;
+}
+function workspaceReadRequest(rel, sessionId, scope) {
+  return {
+    path: `/api/fs/read-text?path=${encodeURIComponent(rel)}${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ""}`,
+    timeoutMs: 5e3,
+    ...scope?.connectionId ? { connectionId: scope.connectionId } : {},
+    ...scope?.profile ? { profile: scope.profile } : {}
+  };
+}
+var CARD_KINDS = Object.freeze(["task", "draft-email", "approval"]);
+var CARD_STATES = ["pending", "running", "done", "error", "awaiting-approval"];
+var MAX_SEND_CHARS = 500;
+var MAX_CARD_CHARS = 32768;
+var MAX_ACTIONS = 3;
+var ACTION_STYLES = ["primary", "danger"];
+var isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var filled = (value) => typeof value === "string" && value.trim().length > 0;
+var text = (value) => typeof value === "string" ? value : "";
+function bodyItem(item) {
+  if (!isObject(item)) return null;
+  if (item.type === "text") return typeof item.text === "string" ? { type: "text", text: item.text } : null;
+  if (item.type === "kv" && Array.isArray(item.rows)) {
+    return { type: "kv", rows: item.rows.filter((r) => Array.isArray(r) && typeof r[0] === "string" && typeof r[1] === "string").map((r) => [r[0], r[1]]) };
+  }
+  if (item.type === "fields" && Array.isArray(item.items)) {
+    return { type: "fields", items: item.items.filter((f2) => isObject(f2) && typeof f2.label === "string" && typeof f2.value === "string").map((f2) => ({ label: f2.label, value: f2.value })) };
+  }
+  return null;
+}
+function validateCard(value) {
+  if (!isObject(value) || value.schema !== "card.v1" || !CARD_KINDS.includes(value.kind) || !filled(value.title)) return null;
+  if (!isObject(value.status) || !CARD_STATES.includes(value.status.state)) return null;
+  if (value.body !== void 0 && !Array.isArray(value.body)) return null;
+  if (value.email !== void 0 && !isObject(value.email)) return null;
+  if (value.actions !== void 0 && !Array.isArray(value.actions)) return null;
+  if (value.resolved !== void 0 && value.resolved !== null && (!isObject(value.resolved) || !filled(value.resolved.action))) return null;
+  const actions = [];
+  for (const action of value.actions || []) {
+    if (actions.length >= MAX_ACTIONS) break;
+    if (!isObject(action) || !filled(action.label) || typeof action.send !== "string") continue;
+    const send = action.send.trim().slice(0, MAX_SEND_CHARS);
+    if (send) actions.push({ label: action.label.trim(), style: ACTION_STYLES.includes(action.style) ? action.style : "default", send });
+  }
+  return {
+    schema: "card.v1",
+    kind: value.kind,
+    title: value.title.trim(),
+    status: { state: value.status.state, label: filled(value.status.label) ? value.status.label.trim() : null },
+    body: (value.body || []).map(bodyItem).filter(Boolean),
+    email: value.email ? { to: text(value.email.to), cc: text(value.email.cc), subject: text(value.email.subject), bodyText: text(value.email.bodyText) } : null,
+    actions,
+    resolved: isObject(value.resolved) ? { action: value.resolved.action.trim(), at: text(value.resolved.at) } : null
+  };
+}
+function cardFromRead(result) {
+  if (!result || result.binary || typeof result.text !== "string" || !result.text) return { ok: false, reason: "unreadable" };
+  if (result.truncated || result.text.length > MAX_CARD_CHARS) return { ok: false, reason: "too-large" };
+  let parsed2;
+  try {
+    parsed2 = JSON.parse(result.text);
+  } catch {
+    return { ok: false, reason: "json" };
+  }
+  const card = validateCard(parsed2);
+  return card ? { ok: true, card } : { ok: false, reason: "schema" };
+}
+function isFinalCard(card) {
+  return Boolean(card && (card.resolved || card.status.state === "done" || card.status.state === "error"));
+}
+function statusLabel(status) {
+  if (status?.label) return status.label;
+  return { pending: "Pending", running: "Running", done: "Done", error: "Error", "awaiting-approval": "Awaiting approval" }[status?.state] || String(status?.state || "");
+}
+function cardChip(card) {
+  const state = card?.status?.state;
+  if (!card || card.kind === "approval" || !["running", "done", "error"].includes(state)) return null;
+  return { state, label: statusLabel(card.status) };
+}
+var LEAD_MAX_CHARS = 200;
+function cardLead(card) {
+  if (!card || !filled(card.title) || card.body?.length !== 1 || card.body[0].type !== "text") return null;
+  const line = card.body[0].text.trim();
+  return line && !line.includes("\n") && line.length <= LEAD_MAX_CHARS ? line : null;
+}
+var PREVIEW_MIN_HEIGHT = 120;
+var PREVIEW_MAX_HEIGHT = 1200;
+var PREVIEW_DEFAULT_HEIGHT = 280;
+var INTENT_THROTTLE_MS = 1e3;
+var PREVIEW_GESTURE_MS = 3e3;
+var PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:";
+var SIZE_TYPE = "hermes-inline-preview-size";
+var INTENT_TYPE = "hermes-inline-preview-intent";
+var ACK_TYPE = "hermes-inline-preview-intent-ack";
+var isHtmlFile = (rel) => /\.html?$/i.test(String(rel || ""));
+function previewStartHeight(raw) {
+  const n = Number(raw);
+  return Number.isInteger(n) ? Math.min(PREVIEW_MAX_HEIGHT, Math.max(PREVIEW_MIN_HEIGHT, n)) : PREVIEW_DEFAULT_HEIGHT;
+}
+function previewPrelude(vars, font, colorScheme) {
+  const tokens = Object.entries(vars || {}).filter(([name, value]) => /^--[a-z-]+$/.test(name) && typeof value === "string" && value && !/[<>{};]/.test(value)).map(([name, value]) => `${name}:${value}`).join(";");
+  const safeFont = typeof font === "string" && font && !/[<>{};]/.test(font) ? `font-family:${font};` : "";
+  const scheme = colorScheme === "dark" ? "dark" : "light";
+  return `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}"><style>:root{color-scheme:${scheme};${tokens}}html,body{margin:0;padding:0;background:transparent;color:var(--foreground,inherit);${safeFont}}</style>`;
+}
+function previewScript(token) {
+  const t = JSON.stringify(String(token));
+  return "<script>(function(){var t=" + t + ";var lastH=0;function post(){var d=document.documentElement,b=document.body;var h=Math.max(d?d.scrollHeight:0,b?b.scrollHeight:0);if(Math.abs(h-lastH)>1){lastH=h;parent.postMessage({type:" + JSON.stringify(SIZE_TYPE) + ',token:t,height:h},"*")}}if(typeof ResizeObserver==="function"){var ro=new ResizeObserver(post);ro.observe(document.documentElement);if(document.body)ro.observe(document.body)}addEventListener("load",post);post();var n=0,w={};addEventListener("message",function(e){var m=e.data;if(e.source!==parent||!m||m.type!==' + JSON.stringify(ACK_TYPE) + '||m.token!==t||!w[m.id])return;var r=w[m.id];delete w[m.id];r(m.ack)});function send(p){if(typeof p!=="string"||!p.trim())return Promise.resolve({ok:false,error:"invalid"});var id=++n;return new Promise(function(res){var k=setTimeout(function(){if(w[id]){delete w[id];res({ok:false,error:"undelivered"})}},5000);w[id]=function(a){clearTimeout(k);res(a)};parent.postMessage({type:' + JSON.stringify(INTENT_TYPE) + ',token:t,id:id,prompt:p},"*")})}window.hermes={send:send,maxLength:' + MAX_SEND_CHARS + '};addEventListener("click",function(e){var el=e.target&&e.target.closest?e.target.closest("[data-hermes-send]"):null;if(el)send(el.getAttribute("data-hermes-send")||"")},true)})()<\/script>';
+}
+function previewDocument(html, token, prelude) {
+  const doc = String(html || "");
+  const script = previewScript(token);
+  const close = /<\/body\s*>/i.exec(doc);
+  return prelude + (close ? doc.slice(0, close.index) + script + doc.slice(close.index) : doc + script);
+}
+function previewHeightFrom(data, token) {
+  if (!isObject(data) || data.type !== SIZE_TYPE || data.token !== token) return null;
+  const h = data.height;
+  if (typeof h !== "number" || !Number.isFinite(h) || h <= 0) return null;
+  return Math.min(PREVIEW_MAX_HEIGHT, Math.max(PREVIEW_MIN_HEIGHT, Math.ceil(h)));
+}
+function previewIntentFrom(data, token, now, lastAcceptedAt) {
+  if (!isObject(data) || data.type !== INTENT_TYPE || data.token !== token) return null;
+  const id = typeof data.id === "number" && Number.isSafeInteger(data.id) ? data.id : null;
+  const prompt = typeof data.prompt === "string" ? data.prompt.trim() : "";
+  if (!prompt) return { kind: "reject", id, ack: { ok: false, error: "invalid" } };
+  if (prompt.length > MAX_SEND_CHARS) return { kind: "reject", id, ack: { ok: false, error: "too_long", maxLength: MAX_SEND_CHARS } };
+  const elapsed = now - lastAcceptedAt;
+  if (lastAcceptedAt > 0 && elapsed < INTENT_THROTTLE_MS) return { kind: "reject", id, ack: { ok: false, error: "throttled", retryAfterMs: INTENT_THROTTLE_MS - elapsed } };
+  return { kind: "accept", id, prompt };
+}
+function previewIntentRoute(now, lastUserAt) {
+  return lastUserAt > 0 && now >= lastUserAt && now - lastUserAt <= PREVIEW_GESTURE_MS ? "send" : "ask";
+}
+function previewAck(token, id, ack) {
+  return { type: ACK_TYPE, token, id, ack };
 }
 
 // src/core/voice.js
@@ -15174,6 +15389,15 @@ function rpcErrorParts(error) {
   const message = typeof error?.message === "string" ? error.message : typeof error === "string" ? error : "";
   const reason = typeof data?.reason === "string" ? data.reason : "";
   return { code, data, reason, message };
+}
+function withoutRefusedParams(error, params, keep = []) {
+  const { data, reason } = rpcErrorParts(error);
+  if (reason !== "invalid_params" || !Array.isArray(data?.fields) || !params || typeof params !== "object") return null;
+  const drop = [...new Set(data.fields.map((field) => String(field).split(".")[0]))].filter((field) => !keep.includes(field) && Object.prototype.hasOwnProperty.call(params, field));
+  if (!drop.length) return null;
+  const next = { ...params };
+  for (const field of drop) delete next[field];
+  return next;
 }
 var HOST_PRE_SEND = /\bnot connected\b|execution identity unavailable|^Session revision unavailable|^No retained rewind to replay|is not available on the shared gateway yet/i;
 var DISPATCH_REFUSED_CODES = /* @__PURE__ */ new Set([-32600, -32602, -32601, 4e3, 5035]);
@@ -15300,6 +15524,7 @@ function roomPostFailure(error) {
 
 // src/core/create-chat.js
 var KICKOFF_TEXT = "Hey, tell me about yourself!";
+var CREATE_SOURCE = "desktop";
 var KICKOFF_DELAY_MS = 400;
 var creations = /* @__PURE__ */ new Map();
 function creationKey(bot) {
@@ -15316,17 +15541,22 @@ function createCanonicalChat(requestForBot2, bot, { kickoff = false, kickoffText
     const existing = await findCanonicalChat(requestForBot2, bot);
     if (existing?.id) return { row: existing, runtimeId: "", created: false, adopted: true };
     const route = botConnectionRoute(bot);
-    const res = await requestForBot2(
-      bot,
-      "session.create",
-      {
-        profile: backendTargetProfile(route, name),
-        title: CANONICAL_CHAT_TITLE,
-        hidden: true,
-        follow_profile_config: true
-      },
-      { spawnPriority: "foreground" }
-    );
+    const params = {
+      profile: backendTargetProfile(route, name),
+      title: CANONICAL_CHAT_TITLE,
+      hidden: true,
+      follow_profile_config: true,
+      source: CREATE_SOURCE
+    };
+    const create = (body) => requestForBot2(bot, "session.create", body, { spawnPriority: "foreground" });
+    let res;
+    try {
+      res = await create(params);
+    } catch (error) {
+      const corrected = withoutRefusedParams(error, params, ["profile"]);
+      if (!corrected) throw error;
+      res = await create(corrected);
+    }
     const sid = String(res?.stored_session_id || "");
     const runtime = String(res?.session_id || "");
     let titled = false;
@@ -15428,14 +15658,14 @@ function segmentStamp(payload) {
   const offset = nonNegativeInt(record.offset);
   return offset === null ? { turnId, segment } : { turnId, segment, offset };
 }
-function admitSegmentDelta(cursor, stamp2, text) {
+function admitSegmentDelta(cursor, stamp2, text2) {
   const offset = stamp2.offset ?? 0;
-  const end = offset + text.length;
+  const end = offset + text2.length;
   if (!cursor || cursor.turnId !== stamp2.turnId || stamp2.segment > cursor.segment) {
-    return { cursor: { turnId: stamp2.turnId, segment: stamp2.segment, end }, text };
+    return { cursor: { turnId: stamp2.turnId, segment: stamp2.segment, end }, text: text2 };
   }
   if (stamp2.segment < cursor.segment || end <= cursor.end) return { cursor, text: "" };
-  return { cursor: { ...cursor, end }, text: text.slice(Math.max(0, cursor.end - offset)) };
+  return { cursor: { ...cursor, end }, text: text2.slice(Math.max(0, cursor.end - offset)) };
 }
 function admitSegmentSeal(cursor, stamp2) {
   const next = { turnId: stamp2.turnId, segment: stamp2.segment + 1, end: 0 };
@@ -15600,6 +15830,45 @@ function applyConnectionUpdate(waiting, payload) {
     deadlineAt: Number.isFinite(payload?.deadline_at) ? payload.deadline_at : waiting.deadlineAt
   };
 }
+var RECOMMENDED = "(Recommended)";
+function bareChoice(choice) {
+  const text2 = str(choice);
+  return text2.endsWith(RECOMMENDED) ? text2.slice(0, -RECOMMENDED.length).trim() : text2;
+}
+function choiceLetter(index) {
+  return index >= 0 && index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+function clarifyFilled(value) {
+  return Array.isArray(value) ? value.length > 0 : typeof value === "string" && value.length > 0;
+}
+function clarifyPicks(waiting) {
+  return { ...waiting?.locked || {}, ...waiting?.picks || {} };
+}
+function clarifyTextAnswer(waiting, text2) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
+  const value = str(text2).trim();
+  const picks = clarifyPicks(waiting);
+  if (!questions.length || !value) return { picks, complete: false };
+  const target = questions.find((q) => !clarifyFilled(picks[q.qid])) || questions[questions.length - 1];
+  const current = picks[target.qid];
+  picks[target.qid] = target.multiSelect ? [...Array.isArray(current) ? current.filter((v) => v !== value) : [], value] : value;
+  return { picks, complete: questions.every((q) => clarifyFilled(picks[q.qid])) };
+}
+function clarifySettledItem(waiting, answer, status, at) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
+  const answers = {};
+  for (const q of questions) answers[q.qid] = answer && Object.prototype.hasOwnProperty.call(answer, q.qid) ? answer[q.qid] ?? null : null;
+  const skipped = questions.every((q) => !clarifyFilled(answers[q.qid]));
+  return {
+    kind: "clarify",
+    id: `clarify:${String(waiting?.id || "")}`,
+    requestId: String(waiting?.id || ""),
+    questions,
+    answers,
+    status: status === "expired" ? "expired" : skipped ? "skipped" : "answered",
+    ...Number.isFinite(at) ? { at } : {}
+  };
+}
 function valueResult(kind, input) {
   if (kind === "vault-login") {
     const identifier = str(input?.identifier).trim();
@@ -15613,19 +15882,19 @@ function valueResult(kind, input) {
 function emptyLive() {
   return { turnId: "", cursor: void 0, bubbleId: null, toolsId: null, reasoning: "", streamed: false, sealed: "" };
 }
-var sealText = (live, text) => ({ ...live, sealed: `${live.sealed || ""}${text || ""}` });
+var sealText = (live, text2) => ({ ...live, sealed: `${live.sealed || ""}${text2 || ""}` });
 function unshownTurnText(full, shown) {
-  const text = String(full || "");
+  const text2 = String(full || "");
   const seen = String(shown || "");
-  if (!seen.trim()) return text;
+  if (!seen.trim()) return text2;
   let i = 0;
   for (let j = 0; j < seen.length; j += 1) {
     if (/\s/.test(seen[j])) continue;
-    while (i < text.length && /\s/.test(text[i])) i += 1;
-    if (i >= text.length || text[i] !== seen[j]) return null;
+    while (i < text2.length && /\s/.test(text2[i])) i += 1;
+    if (i >= text2.length || text2[i] !== seen[j]) return null;
     i += 1;
   }
-  return text.slice(i).replace(/^\s+/, "");
+  return text2.slice(i).replace(/^\s+/, "");
 }
 function initialChatState(items = []) {
   return { items, busy: false, status: null, live: emptyLive(), waiting: null };
@@ -15647,12 +15916,12 @@ function closeBubble(state) {
     live: { ...sealText(state.live, bubble?.text), bubbleId: null }
   };
 }
-function appendToBubble(state, text, at) {
+function appendToBubble(state, text2, at) {
   const bubble = findItem(state.items, state.live.bubbleId);
   if (bubble) {
     return {
       ...state,
-      items: replaceItem(state.items, bubble.id, (item) => ({ text: item.text + text, streaming: true })),
+      items: replaceItem(state.items, bubble.id, (item) => ({ text: item.text + text2, streaming: true })),
       live: { ...state.live, streamed: true, toolsId: null }
     };
   }
@@ -15660,16 +15929,16 @@ function appendToBubble(state, text, at) {
   const reasoning = state.live.reasoning;
   return {
     ...state,
-    items: [...state.items, { kind: "assistant", id, text, at, streaming: true, ...reasoning ? { reasoning } : {} }],
+    items: [...state.items, { kind: "assistant", id, text: text2, at, streaming: true, ...reasoning ? { reasoning } : {} }],
     live: { ...state.live, bubbleId: id, streamed: true, toolsId: null, reasoning: "" }
   };
 }
-function appendReasoning(state, text) {
+function appendReasoning(state, text2) {
   const bubble = findItem(state.items, state.live.bubbleId);
   if (bubble) {
-    return { ...state, items: replaceItem(state.items, bubble.id, (item) => ({ reasoning: (item.reasoning || "") + text })) };
+    return { ...state, items: replaceItem(state.items, bubble.id, (item) => ({ reasoning: (item.reasoning || "") + text2 })) };
   }
-  return { ...state, live: { ...state.live, reasoning: state.live.reasoning + text } };
+  return { ...state, live: { ...state.live, reasoning: state.live.reasoning + text2 } };
 }
 function lastAssistantText(state) {
   for (let i = state.items.length - 1; i >= 0; i -= 1) {
@@ -15701,32 +15970,32 @@ function applyEvent(state, event, now = Date.now()) {
     }
     case "message.delta": {
       if (payload.text === null) return closeBubble(state);
-      let text = typeof payload.text === "string" ? payload.text : "";
+      let text2 = typeof payload.text === "string" ? payload.text : "";
       const stamp2 = segmentStamp(payload);
       let live = state.live;
       if (stamp2) {
-        const admitted = admitSegmentDelta(live.cursor, stamp2, text);
+        const admitted = admitSegmentDelta(live.cursor, stamp2, text2);
         live = { ...live, cursor: admitted.cursor };
-        text = admitted.text;
+        text2 = admitted.text;
       }
       const status = state.status?.kind === "tool" ? null : state.status;
-      if (!text) return { ...state, busy: true, status, live };
-      return appendToBubble({ ...state, busy: true, status, live }, text, now);
+      if (!text2) return { ...state, busy: true, status, live };
+      return appendToBubble({ ...state, busy: true, status, live }, text2, now);
     }
     case "reasoning.delta":
     case "thinking.delta": {
-      const text = typeof payload.text === "string" ? payload.text : "";
-      return text ? appendReasoning({ ...state, busy: true }, text) : state;
+      const text2 = typeof payload.text === "string" ? payload.text : "";
+      return text2 ? appendReasoning({ ...state, busy: true }, text2) : state;
     }
     case "reasoning.available": {
-      const text = typeof payload.text === "string" ? payload.text : "";
-      if (!text) return state;
+      const text2 = typeof payload.text === "string" ? payload.text : "";
+      if (!text2) return state;
       const bubble = findItem(state.items, state.live.bubbleId);
-      if (bubble) return { ...state, items: replaceItem(state.items, bubble.id, { reasoning: text }) };
-      return { ...state, live: { ...state.live, reasoning: text } };
+      if (bubble) return { ...state, items: replaceItem(state.items, bubble.id, { reasoning: text2 }) };
+      return { ...state, live: { ...state.live, reasoning: text2 } };
     }
     case "message.interim": {
-      const text = typeof payload.text === "string" ? payload.text.trim() : "";
+      const text2 = typeof payload.text === "string" ? payload.text.trim() : "";
       const stamp2 = segmentStamp(payload);
       let live = state.live;
       if (stamp2) {
@@ -15734,20 +16003,20 @@ function applyEvent(state, event, now = Date.now()) {
         live = { ...live, cursor: admitted.cursor };
         if (!admitted.fresh) return { ...state, live };
       }
-      if (!text) return closeBubble({ ...state, live });
+      if (!text2) return closeBubble({ ...state, live });
       const bubble = findItem(state.items, live.bubbleId);
       if (bubble) {
         return {
           ...state,
-          items: replaceItem(state.items, bubble.id, { text, streaming: false }),
-          live: { ...sealText(live, text), bubbleId: null }
+          items: replaceItem(state.items, bubble.id, { text: text2, streaming: false }),
+          live: { ...sealText(live, text2), bubbleId: null }
         };
       }
       const reasoning = live.reasoning;
       return {
         ...state,
-        items: [...state.items, { kind: "assistant", id: liveId("a"), text, at: now, ...reasoning ? { reasoning } : {} }],
-        live: { ...sealText(live, text), bubbleId: null, reasoning: "", toolsId: null, streamed: true }
+        items: [...state.items, { kind: "assistant", id: liveId("a"), text: text2, at: now, ...reasoning ? { reasoning } : {} }],
+        live: { ...sealText(live, text2), bubbleId: null, reasoning: "", toolsId: null, streamed: true }
       };
     }
     case "tool.generating": {
@@ -15796,9 +16065,9 @@ function applyEvent(state, event, now = Date.now()) {
       };
     }
     case "status.update": {
-      const text = typeof payload.text === "string" ? payload.text.trim() : "";
-      if (!text) return state;
-      return { ...state, status: { kind: String(payload.kind || "status"), text } };
+      const text2 = typeof payload.text === "string" ? payload.text.trim() : "";
+      if (!text2) return state;
+      return { ...state, status: { kind: String(payload.kind || "status"), text: text2 } };
     }
     case "message.complete": {
       const final = typeof payload.text === "string" ? payload.text.trim() : "";
@@ -15893,13 +16162,13 @@ function isUserTurn(row) {
 }
 function retryText(content) {
   const parts = typeof content === "string" ? [content] : Array.isArray(content) ? content : [null];
-  let text = "";
+  let text2 = "";
   for (const part of parts) {
-    if (typeof part === "string") text += part;
-    else if (part && typeof part === "object" && TEXT_PARTS.has(part.type) && typeof part.text === "string" && Object.keys(part).length === 2) text += part.text;
+    if (typeof part === "string") text2 += part;
+    else if (part && typeof part === "object" && TEXT_PARTS.has(part.type) && typeof part.text === "string" && Object.keys(part).length === 2) text2 += part.text;
     else return null;
   }
-  return text.trim() ? text : "";
+  return text2.trim() ? text2 : "";
 }
 function userTurnFromEnd(rows, turnsBack) {
   const turns = (Array.isArray(rows) ? rows : []).filter(isUserTurn);
@@ -15923,14 +16192,14 @@ function cutRewoundRows(rows, rowId2) {
 function survivorRowIdsFrom(result) {
   const rawMap = result?.survivor_row_id_map;
   if (rawMap && typeof rawMap === "object" && !Array.isArray(rawMap)) {
-    const parsed = /* @__PURE__ */ new Map();
+    const parsed2 = /* @__PURE__ */ new Map();
     for (const [oldId, newId] of Object.entries(rawMap)) {
       const previous = Number(oldId);
       if (!Number.isInteger(previous)) continue;
-      if (newId === null) parsed.set(previous, null);
-      else if (typeof newId === "number" && Number.isInteger(newId)) parsed.set(previous, newId);
+      if (newId === null) parsed2.set(previous, null);
+      else if (typeof newId === "number" && Number.isInteger(newId)) parsed2.set(previous, newId);
     }
-    return parsed;
+    return parsed2;
   }
   const raw = result?.survivor_user_row_ids;
   if (!Array.isArray(raw)) return void 0;
@@ -16022,19 +16291,19 @@ var DESKTOP_ONLY = /* @__PURE__ */ new Set([
   "bg",
   "background"
 ]);
-function parseSlash(text) {
-  const match = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(String(text || "").trim());
+function parseSlash(text2) {
+  const match = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(String(text2 || "").trim());
   if (!match) return null;
   const raw = match[1].toLowerCase();
   const name = ALIASES[raw] || raw;
   const arg = (match[2] || "").trim();
   return { name, raw, arg, command: `${match[1]}${arg ? ` ${arg}` : ""}` };
 }
-function slashSurface(parsed) {
-  if (!parsed) return "none";
-  if (parsed.name === "new") return parsed.arg ? "exec" : "new-guard";
-  if (["compress", "status", "help", "title", "steer", "queue", "model", "undo", "retry"].includes(parsed.name)) return parsed.name;
-  if (DESKTOP_ONLY.has(parsed.raw) || DESKTOP_ONLY.has(parsed.name)) return "desktop";
+function slashSurface(parsed2) {
+  if (!parsed2) return "none";
+  if (parsed2.name === "new") return parsed2.arg ? "exec" : "new-guard";
+  if (["compress", "status", "help", "title", "steer", "queue", "model", "undo", "retry"].includes(parsed2.name)) return parsed2.name;
+  if (DESKTOP_ONLY.has(parsed2.raw) || DESKTOP_ONLY.has(parsed2.name)) return "desktop";
   return "exec";
 }
 var str2 = (value) => typeof value === "string" ? value : "";
@@ -16086,15 +16355,12 @@ var WATCH_FIRST_MS = 1e4;
 var WATCH_MAX_MS = 6e4;
 var REATTACH_DELAYS_MS = [1e3, 5e3, 3e4];
 var RECONNECTING_NOTICE_MS = 1e4;
-var RESUME_KEYS = Object.freeze(["session_id", "profile", "omit_messages"]);
+var RESUME_KEYS = Object.freeze(["session_id", "profile", "omit_messages", "source"]);
+var SESSION_SOURCE = "desktop";
 function correctedResumeParams(error, params, canonical) {
   const { code, data, reason } = rpcErrorParts(error);
   if (reason === "invalid_params" && Array.isArray(data?.fields)) {
-    const drop = data.fields.map((field) => String(field).split(".")[0]).filter((field) => field !== "session_id" && field !== "profile" && Object.prototype.hasOwnProperty.call(params, field));
-    if (!drop.length) return null;
-    const next = { ...params };
-    for (const field of drop) delete next[field];
-    return next;
+    return withoutRefusedParams(error, params, ["session_id", "profile"]);
   }
   if (code === 4007 || reason === "not_found" || code === 4001 && !reason) {
     const other = canonicalIds(canonical).find((id) => id !== params.session_id);
@@ -16347,7 +16613,7 @@ function createChatController(bot, deps, options = {}) {
     const page = await deps.readHistory(bot, state.storedId, { limit: HISTORY_PAGE, offset });
     return Array.isArray(page?.messages) ? page.messages : [];
   }
-  const keepLocal = (item) => item.failed || item.kind === "command" || item.kind === "approval" && item.status === "pending";
+  const keepLocal = (item) => item.failed || item.kind === "command" || item.kind === "clarify" || item.kind === "approval" && item.status === "pending";
   const keepLive = (item) => !isPersistedItem(item);
   async function open() {
     const mine = ++generation2;
@@ -16428,7 +16694,8 @@ function createChatController(bot, deps, options = {}) {
     const params = {
       session_id: state.storedId,
       profile: String(bot?.name || "default"),
-      omit_messages: !withHistory
+      omit_messages: !withHistory,
+      source: SESSION_SOURCE
     };
     for (const key of resumeDropped) delete params[key];
     return params;
@@ -16531,12 +16798,12 @@ function createChatController(bot, deps, options = {}) {
         bubbleId = `inflight:${now()}`;
         items = [...items, { kind: "assistant", id: bubbleId, text: whole, at: now(), streaming: true }];
       } else if (whole && replaceText) {
-        const text = unshownTurnText(whole, chat.live.sealed);
-        if (text && bubbleId) {
-          items = items.map((item) => item.id === bubbleId ? { ...item, text, streaming: true } : item);
-        } else if (text) {
+        const text2 = unshownTurnText(whole, chat.live.sealed);
+        if (text2 && bubbleId) {
+          items = items.map((item) => item.id === bubbleId ? { ...item, text: text2, streaming: true } : item);
+        } else if (text2) {
           bubbleId = `inflight:${now()}`;
-          items = [...items, { kind: "assistant", id: bubbleId, text, at: now(), streaming: true }];
+          items = [...items, { kind: "assistant", id: bubbleId, text: text2, at: now(), streaming: true }];
         }
       }
       if (initial && inflight?.status === "error" && inflight.error && !running) {
@@ -16819,7 +17086,14 @@ function createChatController(bot, deps, options = {}) {
       } else {
         throw new Error("Unknown question");
       }
-      patchWaiting(waiting, null);
+      if (waiting.kind === "clarify") {
+        const settled = clarifySettledItem(waiting, answer, status, now());
+        setChat((chat) => ({
+          ...chat,
+          items: [...chat.items.filter((item) => item.id !== settled.id), settled],
+          waiting: chat.waiting && chat.waiting.kind === waiting.kind && chat.waiting.id === waiting.id ? null : chat.waiting
+        }));
+      } else patchWaiting(waiting, null);
       return { ok: true, status };
     } catch (error) {
       const unsupported = looksUnsupported(error);
@@ -16830,6 +17104,24 @@ function createChatController(bot, deps, options = {}) {
       });
       return { ok: false, unsupported };
     }
+  }
+  function pickClarify(qid, value) {
+    const waiting = state.chat.waiting;
+    if (!waiting || waiting.kind !== "clarify" || waiting.answering) return false;
+    if (!(waiting.questions || []).some((q) => q.qid === qid)) return false;
+    patchWaiting(waiting, { picks: { ...waiting.picks || {}, [qid]: value } });
+    return true;
+  }
+  async function answerClarifyText(text2) {
+    const waiting = state.chat.waiting;
+    if (!waiting || waiting.kind !== "clarify" || waiting.answering) return { ok: false, error: "No question is waiting for an answer" };
+    const { picks, complete } = clarifyTextAnswer(waiting, text2);
+    if (!complete) {
+      patchWaiting(waiting, { picks: { ...waiting.picks || {}, ...picks } });
+      return { ok: true, status: "picked" };
+    }
+    const result = await answerPrompt(picks);
+    return result.ok ? result : { ...result, error: state.chat.waiting?.error || "Your answer was not sent" };
   }
   async function respondConnection(result) {
     const waiting = state.chat.waiting;
@@ -16885,18 +17177,18 @@ function createChatController(bot, deps, options = {}) {
     } catch {
     }
   }
-  async function runSlash(text, depth = 0) {
-    const parsed = parseSlash(text);
-    if (!parsed) return { ok: false };
-    const surface = slashSurface(parsed);
+  async function runSlash(text2, depth = 0) {
+    const parsed2 = parseSlash(text2);
+    if (!parsed2) return { ok: false };
+    const surface = slashSurface(parsed2);
     const id = `cmd:${now()}:${Math.random().toString(36).slice(2, 7)}`;
-    const show = (output, extra = {}) => commandItem(id, { command: `/${parsed.command}`, output, running: false, ...extra });
-    commandItem(id, { command: `/${parsed.command}`, output: "", running: true });
+    const show = (output, extra = {}) => commandItem(id, { command: `/${parsed2.command}`, output, running: false, ...extra });
+    commandItem(id, { command: `/${parsed2.command}`, output: "", running: true });
     try {
       switch (surface) {
         case "new-guard":
         case "compress": {
-          const focus = surface === "compress" ? parsed.arg : "";
+          const focus = surface === "compress" ? parsed2.arg : "";
           const lead = surface === "new-guard" ? "This Bot Chat never resets: compacting instead (same conversation, fresh working context).\n" : "";
           const res = await withRuntime(
             (runtimeId) => deps.requestForBot(bot, "session.compress", { session_id: runtimeId, ...focus ? { focus_topic: focus } : {} }, { timeoutMs: COMPRESS_TIMEOUT_MS })
@@ -16921,10 +17213,10 @@ function createChatController(bot, deps, options = {}) {
           show("Pick this bot’s model in the profile panel (Model).");
           return { ok: true };
         case "desktop":
-          show(`/${parsed.raw} is a command for the Hermes window itself (not this chat). Run it from any Hermes composer.`);
+          show(`/${parsed2.raw} is a command for the Hermes window itself (not this chat). Run it from any Hermes composer.`);
           return { ok: true };
         case "steer": {
-          if (!parsed.arg) {
+          if (!parsed2.arg) {
             show("Usage: /steer <what to change>");
             return { ok: true };
           }
@@ -16932,19 +17224,19 @@ function createChatController(bot, deps, options = {}) {
             let outcome = "uncertain";
             let detail = "";
             try {
-              const res = await withRuntime((runtimeId) => deps.requestForBot(bot, "session.steer", { session_id: runtimeId, text: parsed.arg }));
+              const res = await withRuntime((runtimeId) => deps.requestForBot(bot, "session.steer", { session_id: runtimeId, text: parsed2.arg }));
               outcome = res?.status === "queued" ? "accepted" : res?.status === "rejected" ? "refused" : "uncertain";
             } catch (error) {
               outcome = steerFailure(error);
               detail = String(error?.message || error);
             }
             if (outcome === "accepted") {
-              show(`Steered: “${parsed.arg}” reaches the reply after its next tool call.`);
+              show(`Steered: “${parsed2.arg}” reaches the reply after its next tool call.`);
               return { ok: true };
             }
             if (outcome === "uncertain") {
               show(
-                `Steer not confirmed${detail ? ` (${detail})` : ""}: “${parsed.arg}” may already have reached the reply, so it was not queued as well. The chat is re-read; send it again yourself only if it is missing.`,
+                `Steer not confirmed${detail ? ` (${detail})` : ""}: “${parsed2.arg}” may already have reached the reply, so it was not queued as well. The chat is re-read; send it again yourself only if it is missing.`,
                 { error: true }
               );
               void refresh();
@@ -16952,23 +17244,23 @@ function createChatController(bot, deps, options = {}) {
             }
           }
           removeItem(id);
-          const sent = await sendDraft(parsed.arg, [], { extra: { queued: true } });
+          const sent = await sendDraft(parsed2.arg, [], { extra: { queued: true } });
           return { ok: sent.ok };
         }
         case "undo":
         case "retry":
-          return await runRewindCommand(parsed, id, show, depth);
+          return await runRewindCommand(parsed2, id, show, depth);
         case "queue": {
-          if (!parsed.arg) {
+          if (!parsed2.arg) {
             show("Usage: /queue <message to send after the current reply>");
             return { ok: true };
           }
           removeItem(id);
-          const sent = await sendDraft(parsed.arg, [], { extra: { queued: true } });
+          const sent = await sendDraft(parsed2.arg, [], { extra: { queued: true } });
           return { ok: sent.ok };
         }
         default:
-          return await execSlash(parsed, id, show, depth);
+          return await execSlash(parsed2, id, show, depth);
       }
     } catch (error) {
       show(`error: ${String(error?.message || error)}`, { error: true });
@@ -16978,14 +17270,14 @@ function createChatController(bot, deps, options = {}) {
   function removeItem(id) {
     setChat((chat) => ({ ...chat, items: chat.items.filter((item) => item.id !== id) }));
   }
-  async function execSlash(parsed, id, show, depth) {
+  async function execSlash(parsed2, id, show, depth) {
     let dispatch = null;
     let execError = null;
     try {
-      const res = await withRuntime((runtimeId) => deps.requestForBot(bot, "slash.exec", { session_id: runtimeId, command: parsed.command }));
+      const res = await withRuntime((runtimeId) => deps.requestForBot(bot, "slash.exec", { session_id: runtimeId, command: parsed2.command }));
       dispatch = parseCommandDispatch(res);
       if (!dispatch) {
-        const body = typeof res?.output === "string" && res.output || `/${parsed.raw}: no output`;
+        const body = typeof res?.output === "string" && res.output || `/${parsed2.raw}: no output`;
         show(res?.warning ? `warning: ${res.warning}
 ${body}` : body);
         return { ok: true };
@@ -16994,7 +17286,7 @@ ${body}` : body);
       execError = error;
       if (slashExecFailure(error) === "uncertain") {
         show(
-          `error: /${parsed.raw} not confirmed (${String(error?.message || error)}). It may have run, so it was not run again; the chat is re-read, check it before repeating the command.`,
+          `error: /${parsed2.raw} not confirmed (${String(error?.message || error)}). It may have run, so it was not run again; the chat is re-read, check it before repeating the command.`,
           { error: true }
         );
         void refresh();
@@ -17004,12 +17296,12 @@ ${body}` : body);
     if (!dispatch) {
       try {
         dispatch = parseCommandDispatch(
-          await withRuntime((runtimeId) => deps.requestForBot(bot, "command.dispatch", { session_id: runtimeId, name: parsed.raw, arg: parsed.arg }))
+          await withRuntime((runtimeId) => deps.requestForBot(bot, "command.dispatch", { session_id: runtimeId, name: parsed2.raw, arg: parsed2.arg }))
         );
       } catch (error) {
         const message2 = String(error?.message || error);
         if (execError && /not a quick\/plugin\/(?:bundle\/)?skill command/i.test(message2)) {
-          show(`error: /${parsed.raw} failed: ${String(execError?.message || execError)}`, { error: true });
+          show(`error: /${parsed2.raw} failed: ${String(execError?.message || execError)}`, { error: true });
         } else show(`error: ${message2}`, { error: true });
         return { ok: false };
       }
@@ -17025,23 +17317,23 @@ ${body}` : body);
     if (dispatch.type === "alias") {
       removeItem(id);
       if (depth > 3) return { ok: false };
-      return runSlash(`/${dispatch.target}${parsed.arg ? ` ${parsed.arg}` : ""}`, depth + 1);
+      return runSlash(`/${dispatch.target}${parsed2.arg ? ` ${parsed2.arg}` : ""}`, depth + 1);
     }
     if ((dispatch.type === "send" || dispatch.type === "prefill") && dispatch.notice) show(dispatch.notice);
     else removeItem(id);
     const message = (dispatch.message || "").trim();
     if (dispatch.type === "prefill") return { ok: true, prefill: message };
     if (!message) {
-      show(`/${parsed.raw}: ${dispatch.type === "skill" ? "skill payload missing message" : "empty message"}`, { error: true });
+      show(`/${parsed2.raw}: ${dispatch.type === "skill" ? "skill payload missing message" : "empty message"}`, { error: true });
       return { ok: false };
     }
-    const display = (dispatch.display || "").trim() || `/${parsed.command}`;
+    const display = (dispatch.display || "").trim() || `/${parsed2.command}`;
     const sent = await sendDraft(display, [], { submitText: message, ...state.chat.busy ? { extra: { queued: true } } : {} });
     return { ok: sent.ok };
   }
-  async function completeSlash(text) {
+  async function completeSlash(text2) {
     try {
-      const params = state.runtimeId ? { text, session_id: state.runtimeId } : { text, profile: String(bot?.name || "default") };
+      const params = state.runtimeId ? { text: text2, session_id: state.runtimeId } : { text: text2, profile: String(bot?.name || "default") };
       const res = await deps.requestForBot(bot, "complete.slash", params);
       return { items: Array.isArray(res?.items) ? res.items : [], replaceFrom: Number.isFinite(res?.replace_from) ? res.replace_from : 0 };
     } catch {
@@ -17083,18 +17375,18 @@ ${body}` : body);
       return { rows: cutRewoundRows(s.rows, rowId2), chat: { ...s.chat, items: s.chat.items.slice(0, at) } };
     });
   }
-  async function resubmitFrom(target, text, files = []) {
+  async function resubmitFrom(target, text2, files = []) {
     if (!target?.rowId || target.kind !== "user") return { ok: false, delivery: "not-sent", error: "This message is not saved yet" };
     if (state.chat.busy) return { ok: false, delivery: "not-sent", error: "Wait for the reply to finish" };
     const extra = truncationFor(target);
     cutFrom(target.id);
-    const result = await sendDraft(text, files, { extra });
+    const result = await sendDraft(text2, files, { extra });
     if (!result.ok && result.delivery === "not-sent") void refresh();
     return result;
   }
-  async function editMessage(itemId, text) {
+  async function editMessage(itemId, text2) {
     const target = state.chat.items.find((item) => item.id === itemId);
-    const clean = String(text || "").trim();
+    const clean = String(text2 || "").trim();
     if (!clean) return { ok: false, delivery: "not-sent", error: "Nothing to send" };
     return resubmitFrom(target, clean);
   }
@@ -17130,9 +17422,9 @@ ${body}` : body);
           const target = userTurnFromEnd(snapshot?.messages, turnsBack);
           if (!target) return { served: true, ok: false, nothing: true };
           if (intent === "retry") {
-            const text = retryText(target.content);
-            if (text === null) return { served: true, ok: false, error: "This turn carries media or annotations, so it cannot be retried from here." };
-            if (!text) return { served: true, ok: false, nothing: true };
+            const text2 = retryText(target.content);
+            if (text2 === null) return { served: true, ok: false, error: "This turn carries media or annotations, so it cannot be retried from here." };
+            if (!text2) return { served: true, ok: false, nothing: true };
           }
           receipt = await rewind({ target_message_id: target.row_id, derived_target: true });
           cutRow = target.row_id;
@@ -17150,14 +17442,14 @@ ${body}` : body);
     return { served: true, ok: true, count, content: receipt?.target_message?.content };
   }
   const rewoundText = (content) => typeof content === "string" ? content : retryText(content) ?? "";
-  async function runRewindCommand(parsed, id, show, depth) {
-    const intent = parsed.name;
-    if (intent === "undo" && parsed.arg && !/^[1-9]\d*$/.test(parsed.arg)) {
+  async function runRewindCommand(parsed2, id, show, depth) {
+    const intent = parsed2.name;
+    if (intent === "undo" && parsed2.arg && !/^[1-9]\d*$/.test(parsed2.arg)) {
       show("Usage: /undo [N] (back up N user turns, default 1)");
       return { ok: true };
     }
-    const res = await canonicalRewind({ turnsBack: intent === "undo" && parsed.arg ? Number(parsed.arg) : 1, intent });
-    if (!res.served) return execSlash(parsed, id, show, depth);
+    const res = await canonicalRewind({ turnsBack: intent === "undo" && parsed2.arg ? Number(parsed2.arg) : 1, intent });
+    if (!res.served) return execSlash(parsed2, id, show, depth);
     void refresh();
     if (!res.ok) {
       if (res.nothing) show(intent === "retry" ? "Nothing to retry." : "Nothing to undo.");
@@ -17166,16 +17458,16 @@ ${body}` : body);
     }
     if (intent === "undo") {
       show(`↶ Undid ${res.count === 1 ? "1 message" : `${res.count} messages`}. Edit and resend, or send something new.`);
-      const text2 = rewoundText(res.content);
-      return { ok: true, ...text2.trim() ? { prefill: text2 } : {} };
+      const text3 = rewoundText(res.content);
+      return { ok: true, ...text3.trim() ? { prefill: text3 } : {} };
     }
-    const text = retryText(res.content);
-    if (!text) {
+    const text2 = retryText(res.content);
+    if (!text2) {
       show("Nothing to retry.");
       return { ok: false };
     }
     removeItem(id);
-    const sent = await sendDraft(text, []);
+    const sent = await sendDraft(text2, []);
     return { ok: sent.ok };
   }
   async function rewindTo(itemId) {
@@ -17196,8 +17488,8 @@ ${body}` : body);
         return { ok: false, error: res.error || "Nothing was rewound" };
       }
       show(`↶ Rewound ${res.count === 1 ? "1 message" : `${res.count} messages`}; the message is back in the composer.`);
-      const text = rewoundText(res.content);
-      return { ok: true, prefill: text.trim() ? text : target.text };
+      const text2 = rewoundText(res.content);
+      return { ok: true, prefill: text2.trim() ? text2 : target.text };
     }
     const result = await execSlash(parseSlash(`/undo ${turns}`), id, show, 0);
     void refresh();
@@ -17319,7 +17611,7 @@ ${body}` : body);
       await detachEntry(runtimeId, key, entry, { strict: false });
     }
   }
-  async function submitOnce(runtimeId, text, attachments, mark, payload, { exact = false, extra = {} } = {}) {
+  async function submitOnce(runtimeId, text2, attachments, mark, payload, { exact = false, extra = {} } = {}) {
     let params;
     if (exact && payload.params) {
       params = { ...payload.params, session_id: runtimeId };
@@ -17328,7 +17620,7 @@ ${body}` : body);
       mark("stage");
       await detachStrays(runtimeId, new Set(attachments.map((file) => String(file?.id || ""))));
       const { refs, images } = attachments.length ? await stageAttachments(runtimeId, attachments) : { refs: [], images: [] };
-      const body = refs.length ? `${text}${text ? "\n\n" : ""}${refs.join("\n")}` : text;
+      const body = refs.length ? `${text2}${text2 ? "\n\n" : ""}${refs.join("\n")}` : text2;
       if (disposed) throw new Error("This chat was closed");
       params = {
         session_id: runtimeId,
@@ -17371,8 +17663,8 @@ ${body}` : body);
       else inFlightFiles.delete(id);
     }
   };
-  async function sendDraft(text, attachments = [], sendOptions = {}) {
-    const clean = String(text || "").trim();
+  async function sendDraft(text2, attachments = [], sendOptions = {}) {
+    const clean = String(text2 || "").trim();
     const files = Array.isArray(attachments) ? attachments : [];
     if (!clean && !files.length || !state.storedId) return { ok: false, delivery: "not-sent", error: "Nothing to send" };
     const owner = draftOwnerKey(bot);
@@ -17497,8 +17789,38 @@ ${body}` : body);
     void refresh();
     return { ok: true, delivery: "sent", clientId, receipt: status };
   }
-  async function send(text, attachments = []) {
-    return (await sendDraft(text, attachments)).ok;
+  async function send(text2, attachments = []) {
+    return (await sendDraft(text2, attachments)).ok;
+  }
+  async function sendIntent(text2) {
+    const clean = String(text2 || "").trim();
+    if (!clean) return { ok: false, error: "Nothing to send" };
+    if (clean.length > 500) return { ok: false, error: "Too long" };
+    if (!state.storedId || disposed) return { ok: false, error: "This chat is closed" };
+    const payload = { submissionId: newSubmissionId(), legacy: false, params: null, extra: { display_kind: "hidden" } };
+    const mark = () => void 0;
+    const busyAtSubmit = state.chat.busy;
+    try {
+      let runtimeId = await attach();
+      let receipt;
+      try {
+        receipt = await submitOnce(runtimeId, clean, [], mark, payload);
+      } catch (error) {
+        if (!isRuntimeNotFoundRefusal(error)) throw error;
+        dropRuntime();
+        runtimeId = await attach();
+        receipt = await submitOnce(runtimeId, clean, [], mark, payload);
+      }
+      const status = String(receipt?.status || "");
+      const startsNow = status === "queued" && !busyAtSubmit && Boolean(receipt?.submission_id || receipt?.admission_id);
+      if (status === "streaming" || status === "started" || !status || startsNow) {
+        set((s) => ({ chat: { ...s.chat, busy: true } }));
+        onTurnStarted();
+      }
+      return { ok: true, status };
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) };
+    }
   }
   function foundIn(tail, payload) {
     return tail.some((row, index) => row?.role === "user" && !payload.knownIds.has(rowIdentity(row, index)) && rowText(row).trim() === payload.body.trim());
@@ -17695,7 +18017,10 @@ ${body}` : body);
     react,
     runSlash,
     completeSlash,
+    sendIntent,
     answerPrompt,
+    pickClarify,
+    answerClarifyText,
     respondConnection,
     pollApprovals,
     hasPendingApproval: () => hasPendingApproval(state.chat.items),
@@ -18023,6 +18348,78 @@ function createActivityTracker(deps) {
   return { track, reseed };
 }
 
+// src/core/newMarker.js
+var SEEN_KEY = "seenAt";
+var MAX_SEEN = 200;
+function seenFrom(value) {
+  const out = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [key, at] of Object.entries(value)) {
+    if (typeof key === "string" && key && typeof at === "number" && Number.isFinite(at) && at > 0) out[key] = at;
+  }
+  return out;
+}
+function raiseSeen(seen, key, at) {
+  if (!key || !(at > 0) || (seen[key] || 0) >= at) return seen;
+  const next = { ...seen, [key]: at };
+  const keys = Object.keys(next);
+  if (keys.length > MAX_SEEN) {
+    keys.sort((a2, b2) => next[a2] - next[b2]);
+    for (const drop of keys.slice(0, keys.length - MAX_SEEN)) if (drop !== key) delete next[drop];
+  }
+  return next;
+}
+function newestAt(items) {
+  let max = 0;
+  for (const item of items || []) {
+    const at = Number(item?.at || 0);
+    if (at > max) max = at;
+  }
+  return max;
+}
+function firstUnreadId(items, seenAt) {
+  if (!(typeof seenAt === "number" && Number.isFinite(seenAt))) return null;
+  const list = Array.isArray(items) ? items : [];
+  let start2 = 0;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i]?.kind === "user") {
+      start2 = i + 1;
+      break;
+    }
+  }
+  for (let i = start2; i < list.length; i += 1) {
+    const item = list[i];
+    if (item?.kind === "assistant" && !item.streaming && Number(item.at || 0) > seenAt) return String(item.id);
+  }
+  return null;
+}
+function withNewMarker(rows, id) {
+  if (!id) return rows;
+  const at = rows.findIndex((row) => row?.kind !== "divider" && String(row?.id) === String(id));
+  if (at < 0) return rows;
+  const before = at > 0 && rows[at - 1]?.kind === "divider" ? at - 1 : at;
+  return [...rows.slice(0, before), { kind: "new", id: `new:${id}` }, ...rows.slice(before)];
+}
+function stepMarker(state, { key, items, ready, looking }) {
+  if (!key || !ready) return state;
+  let { markers, seen } = state;
+  const known = Object.prototype.hasOwnProperty.call(seen, key);
+  const current = markers[key];
+  if (current === void 0 || current === null && !looking) {
+    const id = known ? firstUnreadId(items, seen[key]) : null;
+    if (id !== current) markers = { ...markers, [key]: id };
+  }
+  const newest = newestAt(items);
+  if (!known || looking) seen = raiseSeen(seen, key, newest || (known ? 0 : 1));
+  return markers === state.markers && seen === state.seen ? state : { markers, seen };
+}
+function resetMarker(state, key) {
+  if (!key || !Object.prototype.hasOwnProperty.call(state.markers, key)) return state;
+  const markers = { ...state.markers };
+  delete markers[key];
+  return { ...state, markers };
+}
+
 // src/core/rooms.js
 var uuid = () => {
   const c2 = globalThis.crypto;
@@ -18138,7 +18535,7 @@ function roomItems(events, members) {
     const id = `room:${event?.seq ?? event?.event_id}`;
     if (MESSAGE_KINDS.has(event?.kind)) {
       const member = event?.actor?.kind === "member";
-      const text = String(payload.text || payload.content || "");
+      const text2 = String(payload.text || payload.content || "");
       const own = !member && event?.actor?.id === "desktop" && !event?.actor?.display_name;
       const scheduled = !member && /^cron(-notice)?:/.test(String(event?.actor?.id || ""));
       out.push({
@@ -18147,7 +18544,7 @@ function roomItems(events, members) {
         seq: event.seq,
         eventId: event.event_id,
         at,
-        text,
+        text: text2,
         author: member ? String(event?.actor?.display_name || nameOf2(event?.actor?.id)) : own ? "You" : String(event?.actor?.display_name || event?.actor?.id || "Someone"),
         memberId: member ? String(event?.actor?.id || "") : "",
         profile: member ? String(roster.get(String(event?.actor?.id || ""))?.profile || event?.actor?.id || "") : "",
@@ -18255,8 +18652,8 @@ function createRoomController(route, roomId, deps) {
       schedule();
     }, ROOM_POLL_MS);
   }
-  async function post(text, { thread } = {}) {
-    const clean = String(text || "").trim();
+  async function post(text2, { thread } = {}) {
+    const clean = String(text2 || "").trim();
     if (!clean) return { ok: false, posted: "no" };
     const eventId = uuid();
     const entry = { eventId, text: clean, params: { room_id: roomId, event_id: eventId, payload: { text: clean, thread_id: thread || eventId } }, status: "sending", at: Date.now() };
@@ -18385,12 +18782,12 @@ function blobatarMarkup(seed, size, trait) {
   }
 }
 var MARKDOWN_SAFE_PROPS = Object.freeze({ media: false, previewOnly: true });
-function Markdown({ text }) {
+function Markdown({ text: text2 }) {
   const Component2 = sdk.MessageTextContent;
   if (typeof Component2 === "function" || Component2 && typeof Component2 === "object") {
-    return React.createElement(Component2, { text, ...MARKDOWN_SAFE_PROPS });
+    return React.createElement(Component2, { text: text2, ...MARKDOWN_SAFE_PROPS });
   }
-  return React.createElement("div", { className: "gbo-plain" }, text);
+  return React.createElement("div", { className: "gbo-plain" }, text2);
 }
 function readPluginStorage(pluginId, key, fallback) {
   try {
@@ -18557,14 +18954,14 @@ function attentionReasonFromError(errorTextOrReason) {
   const raw = String(errorTextOrReason || "").trim();
   if (!raw) return null;
   if (CLASSES.has(raw)) return raw;
-  const text = raw.toLowerCase();
-  if (/rate.?limit|too many requests|\b429\b|\b5\d\d\b|server error|overloaded|timed?.?out|timeout|temporar/.test(text)) return null;
-  if (/no llm provider|no access token|not configured|no api key|missing api key/.test(text)) return "missing_config";
-  if (/\b401\b|\b403\b|unauthorized|forbidden|authentication|invalid.?api.?key|credentials? (are )?(invalid|expired)/.test(text)) {
+  const text2 = raw.toLowerCase();
+  if (/rate.?limit|too many requests|\b429\b|\b5\d\d\b|server error|overloaded|timed?.?out|timeout|temporar/.test(text2)) return null;
+  if (/no llm provider|no access token|not configured|no api key|missing api key/.test(text2)) return "missing_config";
+  if (/\b401\b|\b403\b|unauthorized|forbidden|authentication|invalid.?api.?key|credentials? (are )?(invalid|expired)/.test(text2)) {
     return "provider_auth_or_access";
   }
-  if (/quota|out of funds|insufficient (credits?|funds|balance)|payment required|\b402\b|billing/.test(text)) return "provider_quota_limit";
-  if (/\bblocked\b/.test(text)) return "agent_blocked";
+  if (/quota|out of funds|insufficient (credits?|funds|balance)|payment required|\b402\b|billing/.test(text2)) return "provider_quota_limit";
+  if (/\bblocked\b/.test(text2)) return "agent_blocked";
   return null;
 }
 function noteAttention(map, key, errorTextOrReason, now = Date.now()) {
@@ -18584,8 +18981,8 @@ function attentionFromEvent(event) {
   if (type === "message.complete") {
     const failed = payload.status === "error" || Boolean(payload.error);
     if (failed) return { kind: "fail", text: payload.reason || payload.failure_reason || payload.error || "error" };
-    const text = String(payload.text ?? payload.content ?? payload.final ?? "").trim();
-    return text || payload.status === "complete" || payload.status === "done" ? { kind: "ok" } : null;
+    const text2 = String(payload.text ?? payload.content ?? payload.final ?? "").trim();
+    return text2 || payload.status === "complete" || payload.status === "done" ? { kind: "ok" } : null;
   }
   if (type === "error") return { kind: "fail", text: payload.reason || payload.message || payload.error || "" };
   return null;
@@ -18598,8 +18995,8 @@ function attentionFromRoomEvent(event, members) {
     return String(m?.profile || id || "").trim();
   };
   if (kind === "turn.failed" && payload.member_id) {
-    const text = payload.reason_code || payload.reason || payload.error || "";
-    return { kind: "fail", profile: profileOf(payload.member_id), text: String(text) };
+    const text2 = payload.reason_code || payload.reason || payload.error || "";
+    return { kind: "fail", profile: profileOf(payload.member_id), text: String(text2) };
   }
   if ((kind === "message" || kind === "message.member") && event?.actor?.kind === "member" && event?.actor?.id) {
     const body = String(payload.text ?? payload.content ?? "").trim();
@@ -18782,8 +19179,8 @@ function cronJobRestPath(job, suffix = "") {
 function scheduleLabel(schedule) {
   const once = /^once in (.+)$/.exec(schedule || "");
   if (once) return `Once in ${once[1]}`;
-  const bare2 = /^(\d+)([mhd])$/.exec(schedule || "");
-  if (bare2) return `Once in ${bare2[1]}${bare2[2]}`;
+  const bare = /^(\d+)([mhd])$/.exec(schedule || "");
+  if (bare) return `Once in ${bare[1]}${bare[2]}`;
   const match = /^every (\d+)m$/.exec(schedule || "");
   if (match) {
     const minutes = Number(match[1]);
@@ -18891,7 +19288,7 @@ function toggleEntry(state, kind, name, enabled) {
   const dirtyKey = { skills: "dirtySkills", toolsets: "dirtyToolsets", mcp: "dirtyMcp" }[kind];
   return { ...state, [dirtyKey]: true, [kind]: (state[kind] || []).map((x) => x.name === name ? { ...x, enabled } : x) };
 }
-function advancedPayload(bot, state, ensureSoul = (text) => text) {
+function advancedPayload(bot, state, ensureSoul = (text2) => text2) {
   const payload = { name: bot.name };
   let clearModel = false;
   let modelInvalid = false;
@@ -18946,13 +19343,13 @@ async function applyAdvancedConfig(request2, bot, state, { ensureSoul, confirm }
   }
   return { ...result, ok: Object.values(merged).every(Boolean), applied: merged, confirmation };
 }
-function boundedFetch(promise, settleMs = MODEL_OPTIONS_SETTLE_MS, timers = globalThis) {
-  if (typeof timers?.setTimeout !== "function") return promise;
+function boundedFetch(promise, settleMs = MODEL_OPTIONS_SETTLE_MS, timers2 = globalThis) {
+  if (typeof timers2?.setTimeout !== "function") return promise;
   let id = null;
   const deadline = new Promise((_, reject) => {
-    id = timers.setTimeout(() => reject(new Error(`model.options did not answer within ${Math.round(settleMs / 1e3)}s`)), settleMs);
+    id = timers2.setTimeout(() => reject(new Error(`model.options did not answer within ${Math.round(settleMs / 1e3)}s`)), settleMs);
   });
-  return Promise.race([promise, deadline]).finally(() => timers.clearTimeout(id));
+  return Promise.race([promise, deadline]).finally(() => timers2.clearTimeout(id));
 }
 function modelOptionsParams() {
   return { include_unconfigured: true, explicit_only: false };
@@ -19048,10 +19445,10 @@ function hasMessagingProtocol(soul) {
   return /(^|\n)## Messaging other agents(\s|$)/.test(soul || "");
 }
 function ensureMessagingProtocol(soul, name, roster, injected = false) {
-  const text = String(soul || "").trim();
-  if (injected || hasMessagingProtocol(text)) return text;
+  const text2 = String(soul || "").trim();
+  if (injected || hasMessagingProtocol(text2)) return text2;
   const section = messagingProtocolSection(name, roster);
-  return text ? text + "\n\n" + section : section;
+  return text2 ? text2 + "\n\n" + section : section;
 }
 function composeSoul({ name, title, description, roster, customSoul, injected = false }) {
   if (customSoul && String(customSoul).trim()) return ensureMessagingProtocol(customSoul, name, roster, injected);
@@ -19112,8 +19509,8 @@ function editedLook(opened, current) {
   if (String(current.title || "").trim() !== String(opened.title || "").trim()) patch.title = String(current.title || "").trim();
   return Object.keys(patch).length > 0 ? patch : null;
 }
-function describeArgv(bot, text) {
-  return ["profile", "describe", String(bot?.name || ""), "--text", String(text || "")];
+function describeArgv(bot, text2) {
+  return ["profile", "describe", String(bot?.name || ""), "--text", String(text2 || "")];
 }
 function duplicateName(bot, roster) {
   const base4 = String(bot?.name || "");
@@ -19204,20 +19601,6 @@ function costLabel(usage) {
   const cost = Number(usage?.cost_usd);
   if (!Number.isFinite(cost) || usage?.cost_usd == null) return "";
   return `${usage?.cost_status === "estimated" ? "~" : ""}$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`;
-}
-function usageDetailRows(usage) {
-  if (!usage) return [];
-  return [
-    ["Context", usageContextLabel(usage)],
-    ["Used", usage.context_max ? `${contextPercent(usage)}%` : ""],
-    ["Model", usage.model || ""],
-    ["Input tokens", usage.input ? compactNumber(usage.input) : ""],
-    ["Output tokens", usage.output ? compactNumber(usage.output) : ""],
-    ["API calls", usage.calls ? String(usage.calls) : ""],
-    ["Compressions", usage.compressions ? String(usage.compressions) : ""],
-    ["Cache hits", typeof usage.cache_hit_pct === "number" ? `${Math.round(usage.cache_hit_pct)}%` : ""],
-    ["Cost", costLabel(usage)]
-  ].filter(([, v]) => v).map(([label, value]) => ({ label, value }));
 }
 
 // src/core/rosterView.js
@@ -19378,7 +19761,13 @@ var roster2 = {
   /** C25: the open chat's usage, keyed by its runtime id. */
   usage: createStore({ key: "", runtimeId: "", usage: null, error: null }),
   /** P3: job ids with a run (trigger) in flight. */
-  running: createStore({})
+  running: createStore({}),
+  /** The panel's Model row: roster key -> the bot's configured model. */
+  models: createStore({}),
+  /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
+   *  the first unread bot message (null: none; absent: not decided), and the
+   *  per-bot seen watermark (ms; plugin storage `seenAt`). */
+  newLine: createStore({ markers: {}, seen: {} })
 };
 function openDialog(state) {
   roster2.dialog.set(state);
@@ -19612,11 +20001,34 @@ async function saveAdvanced(bot, state) {
     }
   }
   const res = await applyAdvancedConfig(request, bot, state, {
-    ensureSoul: (text) => ensureMessagingProtocol(text, bot.name, rows, injected),
+    ensureSoul: (text2) => ensureMessagingProtocol(text2, bot.name, rows, injected),
     confirm: confirmAsker || void 0
   });
   invalidateRoster();
+  if (state?.dirtyModel) {
+    if (res?.applied?.model === true) setBotModel(bot, { provider: String(state.provider || "").trim(), model: String(state.model || "").trim() });
+    else void loadBotModel(bot, { force: true });
+  }
   return res;
+}
+function setBotModel(bot, patch) {
+  const key = rowKey(bot);
+  roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", error: null, ...all[key], ...patch, loading: false, loaded: true } }));
+}
+async function loadBotModel(bot, { force = false } = {}) {
+  const key = rowKey(bot);
+  const have = roster2.models.get()[key];
+  if (have && !force && (have.loading || have.loaded)) return;
+  roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", error: null, loaded: false, ...all[key], loading: true } }));
+  try {
+    const res = await request(bot, "profiles.describe", { name: bot.name });
+    setBotModel(bot, { provider: String(res?.model?.provider || ""), model: String(res?.model?.default || ""), error: null });
+  } catch (error) {
+    roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }));
+  }
+}
+function saveBotModel(bot, value) {
+  return saveAdvanced(bot, { ...emptyAdvancedState(), loaded: true, provider: value.provider, model: value.model, dirtyModel: true });
 }
 async function searchSkills(query) {
   const res = await host2.request("skills.manage", { action: "search", query: String(query || "").trim() });
@@ -20554,24 +20966,24 @@ var ROOT = "[data-gbo-root]";
 var DARK_ROOT = '.dark [data-gbo-root], [data-gbo-root][data-gbo-theme="dark"]';
 var KEYFRAMES = ["rise", "breathe", "shimmer", "bob", "slideIn"];
 var ZOOM = 0.896;
-function splitTop(text, sep) {
+function splitTop(text2, sep) {
   const out = [];
   let depth = 0;
   let quote = "";
   let start2 = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    const c2 = text[i];
+  for (let i = 0; i < text2.length; i += 1) {
+    const c2 = text2[i];
     if (quote) {
       if (c2 === quote) quote = "";
     } else if (c2 === '"' || c2 === "'") quote = c2;
     else if (c2 === "(" || c2 === "[") depth += 1;
     else if (c2 === ")" || c2 === "]") depth -= 1;
     else if (c2 === sep && depth === 0) {
-      out.push(text.slice(start2, i));
+      out.push(text2.slice(start2, i));
       start2 = i + 1;
     }
   }
-  out.push(text.slice(start2));
+  out.push(text2.slice(start2));
   return out;
 }
 function scopeSelector(raw) {
@@ -20604,21 +21016,21 @@ function adaptBlock(block) {
   return block.replace(/var\(--bot-on-action, #FFFFFF\)/g, "var(--gbo-tint-fg, var(--g-color-on-primary))").replace(/--bot-bubble\b/g, "--gbo-tint-bg").replace(/--bot-action-hover\b/g, "--gbo-action-hover").replace(/--bot-action\b/g, "--gbo-action").replace(/--bot-on-action\b/g, "--gbo-tint-fg").replace(/--(?!gbo-|g-|paragraph-gap\b|conversation-text-font-size\b|dt-line-height\b)([a-z][\w-]*)/g, "--g-$1").replace(/(animation:[^;]*)/g, (decl) => decl.replace(new RegExp(`\\b(${KEYFRAMES.join("|")})\\b`, "g"), "gbo-ref-$1")).replace(/(?<![\w.#-])(-?\d*\.?\d+)px\b/g, (_m, v) => px(v));
 }
 function refCss(css) {
-  const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const text2 = css.replace(/\/\*[\s\S]*?\*\//g, "");
   let out = "";
   let i = 0;
-  while (i < text.length) {
-    const open = text.indexOf("{", i);
+  while (i < text2.length) {
+    const open = text2.indexOf("{", i);
     if (open < 0) break;
-    const prelude = text.slice(i, open).trim();
+    const prelude = text2.slice(i, open).trim();
     let depth = 1;
     let j = open + 1;
-    while (j < text.length && depth) {
-      if (text[j] === "{") depth += 1;
-      else if (text[j] === "}") depth -= 1;
+    while (j < text2.length && depth) {
+      if (text2[j] === "{") depth += 1;
+      else if (text2[j] === "}") depth -= 1;
       j += 1;
     }
-    const inner = text.slice(open + 1, j - 1);
+    const inner = text2.slice(open + 1, j - 1);
     if (prelude.startsWith("@keyframes")) {
       const name = prelude.slice("@keyframes".length).trim();
       out += `@keyframes gbo-ref-${name} {${adaptBlock(inner)}}
@@ -20642,6 +21054,26 @@ var REF_STYLES = refCss(REF_CSS);
 var ADAPT_SRC = (
   /* css */
   `
+/* ── the override's own tokens ──────────────────────────────────────── */
+/* Bot bubbles are one flat fill; the open bot's row is a rounded neutral
+   highlight (hover a lighter one); a selected pin is fainter still. */
+:root {
+  --color-bubble-agent-flat: #F0F0F0;
+  --color-row-selected: #0000000D;
+  --color-row-hover: #00000008;
+  --color-row-selected-solid: #E9E9E9;
+  --color-row-hover-solid: #EEEEEE;
+  --color-pin-selected: #00000008;
+}
+:root[data-theme='dark'] {
+  --color-bubble-agent-flat: #242424;
+  --color-row-selected: #FFFFFF12;
+  --color-row-hover: #FFFFFF0A;
+  --color-row-selected-solid: #1E1E1E;
+  --color-row-hover-solid: #181818;
+  --color-pin-selected: #FFFFFF0A;
+}
+
 /* ── panes ──────────────────────────────────────────────────────────── */
 /* The roster fills Hermes's sidebar zone (its width is Hermes's); Hermes
    draws the sidebar | workspace hairline itself. */
@@ -20687,6 +21119,8 @@ var ADAPT_SRC = (
 .gbo-section-head.is-rooms .icon-btn--plain { width: 22px; height: 22px; }
 
 .bot-row { color: inherit; text-align: left; }
+.bot-row:hover { background: var(--color-row-hover); }
+.bot-row.is-selected { background: var(--color-row-selected); }
 .bot-row.is-dim { opacity: 0.55; }
 .bot-row.is-hidden { opacity: 0.6; }
 .gbo-row-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -20702,7 +21136,8 @@ var ADAPT_SRC = (
 .pinned__avatar .gbo-row-dot { right: 4px; top: 4px; }
 .gbo-row-face .gbo-row-dot:not(:has([role="status"])) { display: none; }
 .gbo-row-face .gbo-row-dot [role="status"] { width: 8px; height: 8px; border-width: 0; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
-.bot-row.is-selected .gbo-row-dot [role="status"], .bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-bg-active-solid); }
+.bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
+.bot-row.is-selected .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
 .gbo-room-row .bot-row__avatar { width: 36px; justify-content: center; }
 .gbo-row-more {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; opacity: 0;
@@ -20713,7 +21148,13 @@ var ADAPT_SRC = (
 .pinned.gbo-pins { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
 .pinned.gbo-pins.is-1 { display: flex; justify-content: center; }
 .gbo-pin-wrap { min-width: 0; display: flex; justify-content: center; }
-.pinned__tile { color: inherit; max-width: 100%; }
+.pinned__tile { color: inherit; max-width: 100%; border: 0; outline: none; box-shadow: none; }
+.pinned__tile:hover, .pinned__tile.is-selected { background: var(--color-pin-selected); }
+/* Keyboard focus on a pin or row: a soft neutral ring inside the tile, never
+   the blue box; none at all while the roster is being used with the mouse
+   (data-gbo-pointer, set by the roster until the next Tab or arrow key). */
+.pinned__tile:focus-visible, .bot-row:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--color-border-primary); }
+.gbo-roster[data-gbo-pointer] .pinned__tile:focus-visible, .gbo-roster[data-gbo-pointer] .bot-row:focus-visible { box-shadow: none; }
 .pinned:not(.is-1) .pinned__tile { width: 100%; padding: 6px 4px 4px; }
 .pinned:not(.is-1) .pinned__label { width: 100%; }
 .pinned__tile.is-dim { opacity: 0.55; }
@@ -20724,6 +21165,19 @@ var ADAPT_SRC = (
 .gbo-source-retry { margin: 0 12px 8px; border-radius: 12px; font-size: 13px; line-height: 18px; }
 .account__btn { cursor: default; }
 .account__btn:hover { background: none; }
+/* The footer: initials, the person's name (ellipsis when long) and, at the
+   right, the round Hermes settings button in the top row's style. */
+.gbo-roster-foot .account__btn { padding-right: 0; }
+.gbo-roster-foot .account__initials { letter-spacing: 0; }
+.gbo-foot-btn { color: var(--color-text-primary); }
+
+/* The NEW line: a thin red rule with a small red "NEW" in the middle, above
+   the first unread bot message (and above that message's time line). */
+.gbo-new-line {
+  align-self: stretch; display: flex; align-items: center; gap: 12px; padding-top: 6px;
+  color: var(--color-danger); font-size: 11px; font-weight: 600; line-height: 14px; letter-spacing: 0.4px; user-select: none;
+}
+.gbo-new-line::before, .gbo-new-line::after { content: ''; flex: 1 1 0; height: 1px; background: currentColor; opacity: 0.5; }
 
 /* ── chat header ────────────────────────────────────────────────────── */
 .chat__header { -webkit-app-region: drag; }
@@ -20743,6 +21197,9 @@ var ADAPT_SRC = (
 .group.is-right > .gbo-msg, .transcript__col > .gbo-msg.is-user { align-items: flex-end; align-self: flex-end; }
 .group.is-left > .gbo-msg { align-items: flex-start; }
 .gbo-msg:has(> .gbo-edit) { align-self: stretch; }
+/* Bot bubbles: flat, no sheen, ring or shadow. User bubbles keep the
+   reference's look in the bot's colour. */
+.bubble.is-agent { background: var(--color-bubble-agent-flat); box-shadow: none; border: 0; }
 .bubble.is-user { color: var(--gbo-tint-fg, #FFFFFF); }
 .bubble.is-user a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .bubble.is-user code { background: #FFFFFF2E; border-radius: 4px; padding: 1px 4px; font-family: var(--font-mono-stack); font-size: 13px; }
@@ -20750,17 +21207,25 @@ var ADAPT_SRC = (
   content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%;
   background: currentColor; opacity: 0.4; vertical-align: middle; animation: breathe 1s ease-in-out infinite;
 }
-/* Copy, react, edit, rewind, regenerate: a small pill that floats under the
-   message while it is pointed at, taking no room in the transcript. */
+/* Copy, react, edit, rewind, regenerate: a small pill that floats beside the
+   message (right of a bot message, left of yours), level with its last line,
+   while it is pointed at. Out of flow and the same box hovered or not, so it
+   never moves the transcript; beside the message, so it never covers the next
+   bubble's text (it used to float under the message, over the next bubble).
+   When the message is about as wide as the column (a narrow window), the
+   pill is kept on screen (cqw of .transcript__col, plus the transcript's side
+   padding): it then sits over the empty hover-time slot beside the bubble and
+   the bubble's own side padding, not over its text. */
+.transcript__col { container-type: inline-size; }
 .gbo-msg > .gbo-msg-actions {
-  position: absolute; top: calc(100% - 6px); z-index: 3; display: flex; align-items: center; gap: 2px; margin: 0; padding: 2px;
+  position: absolute; top: auto; bottom: 0; z-index: 3; display: flex; flex-wrap: nowrap; width: max-content; align-items: center; gap: 2px; margin: 0; padding: 2px;
   border-radius: var(--radius-full); background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); box-shadow: var(--shadow-pill);
   opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease-out);
 }
 .gbo-msg:hover > .gbo-msg-actions, .gbo-msg:focus-within > .gbo-msg-actions { opacity: 1; pointer-events: auto; }
-.gbo-msg.is-bot > .gbo-msg-actions { left: 8px; }
-.gbo-msg.is-user > .gbo-msg-actions { right: 8px; }
-.gbo-msg-actions .gbo-icon-btn { width: 24px; height: 24px; font-size: 13px; }
+.gbo-msg.is-bot > .gbo-msg-actions { left: min(calc(100% + 4px), calc(100cqw + 12px - 76px)); }
+.gbo-msg.is-user > .gbo-msg-actions { right: min(calc(100% + 4px), calc(100cqw + 12px - 100px)); }
+.gbo-msg-actions .gbo-icon-btn { width: 22px; height: 22px; font-size: 13px; }
 .gbo-msg-actions .gbo-icon-btn svg { width: 14px; height: 14px; }
 .gbo-msg-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; padding: 0 4px; font-size: 12px; line-height: 16px; letter-spacing: 0.12px; color: var(--color-text-tertiary); }
 .gbo-msg-failed { color: var(--color-danger-text); }
@@ -20865,6 +21330,7 @@ var ADAPT_SRC = (
 .gbo-card-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; color: var(--color-text-primary); }
 .gbo-card-desc { font-size: 14px; line-height: 20px; letter-spacing: 0.14px; color: var(--color-text-tertiary); }
 .gbo-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.gbo-connect-url-blocked { flex-basis: 100%; overflow-wrap: anywhere; }
 .gbo-card-error { font-size: 13px; line-height: 18px; color: var(--color-danger-text); }
 .gbo-q legend { font-size: 15px; font-weight: 600; line-height: 22px; }
 .gbo-choice {
@@ -20874,6 +21340,116 @@ var ADAPT_SRC = (
 .gbo-choice:hover { background: var(--color-bg-secondary-hover); }
 .gbo-choice.is-on { background: var(--color-primary); color: var(--color-on-primary); }
 .gbo-command { border: 0; border-radius: 12px; background: var(--color-bg-subtle); }
+/* The choice card (a clarify question): the bot bubble's flat fill, a bold
+   question, lettered rows. Settled: the chosen row marked, the rest faded. */
+.gbo-ask {
+  align-self: flex-start; width: 310px; max-width: 100%; display: flex; flex-direction: column; gap: 6px;
+  padding: 14px 8px 6px; border-radius: 18px; background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
+}
+.gbo-ask-q { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gbo-ask-q + .gbo-ask-q { margin-top: 4px; }
+.gbo-ask-title { padding: 0 8px 4px; font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; }
+.gbo-ask-rows { display: flex; flex-direction: column; gap: 2px; }
+.gbo-ask-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 5px 8px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--color-text-primary); font: inherit; font-size: 15px; line-height: 22px; letter-spacing: 0.15px; text-align: left; cursor: pointer;
+  transition: background-color 120ms var(--ease-out);
+}
+.gbo-ask-row:hover:not(:disabled) { background: var(--color-row-selected); }
+.gbo-ask-row:focus-visible { outline: 0; box-shadow: var(--color-border-secondary) 0 0 0 2px inset; }
+.gbo-ask-row:disabled { cursor: default; }
+.gbo-ask-key {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: 6px;
+  box-shadow: var(--color-border-secondary) 0 0 0 1px inset; color: var(--color-text-tertiary); font-size: 12px; font-weight: 500; line-height: 16px;
+}
+.gbo-ask-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.gbo-ask-tag { flex: none; font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-ask-check { display: inline-flex; flex: none; color: var(--color-text-primary); }
+.gbo-ask-check svg { width: 16px; height: 16px; }
+.gbo-ask-row.is-on .gbo-ask-key { background: var(--color-text-primary); color: var(--color-bubble-agent-flat); box-shadow: none; }
+.gbo-ask.is-settled .gbo-ask-row:not(.is-on) { opacity: 0.45; }
+.gbo-ask.is-busy .gbo-ask-row { cursor: progress; }
+.gbo-ask-row.is-typed { cursor: default; }
+.gbo-ask-hint, .gbo-ask-note { padding: 0 8px; font-size: 13px; line-height: 18px; color: var(--color-text-tertiary); }
+.gbo-ask-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 2px 0 8px; }
+.gbo-ask-actions .gbo-pill-btn.is-primary { margin-right: auto; }
+.gbo-ask-actions .gbo-pill-btn { height: 30px; }
+.gbo-ask-skip {
+  padding: 2px 6px; border: 0; border-radius: 8px; background: transparent; color: var(--color-text-quaternary);
+  font: inherit; font-size: 12px; line-height: 16px; cursor: pointer;
+}
+.gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
+.gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
+.gbo-ask .gbo-card-error { padding: 0 8px 4px; }
+/* Live ::card and ::preview directives in the open chat. A card sits in the
+   choice card's shell (flat fill, radius, padding, type sizes), roomy: at
+   least about 300px, at most a bubble's width. The title is the bold
+   heading, a one-line body the question under it, the actions the same
+   lettered rows; a quiet chip only for running, done and error. */
+.gbo-directive { display: flex; flex-direction: column; align-self: stretch; width: 100%; max-width: 560px; margin: 4px 0; box-sizing: border-box; }
+.gbo-dcard {
+  align-self: flex-start; width: fit-content; min-width: min(300px, calc(100vw - 48px)); max-width: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 6px; padding: 14px 8px 8px; border-radius: 18px;
+  background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
+}
+.gbo-dcard.is-loading { width: 300px; min-height: 84px; opacity: 0.6; }
+.gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 0 8px; }
+.gbo-dcard-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; text-transform: none; }
+.gbo-dcard.is-unavailable .gbo-dcard-title { padding: 0 8px; text-transform: capitalize; }
+.gbo-dcard-status {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; margin-top: 3px;
+  font-size: 12px; line-height: 16px; color: var(--color-text-tertiary);
+}
+.gbo-dcard-status.is-done { color: var(--color-success-text); }
+.gbo-dcard-status.is-error { color: var(--color-danger-text); }
+.gbo-dcard-spin {
+  width: 10px; height: 10px; border-radius: 999px; border: 1.5px solid currentColor; border-right-color: transparent;
+  box-sizing: border-box; animation: gbo-spin 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .gbo-dcard-spin { animation: none; } }
+.gbo-dcard-text {
+  margin: 0; padding: 0 8px; white-space: pre-wrap; font-size: 14px; line-height: 20px; letter-spacing: 0.14px;
+  color: var(--color-text-secondary); overflow-wrap: anywhere;
+}
+.gbo-dcard-text.is-lead { margin-top: -4px; padding-bottom: 4px; font-size: var(--text-message, 15px); line-height: 22px; letter-spacing: 0.15px; color: var(--color-text-primary); }
+.gbo-dcard-text.is-email { color: var(--color-text-primary); }
+.gbo-dcard-kv {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; padding: 0 8px;
+  font-size: 14px; line-height: 20px; letter-spacing: 0.14px;
+}
+.gbo-dcard-kv dt { color: var(--color-text-tertiary); }
+.gbo-dcard-kv dd { margin: 0; overflow-wrap: anywhere; }
+.gbo-dcard-rows { margin-top: 2px; }
+.gbo-dcard-rows.is-settled .gbo-ask-row:not(.is-on) { opacity: 0.45; }
+.gbo-ask-row.is-danger .gbo-ask-label { color: var(--color-danger-text); }
+.gbo-dcard-note { padding: 0 8px 4px; font-size: 13px; line-height: 18px; color: var(--color-text-tertiary); }
+.gbo-dcard .gbo-card-error { padding: 0 8px 4px; }
+.gbo-preview { width: 100%; border-radius: 14px; overflow: hidden; }
+.gbo-preview.is-loading { height: 120px; background: var(--color-bubble-agent-flat); opacity: 0.6; }
+.gbo-preview-frame { display: block; width: 100%; border: 0; background: transparent; }
+.gbo-preview-row {
+  display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; border-radius: 14px;
+  background: var(--color-bubble-agent-flat); font-size: 14px; line-height: 20px;
+}
+.gbo-preview-name { font-weight: 500; overflow-wrap: anywhere; }
+.gbo-preview-why { color: var(--color-text-tertiary); font-size: 13px; }
+/* A page's message waits here until the user sends or dismisses it. */
+.gbo-preview-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.gbo-preview-ask {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 10px 8px 14px;
+  border-radius: 14px; background: var(--color-bubble-agent-flat); font-size: 14px; line-height: 20px;
+}
+.gbo-preview-ask-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 220px; min-width: 0; }
+.gbo-preview-ask-lead { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-preview-ask-prompt { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text-primary); }
+.gbo-preview-ask-actions { display: flex; gap: 8px; flex: none; }
+.gbo-preview-ask-actions .gbo-pill-btn { height: 30px; }
+/* A card row whose message differs from its label shows the message too. */
+.gbo-ask-label.is-stacked { display: flex; flex-direction: column; }
+.gbo-ask-send {
+  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 12px; line-height: 16px; color: var(--color-text-tertiary);
+}
 
 /* Buttons the override keeps: in the reference's .btn--sm idiom. */
 .gbo-pill-btn {
@@ -20914,6 +21490,8 @@ var ADAPT_SRC = (
 .composer__btn.is-recording { color: var(--color-danger); background: var(--color-danger-bg); }
 .composer__btn.is-recording > svg { opacity: 1; }
 .composer__input:disabled { cursor: default; }
+/* A long prompt (the choice card's "Type your answer…") stays on one line. */
+.composer__input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-composer-note {
   max-width: 960px; margin: 8px auto 0; display: flex; align-items: center; justify-content: center; gap: 8px;
   font-size: 13px; line-height: 18px; color: var(--color-text-secondary);
@@ -20971,8 +21549,13 @@ var ADAPT_SRC = (
 .gbo-slack-card.is-status { height: auto; min-height: 48px; }
 .gbo-slack-card .gbo-slack-card-sub.is-error { color: var(--color-danger-text); }
 .gbo-slack-card .gbo-slack-card-sub.is-warn { color: var(--color-warn-text); }
-.gbo-meter { padding: 8px; }
-.gbo-meter-line { font-size: 13px; line-height: 18px; color: var(--color-text-secondary); }
+/* The Model card: one setting row, the model name and a chevron on the right. */
+.gbo-model-row { height: 36px; padding: 6px 8px; gap: 12px; cursor: pointer; }
+.gbo-model-row:hover { background: var(--color-bg-hover); }
+.gbo-model-row > .panel-row__title { flex: none; }
+.gbo-model-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-text-secondary); }
+.gbo-model-name { min-width: 0; font-size: 13px; line-height: 18px; letter-spacing: 0.195px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gbo-model-value > svg { width: 12px; height: 12px; flex: none; opacity: 0.66; }
 .gbo-meter-bar { background: var(--color-bg-tertiary); }
 .gbo-meter-bar > span { background: var(--gbo-action, var(--color-primary)); }
 .gbo-drawer { background: var(--color-bg-chrome); }
@@ -21038,6 +21621,12 @@ var CHAT_CSS = (
   border: 1px solid var(--gbo-border); background: var(--gbo-bg); font: var(--gbo-text-body-sm); cursor: pointer;
 }
 .gbo-media-file.is-error { color: var(--gbo-destructive); cursor: default; }
+.gbo-media-remote {
+  display: inline-flex; align-items: center; gap: 2px; max-width: min(100%, 360px); height: 30px; padding: 0 12px; border-radius: 999px;
+  border: 1px dashed var(--gbo-border); background: var(--gbo-bg); color: inherit; font: var(--gbo-text-body-sm); cursor: pointer;
+}
+.gbo-media-remote-host { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.gbo-media-remote-load { flex: none; font-weight: 500; }
 
 /* ── C19 / C20 composer popover, command cards, C29 mic ─────────────── */
 .gbo-composer-wrap { position: relative; }
@@ -21323,12 +21912,10 @@ var ROSTER_CSS = (
 .gbo-sheet-primary.is-small { height: 30px; padding: 0 13px; font-size: 13px; }
 .gbo-sheet-out { font-size: 13px; line-height: 1; }
 
-/* usage meter */
-.gbo-meter { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+/* usage meter (the status-bar chip) */
 .gbo-meter-bar { height: 6px; border-radius: 999px; background: var(--gbo-input); overflow: hidden; }
 .gbo-meter-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--gbo-ring); }
 .gbo-meter-bar.is-high > span { background: var(--gbo-warning); }
-.gbo-meter-line { display: flex; justify-content: space-between; gap: 8px; font: var(--gbo-text-label); color: var(--gbo-muted-fg); }
 .gbo-status-meter { display: inline-flex; align-items: center; gap: 6px; font: 11px/16px var(--gbo-font); }
 .gbo-status-meter .gbo-meter-bar { width: 44px; height: 4px; }
 
@@ -21610,7 +22197,9 @@ var app = {
   pinnedBots: createStore([]),
   // Whether the roster pane is on screen (Hermes's sidebar open): the chat
   // header shows its own sidebar toggle while it is not.
-  rosterShown: createStore(true)
+  rosterShown: createStore(true),
+  // The sidebar footer's name ('' = unknown: the footer says "You").
+  userName: createStore("")
 };
 var requestForBot = null;
 var controller = null;
@@ -21840,6 +22429,11 @@ function readBotMedia(bot, path) {
   while (mediaCache.size > MEDIA_CACHE_MAX) mediaCache.delete(mediaCache.keys().next().value);
   return read;
 }
+async function readBotWorkspaceText(bot, rel, sessionId) {
+  const desktop = globalThis.window?.hermesDesktop;
+  if (typeof desktop?.api !== "function") throw new Error("This Hermes build cannot read files");
+  return desktop.api(workspaceReadRequest(rel, sessionId, botRestScope(bot, activeConnectionId())));
+}
 async function transcribeForBot(bot, dataUrl, mimeType) {
   const api = globalThis.window?.hermesDesktop?.api;
   if (typeof api !== "function") throw new Error("This Hermes build cannot transcribe audio");
@@ -21896,6 +22490,7 @@ function selectBot(bot, { openWorkspace = true } = {}) {
   if (key !== app.selectedKey.get()) app.drawerOpen.set(false);
   app.selectedKey.set(key);
   storageSet2("selected", key);
+  resetNewLine(key);
   ackBot(bot);
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot));
   else retitleWorkspace(chatTabTitle(bot));
@@ -22527,6 +23122,58 @@ function toggleSidebar() {
     return false;
   }
 }
+function canOpenSettings() {
+  const ctx = app.ctx;
+  if (typeof ctx?.runAction !== "function") return false;
+  try {
+    const list = typeof ctx.listActions === "function" ? ctx.listActions() : null;
+    return !Array.isArray(list) || list.some((action) => action?.id === "nav.settings");
+  } catch {
+    return false;
+  }
+}
+function openSettings() {
+  try {
+    return app.ctx?.runAction?.("nav.settings")?.ok !== false;
+  } catch {
+    return false;
+  }
+}
+var userNameAsked = false;
+function loadUserName() {
+  if (userNameAsked) return;
+  userNameAsked = true;
+  try {
+    const read = globalThis.window?.hermesDesktop?.getMachineProfile;
+    if (typeof read !== "function") return;
+    Promise.resolve(read()).then((profile) => {
+      const name = String(profile?.username ?? "").trim().slice(0, 80);
+      if (name) app.userName.set(name);
+    }).catch(() => void 0);
+  } catch {
+  }
+}
+var seenLoaded = false;
+function markerState() {
+  if (!seenLoaded && app.ctx) {
+    seenLoaded = true;
+    const seen = seenFrom(storageGet(SEEN_KEY, {}));
+    roster2.newLine.set((s) => ({ ...s, seen: { ...seen, ...s.seen } }));
+  }
+  return roster2.newLine.get();
+}
+function noteTranscript(key, items, ready, looking) {
+  const state = markerState();
+  const next = stepMarker(state, { key, items, ready, looking });
+  if (next === state) return;
+  roster2.newLine.set(next);
+  if (next.seen !== state.seen) storageSet2(SEEN_KEY, next.seen);
+}
+function resetNewLine(key) {
+  const state = roster2.newLine.get();
+  const next = resetMarker(state, key);
+  if (next !== state) roster2.newLine.set(next);
+}
 function setPanelOpen(open) {
   app.panelOpen.set(open);
   storageSet2("panelOpen", open);
@@ -22690,7 +23337,7 @@ var OverrideBoundary = class extends React3.Component {
 };
 
 // src/ui/Chat.tsx
-import * as React19 from "react";
+import * as React21 from "react";
 
 // src/core/colors.js
 function expandHex(hex) {
@@ -22735,13 +23382,13 @@ function hslToRgb(h, s, l) {
   return [f2(0), f2(8), f2(4)].map((v) => Math.round(v * 255));
 }
 function parseColor(value) {
-  const text = String(value ?? "").trim().toLowerCase();
-  const hex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/);
+  const text2 = String(value ?? "").trim().toLowerCase();
+  const hex = text2.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/);
   if (hex) {
     const c2 = expandHex(hex[1]).slice(0, 6);
     return [0, 2, 4].map((offset) => Number.parseInt(c2.substring(offset, offset + 2), 16));
   }
-  const fn = text.match(/^(rgba?|hsla?)\(([^)]*)\)$/);
+  const fn = text2.match(/^(rgba?|hsla?)\(([^)]*)\)$/);
   if (!fn) return null;
   const parts = fn[2].split(/[\s,/]+/).filter(Boolean);
   if (parts.length < 3) return null;
@@ -23151,8 +23798,8 @@ function formsFor(bot) {
   }
   return forms;
 }
-function mentionedBots(text, roster, openBot) {
-  const prose = String(text || "").replace(/```[\s\S]*?```/g, " ").replace(/`[^`\n]*`/g, " ");
+function mentionedBots(text2, roster, openBot) {
+  const prose = String(text2 || "").replace(/```[\s\S]*?```/g, " ").replace(/`[^`\n]*`/g, " ");
   if (!/(^|\s)@[a-z0-9]/i.test(prose)) return [];
   const openKey = openBot ? rowKey(openBot) : "";
   const byForm = /* @__PURE__ */ new Map();
@@ -23394,8 +24041,8 @@ function readDataUrl(file, signal) {
     reader.readAsDataURL(file);
   });
 }
-function completionToken(text, caret) {
-  const before = text.slice(0, caret);
+function completionToken(text2, caret) {
+  const before = text2.slice(0, caret);
   const slash = /^\/([^\s/]*)$/.exec(before);
   if (slash) return { kind: "/", query: slash[1], from: 0 };
   const at = /(^|\s)@([a-z0-9_-]*)$/i.exec(before);
@@ -23438,6 +24085,7 @@ function ComposerNote({
   return null;
 }
 var COMPOSER_MAX_H = 223;
+var ANSWER_PLACEHOLDER = "Type your answer, or talk about something…";
 function Composer({
   bot,
   name,
@@ -23452,9 +24100,11 @@ function Composer({
   onRestored,
   onDiscard,
   onStop,
-  draftRef
+  draftRef,
+  answering = false,
+  onAnswer
 }) {
-  const [text, setText] = React5.useState("");
+  const [text2, setText] = React5.useState("");
   const [files, setFiles] = React5.useState([]);
   const [note, setNote] = React5.useState("");
   const [options, setOptions] = React5.useState([]);
@@ -23465,8 +24115,8 @@ function Composer({
   const owner = draftOwnerKey(bot);
   const ownerRef = React5.useRef(owner);
   ownerRef.current = owner;
-  const textRef = React5.useRef(text);
-  textRef.current = text;
+  const textRef = React5.useRef(text2);
+  textRef.current = text2;
   const filesRef = React5.useRef(files);
   filesRef.current = files;
   const reads = React5.useRef(/* @__PURE__ */ new Set());
@@ -23507,9 +24157,9 @@ ${value}`);
     el.style.height = "0px";
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_H)}px`;
     el.style.overflowY = el.scrollHeight > COMPOSER_MAX_H ? "auto" : "hidden";
-  }, [text]);
+  }, [text2]);
   React5.useEffect(() => {
-    const token = completionToken(text, caret);
+    const token = completionToken(text2, caret);
     const seq = ++completionSeq.current;
     if (!token) {
       setOptions((current) => current.length ? [] : current);
@@ -23524,7 +24174,7 @@ ${value}`);
     const complete = completeRef.current;
     if (!complete) return void 0;
     const timer = setTimeout(() => {
-      void complete(text.slice(0, caret)).then((res) => {
+      void complete(text2.slice(0, caret)).then((res) => {
         if (seq !== completionSeq.current) return;
         setOptions(
           (res.items || []).slice(0, 12).map((item) => ({
@@ -23538,10 +24188,10 @@ ${value}`);
       });
     }, 120);
     return () => clearTimeout(timer);
-  }, [text, caret, roster, bot]);
+  }, [text2, caret, roster, bot]);
   const pick = (option) => {
-    const before = text.slice(0, option.from);
-    const after = text.slice(caret);
+    const before = text2.slice(0, option.from);
+    const after = text2.slice(caret);
     const insert = option.insert.endsWith(" ") ? option.insert : `${option.insert} `;
     const next = `${before}${insert}${after.replace(/^\S*/, "")}`;
     setText(next);
@@ -23556,12 +24206,12 @@ ${value}`);
       }
     });
   };
-  const slash = text.trimStart().startsWith("/");
-  const mentions = React5.useMemo(() => slash ? [] : mentionedBots(text, roster, bot), [text, roster, bot, slash]);
-  const canSend = !disabled && !blocked && (text.trim().length > 0 || files.length > 0);
+  const slash = text2.trimStart().startsWith("/");
+  const mentions = React5.useMemo(() => slash ? [] : mentionedBots(text2, roster, bot), [text2, roster, bot, slash]);
+  const canSend = !disabled && !blocked && (text2.trim().length > 0 || files.length > 0);
   const submit = async () => {
     if (!canSend) return;
-    const sending = text;
+    const sending = text2;
     const sentOwner = owner;
     if (slash && !files.length) {
       setText("");
@@ -23575,6 +24225,23 @@ ${value}`);
     }
     if (slash && files.length) {
       setNote("A command can’t carry attachments: remove them, or send the text without the leading /.");
+      return;
+    }
+    if (answering && onAnswer) {
+      if (files.length) {
+        setNote("An answer can’t carry attachments: remove them, or answer first and send them after.");
+        return;
+      }
+      setText("");
+      setNote("");
+      setOptions([]);
+      const result2 = await onAnswer(sending);
+      if (ownerRef.current !== sentOwner) return;
+      if (!result2?.ok) {
+        if (!textRef.current.trim()) setText(sending);
+        setNote(`Your answer was not sent${result2?.error ? `: ${result2.error}` : ""}.`);
+      }
+      inputRef.current?.focus();
       return;
     }
     const attachments = files.filter((file) => file.owner === ownerRef.current);
@@ -23635,7 +24302,7 @@ ${value}`);
         void addFiles(event.dataTransfer.files);
       },
       children: [
-        open ? /* @__PURE__ */ jsx5("div", { className: "gbo-popover", role: "listbox", "aria-label": text.startsWith("/") ? "Commands" : "Bots", children: options.map((option, i) => /* @__PURE__ */ jsxs4(
+        open ? /* @__PURE__ */ jsx5("div", { className: "gbo-popover", role: "listbox", "aria-label": text2.startsWith("/") ? "Commands" : "Bots", children: options.map((option, i) => /* @__PURE__ */ jsxs4(
           "button",
           {
             type: "button",
@@ -23701,10 +24368,10 @@ ${value}`);
                 ref: inputRef,
                 className: "composer__input",
                 rows: 1,
-                value: text,
+                value: text2,
                 disabled,
-                placeholder: `Message ${name}`,
-                "aria-label": `Message ${name}`,
+                placeholder: answering ? ANSWER_PLACEHOLDER : `Message ${name}`,
+                "aria-label": answering ? `Answer ${name}` : `Message ${name}`,
                 "aria-autocomplete": "list",
                 onChange: (event) => {
                   setText(event.target.value);
@@ -23935,10 +24602,10 @@ function Check({ checked, onChange, children, meta, disabled, title }) {
   ] });
 }
 function Select({ value, onChange, options, label, disabled }) {
-  return /* @__PURE__ */ jsx7("select", { className: "gbo-select", "aria-label": label, value, disabled, onChange: (event) => onChange(event.target.value), children: options.map(([id, text]) => /* @__PURE__ */ jsx7("option", { value: id, children: text }, id)) });
+  return /* @__PURE__ */ jsx7("select", { className: "gbo-select", "aria-label": label, value, disabled, onChange: (event) => onChange(event.target.value), children: options.map(([id, text2]) => /* @__PURE__ */ jsx7("option", { value: id, children: text2 }, id)) });
 }
 function Tabs({ value, onChange, tabs: tabs2 }) {
-  return /* @__PURE__ */ jsx7("div", { className: "gbo-tabs", role: "tablist", children: tabs2.map(([id, text]) => /* @__PURE__ */ jsx7("button", { type: "button", role: "tab", "aria-selected": value === id, onClick: () => onChange(id), children: text }, id)) });
+  return /* @__PURE__ */ jsx7("div", { className: "gbo-tabs", role: "tablist", children: tabs2.map(([id, text2]) => /* @__PURE__ */ jsx7("button", { type: "button", role: "tab", "aria-selected": value === id, onClick: () => onChange(id), children: text2 }, id)) });
 }
 function itemInner(entry) {
   return /* @__PURE__ */ jsxs6(Fragment2, { children: [
@@ -24090,9 +24757,343 @@ function Confirm({
   );
 }
 
-// src/ui/Media.tsx
+// src/ui/Directives.tsx
 import * as React7 from "react";
-import { Fragment as Fragment3, jsx as jsx8, jsxs as jsxs7 } from "react/jsx-runtime";
+import { Fragment as Fragment4, jsx as jsx8, jsxs as jsxs7 } from "react/jsx-runtime";
+var POLL_MS = 3e3;
+var POLL_MAX_MS = 30 * 6e4;
+var CLICK_THROTTLE_MS = 1e3;
+var DirectiveContext = React7.createContext(null);
+var timers = () => globalThis;
+function readKeyFor(scope, rel) {
+  return rel ? `${rowKey(scope.bot)}
+${scope.sessionId}
+${rel}` : "";
+}
+function useLatest(value) {
+  const ref = React7.useRef(value);
+  ref.current = value;
+  return ref;
+}
+function useCardFile(scope, rel, poll) {
+  const known = rel && scope.preload ? scope.preload[rel] : void 0;
+  const key = readKeyFor(scope, rel);
+  const [state, setState] = React7.useState(() => ({ key, raw: "", payload: known ? cardFromRead(known) : null }));
+  const latest = useLatest(scope);
+  const have = state.key === key ? state : null;
+  const settled = Boolean(have?.payload?.ok && isFinalCard(have.payload.card));
+  const loaded = Boolean(have?.payload);
+  React7.useEffect(() => {
+    if (!rel || known || settled) return void 0;
+    if (loaded && !poll) return void 0;
+    let alive = true;
+    let timer = 0;
+    const started = Date.now();
+    const tick = async () => {
+      let raw = "";
+      let next;
+      try {
+        const result = await readBotWorkspaceText(latest.current.bot, rel, latest.current.sessionId);
+        raw = JSON.stringify(result ?? null);
+        next = cardFromRead(result);
+      } catch {
+        raw = "\0read";
+        next = { ok: false, reason: "read" };
+      }
+      if (!alive) return;
+      setState((prev) => prev.key === key && prev.raw === raw ? prev : { key, raw, payload: next });
+      if (!poll || next.ok && isFinalCard(next.card) || Date.now() - started > POLL_MAX_MS) return;
+      timer = timers().setTimeout(tick, POLL_MS);
+    };
+    if (loaded) timer = timers().setTimeout(tick, POLL_MS);
+    else void tick();
+    return () => {
+      alive = false;
+      timers().clearTimeout(timer);
+    };
+  }, [key, rel, poll, known, settled]);
+  return have ? have.payload : null;
+}
+function Rows({ rows }) {
+  if (!rows.length) return null;
+  return /* @__PURE__ */ jsx8("dl", { className: "gbo-dcard-kv", children: rows.map(([k, v], i) => /* @__PURE__ */ jsxs7(React7.Fragment, { children: [
+    /* @__PURE__ */ jsx8("dt", { children: k }),
+    /* @__PURE__ */ jsx8("dd", { children: v })
+  ] }, i)) });
+}
+function Body({ body }) {
+  return /* @__PURE__ */ jsx8(Fragment4, { children: body.map(
+    (block, i) => block.type === "text" ? /* @__PURE__ */ jsx8("p", { className: "gbo-dcard-text", children: block.text }, i) : block.type === "kv" ? /* @__PURE__ */ jsx8(Rows, { rows: block.rows }, i) : /* @__PURE__ */ jsx8(Rows, { rows: block.items.map((f2) => [f2.label, f2.value]) }, i)
+  ) });
+}
+function Actions({ card, scope, labelledBy }) {
+  const [sent, setSent] = React7.useState("");
+  const [error, setError] = React7.useState("");
+  const last = React7.useRef(0);
+  const frozen = Boolean(card.resolved || sent);
+  const click = async (action) => {
+    const at = Date.now();
+    if (frozen || at - last.current < CLICK_THROTTLE_MS) return;
+    last.current = at;
+    setError("");
+    setSent(action.label);
+    const result = await scope.sendIntent(action.send);
+    if (!result.ok) {
+      setSent("");
+      setError(result.error || "Not sent");
+    }
+  };
+  const picked = card.resolved ? card.resolved.action : sent;
+  const matched = card.actions.some((action) => action.label === picked);
+  if (!card.actions.length && !card.resolved && !error) return null;
+  return /* @__PURE__ */ jsxs7(Fragment4, { children: [
+    card.actions.length ? /* @__PURE__ */ jsx8("div", { className: `gbo-ask-rows gbo-dcard-rows${frozen ? " is-settled" : ""}`, role: "radiogroup", "aria-labelledby": labelledBy, children: card.actions.map((action, i) => {
+      const on = action.label === picked;
+      return /* @__PURE__ */ jsxs7(
+        "button",
+        {
+          type: "button",
+          role: "radio",
+          "aria-checked": on,
+          disabled: frozen,
+          className: `gbo-ask-row${on ? " is-on" : ""}${action.style === "danger" ? " is-danger" : ""}`,
+          onClick: () => void click(action),
+          children: [
+            /* @__PURE__ */ jsx8("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
+            action.send !== action.label ? /* @__PURE__ */ jsxs7("span", { className: "gbo-ask-label is-stacked", children: [
+              /* @__PURE__ */ jsx8("span", { className: "gbo-ask-label-main", children: action.label }),
+              /* @__PURE__ */ jsx8("span", { className: "gbo-ask-send", title: action.send, children: action.send })
+            ] }) : /* @__PURE__ */ jsx8("span", { className: "gbo-ask-label", children: action.label }),
+            on ? /* @__PURE__ */ jsx8("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx8(IconCheck, {}) }) : null
+          ]
+        },
+        action.label
+      );
+    }) }) : null,
+    card.resolved && !matched ? /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-note", children: card.resolved.action }) : null,
+    error ? /* @__PURE__ */ jsx8("div", { className: "gbo-card-error", role: "alert", children: error }) : null
+  ] });
+}
+function CardView({ card, scope }) {
+  const email = card.kind === "draft-email" ? card.email || { to: "", cc: "", subject: "", bodyText: "" } : null;
+  const chip = cardChip(card);
+  const lead = email ? null : cardLead(card);
+  const titleId = React7.useId();
+  const settled = Boolean(card.resolved);
+  return /* @__PURE__ */ jsxs7(
+    "div",
+    {
+      className: `gbo-dcard is-${card.kind} is-${card.status.state}${settled ? " is-settled" : ""}`,
+      "data-gbo-card": card.kind,
+      role: "group",
+      "aria-labelledby": titleId,
+      children: [
+        /* @__PURE__ */ jsxs7("div", { className: "gbo-dcard-head", children: [
+          /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-title", id: titleId, children: email?.subject || card.title }),
+          chip ? /* @__PURE__ */ jsxs7("span", { className: `gbo-dcard-status is-${chip.state}`, role: "status", children: [
+            chip.state === "running" ? /* @__PURE__ */ jsx8("span", { className: "gbo-dcard-spin", "aria-hidden": "true" }) : null,
+            chip.label
+          ] }) : null
+        ] }),
+        lead ? /* @__PURE__ */ jsx8("p", { className: "gbo-dcard-text is-lead", children: lead }) : null,
+        email ? /* @__PURE__ */ jsx8(Rows, { rows: [["To", email.to || "—"], ...email.cc.trim() ? [["Cc", email.cc]] : []] }) : null,
+        email?.bodyText ? /* @__PURE__ */ jsx8("p", { className: "gbo-dcard-text is-email", children: email.bodyText }) : null,
+        lead ? null : /* @__PURE__ */ jsx8(Body, { body: card.body }),
+        /* @__PURE__ */ jsx8(Actions, { card, scope, labelledBy: titleId })
+      ]
+    }
+  );
+}
+function CardDirective({ attrs, source, poll, scope }) {
+  const rel = workspaceRelPath(attrs.file);
+  const payload = useCardFile(scope, rel, poll);
+  if (rel && payload === null) return /* @__PURE__ */ jsx8("div", { className: "gbo-dcard is-loading", "aria-label": "Loading card" });
+  if (!rel || !payload?.ok) {
+    return /* @__PURE__ */ jsxs7("div", { className: "gbo-dcard is-unavailable", title: source, children: [
+      /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-title", children: attrs.kind && /^[a-z-]{1,24}$/.test(attrs.kind) ? attrs.kind.replace("-", " ") : "Card" }),
+      /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-note", children: "Card not available" })
+    ] });
+  }
+  return /* @__PURE__ */ jsx8(CardView, { card: payload.card, scope });
+}
+var FALLBACK_THEME = {
+  light: { "--foreground": "#1C1C1C", "--muted-foreground": "#1C1C1C8F", "--accent": "#1C1C1C", "--border": "#1C1C1C1F", "--card": "#F0F0F0" },
+  dark: { "--foreground": "#F5F5F5", "--muted-foreground": "#F5F5F58A", "--accent": "#F5F5F5", "--border": "#F5F5F51A", "--card": "#242424" }
+};
+var FALLBACK_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+function themeFor(el, given) {
+  const doc = globalThis.document;
+  const style = el && typeof getComputedStyle === "function" ? getComputedStyle(el) : null;
+  const read = (name) => style?.getPropertyValue(name).trim() || "";
+  const root = doc?.documentElement;
+  const dark = given ? given === "dark" : Boolean(root && (root.classList?.contains("dark") || root.dataset?.theme === "dark" || root.dataset?.hermesMode === "dark"));
+  const scheme = dark ? "dark" : "light";
+  const fallback = FALLBACK_THEME[scheme];
+  return {
+    vars: {
+      "--foreground": read("--color-text-primary") || fallback["--foreground"],
+      "--muted-foreground": read("--color-text-tertiary") || fallback["--muted-foreground"],
+      "--accent": read("--color-primary") || fallback["--accent"],
+      "--border": read("--color-border-tertiary") || fallback["--border"],
+      "--card": read("--color-bubble-agent-flat") || fallback["--card"]
+    },
+    font: style?.fontFamily || FALLBACK_FONT,
+    scheme
+  };
+}
+var frameSeq = 0;
+function PreviewFrame({ html, name, startHeight, scope }) {
+  const wrap = React7.useRef(null);
+  const frame = React7.useRef(null);
+  const token = React7.useMemo(() => `gbo-${Date.now().toString(36)}-${frameSeq += 1}-${Math.random().toString(36).slice(2, 10)}`, []);
+  const [doc, setDoc] = React7.useState(() => {
+    const theme = themeFor(null, scope.theme);
+    return previewDocument(html, token, previewPrelude(theme.vars, theme.font, theme.scheme));
+  });
+  const [height, setHeight] = React7.useState(startHeight);
+  const lastIntent = React7.useRef(0);
+  const lastUser = React7.useRef(0);
+  const [pending, setPending] = React7.useState(null);
+  const pendingRef = React7.useRef(null);
+  const sendFromFrame = React7.useCallback(
+    (prompt, reply) => {
+      void scope.sendIntent(prompt).then(
+        (result) => reply(result.ok ? { ok: true } : { ok: false, error: "undelivered" }),
+        () => reply({ ok: false, error: "undelivered" })
+      );
+    },
+    [scope]
+  );
+  const replyTo = React7.useCallback(
+    (id, ack) => {
+      const source = frame.current?.contentWindow;
+      if (source && id !== null) source.postMessage(previewAck(token, id, ack), "*");
+    },
+    [token]
+  );
+  const hold = (next) => {
+    pendingRef.current = next;
+    setPending(next);
+  };
+  React7.useEffect(() => {
+    const win = globalThis.window;
+    if (!win?.addEventListener) return void 0;
+    const seen = () => {
+      const el = frame.current;
+      if (el && win.document?.activeElement === el) lastUser.current = Date.now();
+    };
+    const onBlur = () => {
+      seen();
+      timers().setTimeout(seen, 0);
+    };
+    win.addEventListener("blur", onBlur);
+    return () => win.removeEventListener("blur", onBlur);
+  }, []);
+  React7.useLayoutEffect(() => {
+    const theme = themeFor(wrap.current, scope.theme);
+    setDoc(previewDocument(html, token, previewPrelude(theme.vars, theme.font, theme.scheme)));
+  }, [html, token, scope.theme]);
+  React7.useEffect(() => {
+    const win = globalThis.window;
+    if (!win?.addEventListener) return void 0;
+    const onMessage = (event) => {
+      const source = frame.current?.contentWindow;
+      if (!source || event.source !== source) return;
+      const h = previewHeightFrom(event.data, token);
+      if (h !== null) {
+        setHeight(h);
+        return;
+      }
+      const decision = previewIntentFrom(event.data, token, Date.now(), lastIntent.current);
+      if (!decision) return;
+      const reply = (ack) => {
+        if (decision.id !== null) source.postMessage(previewAck(token, decision.id, ack), "*");
+      };
+      if (decision.kind === "reject") return reply(decision.ack);
+      const now = Date.now();
+      lastIntent.current = now;
+      if (previewIntentRoute(now, lastUser.current) === "send") return sendFromFrame(decision.prompt, reply);
+      const older = pendingRef.current;
+      if (older) replyTo(older.id, { ok: false, error: "replaced" });
+      hold({ id: decision.id, prompt: decision.prompt });
+    };
+    win.addEventListener("message", onMessage);
+    return () => win.removeEventListener("message", onMessage);
+  }, [token, sendFromFrame, replyTo]);
+  const send = () => {
+    const ask = pendingRef.current;
+    if (!ask) return;
+    hold(null);
+    sendFromFrame(ask.prompt, (ack) => replyTo(ask.id, ack));
+  };
+  const dismiss = () => {
+    const ask = pendingRef.current;
+    if (!ask) return;
+    hold(null);
+    replyTo(ask.id, { ok: false, error: "dismissed" });
+  };
+  return /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-wrap", children: [
+    /* @__PURE__ */ jsx8("div", { className: "gbo-preview", ref: wrap, children: doc ? /* @__PURE__ */ jsx8("iframe", { ref: frame, className: "gbo-preview-frame", title: name, sandbox: "allow-scripts", srcDoc: doc, style: { height } }) : null }),
+    pending ? /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-ask", role: "group", "aria-label": `${name} wants to send a message`, children: [
+      /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-ask-text", children: [
+        /* @__PURE__ */ jsx8("span", { className: "gbo-preview-ask-lead", children: "This page wants to send:" }),
+        /* @__PURE__ */ jsx8("span", { className: "gbo-preview-ask-prompt", children: pending.prompt })
+      ] }),
+      /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-ask-actions", children: [
+        /* @__PURE__ */ jsx8("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: send, children: "Send" }),
+        /* @__PURE__ */ jsx8("button", { type: "button", className: "gbo-pill-btn", onClick: dismiss, children: "Dismiss" })
+      ] })
+    ] }) : null
+  ] });
+}
+function PreviewDirective({ attrs, source, scope }) {
+  const rel = workspaceRelPath(attrs.file);
+  const html = rel ? isHtmlFile(rel) : false;
+  const known = rel && scope.preload ? scope.preload[rel] : void 0;
+  const key = readKeyFor(scope, rel);
+  const [read, setRead] = React7.useState(() => ({
+    key,
+    value: known ? { text: String(known.text || ""), error: known.text ? "" : "not available" } : null
+  }));
+  const state = read.key === key ? read.value : null;
+  const latest = useLatest(scope);
+  React7.useEffect(() => {
+    if (!rel || !html || known) return void 0;
+    let alive = true;
+    readBotWorkspaceText(latest.current.bot, rel, latest.current.sessionId).then(
+      (result) => {
+        if (!alive) return;
+        if (!result || result.binary || typeof result.text !== "string" || result.truncated) setRead({ key, value: { text: "", error: "not available" } });
+        else setRead({ key, value: { text: result.text, error: "" } });
+      },
+      () => alive && setRead({ key, value: { text: "", error: "not available" } })
+    );
+    return () => {
+      alive = false;
+    };
+  }, [key, rel, html, known]);
+  const name = rel ? rel.split("/").pop() || rel : "Preview";
+  if (rel && html && state === null) return /* @__PURE__ */ jsx8("div", { className: "gbo-preview is-loading", "aria-label": `Loading ${name}` });
+  if (!rel || !html || state?.error) {
+    return /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-row", title: source, children: [
+      /* @__PURE__ */ jsx8("span", { className: "gbo-preview-name", children: name }),
+      /* @__PURE__ */ jsx8("span", { className: "gbo-preview-why", children: !rel ? "Preview not available" : !html ? "Only HTML previews show here" : "Preview not available" })
+    ] });
+  }
+  return /* @__PURE__ */ jsx8(PreviewFrame, { html: state.text, name, startHeight: previewStartHeight(attrs.height), scope });
+}
+function DirectiveBlock({ segment, poll, scope }) {
+  return /* @__PURE__ */ jsx8("div", { className: "gbo-directive", children: segment.name === "card" ? /* @__PURE__ */ jsx8(CardDirective, { attrs: segment.attrs, source: segment.source, poll, scope }) : /* @__PURE__ */ jsx8(PreviewDirective, { attrs: segment.attrs, source: segment.source, scope }) });
+}
+function useDirectiveSegments(text2) {
+  const scope = React7.useContext(DirectiveContext);
+  const segments = React7.useMemo(() => scope ? splitDirectives(text2) : null, [scope, text2]);
+  return { segments, scope };
+}
+
+// src/ui/Media.tsx
+import * as React8 from "react";
+import { Fragment as Fragment5, jsx as jsx9, jsxs as jsxs8 } from "react/jsx-runtime";
 function saveDataUrl(dataUrl, name) {
   try {
     const link = document.createElement("a");
@@ -24107,10 +25108,10 @@ function saveDataUrl(dataUrl, name) {
   }
 }
 function OwnerMedia({ bot, item }) {
-  const [src, setSrc] = React7.useState(item.remote ? item.path : "");
-  const [error, setError] = React7.useState("");
+  const [src, setSrc] = React8.useState("");
+  const [error, setError] = React8.useState("");
   const wantsRead = !item.remote && item.kind !== "file";
-  React7.useEffect(() => {
+  React8.useEffect(() => {
     if (!wantsRead) return void 0;
     let live = true;
     readBotMedia(bot, item.path).then(
@@ -24125,17 +25126,28 @@ function OwnerMedia({ bot, item }) {
       live = false;
     };
   }, [bot, item.path, wantsRead]);
+  if (item.kind === "image" && item.remote && !src) {
+    const host3 = remoteImageHost(item.path);
+    return /* @__PURE__ */ jsxs8("button", { type: "button", className: "gbo-media-remote", title: item.path, onClick: () => setSrc(item.path), children: [
+      /* @__PURE__ */ jsxs8("span", { className: "gbo-media-remote-host", children: [
+        "Image from ",
+        host3
+      ] }),
+      /* @__PURE__ */ jsx9("span", { "aria-hidden": "true", children: " · " }),
+      /* @__PURE__ */ jsx9("span", { className: "gbo-media-remote-load", children: "Load" })
+    ] });
+  }
   if (item.kind === "image") {
-    if (error) return /* @__PURE__ */ jsxs7("span", { className: "gbo-media-file is-error", title: error, children: [
+    if (error) return /* @__PURE__ */ jsxs8("span", { className: "gbo-media-file is-error", title: error, children: [
       item.name,
       ": not available"
     ] });
-    return src ? /* @__PURE__ */ jsx8("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx8("img", { alt: item.name, src, loading: "lazy" }) }) : /* @__PURE__ */ jsx8("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
+    return src ? /* @__PURE__ */ jsx9("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx9("img", { alt: item.name, src, loading: "lazy" }) }) : /* @__PURE__ */ jsx9("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
   }
   if ((item.kind === "audio" || item.kind === "video") && src) {
-    return item.kind === "audio" ? /* @__PURE__ */ jsx8("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx8("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
+    return item.kind === "audio" ? /* @__PURE__ */ jsx9("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx9("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
   }
-  return /* @__PURE__ */ jsxs7(
+  return /* @__PURE__ */ jsxs8(
     "button",
     {
       type: "button",
@@ -24156,24 +25168,24 @@ function OwnerMedia({ bot, item }) {
 }
 function MediaStrip({ bot, media }) {
   if (!media.length) return null;
-  return /* @__PURE__ */ jsx8("div", { className: "gbo-media", children: media.map((item) => /* @__PURE__ */ jsx8(OwnerMedia, { bot, item }, item.path)) });
+  return /* @__PURE__ */ jsx9("div", { className: "gbo-media", children: media.map((item) => /* @__PURE__ */ jsx9(OwnerMedia, { bot, item }, item.path)) });
 }
-function BotText({ bot, text }) {
-  const { text: clean, media } = React7.useMemo(() => extractMedia(text), [text]);
-  return /* @__PURE__ */ jsxs7(Fragment3, { children: [
-    clean ? /* @__PURE__ */ jsx8(Markdown, { text: clean }) : null,
-    /* @__PURE__ */ jsx8(MediaStrip, { bot, media })
+function BotText({ bot, text: text2 }) {
+  const { text: clean, media } = React8.useMemo(() => extractMedia(text2), [text2]);
+  return /* @__PURE__ */ jsxs8(Fragment5, { children: [
+    clean ? /* @__PURE__ */ jsx9(Markdown, { text: clean }) : null,
+    /* @__PURE__ */ jsx9(MediaStrip, { bot, media })
   ] });
 }
 
 // src/ui/MessageActions.tsx
-import * as React8 from "react";
-import { Fragment as Fragment4, jsx as jsx9, jsxs as jsxs8 } from "react/jsx-runtime";
+import * as React9 from "react";
+import { Fragment as Fragment6, jsx as jsx10, jsxs as jsxs9 } from "react/jsx-runtime";
 var QUICK_REACTIONS = ["❤️", "👍", "👎", "😂", "‼️", "❓"];
 function Reactions({ item, onReact }) {
   const list = Array.isArray(item.reactions) ? item.reactions : [];
   if (!list.length) return null;
-  return /* @__PURE__ */ jsx9("div", { className: "gbo-reactions", children: list.map((reaction) => /* @__PURE__ */ jsx9(
+  return /* @__PURE__ */ jsx10("div", { className: "gbo-reactions", children: list.map((reaction) => /* @__PURE__ */ jsx10(
     "button",
     {
       type: "button",
@@ -24187,10 +25199,10 @@ function Reactions({ item, onReact }) {
   )) });
 }
 function ReactButton({ onReact }) {
-  const [open, setOpen] = React8.useState(false);
-  return /* @__PURE__ */ jsxs8("span", { className: "gbo-react-wrap", children: [
-    /* @__PURE__ */ jsx9("button", { type: "button", className: "gbo-icon-btn gbo-act", title: "React", "aria-label": "React", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: "☺" }),
-    open ? /* @__PURE__ */ jsx9("span", { className: "gbo-react-picker", role: "menu", children: QUICK_REACTIONS.map((emoji) => /* @__PURE__ */ jsx9(
+  const [open, setOpen] = React9.useState(false);
+  return /* @__PURE__ */ jsxs9("span", { className: "gbo-react-wrap", children: [
+    /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-icon-btn gbo-act", title: "React", "aria-label": "React", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: "☺" }),
+    open ? /* @__PURE__ */ jsx10("span", { className: "gbo-react-picker", role: "menu", children: QUICK_REACTIONS.map((emoji) => /* @__PURE__ */ jsx10(
       "button",
       {
         type: "button",
@@ -24205,18 +25217,18 @@ function ReactButton({ onReact }) {
     )) }) : null
   ] });
 }
-function copyText(text) {
+function copyText(text2) {
   try {
-    void globalThis.navigator?.clipboard?.writeText?.(text);
+    void globalThis.navigator?.clipboard?.writeText?.(text2);
   } catch {
   }
 }
 function useConfirm() {
-  const [pending, setPending] = React8.useState(null);
+  const [pending, setPending] = React9.useState(null);
   const ask = (later, label, run) => later > 0 ? setPending({ label: `${label}: this removes ${later} later message${later === 1 ? "" : "s"} from the chat.`, run }) : run();
-  const view = pending ? /* @__PURE__ */ jsxs8("div", { className: "gbo-confirm", role: "alertdialog", "aria-label": "Confirm", children: [
-    /* @__PURE__ */ jsx9("span", { children: pending.label }),
-    /* @__PURE__ */ jsx9(
+  const view = pending ? /* @__PURE__ */ jsxs9("div", { className: "gbo-confirm", role: "alertdialog", "aria-label": "Confirm", children: [
+    /* @__PURE__ */ jsx10("span", { children: pending.label }),
+    /* @__PURE__ */ jsx10(
       "button",
       {
         type: "button",
@@ -24229,22 +25241,22 @@ function useConfirm() {
         children: "Continue"
       }
     ),
-    /* @__PURE__ */ jsx9("button", { type: "button", className: "gbo-pill-btn", onClick: () => setPending(null), children: "Cancel" })
+    /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-pill-btn", onClick: () => setPending(null), children: "Cancel" })
   ] }) : null;
   return { ask, view };
 }
 function UserActions({ item, controller: controller2, busy, onPrefill }) {
-  const [editing, setEditing] = React8.useState(false);
-  const [draft, setDraft] = React8.useState(item.text);
+  const [editing, setEditing] = React9.useState(false);
+  const [draft, setDraft] = React9.useState(item.text);
   const { ask, view } = useConfirm();
   const stored = Boolean(item.rowId) && !item.pending && !item.failed;
   if (!stored) return null;
   const later = () => controller2?.laterTurns?.(item.id) ?? 0;
   if (editing) {
-    return /* @__PURE__ */ jsxs8("div", { className: "gbo-edit", children: [
-      /* @__PURE__ */ jsx9("textarea", { className: "gbo-input gbo-edit-box", value: draft, "aria-label": "Edit message", onChange: (event) => setDraft(event.target.value) }),
-      /* @__PURE__ */ jsxs8("div", { className: "gbo-card-actions", children: [
-        /* @__PURE__ */ jsx9(
+    return /* @__PURE__ */ jsxs9("div", { className: "gbo-edit", children: [
+      /* @__PURE__ */ jsx10("textarea", { className: "gbo-input gbo-edit-box", value: draft, "aria-label": "Edit message", onChange: (event) => setDraft(event.target.value) }),
+      /* @__PURE__ */ jsxs9("div", { className: "gbo-card-actions", children: [
+        /* @__PURE__ */ jsx10(
           "button",
           {
             type: "button",
@@ -24257,16 +25269,16 @@ function UserActions({ item, controller: controller2, busy, onPrefill }) {
             children: "Send edit"
           }
         ),
-        /* @__PURE__ */ jsx9("button", { type: "button", className: "gbo-pill-btn", onClick: () => setEditing(false), children: "Cancel" })
+        /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-pill-btn", onClick: () => setEditing(false), children: "Cancel" })
       ] }),
       view
     ] });
   }
-  return /* @__PURE__ */ jsxs8(Fragment4, { children: [
-    /* @__PURE__ */ jsxs8("div", { className: "gbo-msg-actions", children: [
-      /* @__PURE__ */ jsx9(ReactButton, { onReact: (emoji) => void controller2?.react(item.id, emoji) }),
-      /* @__PURE__ */ jsx9("button", { type: "button", className: "gbo-icon-btn gbo-act", title: "Copy", "aria-label": "Copy message", onClick: () => copyText(item.text), children: /* @__PURE__ */ jsx9(IconCopy, {}) }),
-      /* @__PURE__ */ jsx9(
+  return /* @__PURE__ */ jsxs9(Fragment6, { children: [
+    /* @__PURE__ */ jsxs9("div", { className: "gbo-msg-actions", children: [
+      /* @__PURE__ */ jsx10(ReactButton, { onReact: (emoji) => void controller2?.react(item.id, emoji) }),
+      /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-icon-btn gbo-act", title: "Copy", "aria-label": "Copy message", onClick: () => copyText(item.text), children: /* @__PURE__ */ jsx10(IconCopy, {}) }),
+      /* @__PURE__ */ jsx10(
         "button",
         {
           type: "button",
@@ -24281,7 +25293,7 @@ function UserActions({ item, controller: controller2, busy, onPrefill }) {
           children: "✎"
         }
       ),
-      /* @__PURE__ */ jsx9(
+      /* @__PURE__ */ jsx10(
         "button",
         {
           type: "button",
@@ -24309,11 +25321,11 @@ function AssistantActions({ item, controller: controller2, busy }) {
     for (let i = at; i >= 0; i -= 1) if (items[i]?.kind === "user") return controller2?.laterTurns?.(items[i].id) ?? 0;
     return 0;
   };
-  return /* @__PURE__ */ jsxs8(Fragment4, { children: [
-    /* @__PURE__ */ jsxs8("div", { className: "gbo-msg-meta gbo-msg-actions", children: [
-      /* @__PURE__ */ jsx9("button", { type: "button", className: "gbo-icon-btn", title: "Copy", "aria-label": "Copy message", onClick: () => copyText(item.text), children: /* @__PURE__ */ jsx9(IconCopy, {}) }),
-      /* @__PURE__ */ jsx9(ReactButton, { onReact: (emoji) => void controller2?.react(item.id, emoji) }),
-      /* @__PURE__ */ jsx9(
+  return /* @__PURE__ */ jsxs9(Fragment6, { children: [
+    /* @__PURE__ */ jsxs9("div", { className: "gbo-msg-meta gbo-msg-actions", children: [
+      /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-icon-btn", title: "Copy", "aria-label": "Copy message", onClick: () => copyText(item.text), children: /* @__PURE__ */ jsx10(IconCopy, {}) }),
+      /* @__PURE__ */ jsx10(ReactButton, { onReact: (emoji) => void controller2?.react(item.id, emoji) }),
+      /* @__PURE__ */ jsx10(
         "button",
         {
           type: "button",
@@ -24330,12 +25342,15 @@ function AssistantActions({ item, controller: controller2, busy }) {
   ] });
 }
 
+// src/ui/Profile.tsx
+import * as React18 from "react";
+
 // src/ui/BotDialogs.tsx
-import * as React13 from "react";
+import * as React14 from "react";
 
 // src/ui/CronDialogs.tsx
-import * as React9 from "react";
-import { Fragment as Fragment5, jsx as jsx10, jsxs as jsxs9 } from "react/jsx-runtime";
+import * as React10 from "react";
+import { Fragment as Fragment7, jsx as jsx11, jsxs as jsxs10 } from "react/jsx-runtime";
 var digits = (v, n) => v.replace(/[^0-9]/g, "").slice(0, n);
 function timeLabel(id) {
   const [h, m] = id.split(":").map(Number);
@@ -24350,28 +25365,28 @@ function SchedulePicker({ state, setState }) {
     ["h", `hours${suffix}`],
     ["d", `days${suffix}`]
   ];
-  return /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
-    /* @__PURE__ */ jsxs9("div", { className: needsTime ? "gbo-row2" : "", children: [
-      /* @__PURE__ */ jsx10(Select, { label: "How often", value: state.freq, onChange: (v) => upd({ freq: v }), options: FREQUENCIES }),
-      needsTime ? /* @__PURE__ */ jsx10(Select, { label: "Time", value: state.time, onChange: (v) => upd({ time: v }), options: times }) : null
+  return /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
+    /* @__PURE__ */ jsxs10("div", { className: needsTime ? "gbo-row2" : "", children: [
+      /* @__PURE__ */ jsx11(Select, { label: "How often", value: state.freq, onChange: (v) => upd({ freq: v }), options: FREQUENCIES }),
+      needsTime ? /* @__PURE__ */ jsx11(Select, { label: "Time", value: state.time, onChange: (v) => upd({ time: v }), options: times }) : null
     ] }),
-    state.freq === "once" ? /* @__PURE__ */ jsxs9("div", { className: "gbo-row2", children: [
-      /* @__PURE__ */ jsx10("input", { className: "gbo-input", "aria-label": "In", value: state.onceN, placeholder: "30", onChange: (e2) => upd({ onceN: digits(e2.target.value, 4) }) }),
-      /* @__PURE__ */ jsx10(Select, { label: "Unit", value: state.onceUnit, onChange: (v) => upd({ onceUnit: v }), options: unitOptions(" from now") })
+    state.freq === "once" ? /* @__PURE__ */ jsxs10("div", { className: "gbo-row2", children: [
+      /* @__PURE__ */ jsx11("input", { className: "gbo-input", "aria-label": "In", value: state.onceN, placeholder: "30", onChange: (e2) => upd({ onceN: digits(e2.target.value, 4) }) }),
+      /* @__PURE__ */ jsx11(Select, { label: "Unit", value: state.onceUnit, onChange: (v) => upd({ onceUnit: v }), options: unitOptions(" from now") })
     ] }) : null,
-    state.freq === "weekly" ? /* @__PURE__ */ jsx10(Select, { label: "Day", value: state.weekday, onChange: (v) => upd({ weekday: v }), options: WEEKDAYS }) : null,
-    state.freq === "monthly" ? /* @__PURE__ */ jsx10(Field, { label: "Day of month", children: /* @__PURE__ */ jsx10("input", { className: "gbo-input", value: state.monthday, placeholder: "1", onChange: (e2) => upd({ monthday: digits(e2.target.value, 2) }) }) }) : null,
-    state.freq === "interval" ? /* @__PURE__ */ jsxs9("div", { className: "gbo-row2", children: [
-      /* @__PURE__ */ jsx10("input", { className: "gbo-input", "aria-label": "Every", value: state.intervalN, placeholder: "2", onChange: (e2) => upd({ intervalN: digits(e2.target.value, 4) }) }),
-      /* @__PURE__ */ jsx10(Select, { label: "Unit", value: state.intervalUnit, onChange: (v) => upd({ intervalUnit: v }), options: unitOptions("") })
+    state.freq === "weekly" ? /* @__PURE__ */ jsx11(Select, { label: "Day", value: state.weekday, onChange: (v) => upd({ weekday: v }), options: WEEKDAYS }) : null,
+    state.freq === "monthly" ? /* @__PURE__ */ jsx11(Field, { label: "Day of month", children: /* @__PURE__ */ jsx11("input", { className: "gbo-input", value: state.monthday, placeholder: "1", onChange: (e2) => upd({ monthday: digits(e2.target.value, 2) }) }) }) : null,
+    state.freq === "interval" ? /* @__PURE__ */ jsxs10("div", { className: "gbo-row2", children: [
+      /* @__PURE__ */ jsx11("input", { className: "gbo-input", "aria-label": "Every", value: state.intervalN, placeholder: "2", onChange: (e2) => upd({ intervalN: digits(e2.target.value, 4) }) }),
+      /* @__PURE__ */ jsx11(Select, { label: "Unit", value: state.intervalUnit, onChange: (v) => upd({ intervalUnit: v }), options: unitOptions("") })
     ] }) : null,
-    state.freq === "advanced" ? /* @__PURE__ */ jsx10("input", { className: "gbo-input", style: { fontFamily: "var(--gbo-mono)" }, value: state.raw, placeholder: "every 1d · every 2h · 0 9 * * * (cron)", onChange: (e2) => upd({ raw: e2.target.value }) }) : null,
-    state.freq !== "once" && state.freq !== "advanced" && state.repeatN !== void 0 ? /* @__PURE__ */ jsxs9("label", { className: "gbo-check", children: [
-      /* @__PURE__ */ jsx10("span", { children: "Stop after" }),
-      /* @__PURE__ */ jsx10("input", { className: "gbo-input", style: { width: 64 }, value: state.repeatN, placeholder: "∞", onChange: (e2) => upd({ repeatN: digits(e2.target.value, 4) }) }),
-      /* @__PURE__ */ jsx10("span", { children: "runs" })
+    state.freq === "advanced" ? /* @__PURE__ */ jsx11("input", { className: "gbo-input", style: { fontFamily: "var(--gbo-mono)" }, value: state.raw, placeholder: "every 1d · every 2h · 0 9 * * * (cron)", onChange: (e2) => upd({ raw: e2.target.value }) }) : null,
+    state.freq !== "once" && state.freq !== "advanced" && state.repeatN !== void 0 ? /* @__PURE__ */ jsxs10("label", { className: "gbo-check", children: [
+      /* @__PURE__ */ jsx11("span", { children: "Stop after" }),
+      /* @__PURE__ */ jsx11("input", { className: "gbo-input", style: { width: 64 }, value: state.repeatN, placeholder: "∞", onChange: (e2) => upd({ repeatN: digits(e2.target.value, 4) }) }),
+      /* @__PURE__ */ jsx11("span", { children: "runs" })
     ] }) : null,
-    /* @__PURE__ */ jsxs9("span", { className: "gbo-field-hint", children: [
+    /* @__PURE__ */ jsxs10("span", { className: "gbo-field-hint", children: [
       scheduleSummary(state, timeLabel(state.time || "9:0")),
       " · ",
       composeSchedule(state) || "—"
@@ -24380,18 +25395,18 @@ function SchedulePicker({ state, setState }) {
 }
 function JobDialog({ bot, job, onClose }) {
   const editing = Boolean(job);
-  const [title, setTitle] = React9.useState(() => job ? routineTitle(job) : "");
-  const [stored, setStored] = React9.useState(() => ({ status: editing ? "loading" : "ready" }));
-  const [instruction, setInstruction] = React9.useState("");
-  const [sched, setSched] = React9.useState(() => job ? { ...scheduleStateFrom(job.schedule), repeatN: void 0 } : defaultScheduleState());
-  const [initialSchedule] = React9.useState(() => job ? composeSchedule({ ...scheduleStateFrom(job.schedule), repeatN: void 0 }).trim() : void 0);
-  const [continuity, setContinuity] = React9.useState(false);
-  const [target, setTarget] = React9.useState(() => job?.deliver === "bot-chat" ? "bot-chat" : "history");
-  const [busy, setBusy] = React9.useState(false);
-  const [error, setError] = React9.useState(null);
+  const [title, setTitle] = React10.useState(() => job ? routineTitle(job) : "");
+  const [stored, setStored] = React10.useState(() => ({ status: editing ? "loading" : "ready" }));
+  const [instruction, setInstruction] = React10.useState("");
+  const [sched, setSched] = React10.useState(() => job ? { ...scheduleStateFrom(job.schedule), repeatN: void 0 } : defaultScheduleState());
+  const [initialSchedule] = React10.useState(() => job ? composeSchedule({ ...scheduleStateFrom(job.schedule), repeatN: void 0 }).trim() : void 0);
+  const [continuity, setContinuity] = React10.useState(false);
+  const [target, setTarget] = React10.useState(() => job?.deliver === "bot-chat" ? "bot-chat" : "history");
+  const [busy, setBusy] = React10.useState(false);
+  const [error, setError] = React10.useState(null);
   const who = displayName(bot, metaFor(bot));
   const schedule = composeSchedule(sched).trim();
-  React9.useEffect(() => {
+  React10.useEffect(() => {
     if (!editing) return;
     let live = true;
     loadJob(bot, job).then(
@@ -24437,7 +25452,7 @@ function JobDialog({ bot, job, onClose }) {
       setError(String(err2?.message || err2));
     }
   };
-  return /* @__PURE__ */ jsxs9(
+  return /* @__PURE__ */ jsxs10(
     Dialog,
     {
       open: true,
@@ -24445,20 +25460,20 @@ function JobDialog({ bot, job, onClose }) {
       onClose,
       title: editing ? "Edit scheduled job" : "New scheduled job",
       description: editing ? `A job of ${who}. Saved through Hermes’s Cron API on ${who}’s machine.` : `${who} runs this on a schedule, in its own profile.`,
-      footer: /* @__PURE__ */ jsxs9(Fragment5, { children: [
-        /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || stored.status === "loading" || !title.trim() || instructionMissing || !schedule, onClick: () => void submit(), children: busy ? "Saving…" : editing ? "Save" : "Create job" })
+      footer: /* @__PURE__ */ jsxs10(Fragment7, { children: [
+        /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || stored.status === "loading" || !title.trim() || instructionMissing || !schedule, onClick: () => void submit(), children: busy ? "Saving…" : editing ? "Save" : "Create job" })
       ] }),
       children: [
-        /* @__PURE__ */ jsx10(Field, { label: "Name", children: /* @__PURE__ */ jsx10("input", { className: "gbo-input", autoFocus: true, value: title, placeholder: "Morning digest", onChange: (e2) => setTitle(e2.target.value) }) }),
-        /* @__PURE__ */ jsx10(Field, { label: "What should it do?", children: instructionEditable ? /* @__PURE__ */ jsx10("textarea", { className: "gbo-textarea", value: instruction, placeholder: scriptOnly ? "Optional: this job runs a script" : "Summarise yesterday’s alerts and send me the top three.", onChange: (e2) => setInstruction(e2.target.value) }) : /* @__PURE__ */ jsx10("textarea", { className: "gbo-textarea", value: stored.status === "loading" ? "" : String(job?.prompt_preview || ""), placeholder: stored.status === "loading" ? "Loading the full instruction…" : "", readOnly: true, disabled: stored.status === "loading" }) }),
-        stored.status === "failed" ? /* @__PURE__ */ jsxs9("div", { className: "gbo-form-note", children: [
+        /* @__PURE__ */ jsx11(Field, { label: "Name", children: /* @__PURE__ */ jsx11("input", { className: "gbo-input", autoFocus: true, value: title, placeholder: "Morning digest", onChange: (e2) => setTitle(e2.target.value) }) }),
+        /* @__PURE__ */ jsx11(Field, { label: "What should it do?", children: instructionEditable ? /* @__PURE__ */ jsx11("textarea", { className: "gbo-textarea", value: instruction, placeholder: scriptOnly ? "Optional: this job runs a script" : "Summarise yesterday’s alerts and send me the top three.", onChange: (e2) => setInstruction(e2.target.value) }) : /* @__PURE__ */ jsx11("textarea", { className: "gbo-textarea", value: stored.status === "loading" ? "" : String(job?.prompt_preview || ""), placeholder: stored.status === "loading" ? "Loading the full instruction…" : "", readOnly: true, disabled: stored.status === "loading" }) }),
+        stored.status === "failed" ? /* @__PURE__ */ jsxs10("div", { className: "gbo-form-note", children: [
           "The full instruction could not be read (",
           stored.error,
           "). It is left unchanged; the other fields can still be saved."
         ] }) : null,
-        /* @__PURE__ */ jsx10(Field, { label: "When to run", children: /* @__PURE__ */ jsx10(SchedulePicker, { state: sched, setState: setSched }) }),
-        /* @__PURE__ */ jsx10(Field, { label: "Send results to", children: /* @__PURE__ */ jsx10(
+        /* @__PURE__ */ jsx11(Field, { label: "When to run", children: /* @__PURE__ */ jsx11(SchedulePicker, { state: sched, setState: setSched }) }),
+        /* @__PURE__ */ jsx11(Field, { label: "Send results to", children: /* @__PURE__ */ jsx11(
           Select,
           {
             label: "Send results to",
@@ -24470,8 +25485,8 @@ function JobDialog({ bot, job, onClose }) {
             ]
           }
         ) }),
-        editing ? null : /* @__PURE__ */ jsx10(Check, { checked: continuity, onChange: setContinuity, children: "Continue from the previous run (same session each time)" }),
-        error ? /* @__PURE__ */ jsx10("div", { className: "gbo-form-error", children: error }) : null
+        editing ? null : /* @__PURE__ */ jsx11(Check, { checked: continuity, onChange: setContinuity, children: "Continue from the previous run (same session each time)" }),
+        error ? /* @__PURE__ */ jsx11("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
@@ -24480,18 +25495,18 @@ function JobDetailDialog({ bot, job, onClose }) {
   const rows = routineDetailRows(job);
   const issue = routineDetailIssue(job);
   const instruction = String(job?.prompt_preview || "").trim();
-  return /* @__PURE__ */ jsxs9(
+  return /* @__PURE__ */ jsxs10(
     Dialog,
     {
       open: true,
       onClose,
       title: routineTitle(job),
       description: "What Hermes knows about this job.",
-      footer: /* @__PURE__ */ jsxs9(Fragment5, { children: [
-        /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-btn is-ghost", onClick: () => openDialog({ kind: "cron-remove", bot, job }), children: "Delete" }),
-        /* @__PURE__ */ jsx10("span", { className: "gbo-spacer" }),
-        /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-btn", onClick: () => openDialog({ kind: "cron-edit", bot, job }), children: "Edit" }),
-        /* @__PURE__ */ jsx10(
+      footer: /* @__PURE__ */ jsxs10(Fragment7, { children: [
+        /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-ghost", onClick: () => openDialog({ kind: "cron-remove", bot, job }), children: "Delete" }),
+        /* @__PURE__ */ jsx11("span", { className: "gbo-spacer" }),
+        /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn", onClick: () => openDialog({ kind: "cron-edit", bot, job }), children: "Edit" }),
+        /* @__PURE__ */ jsx11(
           "button",
           {
             type: "button",
@@ -24503,21 +25518,21 @@ function JobDetailDialog({ bot, job, onClose }) {
             children: "Run now"
           }
         ),
-        /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-btn is-primary", onClick: onClose, children: "Close" })
+        /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-primary", onClick: onClose, children: "Close" })
       ] }),
       children: [
-        issue ? /* @__PURE__ */ jsx10("div", { className: "gbo-form-error", children: issue }) : null,
-        /* @__PURE__ */ jsx10("div", { className: "gbo-detail-rows", children: rows.map((row) => /* @__PURE__ */ jsxs9("div", { className: "gbo-detail-row", children: [
-          /* @__PURE__ */ jsx10("span", { children: row.label }),
-          /* @__PURE__ */ jsx10("span", { title: row.value, children: row.value })
+        issue ? /* @__PURE__ */ jsx11("div", { className: "gbo-form-error", children: issue }) : null,
+        /* @__PURE__ */ jsx11("div", { className: "gbo-detail-rows", children: rows.map((row) => /* @__PURE__ */ jsxs10("div", { className: "gbo-detail-row", children: [
+          /* @__PURE__ */ jsx11("span", { children: row.label }),
+          /* @__PURE__ */ jsx11("span", { title: row.value, children: row.value })
         ] }, row.label)) }),
-        instruction ? /* @__PURE__ */ jsx10(Field, { label: "Instruction", children: /* @__PURE__ */ jsx10("div", { className: "gbo-pre", children: instruction }) }) : null
+        instruction ? /* @__PURE__ */ jsx11(Field, { label: "Instruction", children: /* @__PURE__ */ jsx11("div", { className: "gbo-pre", children: instruction }) }) : null
       ]
     }
   );
 }
 function JobRemoveDialog({ bot, job, onClose }) {
-  return /* @__PURE__ */ jsx10(
+  return /* @__PURE__ */ jsx11(
     Confirm,
     {
       open: true,
@@ -24532,8 +25547,8 @@ function JobRemoveDialog({ bot, job, onClose }) {
 }
 
 // src/ui/ProfileConfig.tsx
-import * as React10 from "react";
-import { jsx as jsx11, jsxs as jsxs10 } from "react/jsx-runtime";
+import * as React11 from "react";
+import { jsx as jsx12, jsxs as jsxs11 } from "react/jsx-runtime";
 var modelCache = /* @__PURE__ */ new Map();
 var MODEL_OPTIONS_STALE_MS = 12e4;
 function modelKey(bot) {
@@ -24544,11 +25559,11 @@ function primeModelOptions(bot, value) {
 }
 function useModelOptions(bot) {
   const key = modelKey(bot);
-  const [state, setState] = React10.useState(() => {
+  const [state, setState] = React11.useState(() => {
     const hit = modelCache.get(key);
     return hit && Date.now() - hit.at < MODEL_OPTIONS_STALE_MS ? { loading: false, error: null, data: hit.value } : { loading: true, error: null, data: null };
   });
-  React10.useEffect(() => {
+  React11.useEffect(() => {
     const hit = modelCache.get(key);
     if (hit && Date.now() - hit.at < MODEL_OPTIONS_STALE_MS) return;
     let live = true;
@@ -24564,18 +25579,18 @@ function useModelOptions(bot) {
 }
 function ModelPicker({ bot, value, onChange }) {
   const { loading, error, data } = useModelOptions(bot);
-  const [manual, setManual] = React10.useState(null);
+  const [manual, setManual] = React11.useState(null);
   const providers = usableProviders(data);
   const known = !value.provider || providers.some((p) => providerMatches(p, value.provider));
   const freeText = manual ?? !known;
-  if (loading) return /* @__PURE__ */ jsx11("div", { className: "gbo-form-note", children: "Loading models…" });
+  if (loading) return /* @__PURE__ */ jsx12("div", { className: "gbo-form-note", children: "Loading models…" });
   if (error || !providers.length || freeText) {
-    return /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
-      /* @__PURE__ */ jsxs10("div", { className: "gbo-row2", children: [
-        /* @__PURE__ */ jsx11(Field, { label: "Provider", children: /* @__PURE__ */ jsx11("input", { className: "gbo-input", value: value.provider, placeholder: "nous / openrouter / …", onChange: (e2) => onChange({ provider: e2.target.value }) }) }),
-        /* @__PURE__ */ jsx11(Field, { label: "Model", children: /* @__PURE__ */ jsx11("input", { className: "gbo-input", value: value.model, placeholder: "provider/model-name", onChange: (e2) => onChange({ model: e2.target.value }) }) })
+    return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
+      /* @__PURE__ */ jsxs11("div", { className: "gbo-row2", children: [
+        /* @__PURE__ */ jsx12(Field, { label: "Provider", children: /* @__PURE__ */ jsx12("input", { className: "gbo-input", value: value.provider, placeholder: "nous / openrouter / …", onChange: (e2) => onChange({ provider: e2.target.value }) }) }),
+        /* @__PURE__ */ jsx12(Field, { label: "Model", children: /* @__PURE__ */ jsx12("input", { className: "gbo-input", value: value.model, placeholder: "provider/model-name", onChange: (e2) => onChange({ model: e2.target.value }) }) })
       ] }),
-      providers.length ? /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setManual(false), children: "Back to the lists" }) : error ? /* @__PURE__ */ jsxs10("span", { className: "gbo-field-hint", children: [
+      providers.length ? /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setManual(false), children: "Back to the lists" }) : error ? /* @__PURE__ */ jsxs11("span", { className: "gbo-field-hint", children: [
         "The model list did not load (",
         error,
         "); type them instead."
@@ -24586,8 +25601,8 @@ function ModelPicker({ bot, value, onChange }) {
   const models = active ? providerModels(active) : [];
   const NONE = "__default__";
   const CUSTOM = "__custom__";
-  return /* @__PURE__ */ jsxs10("div", { className: "gbo-row2", children: [
-    /* @__PURE__ */ jsx11(Field, { label: "Provider", children: /* @__PURE__ */ jsx11(
+  return /* @__PURE__ */ jsxs11("div", { className: "gbo-row2", children: [
+    /* @__PURE__ */ jsx12(Field, { label: "Provider", children: /* @__PURE__ */ jsx12(
       Select,
       {
         label: "Provider",
@@ -24603,7 +25618,7 @@ function ModelPicker({ bot, value, onChange }) {
         options: [[NONE, "Default (the profile’s own)"], ...providers.map((p) => [p.slug, p.name || p.slug]), [CUSTOM, "Custom…"]]
       }
     ) }),
-    /* @__PURE__ */ jsx11(Field, { label: "Model", children: /* @__PURE__ */ jsx11(
+    /* @__PURE__ */ jsx12(Field, { label: "Model", children: /* @__PURE__ */ jsx12(
       Select,
       {
         label: "Model",
@@ -24616,12 +25631,12 @@ function ModelPicker({ bot, value, onChange }) {
   ] });
 }
 function SkillsHub({ bot, onInstalled }) {
-  const [query, setQuery] = React10.useState("");
-  const [results, setResults] = React10.useState(null);
-  const [busy, setBusy] = React10.useState(null);
-  const [error, setError] = React10.useState(null);
-  return /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
-    /* @__PURE__ */ jsxs10(
+  const [query, setQuery] = React11.useState("");
+  const [results, setResults] = React11.useState(null);
+  const [busy, setBusy] = React11.useState(null);
+  const [error, setError] = React11.useState(null);
+  return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
+    /* @__PURE__ */ jsxs11(
       "form",
       {
         style: { display: "flex", gap: 6 },
@@ -24640,16 +25655,16 @@ function SkillsHub({ bot, onInstalled }) {
           }
         },
         children: [
-          /* @__PURE__ */ jsx11("input", { className: "gbo-input", placeholder: "Find skills in the hub", value: query, onChange: (e2) => setQuery(e2.target.value) }),
-          /* @__PURE__ */ jsx11("button", { type: "submit", className: "gbo-btn is-small", disabled: !query.trim() || Boolean(busy), children: busy === "search" ? "Searching…" : "Search" })
+          /* @__PURE__ */ jsx12("input", { className: "gbo-input", placeholder: "Find skills in the hub", value: query, onChange: (e2) => setQuery(e2.target.value) }),
+          /* @__PURE__ */ jsx12("button", { type: "submit", className: "gbo-btn is-small", disabled: !query.trim() || Boolean(busy), children: busy === "search" ? "Searching…" : "Search" })
         ]
       }
     ),
-    error ? /* @__PURE__ */ jsx11("div", { className: "gbo-form-error", children: error }) : null,
-    results && !results.length ? /* @__PURE__ */ jsx11("span", { className: "gbo-field-hint", children: "No skills found." }) : null,
-    (results || []).slice(0, 8).map((r) => /* @__PURE__ */ jsxs10("div", { className: "gbo-check", style: { cursor: "default" }, children: [
-      /* @__PURE__ */ jsx11("span", { className: "gbo-check-text", title: r.description || r.name, children: r.name }),
-      /* @__PURE__ */ jsx11(
+    error ? /* @__PURE__ */ jsx12("div", { className: "gbo-form-error", children: error }) : null,
+    results && !results.length ? /* @__PURE__ */ jsx12("span", { className: "gbo-field-hint", children: "No skills found." }) : null,
+    (results || []).slice(0, 8).map((r) => /* @__PURE__ */ jsxs11("div", { className: "gbo-check", style: { cursor: "default" }, children: [
+      /* @__PURE__ */ jsx12("span", { className: "gbo-check-text", title: r.description || r.name, children: r.name }),
+      /* @__PURE__ */ jsx12(
         "button",
         {
           type: "button",
@@ -24678,11 +25693,11 @@ function backendScope(bot) {
   return route ? { connectionId: route.connectionId, profile: route.targetProfile || route.profile } : bot.name;
 }
 function McpSetup({ bot, entry, onDone }) {
-  const [phase, setPhase] = React10.useState("idle");
-  const [message, setMessage] = React10.useState("");
-  const fields = React10.useRef({});
-  const epoch = React10.useRef(0);
-  const pending = React10.useRef(null);
+  const [phase, setPhase] = React11.useState("idle");
+  const [message, setMessage] = React11.useState("");
+  const fields = React11.useRef({});
+  const epoch = React11.useRef(0);
+  const pending = React11.useRef(null);
   const wipePending = () => {
     const held = pending.current;
     pending.current = null;
@@ -24696,7 +25711,7 @@ function McpSetup({ bot, entry, onDone }) {
   const clearFields = () => {
     for (const input of Object.values(fields.current)) if (input) input.value = "";
   };
-  React10.useEffect(
+  React11.useEffect(
     () => () => {
       epoch.current += 1;
       clearFields();
@@ -24704,9 +25719,9 @@ function McpSetup({ bot, entry, onDone }) {
     },
     []
   );
-  const fail = (text) => {
+  const fail = (text2) => {
     setPhase("error");
-    setMessage(text);
+    setMessage(text2);
   };
   const ensureAdded = async () => {
     if (entry.fromCatalog && !entry.installed) await request(bot, "mcp.servers.add", { profile: bot.name, name: entry.name, preset: entry.name });
@@ -24751,7 +25766,7 @@ function McpSetup({ bot, entry, onDone }) {
     const secrets = entered.map(([, value]) => value).filter(Boolean);
     const held = { entered, secrets };
     pending.current = held;
-    const scrub = (text) => secrets.reduce((out, value) => out.split(value).join("••••"), text);
+    const scrub = (text2) => secrets.reduce((out, value) => out.split(value).join("••••"), text2);
     setPhase("busy");
     try {
       for (let i = 0; i < entered.length; i += 1) {
@@ -24775,10 +25790,10 @@ function McpSetup({ bot, entry, onDone }) {
       secrets.length = 0;
     }
   };
-  if (phase === "done") return /* @__PURE__ */ jsx11("span", { className: "gbo-field-hint", children: "Configured" });
+  if (phase === "done") return /* @__PURE__ */ jsx12("span", { className: "gbo-field-hint", children: "Configured" });
   if (phase === "keys") {
-    return /* @__PURE__ */ jsxs10("span", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }, children: [
-      requires.map((k) => /* @__PURE__ */ jsx11(
+    return /* @__PURE__ */ jsxs11("span", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }, children: [
+      requires.map((k) => /* @__PURE__ */ jsx12(
         "input",
         {
           ref: (el) => {
@@ -24792,21 +25807,21 @@ function McpSetup({ bot, entry, onDone }) {
         },
         k
       )),
-      /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-small", onClick: () => void submitKeys(), children: "Save and test" })
+      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-btn is-small", onClick: () => void submitKeys(), children: "Save and test" })
     ] });
   }
-  return /* @__PURE__ */ jsxs10("span", { style: { display: "inline-flex", gap: 6, alignItems: "center" }, children: [
-    /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-small", disabled: phase === "busy", onClick: () => void begin(), children: phase === "busy" ? "Working…" : isOAuth ? "Sign in" : "Set up" }),
-    message ? /* @__PURE__ */ jsx11("span", { className: phase === "error" ? "gbo-card-error" : "gbo-field-hint", children: message }) : null
+  return /* @__PURE__ */ jsxs11("span", { style: { display: "inline-flex", gap: 6, alignItems: "center" }, children: [
+    /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-btn is-small", disabled: phase === "busy", onClick: () => void begin(), children: phase === "busy" ? "Working…" : isOAuth ? "Sign in" : "Set up" }),
+    message ? /* @__PURE__ */ jsx12("span", { className: phase === "error" ? "gbo-card-error" : "gbo-field-hint", children: message }) : null
   ] });
 }
 function AdvancedConfig({ bot, state, setState }) {
-  const [unsupported, setUnsupported] = React10.useState(null);
-  const [filter, setFilter] = React10.useState("");
-  const [toolsetOpen, setToolsetOpen] = React10.useState("");
+  const [unsupported, setUnsupported] = React11.useState(null);
+  const [filter, setFilter] = React11.useState("");
+  const [toolsetOpen, setToolsetOpen] = React11.useState("");
   const ToolsetPanel = sdk.ToolsetConfigPanel;
   const loadKey = `${bot?.connectionId || ""}::${bot?.name}`;
-  React10.useEffect(() => {
+  React11.useEffect(() => {
     if (state.loaded) return;
     let live = true;
     loadProfileConfig(bot).then((next) => live && setState(() => next)).catch((error) => live && setUnsupported(String(error?.message || error)));
@@ -24814,37 +25829,37 @@ function AdvancedConfig({ bot, state, setState }) {
       live = false;
     };
   }, [loadKey]);
-  if (unsupported) return /* @__PURE__ */ jsxs10("div", { className: "gbo-form-note", children: [
+  if (unsupported) return /* @__PURE__ */ jsxs11("div", { className: "gbo-form-note", children: [
     "This bot’s Hermes cannot describe its profile here (",
     unsupported,
     "). Use `hermes -p ",
     bot.name,
     " config` on its machine."
   ] });
-  if (!state.loaded) return /* @__PURE__ */ jsx11("div", { className: "gbo-form-note", children: "Loading the bot’s config…" });
+  if (!state.loaded) return /* @__PURE__ */ jsx12("div", { className: "gbo-form-note", children: "Loading the bot’s config…" });
   const skills = filter.trim() ? state.skills.filter((s) => s.name.toLowerCase().includes(filter.trim().toLowerCase())) : state.skills;
   const on = (list) => list.filter((x) => x.enabled).length;
-  return /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 14 }, children: [
-    /* @__PURE__ */ jsx11(ModelPicker, { bot, value: { provider: state.provider, model: state.model }, onChange: (patch) => setState((s) => ({ ...s, dirtyModel: true, ...patch })) }),
-    /* @__PURE__ */ jsxs10(Field, { label: `Skills · ${on(state.skills)} of ${state.skills.length} on`, children: [
-      /* @__PURE__ */ jsx11("input", { className: "gbo-input", placeholder: "Filter skills", value: filter, onChange: (e2) => setFilter(e2.target.value) }),
-      /* @__PURE__ */ jsx11("div", { className: "gbo-check-list", children: skills.map((s) => /* @__PURE__ */ jsx11(Check, { title: s.description || s.name, checked: Boolean(s.enabled), onChange: (v) => setState((st) => toggleEntry(st, "skills", s.name, v)), children: s.name }, s.name)) })
+  return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 14 }, children: [
+    /* @__PURE__ */ jsx12(ModelPicker, { bot, value: { provider: state.provider, model: state.model }, onChange: (patch) => setState((s) => ({ ...s, dirtyModel: true, ...patch })) }),
+    /* @__PURE__ */ jsxs11(Field, { label: `Skills · ${on(state.skills)} of ${state.skills.length} on`, children: [
+      /* @__PURE__ */ jsx12("input", { className: "gbo-input", placeholder: "Filter skills", value: filter, onChange: (e2) => setFilter(e2.target.value) }),
+      /* @__PURE__ */ jsx12("div", { className: "gbo-check-list", children: skills.map((s) => /* @__PURE__ */ jsx12(Check, { title: s.description || s.name, checked: Boolean(s.enabled), onChange: (v) => setState((st) => toggleEntry(st, "skills", s.name, v)), children: s.name }, s.name)) })
     ] }),
-    /* @__PURE__ */ jsx11(SkillsHub, { bot, onInstalled: (name) => setState((s) => s.skills.some((x) => x.name === name) ? s : { ...s, skills: [...s.skills, { name, enabled: true }] }) }),
-    /* @__PURE__ */ jsx11(Field, { label: `Toolsets · ${on(state.toolsets)} of ${state.toolsets.length} on`, children: /* @__PURE__ */ jsx11("div", { className: "gbo-check-list", children: state.toolsets.map((t) => /* @__PURE__ */ jsx11(Check, { title: t.description || t.name, checked: Boolean(t.enabled), meta: t.tool_count ? String(t.tool_count) : void 0, onChange: (v) => setState((st) => toggleEntry(st, "toolsets", t.name, v)), children: t.name }, t.name)) }) }),
+    /* @__PURE__ */ jsx12(SkillsHub, { bot, onInstalled: (name) => setState((s) => s.skills.some((x) => x.name === name) ? s : { ...s, skills: [...s.skills, { name, enabled: true }] }) }),
+    /* @__PURE__ */ jsx12(Field, { label: `Toolsets · ${on(state.toolsets)} of ${state.toolsets.length} on`, children: /* @__PURE__ */ jsx12("div", { className: "gbo-check-list", children: state.toolsets.map((t) => /* @__PURE__ */ jsx12(Check, { title: t.description || t.name, checked: Boolean(t.enabled), meta: t.tool_count ? String(t.tool_count) : void 0, onChange: (v) => setState((st) => toggleEntry(st, "toolsets", t.name, v)), children: t.name }, t.name)) }) }),
     ToolsetPanel && state.toolsets.length ? (
       // profile-config.tsx:404: the SDK's own per-toolset config (keys,
       // model, post-setup) scoped to this bot's backend, when exported.
-      /* @__PURE__ */ jsxs10("details", { className: "gbo-section-card", children: [
-        /* @__PURE__ */ jsx11("summary", { className: "gbo-field-hint", style: { cursor: "pointer" }, children: "Configure a toolset (keys and options)" }),
-        /* @__PURE__ */ jsx11(Select, { label: "Toolset", value: toolsetOpen || state.toolsets[0].name, onChange: setToolsetOpen, options: state.toolsets.map((t) => [t.name, t.name]) }),
-        /* @__PURE__ */ jsx11(ToolsetPanel, { profile: backendScope(bot), toolset: toolsetOpen || state.toolsets[0].name })
+      /* @__PURE__ */ jsxs11("details", { className: "gbo-section-card", children: [
+        /* @__PURE__ */ jsx12("summary", { className: "gbo-field-hint", style: { cursor: "pointer" }, children: "Configure a toolset (keys and options)" }),
+        /* @__PURE__ */ jsx12(Select, { label: "Toolset", value: toolsetOpen || state.toolsets[0].name, onChange: setToolsetOpen, options: state.toolsets.map((t) => [t.name, t.name]) }),
+        /* @__PURE__ */ jsx12(ToolsetPanel, { profile: backendScope(bot), toolset: toolsetOpen || state.toolsets[0].name })
       ] })
     ) : null,
-    /* @__PURE__ */ jsx11(Field, { label: "MCP servers", children: state.mcp.length ? /* @__PURE__ */ jsx11("div", { className: "gbo-check-list is-one", children: state.mcp.map((m) => {
+    /* @__PURE__ */ jsx12(Field, { label: "MCP servers", children: state.mcp.length ? /* @__PURE__ */ jsx12("div", { className: "gbo-check-list is-one", children: state.mcp.map((m) => {
       const setup = mcpNeedsSetup(m);
-      return /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
-        /* @__PURE__ */ jsx11(
+      return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
+        /* @__PURE__ */ jsx12(
           Check,
           {
             title: m.description || m.name,
@@ -24855,7 +25870,7 @@ function AdvancedConfig({ bot, state, setState }) {
             children: m.name
           }
         ),
-        setup ? /* @__PURE__ */ jsx11(
+        setup ? /* @__PURE__ */ jsx12(
           McpSetup,
           {
             bot,
@@ -24864,13 +25879,13 @@ function AdvancedConfig({ bot, state, setState }) {
           }
         ) : null
       ] }, m.name);
-    }) }) : /* @__PURE__ */ jsx11("span", { className: "gbo-field-hint", children: "No MCP servers." }) }),
-    /* @__PURE__ */ jsx11(Field, { label: "SOUL (who the bot is)", hint: "The agent-messaging section is kept or added on save, as Bot Mode does.", children: /* @__PURE__ */ jsx11("textarea", { className: "gbo-textarea is-mono", value: state.soul, onChange: (e2) => setState((s) => ({ ...s, dirtySoul: true, soul: e2.target.value })) }) })
+    }) }) : /* @__PURE__ */ jsx12("span", { className: "gbo-field-hint", children: "No MCP servers." }) }),
+    /* @__PURE__ */ jsx12(Field, { label: "SOUL (who the bot is)", hint: "The agent-messaging section is kept or added on save, as Bot Mode does.", children: /* @__PURE__ */ jsx12("textarea", { className: "gbo-textarea is-mono", value: state.soul, onChange: (e2) => setState((s) => ({ ...s, dirtySoul: true, soul: e2.target.value })) }) })
   ] });
 }
 
 // src/ui/SlackSetup.tsx
-import * as React12 from "react";
+import * as React13 from "react";
 
 // src/core/slack.js
 var SLACK_PLATFORM = "slack";
@@ -24919,8 +25934,8 @@ var BOT_EVENTS = [
   "app_context_changed",
   "app_home_opened"
 ];
-function cut(text, n) {
-  return Array.from(String(text)).slice(0, n).join("");
+function cut(text2, n) {
+  return Array.from(String(text2)).slice(0, n).join("");
 }
 var sorted = (list) => [...list].sort((a2, b2) => a2 < b2 ? -1 : a2 > b2 ? 1 : 0);
 function slackManifest(botName) {
@@ -24958,10 +25973,10 @@ var TOKEN_RULES = {
 function slackTokenError(kind, value) {
   const rule = TOKEN_RULES[kind];
   if (!rule) return "Unknown token";
-  const text = String(value ?? "").trim();
-  if (!text) return `Paste the ${rule.label.toLowerCase()}`;
-  if (!text.startsWith(rule.prefix)) return `The ${rule.label.toLowerCase()} starts with ${rule.prefix}`;
-  if (/\s/.test(text) || text.length <= rule.prefix.length + 8) return `That does not look like a whole ${rule.label.toLowerCase()}`;
+  const text2 = String(value ?? "").trim();
+  if (!text2) return `Paste the ${rule.label.toLowerCase()}`;
+  if (!text2.startsWith(rule.prefix)) return `The ${rule.label.toLowerCase()} starts with ${rule.prefix}`;
+  if (/\s/.test(text2) || text2.length <= rule.prefix.length + 8) return `That does not look like a whole ${rule.label.toLowerCase()}`;
   return null;
 }
 function slackPlatformFrom(response) {
@@ -24984,8 +25999,8 @@ function slackPanelCard(state, key, hidden) {
   if (slackAlreadySet(state.platform)) return "status";
   return hiddenKeysFrom(hidden).includes(key) ? null : "suggested";
 }
-function short(text, max = 48) {
-  const line = String(text || "").split("\n")[0].trim();
+function short(text2, max = 48) {
+  const line = String(text2 || "").split("\n")[0].trim();
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 }
 function gatewayStatusRequest(scope) {
@@ -25112,17 +26127,17 @@ function restFailure(error) {
   let detail = m ? m[2].trim() : message.trim();
   if (m) {
     try {
-      const parsed = JSON.parse(detail);
-      if (typeof parsed?.detail === "string") detail = parsed.detail;
-      else if (Array.isArray(parsed?.detail)) detail = parsed.detail.map((d2) => String(d2?.msg || d2)).join("; ");
+      const parsed2 = JSON.parse(detail);
+      if (typeof parsed2?.detail === "string") detail = parsed2.detail;
+      else if (Array.isArray(parsed2?.detail)) detail = parsed2.detail.map((d2) => String(d2?.msg || d2)).join("; ");
     } catch {
     }
   }
   return { status, detail: detail || "Request failed" };
 }
 var TOKEN_LIKE = /\b(?:xoxe[.-]|xox[a-z]-|xapp-)[A-Za-z0-9.-]+/g;
-function withoutSecrets(text, secrets) {
-  let out = String(text ?? "");
+function withoutSecrets(text2, secrets) {
+  let out = String(text2 ?? "");
   for (const secret of secrets || []) {
     const s = String(secret ?? "").trim();
     if (s.length >= 4) out = out.split(s).join("[token]");
@@ -25137,8 +26152,8 @@ function slackIsConnected(entry) {
 }
 function slackError(error, fallback, secrets = []) {
   const { status, detail } = restFailure(error);
-  const text = status === 409 ? detail : detail || fallback;
-  return new Error(withoutSecrets(text || fallback, secrets));
+  const text2 = status === 409 ? detail : detail || fallback;
+  return new Error(withoutSecrets(text2 || fallback, secrets));
 }
 async function saveSlackTokens(call, scope, tokens) {
   const appError = slackTokenError("app", tokens?.appToken);
@@ -25250,16 +26265,16 @@ function logClock(stamp2, now) {
 }
 function slackLogLine(lastLog, testOk, now = Date.now()) {
   if (!lastLog || typeof lastLog !== "object") return "";
-  const text = withoutSecrets(String(lastLog.text ?? ""), []).trim();
-  if (!text) return "";
+  const text2 = withoutSecrets(String(lastLog.text ?? ""), []).trim();
+  if (!text2) return "";
   const at = logClock(lastLog.at || lastLog.ts, now);
-  if (/^\[Slack\] (?:Socket Mode connected|HTTP Events mode ready|Authenticated as)/.test(text)) return at ? `Last connected ${at}` : "Connected before";
-  if (/unhealthy/.test(text)) return testOk ? "" : `Likely reason: ${at ? `${text} (${at})` : text}`;
+  if (/^\[Slack\] (?:Socket Mode connected|HTTP Events mode ready|Authenticated as)/.test(text2)) return at ? `Last connected ${at}` : "Connected before";
+  if (/unhealthy/.test(text2)) return testOk ? "" : `Likely reason: ${at ? `${text2} (${at})` : text2}`;
   return "";
 }
 function slackCheckVerdict(check, now = Date.now()) {
   if (!check) return null;
-  const clean = (text) => withoutSecrets(String(text ?? ""), []).trim();
+  const clean = (text2) => withoutSecrets(String(text2 ?? ""), []).trim();
   if (check.kind === "missing") return { tone: "note", message: SLACK_CHECK_HINT, lines: [], log: "" };
   const result = check.result && typeof check.result === "object" ? check.result : null;
   const log = slackLogLine(result?.last_log, check.kind === "ok", now);
@@ -25286,6 +26301,26 @@ function slackCheckedLabel(at) {
   const when = new Date(at);
   if (Number.isNaN(when.getTime())) return "Connected";
   return `Connected · checked ${when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+// src/core/urls.js
+function parsed(value) {
+  try {
+    return new URL(String(value));
+  } catch {
+    return null;
+  }
+}
+var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]"]);
+function isSlackAuthorizationUrl(value) {
+  const url = parsed(value);
+  return Boolean(url && url.protocol === "https:" && url.hostname === "slack.com" && url.pathname === "/oauth/v2/authorize");
+}
+function isOpenableConnectUrl(value) {
+  const url = parsed(value);
+  if (!url) return false;
+  if (url.protocol === "https:") return Boolean(url.hostname);
+  return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
 }
 
 // src/core/slackConnect.js
@@ -25350,14 +26385,6 @@ function refreshTokenError(value) {
   if (!s) return "Paste the refresh token";
   if (!s.startsWith("xoxe-") || /\s/.test(s) || s.length <= 13) return "Paste the complete refresh token starting with xoxe-";
   return null;
-}
-function isSlackAuthorizationUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "slack.com" && url.pathname === "/oauth/v2/authorize";
-  } catch {
-    return false;
-  }
 }
 
 // src/ui/slackActions.ts
@@ -25502,29 +26529,29 @@ function enableSlackProvisioning(bot) {
 }
 
 // src/ui/SlackConnect.tsx
-import * as React11 from "react";
-import { Fragment as Fragment6, jsx as jsx12, jsxs as jsxs11 } from "react/jsx-runtime";
+import * as React12 from "react";
+import { Fragment as Fragment8, jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
 function SlackConnect({ bot, name, initial, onClose }) {
-  const [workspaces, setWorkspaces] = React11.useState(initial.workspaces);
-  const [selected, setSelected] = React11.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
-  const [phase, setPhase] = React11.useState(initial.status?.phase || "none");
-  const [teamName, setTeamName] = React11.useState(initial.status?.team_name || "");
-  const [adding, setAdding] = React11.useState(needsWorkspace(initial.workspaces));
-  const [refresh, setRefresh] = React11.useState("");
-  const [authorize, setAuthorize] = React11.useState("");
-  const [busy, setBusy] = React11.useState(false);
-  const [confirm, setConfirm] = React11.useState(false);
-  const [error, setError] = React11.useState("");
-  const [timedOut, setTimedOut] = React11.useState(false);
-  const [testResult, setTestResult] = React11.useState("");
-  const [needsBootstrap, setNeedsBootstrap] = React11.useState(Boolean(initial.bootstrap));
-  const phaseRef = React11.useRef(phase);
-  const alive = React11.useRef(true);
+  const [workspaces, setWorkspaces] = React12.useState(initial.workspaces);
+  const [selected, setSelected] = React12.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
+  const [phase, setPhase] = React12.useState(initial.status?.phase || "none");
+  const [teamName, setTeamName] = React12.useState(initial.status?.team_name || "");
+  const [adding, setAdding] = React12.useState(needsWorkspace(initial.workspaces));
+  const [refresh, setRefresh] = React12.useState("");
+  const [authorize, setAuthorize] = React12.useState("");
+  const [busy, setBusy] = React12.useState(false);
+  const [confirm, setConfirm] = React12.useState(false);
+  const [error, setError] = React12.useState("");
+  const [timedOut, setTimedOut] = React12.useState(false);
+  const [testResult, setTestResult] = React12.useState("");
+  const [needsBootstrap, setNeedsBootstrap] = React12.useState(Boolean(initial.bootstrap));
+  const phaseRef = React12.useRef(phase);
+  const alive = React12.useRef(true);
   phaseRef.current = phase;
-  React11.useEffect(() => () => {
+  React12.useEffect(() => () => {
     alive.current = false;
   }, []);
-  React11.useEffect(() => {
+  React12.useEffect(() => {
     if (phase !== "created" && phase !== "installed") return;
     let stopped = false;
     const started = Date.now();
@@ -25637,111 +26664,111 @@ function SlackConnect({ bot, name, initial, onClose }) {
   const waiting = phase === "created" || phase === "installed";
   const workspace = teamName || workspaceLabel(workspaces.find((w) => w.team_id === selected) || { team_id: selected }, Object.values(slack.checks.get()));
   const title = confirm ? `Remove the Slack app for ${name}?` : connected ? `Connected to ${workspace} Slack` : adding ? "Connect another workspace" : `Bring ${name} to Slack`;
-  const cancel = /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: confirm ? () => setConfirm(false) : close, children: "Cancel" });
+  const cancel = /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: confirm ? () => setConfirm(false) : close, children: "Cancel" });
   let body;
   let footer;
   if (confirm) {
-    body = /* @__PURE__ */ jsxs11("p", { className: "gbo-sheet-text", children: [
+    body = /* @__PURE__ */ jsxs12("p", { className: "gbo-sheet-text", children: [
       "This deletes the app from the Slack workspace. Teammates can no longer reach ",
       name,
       " from Slack until it is added again."
     ] });
-    footer = /* @__PURE__ */ jsxs11(Fragment6, { children: [
+    footer = /* @__PURE__ */ jsxs12(Fragment8, { children: [
       cancel,
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-primary gbo-slack-remove-primary", disabled: busy, onClick: () => void remove(), children: "Remove" })
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary gbo-slack-remove-primary", disabled: busy, onClick: () => void remove(), children: "Remove" })
     ] });
   } else if (connected) {
-    body = /* @__PURE__ */ jsxs11(Fragment6, { children: [
-      /* @__PURE__ */ jsxs11("p", { className: "gbo-sheet-text", children: [
+    body = /* @__PURE__ */ jsxs12(Fragment8, { children: [
+      /* @__PURE__ */ jsxs12("p", { className: "gbo-sheet-text", children: [
         "You can DM or @mention ",
         name,
         " in ",
         workspace,
         " Slack. It’ll respond with the same plugins, context, and memories it uses here."
       ] }),
-      testResult ? /* @__PURE__ */ jsx12("div", { className: "gbo-sheet-note", role: "status", children: testResult }) : null
+      testResult ? /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-note", role: "status", children: testResult }) : null
     ] });
-    footer = /* @__PURE__ */ jsxs11(Fragment6, { children: [
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: () => void testConnection(), children: busy ? "Testing…" : "Test connection" }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", disabled: busy, onClick: () => setConfirm(true), children: "Remove from Slack" }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: onClose, children: "Done" })
+    footer = /* @__PURE__ */ jsxs12(Fragment8, { children: [
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: () => void testConnection(), children: busy ? "Testing…" : "Test connection" }),
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", disabled: busy, onClick: () => setConfirm(true), children: "Remove from Slack" }),
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: onClose, children: "Done" })
     ] });
   } else if (waiting) {
-    body = /* @__PURE__ */ jsxs11("div", { className: "gbo-sheet-note", children: [
+    body = /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-note", children: [
       phase === "installed" ? "Slack is installed. Waiting for the bot connection…" : "Finish in Slack… Allow the bot in the browser tab that just opened.",
       timedOut ? " The connection timed out. Select Cancel to remove the incomplete app." : ""
     ] });
-    footer = /* @__PURE__ */ jsxs11(Fragment6, { children: [
+    footer = /* @__PURE__ */ jsxs12(Fragment8, { children: [
       cancel,
-      phase === "installed" ? /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", onClick: () => setConfirm(true), children: "Remove from Slack" }) : authorize ? /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(authorize), children: "Open again ↗" }) : null
+      phase === "installed" ? /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", onClick: () => setConfirm(true), children: "Remove from Slack" }) : authorize ? /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(authorize), children: "Open again ↗" }) : null
     ] });
   } else if (phase === "denied" || phase === "error") {
-    body = /* @__PURE__ */ jsxs11("div", { className: "gbo-sheet-note", children: [
+    body = /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-note", children: [
       phase === "denied" ? "Slack install was cancelled." : "Slack setup needs attention.",
       " Remove the incomplete app before trying again."
     ] });
-    footer = /* @__PURE__ */ jsxs11(Fragment6, { children: [
+    footer = /* @__PURE__ */ jsxs12(Fragment8, { children: [
       cancel,
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: () => void remove(), children: "Remove and try again" })
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: () => void remove(), children: "Remove and try again" })
     ] });
   } else if (adding) {
-    body = /* @__PURE__ */ jsxs11("div", { className: "gbo-sheet-form", children: [
-      /* @__PURE__ */ jsxs11("p", { className: "gbo-sheet-text gbo-slack-howto", children: [
+    body = /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-form", children: [
+      /* @__PURE__ */ jsxs12("p", { className: "gbo-sheet-text gbo-slack-howto", children: [
         "On api.slack.com/apps, scroll to Your App Configuration Tokens and click Generate Token for your workspace.",
-        /* @__PURE__ */ jsx12("br", {}),
+        /* @__PURE__ */ jsx13("br", {}),
         "Paste the Refresh token (it starts with xoxe-) below. Hermes keeps it on the bot’s server."
       ] }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-link-btn", onClick: () => openExternalLink("https://api.slack.com/apps"), children: "Open Slack app settings ↗" }),
-      /* @__PURE__ */ jsxs11("label", { className: "gbo-sheet-field", children: [
-        /* @__PURE__ */ jsx12("span", { children: "Refresh token" }),
-        /* @__PURE__ */ jsx12("input", { className: "gbo-input", type: "password", autoComplete: "off", spellCheck: false, value: refresh, onChange: (e2) => setRefresh(e2.target.value) })
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-link-btn", onClick: () => openExternalLink("https://api.slack.com/apps"), children: "Open Slack app settings ↗" }),
+      /* @__PURE__ */ jsxs12("label", { className: "gbo-sheet-field", children: [
+        /* @__PURE__ */ jsx13("span", { children: "Refresh token" }),
+        /* @__PURE__ */ jsx13("input", { className: "gbo-input", type: "password", autoComplete: "off", spellCheck: false, value: refresh, onChange: (e2) => setRefresh(e2.target.value) })
       ] })
     ] });
-    footer = /* @__PURE__ */ jsxs11(Fragment6, { children: [
+    footer = /* @__PURE__ */ jsxs12(Fragment8, { children: [
       cancel,
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || Boolean(refreshTokenError(refresh)), onClick: () => void add2(), children: "Add" })
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || Boolean(refreshTokenError(refresh)), onClick: () => void add2(), children: "Add" })
     ] });
   } else {
-    body = /* @__PURE__ */ jsxs11(Fragment6, { children: [
-      /* @__PURE__ */ jsxs11("p", { className: "gbo-sheet-text", children: [
+    body = /* @__PURE__ */ jsxs12(Fragment8, { children: [
+      /* @__PURE__ */ jsxs12("p", { className: "gbo-sheet-text", children: [
         "You can DM or @mention ",
         name,
         " in Slack. It’ll respond with the same plugins, context, and memories it uses here."
       ] }),
-      phase === "denied" ? /* @__PURE__ */ jsx12("div", { className: "gbo-sheet-note", children: "Slack install was cancelled. Try again." }) : null,
-      workspaces.map((w) => /* @__PURE__ */ jsxs11("label", { className: "gbo-sheet-choice", children: [
-        /* @__PURE__ */ jsx12("input", { className: "gbo-slack-workspace-choice", type: "radio", name: "slack-workspace", checked: selected === w.team_id, onChange: () => setSelected(w.team_id) }),
+      phase === "denied" ? /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-note", children: "Slack install was cancelled. Try again." }) : null,
+      workspaces.map((w) => /* @__PURE__ */ jsxs12("label", { className: "gbo-sheet-choice", children: [
+        /* @__PURE__ */ jsx13("input", { className: "gbo-slack-workspace-choice", type: "radio", name: "slack-workspace", checked: selected === w.team_id, onChange: () => setSelected(w.team_id) }),
         workspaceLabel(w, Object.values(slack.checks.get()))
       ] }, w.team_id)),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-link-btn gbo-slack-add-workspace", onClick: () => setAdding(true), children: "+ Connect another workspace" })
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-link-btn gbo-slack-add-workspace", onClick: () => setAdding(true), children: "+ Connect another workspace" })
     ] });
-    footer = /* @__PURE__ */ jsxs11(Fragment6, { children: [
+    footer = /* @__PURE__ */ jsxs12(Fragment8, { children: [
       cancel,
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || !selected, onClick: () => void connect(), children: "Connect ↗" })
+      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || !selected, onClick: () => void connect(), children: "Connect ↗" })
     ] });
   }
-  return /* @__PURE__ */ jsxs11(Sheet, { onClose: close, busy, label: title, title, subtitle: "Uses your Slack connection", emblem: /* @__PURE__ */ jsx12(SlackMark, { size: 40 }), footer, children: [
+  return /* @__PURE__ */ jsxs12(Sheet, { onClose: close, busy, label: title, title, subtitle: "Uses your Slack connection", emblem: /* @__PURE__ */ jsx13(SlackMark, { size: 40 }), footer, children: [
     body,
-    error ? /* @__PURE__ */ jsx12("div", { className: "gbo-form-error", role: "alert", children: error }) : null
+    error ? /* @__PURE__ */ jsx13("div", { className: "gbo-form-error", role: "alert", children: error }) : null
   ] });
 }
 
 // src/ui/SlackSetup.tsx
-import { Fragment as Fragment7, jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
-var SlackMark = ({ size = 18 }) => /* @__PURE__ */ jsxs12("svg", { width: size, height: size, viewBox: "0 0 24 24", "aria-hidden": true, className: "gbo-slack-mark", children: [
-  /* @__PURE__ */ jsx13("rect", { x: "3", y: "8.5", width: "8.5", height: "3", rx: "1.5", fill: "#36C5F0" }),
-  /* @__PURE__ */ jsx13("rect", { x: "8.5", y: "3", width: "3", height: "4.5", rx: "1.5", fill: "#36C5F0" }),
-  /* @__PURE__ */ jsx13("rect", { x: "12.5", y: "3", width: "3", height: "8.5", rx: "1.5", fill: "#2EB67D" }),
-  /* @__PURE__ */ jsx13("rect", { x: "16.5", y: "8.5", width: "4.5", height: "3", rx: "1.5", fill: "#2EB67D" }),
-  /* @__PURE__ */ jsx13("rect", { x: "12.5", y: "12.5", width: "8.5", height: "3", rx: "1.5", fill: "#ECB22E" }),
-  /* @__PURE__ */ jsx13("rect", { x: "12.5", y: "16.5", width: "3", height: "4.5", rx: "1.5", fill: "#ECB22E" }),
-  /* @__PURE__ */ jsx13("rect", { x: "8.5", y: "12.5", width: "3", height: "8.5", rx: "1.5", fill: "#E01E5A" }),
-  /* @__PURE__ */ jsx13("rect", { x: "3", y: "12.5", width: "4.5", height: "3", rx: "1.5", fill: "#E01E5A" })
+import { Fragment as Fragment9, jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
+var SlackMark = ({ size = 18 }) => /* @__PURE__ */ jsxs13("svg", { width: size, height: size, viewBox: "0 0 24 24", "aria-hidden": true, className: "gbo-slack-mark", children: [
+  /* @__PURE__ */ jsx14("rect", { x: "3", y: "8.5", width: "8.5", height: "3", rx: "1.5", fill: "#36C5F0" }),
+  /* @__PURE__ */ jsx14("rect", { x: "8.5", y: "3", width: "3", height: "4.5", rx: "1.5", fill: "#36C5F0" }),
+  /* @__PURE__ */ jsx14("rect", { x: "12.5", y: "3", width: "3", height: "8.5", rx: "1.5", fill: "#2EB67D" }),
+  /* @__PURE__ */ jsx14("rect", { x: "16.5", y: "8.5", width: "4.5", height: "3", rx: "1.5", fill: "#2EB67D" }),
+  /* @__PURE__ */ jsx14("rect", { x: "12.5", y: "12.5", width: "8.5", height: "3", rx: "1.5", fill: "#ECB22E" }),
+  /* @__PURE__ */ jsx14("rect", { x: "12.5", y: "16.5", width: "3", height: "4.5", rx: "1.5", fill: "#ECB22E" }),
+  /* @__PURE__ */ jsx14("rect", { x: "8.5", y: "12.5", width: "3", height: "8.5", rx: "1.5", fill: "#E01E5A" }),
+  /* @__PURE__ */ jsx14("rect", { x: "3", y: "12.5", width: "4.5", height: "3", rx: "1.5", fill: "#E01E5A" })
 ] });
-var Emblem = () => /* @__PURE__ */ jsx13(SlackMark, { size: 40 });
-var Out = () => /* @__PURE__ */ jsx13("span", { className: "gbo-sheet-out", "aria-hidden": true, children: "↗" });
+var Emblem = () => /* @__PURE__ */ jsx14(SlackMark, { size: 40 });
+var Out = () => /* @__PURE__ */ jsx14("span", { className: "gbo-sheet-out", "aria-hidden": true, children: "↗" });
 function Intro({ name }) {
-  return /* @__PURE__ */ jsxs12("p", { className: "gbo-sheet-text", children: [
+  return /* @__PURE__ */ jsxs13("p", { className: "gbo-sheet-text", children: [
     "You can DM or @mention ",
     name,
     " in Slack. It’ll respond with the same skills, context and memories it uses here."
@@ -25751,24 +26778,24 @@ function SuggestedSlack({ bot }) {
   const state = useStore(slack.state);
   const hidden = useStore(slack.hidden);
   const key = rowKey(bot);
-  React12.useEffect(() => {
+  React13.useEffect(() => {
     loadSlackHidden();
   }, []);
-  React12.useEffect(() => {
+  React13.useEffect(() => {
     void loadSlackState(bot);
   }, [key]);
   if (state.key === key && ["created", "installed", "connected", "denied", "error"].includes(state.connectStatus?.phase)) return null;
   if (slackPanelCard(state, key, hidden) !== "suggested") return null;
   const name = displayName(bot, metaFor(bot));
-  return /* @__PURE__ */ jsxs12("section", { className: "gbo-panel-section", "aria-label": "Suggested", children: [
-    /* @__PURE__ */ jsxs12("div", { className: "section-label section-label--row gbo-panel-label", children: [
-      /* @__PURE__ */ jsx13("span", { children: "Suggested" }),
-      /* @__PURE__ */ jsx13("button", { type: "button", className: "link-btn link-btn--small gbo-suggest-hide", onClick: () => hideSlackCard(bot), children: "Hide" })
+  return /* @__PURE__ */ jsxs13("section", { className: "gbo-panel-section", "aria-label": "Suggested", children: [
+    /* @__PURE__ */ jsxs13("div", { className: "section-label section-label--row gbo-panel-label", children: [
+      /* @__PURE__ */ jsx14("span", { children: "Suggested" }),
+      /* @__PURE__ */ jsx14("button", { type: "button", className: "link-btn link-btn--small gbo-suggest-hide", onClick: () => hideSlackCard(bot), children: "Hide" })
     ] }),
-    /* @__PURE__ */ jsx13("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs12("button", { type: "button", className: "panel-row panel-row--link gbo-slack-card gbo-suggest-card", title: `Bring ${name} to Slack`, onClick: () => openDialog({ kind: "slack", bot }), children: [
-      /* @__PURE__ */ jsx13("span", { className: "panel-row__glyph gbo-slack-card-mark", children: /* @__PURE__ */ jsx13(SlackMark, {}) }),
-      /* @__PURE__ */ jsx13("span", { className: "panel-row__title gbo-slack-card-line", children: "Add to Slack" }),
-      /* @__PURE__ */ jsx13(IconChevron, {})
+    /* @__PURE__ */ jsx14("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs13("button", { type: "button", className: "panel-row panel-row--link gbo-slack-card gbo-suggest-card", title: `Bring ${name} to Slack`, onClick: () => openDialog({ kind: "slack", bot }), children: [
+      /* @__PURE__ */ jsx14("span", { className: "panel-row__glyph gbo-slack-card-mark", children: /* @__PURE__ */ jsx14(SlackMark, {}) }),
+      /* @__PURE__ */ jsx14("span", { className: "panel-row__title gbo-slack-card-line", children: "Add to Slack" }),
+      /* @__PURE__ */ jsx14(IconChevron, {})
     ] }) })
   ] });
 }
@@ -25778,13 +26805,13 @@ function SlackStatusCard({ bot }) {
   const phase = state.key === rowKey(bot) ? state.connectStatus?.phase : null;
   if (!["created", "installed", "connected", "denied", "error"].includes(phase) && slackPanelCard(state, rowKey(bot), hidden) !== "status") return null;
   const status = ["created", "installed", "connected", "denied", "error"].includes(phase) ? { label: phase === "connected" ? "Connected" : phase === "denied" || phase === "error" ? "Needs attention" : "Connecting…", tone: phase === "connected" ? "ok" : "warn" } : slackStatus(state.platform, { served: Boolean(state.served), gateway: state.gateway });
-  return /* @__PURE__ */ jsx13("section", { className: "gbo-panel-section gbo-slack-section", children: /* @__PURE__ */ jsx13("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs12("button", { type: "button", className: "panel-row panel-row--link gbo-slack-card is-status", title: `Slack · ${status?.label || ""}`, onClick: () => openDialog({ kind: "slack-status", bot }), children: [
-    /* @__PURE__ */ jsx13("span", { className: "panel-row__glyph gbo-slack-card-mark", children: /* @__PURE__ */ jsx13(SlackMark, {}) }),
-    /* @__PURE__ */ jsxs12("span", { className: "panel-row__text gbo-slack-card-text", children: [
-      /* @__PURE__ */ jsx13("span", { className: "panel-row__title gbo-slack-card-title", children: "Slack" }),
-      /* @__PURE__ */ jsx13("span", { className: `panel-row__sub gbo-slack-card-sub is-${status?.tone || "warn"}`, children: status?.label })
+  return /* @__PURE__ */ jsx14("section", { className: "gbo-panel-section gbo-slack-section", children: /* @__PURE__ */ jsx14("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs13("button", { type: "button", className: "panel-row panel-row--link gbo-slack-card is-status", title: `Slack · ${status?.label || ""}`, onClick: () => openDialog({ kind: "slack-status", bot }), children: [
+    /* @__PURE__ */ jsx14("span", { className: "panel-row__glyph gbo-slack-card-mark", children: /* @__PURE__ */ jsx14(SlackMark, {}) }),
+    /* @__PURE__ */ jsxs13("span", { className: "panel-row__text gbo-slack-card-text", children: [
+      /* @__PURE__ */ jsx14("span", { className: "panel-row__title gbo-slack-card-title", children: "Slack" }),
+      /* @__PURE__ */ jsx14("span", { className: `panel-row__sub gbo-slack-card-sub is-${status?.tone || "warn"}`, children: status?.label })
     ] }),
-    /* @__PURE__ */ jsx13(IconChevron, {})
+    /* @__PURE__ */ jsx14(IconChevron, {})
   ] }) }) });
 }
 function LegacySlackStatusDialog({ bot, onClose }) {
@@ -25794,10 +26821,10 @@ function LegacySlackStatusDialog({ bot, onClose }) {
   const entry = state.key === key ? state.platform : null;
   const served = state.key === key && Boolean(state.served);
   const name = displayName(bot, metaFor(bot));
-  const [testing, setTesting] = React12.useState(false);
-  const [result, setResult] = React12.useState(null);
-  const alive = React12.useRef(true);
-  React12.useEffect(() => {
+  const [testing, setTesting] = React13.useState(false);
+  const [result, setResult] = React13.useState(null);
+  const alive = React13.useRef(true);
+  React13.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
@@ -25820,38 +26847,38 @@ function LegacySlackStatusDialog({ bot, onClose }) {
     setTesting(false);
     void loadSlackState(bot);
   };
-  return /* @__PURE__ */ jsxs12(
+  return /* @__PURE__ */ jsxs13(
     Sheet,
     {
       onClose,
       label: `${name} is in Slack`,
-      emblem: /* @__PURE__ */ jsx13(Emblem, {}),
+      emblem: /* @__PURE__ */ jsx14(Emblem, {}),
       title: `${name} is in Slack`,
       subtitle: "Uses its own Slack app",
-      footer: /* @__PURE__ */ jsxs12(Fragment7, { children: [
-        testable ? /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-cancel", disabled: testing, onClick: () => void test(), children: testing ? "Testing…" : "Test connection" }) : /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }),
-        /* @__PURE__ */ jsxs12("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(SLACK_OPEN_URL), children: [
+      footer: /* @__PURE__ */ jsxs13(Fragment9, { children: [
+        testable ? /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-cancel", disabled: testing, onClick: () => void test(), children: testing ? "Testing…" : "Test connection" }) : /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }),
+        /* @__PURE__ */ jsxs13("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(SLACK_OPEN_URL), children: [
           "Open Slack ",
-          /* @__PURE__ */ jsx13(Out, {})
+          /* @__PURE__ */ jsx14(Out, {})
         ] })
       ] }),
       children: [
-        /* @__PURE__ */ jsx13(Intro, { name }),
-        workspace ? /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-choice is-checked", children: [
-          /* @__PURE__ */ jsx13("span", { className: "gbo-sheet-check", children: /* @__PURE__ */ jsx13(IconCheck, {}) }),
-          /* @__PURE__ */ jsx13("span", { children: workspace })
+        /* @__PURE__ */ jsx14(Intro, { name }),
+        workspace ? /* @__PURE__ */ jsxs13("div", { className: "gbo-sheet-choice is-checked", children: [
+          /* @__PURE__ */ jsx14("span", { className: "gbo-sheet-check", children: /* @__PURE__ */ jsx14(IconCheck, {}) }),
+          /* @__PURE__ */ jsx14("span", { children: workspace })
         ] }) : null,
-        entry ? /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-rows", children: rows.map((row) => /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-row", children: [
-          /* @__PURE__ */ jsx13("span", { children: row.label }),
-          /* @__PURE__ */ jsx13("span", { title: row.value, children: row.value })
-        ] }, row.label)) }) : /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-note", children: state.loading ? "Loading…" : "Slack status is not known yet." }),
-        message ? /* @__PURE__ */ jsx13("div", { className: "gbo-form-error", children: message }) : null,
-        result ? /* @__PURE__ */ jsxs12("div", { className: `gbo-slack-check is-${result.tone}`, role: "status", children: [
-          /* @__PURE__ */ jsx13("div", { className: result.tone === "ok" ? "gbo-slack-ok" : "gbo-form-error", children: [result.message, ...result.lines.filter((line) => result.tone === "ok" && !/failed/.test(line))].join(" · ") }),
-          result.lines.filter((line) => result.tone !== "ok" || /failed/.test(line)).map((line) => /* @__PURE__ */ jsx13("div", { className: "gbo-form-error", children: line }, line)),
-          result.log ? /* @__PURE__ */ jsx13("div", { className: "gbo-slack-log", title: result.log, children: result.log }) : null
+        entry ? /* @__PURE__ */ jsx14("div", { className: "gbo-sheet-rows", children: rows.map((row) => /* @__PURE__ */ jsxs13("div", { className: "gbo-sheet-row", children: [
+          /* @__PURE__ */ jsx14("span", { children: row.label }),
+          /* @__PURE__ */ jsx14("span", { title: row.value, children: row.value })
+        ] }, row.label)) }) : /* @__PURE__ */ jsx14("div", { className: "gbo-sheet-note", children: state.loading ? "Loading…" : "Slack status is not known yet." }),
+        message ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: message }) : null,
+        result ? /* @__PURE__ */ jsxs13("div", { className: `gbo-slack-check is-${result.tone}`, role: "status", children: [
+          /* @__PURE__ */ jsx14("div", { className: result.tone === "ok" ? "gbo-slack-ok" : "gbo-form-error", children: [result.message, ...result.lines.filter((line) => result.tone === "ok" && !/failed/.test(line))].join(" · ") }),
+          result.lines.filter((line) => result.tone !== "ok" || /failed/.test(line)).map((line) => /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: line }, line)),
+          result.log ? /* @__PURE__ */ jsx14("div", { className: "gbo-slack-log", title: result.log, children: result.log }) : null
         ] }) : null,
-        cache.missing ? /* @__PURE__ */ jsx13("div", { className: "gbo-slack-hint", children: SLACK_CHECK_HINT }) : null
+        cache.missing ? /* @__PURE__ */ jsx14("div", { className: "gbo-slack-hint", children: SLACK_CHECK_HINT }) : null
       ]
     }
   );
@@ -25868,18 +26895,18 @@ function sleep(ms, cancelled) {
 var STEP_NAMES = ["Create the Slack app", "Paste two tokens", "Connect", "Approve your first DM"];
 function LegacySlackDialog({ bot, initial, onClose }) {
   const name = displayName(bot, metaFor(bot));
-  const [stage, setStage] = React12.useState(initial?.stage || "create");
-  const [appToken, setAppToken] = React12.useState("");
-  const [botToken, setBotToken] = React12.useState("");
-  const [busy, setBusy] = React12.useState(false);
-  const [error, setError] = React12.useState(initial?.error ?? null);
-  const [note, setNote] = React12.useState(initial?.note ?? null);
-  const [pending, setPending] = React12.useState(initial?.pending || []);
-  const [approving, setApproving] = React12.useState("");
-  const [approved, setApproved] = React12.useState([]);
-  const [polling, setPolling] = React12.useState(false);
-  const alive = React12.useRef(true);
-  React12.useEffect(() => {
+  const [stage, setStage] = React13.useState(initial?.stage || "create");
+  const [appToken, setAppToken] = React13.useState("");
+  const [botToken, setBotToken] = React13.useState("");
+  const [busy, setBusy] = React13.useState(false);
+  const [error, setError] = React13.useState(initial?.error ?? null);
+  const [note, setNote] = React13.useState(initial?.note ?? null);
+  const [pending, setPending] = React13.useState(initial?.pending || []);
+  const [approving, setApproving] = React13.useState("");
+  const [approved, setApproved] = React13.useState([]);
+  const [polling, setPolling] = React13.useState(false);
+  const alive = React13.useRef(true);
+  React13.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
@@ -25891,7 +26918,7 @@ function LegacySlackDialog({ bot, initial, onClose }) {
     setBotToken("");
     onClose();
   };
-  React12.useEffect(() => {
+  React13.useEffect(() => {
     if (stage !== "connected" || initial?.pending) return;
     let stopped = false;
     const done = () => stopped || gone();
@@ -25988,18 +27015,18 @@ function LegacySlackDialog({ bot, initial, onClose }) {
   };
   const order = ["create", "tokens", "restart", "connected"];
   const at = Math.max(0, order.indexOf(stage === "restarting" || stage === "restart-timeout" ? "restart" : stage));
-  const cancel = (label = "Cancel") => /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: close, children: label });
+  const cancel = (label = "Cancel") => /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: close, children: label });
   let body = null;
   let footer = null;
   if (stage === "create") {
-    body = /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-note", children: [
+    body = /* @__PURE__ */ jsxs13("div", { className: "gbo-sheet-note", children: [
       "Pick your workspace, press Create, then Install to Workspace.",
       " ",
-      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-link-btn", onClick: () => setStage("tokens"), children: "I already have the app" })
+      /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-link-btn", onClick: () => setStage("tokens"), children: "I already have the app" })
     ] });
-    footer = /* @__PURE__ */ jsxs12(Fragment7, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       cancel(),
-      /* @__PURE__ */ jsxs12(
+      /* @__PURE__ */ jsxs13(
         "button",
         {
           type: "button",
@@ -26010,13 +27037,13 @@ function LegacySlackDialog({ bot, initial, onClose }) {
           },
           children: [
             "Create Slack app ",
-            /* @__PURE__ */ jsx13(Out, {})
+            /* @__PURE__ */ jsx14(Out, {})
           ]
         }
       )
     ] });
   } else if (stage === "tokens") {
-    body = /* @__PURE__ */ jsxs12(
+    body = /* @__PURE__ */ jsxs13(
       "form",
       {
         className: "gbo-sheet-form",
@@ -26026,9 +27053,9 @@ function LegacySlackDialog({ bot, initial, onClose }) {
           void connect();
         },
         children: [
-          /* @__PURE__ */ jsxs12("label", { className: "gbo-sheet-field", children: [
-            /* @__PURE__ */ jsx13("span", { children: "App-level token" }),
-            /* @__PURE__ */ jsx13(
+          /* @__PURE__ */ jsxs13("label", { className: "gbo-sheet-field", children: [
+            /* @__PURE__ */ jsx14("span", { children: "App-level token" }),
+            /* @__PURE__ */ jsx14(
               "input",
               {
                 className: "gbo-input",
@@ -26044,11 +27071,11 @@ function LegacySlackDialog({ bot, initial, onClose }) {
                 onChange: (e2) => setAppToken(e2.target.value)
               }
             ),
-            /* @__PURE__ */ jsx13("span", { className: `gbo-field-hint${appError ? " is-error" : ""}`, children: appError || "Basic Information → App-Level Tokens → Generate, with connections:write." })
+            /* @__PURE__ */ jsx14("span", { className: `gbo-field-hint${appError ? " is-error" : ""}`, children: appError || "Basic Information → App-Level Tokens → Generate, with connections:write." })
           ] }),
-          /* @__PURE__ */ jsxs12("label", { className: "gbo-sheet-field", children: [
-            /* @__PURE__ */ jsx13("span", { children: "Bot token" }),
-            /* @__PURE__ */ jsx13(
+          /* @__PURE__ */ jsxs13("label", { className: "gbo-sheet-field", children: [
+            /* @__PURE__ */ jsx14("span", { children: "Bot token" }),
+            /* @__PURE__ */ jsx14(
               "input",
               {
                 className: "gbo-input",
@@ -26064,66 +27091,66 @@ function LegacySlackDialog({ bot, initial, onClose }) {
                 onChange: (e2) => setBotToken(e2.target.value)
               }
             ),
-            /* @__PURE__ */ jsx13("span", { className: `gbo-field-hint${botError ? " is-error" : ""}`, children: botError || "OAuth & Permissions → Bot User OAuth Token." })
+            /* @__PURE__ */ jsx14("span", { className: `gbo-field-hint${botError ? " is-error" : ""}`, children: botError || "OAuth & Permissions → Bot User OAuth Token." })
           ] }),
-          /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-link-btn gbo-sheet-back", disabled: busy, onClick: () => setStage("create"), children: "← Back to creating the app" }),
-          /* @__PURE__ */ jsx13("button", { type: "submit", hidden: true })
+          /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-link-btn gbo-sheet-back", disabled: busy, onClick: () => setStage("create"), children: "← Back to creating the app" }),
+          /* @__PURE__ */ jsx14("button", { type: "submit", hidden: true })
         ]
       }
     );
-    footer = /* @__PURE__ */ jsxs12(Fragment7, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       cancel(),
-      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", disabled: !ready || busy, onClick: () => void connect(), children: busy ? "Connecting…" : "Connect" })
+      /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", disabled: !ready || busy, onClick: () => void connect(), children: busy ? "Connecting…" : "Connect" })
     ] });
   } else if (stage === "restart" || stage === "restarting" || stage === "restart-timeout") {
-    body = /* @__PURE__ */ jsxs12(Fragment7, { children: [
-      /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-note", children: slackConnectedText(name, { hotServed: false }) }),
-      stage === "restart" ? /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-warn", children: slackRestartWarning(name) }) : null,
-      stage === "restarting" ? /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-note", children: [
+    body = /* @__PURE__ */ jsxs13(Fragment9, { children: [
+      /* @__PURE__ */ jsx14("div", { className: "gbo-sheet-note", children: slackConnectedText(name, { hotServed: false }) }),
+      stage === "restart" ? /* @__PURE__ */ jsx14("div", { className: "gbo-sheet-warn", children: slackRestartWarning(name) }) : null,
+      stage === "restarting" ? /* @__PURE__ */ jsxs13("div", { className: "gbo-sheet-note", children: [
         "Restarting ",
         name,
         "’s connection…"
       ] }) : null,
-      stage === "restart-timeout" ? /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-note", children: SLACK_RESTART_TIMEOUT_TEXT }) : null
+      stage === "restart-timeout" ? /* @__PURE__ */ jsx14("div", { className: "gbo-sheet-note", children: SLACK_RESTART_TIMEOUT_TEXT }) : null
     ] });
-    footer = /* @__PURE__ */ jsxs12(Fragment7, { children: [
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
       cancel(stage === "restart" ? "Cancel" : "Close"),
-      stage === "restart-timeout" ? /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", onClick: () => void waitThenTest(), children: "Check again" }) : /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || stage === "restarting", onClick: () => void restart(), children: busy || stage === "restarting" ? "Restarting…" : "Restart now" })
+      stage === "restart-timeout" ? /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", onClick: () => void waitThenTest(), children: "Check again" }) : /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || stage === "restarting", onClick: () => void restart(), children: busy || stage === "restarting" ? "Restarting…" : "Restart now" })
     ] });
   } else {
-    body = /* @__PURE__ */ jsxs12(Fragment7, { children: [
-      note ? /* @__PURE__ */ jsxs12("div", { className: "gbo-form-error", children: [
+    body = /* @__PURE__ */ jsxs13(Fragment9, { children: [
+      note ? /* @__PURE__ */ jsxs13("div", { className: "gbo-form-error", children: [
         "Saved, but the check failed: ",
         note
-      ] }) : /* @__PURE__ */ jsx13("div", { className: "gbo-slack-ok", children: slackConnectedText(name, { hotServed: true }) }),
-      /* @__PURE__ */ jsxs12("div", { className: "gbo-slack-pairing", "aria-label": "First DM", children: [
-        /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-hint", children: pending.length ? "Someone sent a first DM. Approve it so they can chat:" : polling ? `Waiting for your first DM to ${name}…` : approved.length ? "Approved. They can chat now." : `When someone DMs ${name} for the first time, approve them in Hermes’s Messaging settings.` }),
-        pending.map((row) => /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-choice", children: [
-          /* @__PURE__ */ jsx13("span", { title: String(row.user_id || ""), children: String(row.user_name || row.user_id || "Slack user") }),
-          /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary is-small", disabled: approving === row.request_id, onClick: () => void approve(row), children: approving === row.request_id ? "Approving…" : "Approve" })
+      ] }) : /* @__PURE__ */ jsx14("div", { className: "gbo-slack-ok", children: slackConnectedText(name, { hotServed: true }) }),
+      /* @__PURE__ */ jsxs13("div", { className: "gbo-slack-pairing", "aria-label": "First DM", children: [
+        /* @__PURE__ */ jsx14("div", { className: "gbo-sheet-hint", children: pending.length ? "Someone sent a first DM. Approve it so they can chat:" : polling ? `Waiting for your first DM to ${name}…` : approved.length ? "Approved. They can chat now." : `When someone DMs ${name} for the first time, approve them in Hermes’s Messaging settings.` }),
+        pending.map((row) => /* @__PURE__ */ jsxs13("div", { className: "gbo-sheet-choice", children: [
+          /* @__PURE__ */ jsx14("span", { title: String(row.user_id || ""), children: String(row.user_name || row.user_id || "Slack user") }),
+          /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary is-small", disabled: approving === row.request_id, onClick: () => void approve(row), children: approving === row.request_id ? "Approving…" : "Approve" })
         ] }, row.request_id))
       ] })
     ] });
-    footer = /* @__PURE__ */ jsxs12(Fragment7, { children: [
-      /* @__PURE__ */ jsx13("span", {}),
-      /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-primary", onClick: close, children: "Done" })
+    footer = /* @__PURE__ */ jsxs13(Fragment9, { children: [
+      /* @__PURE__ */ jsx14("span", {}),
+      /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-primary", onClick: close, children: "Done" })
     ] });
   }
-  return /* @__PURE__ */ jsxs12(Sheet, { onClose: close, busy, label: `Bring ${name} to Slack`, emblem: /* @__PURE__ */ jsx13(Emblem, {}), title: `Bring ${name} to Slack`, subtitle: "Uses its own Slack app", footer, children: [
-    /* @__PURE__ */ jsx13(Intro, { name }),
-    /* @__PURE__ */ jsxs12("div", { className: "gbo-sheet-step", "aria-label": `Step ${at + 1} of 4`, children: [
+  return /* @__PURE__ */ jsxs13(Sheet, { onClose: close, busy, label: `Bring ${name} to Slack`, emblem: /* @__PURE__ */ jsx14(Emblem, {}), title: `Bring ${name} to Slack`, subtitle: "Uses its own Slack app", footer, children: [
+    /* @__PURE__ */ jsx14(Intro, { name }),
+    /* @__PURE__ */ jsxs13("div", { className: "gbo-sheet-step", "aria-label": `Step ${at + 1} of 4`, children: [
       "Step ",
       at + 1,
       " of 4 · ",
       STEP_NAMES[at]
     ] }),
-    error ? /* @__PURE__ */ jsx13("div", { className: "gbo-form-error", children: error }) : null,
+    error ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: error }) : null,
     body
   ] });
 }
 function SlackConnectRouter({ bot, initial, onClose, status }) {
-  const [result, setResult] = React12.useState(initial ? { kind: "missing" } : null);
-  React12.useEffect(() => {
+  const [result, setResult] = React13.useState(initial ? { kind: "missing" } : null);
+  React13.useEffect(() => {
     if (initial) return;
     let cancelled = false;
     setResult(null);
@@ -26135,30 +27162,30 @@ function SlackConnectRouter({ bot, initial, onClose, status }) {
     };
   }, [bot, initial]);
   if (result?.kind === "missing" || result?.kind === "available" && (result.status?.mode === "socket" || status && result.bootstrap)) {
-    return status ? /* @__PURE__ */ jsx13(LegacySlackStatusDialog, { bot, onClose }) : /* @__PURE__ */ jsx13(LegacySlackDialog, { bot, initial, onClose });
+    return status ? /* @__PURE__ */ jsx14(LegacySlackStatusDialog, { bot, onClose }) : /* @__PURE__ */ jsx14(LegacySlackDialog, { bot, initial, onClose });
   }
-  if (result?.kind === "available") return /* @__PURE__ */ jsx13(SlackConnect, { bot, name: displayName(bot, metaFor(bot)), initial: result, onClose });
-  return /* @__PURE__ */ jsx13(Sheet, { onClose, label: "Slack connection", title: "Slack connection", emblem: /* @__PURE__ */ jsx13(SlackMark, { size: 40 }), footer: /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }), children: /* @__PURE__ */ jsx13("div", { className: "gbo-sheet-note", children: result?.kind === "error" ? withoutSecrets(result.message, []) : "Loading…" }) });
+  if (result?.kind === "available") return /* @__PURE__ */ jsx14(SlackConnect, { bot, name: displayName(bot, metaFor(bot)), initial: result, onClose });
+  return /* @__PURE__ */ jsx14(Sheet, { onClose, label: "Slack connection", title: "Slack connection", emblem: /* @__PURE__ */ jsx14(SlackMark, { size: 40 }), footer: /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }), children: /* @__PURE__ */ jsx14("div", { className: "gbo-sheet-note", children: result?.kind === "error" ? withoutSecrets(result.message, []) : "Loading…" }) });
 }
 function SlackDialog({ bot, initial, onClose }) {
-  return /* @__PURE__ */ jsx13(SlackConnectRouter, { bot, initial, onClose, status: false });
+  return /* @__PURE__ */ jsx14(SlackConnectRouter, { bot, initial, onClose, status: false });
 }
 function SlackStatusDialog({ bot, onClose }) {
   const state = useStore(slack.state);
   const vars = state.key === rowKey(bot) && Array.isArray(state.platform?.env_vars) ? state.platform.env_vars : [];
-  if (vars.some((entry) => entry?.key === "SLACK_APP_TOKEN" && entry?.is_set === true)) return /* @__PURE__ */ jsx13(LegacySlackStatusDialog, { bot, onClose });
-  return /* @__PURE__ */ jsx13(SlackConnectRouter, { bot, onClose, status: true });
+  if (vars.some((entry) => entry?.key === "SLACK_APP_TOKEN" && entry?.is_set === true)) return /* @__PURE__ */ jsx14(LegacySlackStatusDialog, { bot, onClose });
+  return /* @__PURE__ */ jsx14(SlackConnectRouter, { bot, onClose, status: true });
 }
 
 // src/ui/BotDialogs.tsx
-import { Fragment as Fragment8, jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
 var hostSeq = 0;
 var hosts = [];
 var hostChange = /* @__PURE__ */ new Set();
 function useIsDialogHost() {
-  const [id] = React13.useState(() => ++hostSeq);
-  const [, force] = React13.useReducer((n) => n + 1, 0);
-  React13.useEffect(() => {
+  const [id] = React14.useState(() => ++hostSeq);
+  const [, force] = React14.useReducer((n) => n + 1, 0);
+  React14.useEffect(() => {
     hosts.push(id);
     hostChange.forEach((fn) => fn());
     hostChange.add(force);
@@ -26174,32 +27201,33 @@ function useIsDialogHost() {
 function RosterDialogs() {
   const isHost = useIsDialogHost();
   const dialog = useStore(roster2.dialog);
-  const [confirm, setConfirm] = React13.useState(null);
-  React13.useEffect(() => {
+  const [confirm, setConfirm] = React14.useState(null);
+  React14.useEffect(() => {
     if (!isHost) return;
     setConfirm(null);
     setConfirmAsker((message) => new Promise((resolve) => setConfirm({ message, resolve })));
     return () => setConfirmAsker(null);
   }, [isHost]);
-  const close = React13.useCallback(() => closeDialogIf(dialog), [dialog]);
+  const close = React14.useCallback(() => closeDialogIf(dialog), [dialog]);
   if (!isHost) return null;
-  return /* @__PURE__ */ jsxs13(OverrideBoundary, { area: "dialog", onReset: close, children: [
-    dialog?.kind === "edit" ? /* @__PURE__ */ jsx14(EditProfileDialog, { bot: dialog.bot, onClose: close }) : null,
-    dialog?.kind === "config" ? /* @__PURE__ */ jsx14(ConfigDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
-    dialog?.kind === "groups" ? /* @__PURE__ */ jsx14(GroupsDialog, { bot: dialog.bot, onClose: close }) : null,
-    dialog?.kind === "create" ? /* @__PURE__ */ jsx14(CreateBotDialog, { initialTab: dialog.tab, initialCaps: dialog.caps, onClose: close }) : null,
-    dialog?.kind === "delete" ? /* @__PURE__ */ jsx14(
+  return /* @__PURE__ */ jsxs14(OverrideBoundary, { area: "dialog", onReset: close, children: [
+    dialog?.kind === "edit" ? /* @__PURE__ */ jsx15(EditProfileDialog, { bot: dialog.bot, onClose: close }) : null,
+    dialog?.kind === "config" ? /* @__PURE__ */ jsx15(ConfigDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
+    dialog?.kind === "model" ? /* @__PURE__ */ jsx15(ModelDialog, { bot: dialog.bot, onClose: close }) : null,
+    dialog?.kind === "groups" ? /* @__PURE__ */ jsx15(GroupsDialog, { bot: dialog.bot, onClose: close }) : null,
+    dialog?.kind === "create" ? /* @__PURE__ */ jsx15(CreateBotDialog, { initialTab: dialog.tab, initialCaps: dialog.caps, onClose: close }) : null,
+    dialog?.kind === "delete" ? /* @__PURE__ */ jsx15(
       Confirm,
       {
         open: true,
         title: "Delete this bot?",
-        description: /* @__PURE__ */ jsxs13("span", { children: [
+        description: /* @__PURE__ */ jsxs14("span", { children: [
           "This permanently deletes ",
-          /* @__PURE__ */ jsx14("strong", { children: dialog.bot.name }),
+          /* @__PURE__ */ jsx15("strong", { children: dialog.bot.name }),
           " and its Hermes profile",
-          dialog.bot.path ? /* @__PURE__ */ jsxs13(Fragment8, { children: [
+          dialog.bot.path ? /* @__PURE__ */ jsxs14(Fragment10, { children: [
             " at ",
-            /* @__PURE__ */ jsx14("code", { children: dialog.bot.path })
+            /* @__PURE__ */ jsx15("code", { children: dialog.bot.path })
           ] }) : null,
           dialog.bot.connectionLabel ? ` on ${dialog.bot.connectionLabel}` : "",
           ". This cannot be undone."
@@ -26210,12 +27238,12 @@ function RosterDialogs() {
         onClose: close
       }
     ) : null,
-    dialog?.kind === "cron-edit" ? /* @__PURE__ */ jsx14(JobDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
-    dialog?.kind === "cron-detail" ? /* @__PURE__ */ jsx14(JobDetailDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
-    dialog?.kind === "cron-remove" ? /* @__PURE__ */ jsx14(JobRemoveDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
-    dialog?.kind === "slack" ? /* @__PURE__ */ jsx14(SlackDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
-    dialog?.kind === "slack-status" ? /* @__PURE__ */ jsx14(SlackStatusDialog, { bot: dialog.bot, onClose: close }) : null,
-    confirm ? /* @__PURE__ */ jsx14(
+    dialog?.kind === "cron-edit" ? /* @__PURE__ */ jsx15(JobDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
+    dialog?.kind === "cron-detail" ? /* @__PURE__ */ jsx15(JobDetailDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
+    dialog?.kind === "cron-remove" ? /* @__PURE__ */ jsx15(JobRemoveDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
+    dialog?.kind === "slack" ? /* @__PURE__ */ jsx15(SlackDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
+    dialog?.kind === "slack-status" ? /* @__PURE__ */ jsx15(SlackStatusDialog, { bot: dialog.bot, onClose: close }) : null,
+    confirm ? /* @__PURE__ */ jsx15(
       Confirm,
       {
         open: true,
@@ -26264,15 +27292,15 @@ function normalizeImage(dataUrl, edge = 256) {
   });
 }
 function AvatarPicker({ name, title, description, look, setLook }) {
-  const [tab, setTab] = React13.useState("face");
-  const [gen, setGen] = React13.useState({ available: null, busy: false, error: null });
+  const [tab, setTab] = React14.useState("face");
+  const [gen, setGen] = React14.useState({ available: null, busy: false, error: null });
   const seedName = name || "agent";
   const { seedPart, kind } = parseBlob(look.shape);
-  React13.useEffect(() => {
+  React14.useEffect(() => {
     if (tab === "generate" && gen.available !== true) void probeImageGeneration().then((available) => setGen((g) => ({ ...g, available })));
   }, [tab]);
-  return /* @__PURE__ */ jsxs13("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [
-    /* @__PURE__ */ jsx14(
+  return /* @__PURE__ */ jsxs14("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [
+    /* @__PURE__ */ jsx15(
       Tabs,
       {
         value: tab,
@@ -26284,8 +27312,8 @@ function AvatarPicker({ name, title, description, look, setLook }) {
         ]
       }
     ),
-    tab === "face" ? /* @__PURE__ */ jsxs13(Fragment8, { children: [
-      blobatarMarkup("x", 8) !== null ? /* @__PURE__ */ jsx14("div", { className: "gbo-face-grid", children: BLOB_KINDS.map((k) => /* @__PURE__ */ jsx14(
+    tab === "face" ? /* @__PURE__ */ jsxs14(Fragment10, { children: [
+      blobatarMarkup("x", 8) !== null ? /* @__PURE__ */ jsx15("div", { className: "gbo-face-grid", children: BLOB_KINDS.map((k) => /* @__PURE__ */ jsx15(
         "button",
         {
           type: "button",
@@ -26293,20 +27321,20 @@ function AvatarPicker({ name, title, description, look, setLook }) {
           "aria-pressed": !look.image && String(look.shape || "").startsWith("blobatar") && kind === k,
           title: k,
           onClick: () => setLook((l) => ({ ...l, image: null, shape: blobShape(seedPart, k) })),
-          children: /* @__PURE__ */ jsx14(BotAvatar, { look: "hermes", name: seedName, meta: { shape: blobShape(seedPart, k), color: look.color, custom: true }, size: 34 })
+          children: /* @__PURE__ */ jsx15(BotAvatar, { look: "hermes", name: seedName, meta: { shape: blobShape(seedPart, k), color: look.color, custom: true }, size: 34 })
         },
         k
       )) }) : null,
-      /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setLook((l) => ({ ...l, image: null, shape: blobShape(Math.random().toString(36).slice(2, 10), kind) })), children: "Shuffle face" }),
-      /* @__PURE__ */ jsxs13("div", { className: "gbo-swatches", role: "group", "aria-label": "Colour", children: [
-        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-swatch is-auto", "aria-pressed": !look.color, title: "From the name", onClick: () => setLook((l) => ({ ...l, color: null })) }),
-        SWATCHES.map((c2) => /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-swatch", style: { background: c2 }, "aria-pressed": look.color === c2, title: c2, onClick: () => setLook((l) => ({ ...l, color: c2 })) }, c2))
+      /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setLook((l) => ({ ...l, image: null, shape: blobShape(Math.random().toString(36).slice(2, 10), kind) })), children: "Shuffle face" }),
+      /* @__PURE__ */ jsxs14("div", { className: "gbo-swatches", role: "group", "aria-label": "Colour", children: [
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-swatch is-auto", "aria-pressed": !look.color, title: "From the name", onClick: () => setLook((l) => ({ ...l, color: null })) }),
+        SWATCHES.map((c2) => /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-swatch", style: { background: c2 }, "aria-pressed": look.color === c2, title: c2, onClick: () => setLook((l) => ({ ...l, color: c2 })) }, c2))
       ] })
     ] }) : null,
-    tab === "upload" ? /* @__PURE__ */ jsxs13("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
-      /* @__PURE__ */ jsxs13("label", { className: "gbo-btn is-small", children: [
+    tab === "upload" ? /* @__PURE__ */ jsxs14("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+      /* @__PURE__ */ jsxs14("label", { className: "gbo-btn is-small", children: [
         "Choose a picture…",
-        /* @__PURE__ */ jsx14(
+        /* @__PURE__ */ jsx15(
           "input",
           {
             type: "file",
@@ -26327,10 +27355,10 @@ function AvatarPicker({ name, title, description, look, setLook }) {
           }
         )
       ] }),
-      look.image ? /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-small is-ghost", onClick: () => setLook((l) => ({ ...l, image: null })), children: "Remove picture" }) : null
+      look.image ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-small is-ghost", onClick: () => setLook((l) => ({ ...l, image: null })), children: "Remove picture" }) : null
     ] }) : null,
-    tab === "generate" ? gen.available === false ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-note", children: "No image generator is configured on this Hermes." }) : /* @__PURE__ */ jsxs13("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
-      /* @__PURE__ */ jsx14(
+    tab === "generate" ? gen.available === false ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-note", children: "No image generator is configured on this Hermes." }) : /* @__PURE__ */ jsxs14("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+      /* @__PURE__ */ jsx15(
         "button",
         {
           type: "button",
@@ -26350,7 +27378,7 @@ function AvatarPicker({ name, title, description, look, setLook }) {
           children: gen.busy ? "Generating…" : gen.available === null ? "Checking…" : "Generate a picture"
         }
       ),
-      gen.error ? /* @__PURE__ */ jsx14("span", { className: "gbo-card-error", children: gen.error }) : null
+      gen.error ? /* @__PURE__ */ jsx15("span", { className: "gbo-card-error", children: gen.error }) : null
     ] }) : null
   ] });
 }
@@ -26358,21 +27386,21 @@ function lookOf(bot, meta) {
   return { shape: meta?.shape || "blobatar", color: meta?.color ?? null, image: meta?.image ?? null, title: meta?.title || bot?.title || "" };
 }
 function EditProfileDialog({ bot: row, onClose }) {
-  const [bot, setBot] = React13.useState(row);
+  const [bot, setBot] = React14.useState(row);
   const meta = metaFor(row);
-  const [opened] = React13.useState(() => lookOf(row, meta));
-  const [look, setLook] = React13.useState(() => lookOf(row, meta));
-  const [description, setDescriptionState] = React13.useState(String(row.description || ""));
-  const descriptionTouched = React13.useRef(false);
+  const [opened] = React14.useState(() => lookOf(row, meta));
+  const [look, setLook] = React14.useState(() => lookOf(row, meta));
+  const [description, setDescriptionState] = React14.useState(String(row.description || ""));
+  const descriptionTouched = React14.useRef(false);
   const setDescription = (value) => {
     descriptionTouched.current = true;
     setDescriptionState(value);
   };
-  const [advancedOpen, setAdvancedOpen] = React13.useState(false);
-  const [adv, setAdv] = React13.useState(emptyAdvancedState());
-  const [busy, setBusy] = React13.useState(false);
-  const [error, setError] = React13.useState(null);
-  React13.useEffect(() => {
+  const [advancedOpen, setAdvancedOpen] = React14.useState(false);
+  const [adv, setAdv] = React14.useState(emptyAdvancedState());
+  const [busy, setBusy] = React14.useState(false);
+  const [error, setError] = React14.useState(null);
+  React14.useEffect(() => {
     let live = true;
     void ensureBotProfile(row).then((next) => {
       if (!live) return;
@@ -26396,7 +27424,7 @@ function EditProfileDialog({ bot: row, onClose }) {
       setBusy(false);
     }
   };
-  return /* @__PURE__ */ jsxs13(
+  return /* @__PURE__ */ jsxs14(
     Dialog,
     {
       open: true,
@@ -26405,31 +27433,31 @@ function EditProfileDialog({ bot: row, onClose }) {
       onClose,
       title: "Edit profile",
       description: `${displayName(bot, null)} · profile ${bot.name}${bot.connectionLabel ? ` on ${bot.connectionLabel}` : ""}`,
-      footer: /* @__PURE__ */ jsxs13(Fragment8, { children: [
-        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void submit(), children: busy ? "Saving…" : "Save" })
+      footer: /* @__PURE__ */ jsxs14(Fragment10, { children: [
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void submit(), children: busy ? "Saving…" : "Save" })
       ] }),
       children: [
-        /* @__PURE__ */ jsx14("div", { className: "gbo-avatar-hero", children: /* @__PURE__ */ jsx14(BotAvatar, { look: "hermes", name: bot.name, meta: { ...look, custom: true }, size: 64 }) }),
-        /* @__PURE__ */ jsx14(AvatarPicker, { name: bot.name, title: look.title, description, look, setLook }),
-        /* @__PURE__ */ jsx14(Field, { label: "Name shown", children: /* @__PURE__ */ jsx14("input", { className: "gbo-input", value: look.title, placeholder: displayName(bot, null), onChange: (e2) => setLook((l) => ({ ...l, title: e2.target.value })) }) }),
-        /* @__PURE__ */ jsx14(Field, { label: "Description", children: /* @__PURE__ */ jsx14("textarea", { className: "gbo-textarea", value: description, placeholder: "What this bot is for", onChange: (e2) => setDescription(e2.target.value) }) }),
-        /* @__PURE__ */ jsxs13("button", { type: "button", className: "gbo-disclosure", "aria-expanded": advancedOpen, onClick: () => setAdvancedOpen((v) => !v), children: [
-          /* @__PURE__ */ jsx14("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx14("path", { d: "m6 9 6 6 6-6" }) }),
+        /* @__PURE__ */ jsx15("div", { className: "gbo-avatar-hero", children: /* @__PURE__ */ jsx15(BotAvatar, { look: "hermes", name: bot.name, meta: { ...look, custom: true }, size: 64 }) }),
+        /* @__PURE__ */ jsx15(AvatarPicker, { name: bot.name, title: look.title, description, look, setLook }),
+        /* @__PURE__ */ jsx15(Field, { label: "Name shown", children: /* @__PURE__ */ jsx15("input", { className: "gbo-input", value: look.title, placeholder: displayName(bot, null), onChange: (e2) => setLook((l) => ({ ...l, title: e2.target.value })) }) }),
+        /* @__PURE__ */ jsx15(Field, { label: "Description", children: /* @__PURE__ */ jsx15("textarea", { className: "gbo-textarea", value: description, placeholder: "What this bot is for", onChange: (e2) => setDescription(e2.target.value) }) }),
+        /* @__PURE__ */ jsxs14("button", { type: "button", className: "gbo-disclosure", "aria-expanded": advancedOpen, onClick: () => setAdvancedOpen((v) => !v), children: [
+          /* @__PURE__ */ jsx15("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx15("path", { d: "m6 9 6 6 6-6" }) }),
           "Skills, tools, MCP, model and SOUL"
         ] }),
-        advancedOpen ? /* @__PURE__ */ jsx14("div", { className: "gbo-section-card", children: /* @__PURE__ */ jsx14(AdvancedConfig, { bot, state: adv, setState: setAdv }) }) : null,
-        error ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: error }) : null
+        advancedOpen ? /* @__PURE__ */ jsx15("div", { className: "gbo-section-card", children: /* @__PURE__ */ jsx15(AdvancedConfig, { bot, state: adv, setState: setAdv }) }) : null,
+        error ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
 }
 function ConfigDialog({ bot, initial, onClose }) {
-  const [adv, setAdv] = React13.useState(() => initial?.loaded ? initial : emptyAdvancedState());
-  const [busy, setBusy] = React13.useState(false);
-  const [error, setError] = React13.useState(null);
+  const [adv, setAdv] = React14.useState(() => initial?.loaded ? initial : emptyAdvancedState());
+  const [busy, setBusy] = React14.useState(false);
+  const [error, setError] = React14.useState(null);
   const dirty = adv.dirtyModel || adv.dirtySoul || adv.dirtySkills || adv.dirtyToolsets || adv.dirtyMcp;
-  return /* @__PURE__ */ jsxs13(
+  return /* @__PURE__ */ jsxs14(
     Dialog,
     {
       open: true,
@@ -26438,9 +27466,9 @@ function ConfigDialog({ bot, initial, onClose }) {
       onClose,
       title: `${displayName(bot, metaFor(bot))}: skills, tools and model`,
       description: "Changes are written to the bot’s own Hermes profile on save.",
-      footer: /* @__PURE__ */ jsxs13(Fragment8, { children: [
-        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx14(
+      footer: /* @__PURE__ */ jsxs14(Fragment10, { children: [
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx15(
           "button",
           {
             type: "button",
@@ -26465,8 +27493,67 @@ function ConfigDialog({ bot, initial, onClose }) {
         )
       ] }),
       children: [
-        /* @__PURE__ */ jsx14(AdvancedConfig, { bot, state: adv, setState: setAdv }),
-        error ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: error }) : null
+        /* @__PURE__ */ jsx15(AdvancedConfig, { bot, state: adv, setState: setAdv }),
+        error ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-error", children: error }) : null
+      ]
+    }
+  );
+}
+function ModelDialog({ bot, onClose }) {
+  const current = useStore(roster2.models)[rowKey(bot)];
+  const [value, setValue] = React14.useState(() => current?.loaded ? { provider: current.provider, model: current.model } : null);
+  const [dirty, setDirty] = React14.useState(false);
+  const [busy, setBusy] = React14.useState(false);
+  const [error, setError] = React14.useState(null);
+  React14.useEffect(() => {
+    void loadBotModel(bot);
+  }, [rowKey(bot)]);
+  React14.useEffect(() => {
+    if (!value && current?.loaded) setValue({ provider: current.provider, model: current.model });
+  }, [current?.loaded]);
+  const save = async () => {
+    if (!value) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await saveBotModel(bot, value);
+      if (res?.applied?.model === true) onClose();
+      else if (res?.confirmation?.accepted === false) setError("Not saved: the model was not confirmed.");
+      else setError("Not saved: model");
+    } catch (err2) {
+      setError(String(err2?.message || err2));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ jsxs14(
+    Dialog,
+    {
+      open: true,
+      busy,
+      onClose,
+      title: `${displayName(bot, metaFor(bot))}: model`,
+      description: "Written to the bot’s own Hermes profile on save.",
+      footer: /* @__PURE__ */ jsxs14(Fragment10, { children: [
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !dirty || !value, onClick: () => void save(), children: busy ? "Saving…" : "Save" })
+      ] }),
+      children: [
+        value ? /* @__PURE__ */ jsx15(
+          ModelPicker,
+          {
+            bot,
+            value,
+            onChange: (patch) => {
+              setDirty(true);
+              setValue((v) => ({ ...v || { provider: "", model: "" }, ...patch }));
+            }
+          }
+        ) : current?.error ? /* @__PURE__ */ jsxs14("div", { className: "gbo-form-error", children: [
+          "Could not read the bot’s model: ",
+          current.error
+        ] }) : /* @__PURE__ */ jsx15("div", { className: "gbo-form-note", children: "Loading the bot’s model…" }),
+        error ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
@@ -26474,9 +27561,9 @@ function ConfigDialog({ bot, initial, onClose }) {
 function GroupsDialog({ bot, onClose }) {
   useStore(roster2.metaWrites);
   useStore(app.roster);
-  const [name, setName] = React13.useState("");
-  const [error, setError] = React13.useState(null);
-  const [busy, setBusy] = React13.useState(false);
+  const [name, setName] = React14.useState("");
+  const [error, setError] = React14.useState(null);
+  const [busy, setBusy] = React14.useState(false);
   const meta = metaFor(bot);
   const current = botGroups(meta);
   const groups = knownGroups(app.roster.get().rows.map((r) => metaFor(r)));
@@ -26506,7 +27593,7 @@ function GroupsDialog({ bot, onClose }) {
       setBusy(false);
     }
   };
-  return /* @__PURE__ */ jsxs13(
+  return /* @__PURE__ */ jsxs14(
     Dialog,
     {
       open: true,
@@ -26514,8 +27601,8 @@ function GroupsDialog({ bot, onClose }) {
       onClose,
       title: "Groups",
       description: `Groups ${who} belongs to. A bot can be in several.`,
-      footer: /* @__PURE__ */ jsxs13(Fragment8, { children: [
-        current.length ? /* @__PURE__ */ jsx14(
+      footer: /* @__PURE__ */ jsxs14(Fragment10, { children: [
+        current.length ? /* @__PURE__ */ jsx15(
           "button",
           {
             type: "button",
@@ -26527,16 +27614,16 @@ function GroupsDialog({ bot, onClose }) {
             children: "Remove from all groups"
           }
         ) : null,
-        /* @__PURE__ */ jsx14("span", { className: "gbo-spacer" }),
-        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-primary", onClick: onClose, children: "Done" })
+        /* @__PURE__ */ jsx15("span", { className: "gbo-spacer" }),
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-primary", onClick: onClose, children: "Done" })
       ] }),
       children: [
-        groups.length ? /* @__PURE__ */ jsx14("div", { className: "gbo-check-list is-one", children: groups.map((group) => /* @__PURE__ */ jsx14(Check, { checked: current.includes(group), disabled: locked || busy, onChange: (v) => void setMembership(group, v), children: group }, group)) }) : null,
-        locked ? /* @__PURE__ */ jsxs13("div", { className: "gbo-form-note", children: [
+        groups.length ? /* @__PURE__ */ jsx15("div", { className: "gbo-check-list is-one", children: groups.map((group) => /* @__PURE__ */ jsx15(Check, { checked: current.includes(group), disabled: locked || busy, onChange: (v) => void setMembership(group, v), children: group }, group)) }) : null,
+        locked ? /* @__PURE__ */ jsxs14("div", { className: "gbo-form-note", children: [
           who,
           "’s machine is offline; its groups can change once it is back."
         ] }) : null,
-        /* @__PURE__ */ jsxs13(
+        /* @__PURE__ */ jsxs14(
           "form",
           {
             style: { display: "flex", gap: 8 },
@@ -26549,36 +27636,36 @@ function GroupsDialog({ bot, onClose }) {
               }
             },
             children: [
-              /* @__PURE__ */ jsx14("input", { className: "gbo-input", autoFocus: true, disabled: locked, value: name, placeholder: groups.length ? "New group…" : "Group name (e.g. Research)", onChange: (e2) => setName(e2.target.value) }),
-              /* @__PURE__ */ jsx14("button", { type: "submit", className: "gbo-btn is-small", disabled: locked || !name.trim() || busy, children: "Create & join" })
+              /* @__PURE__ */ jsx15("input", { className: "gbo-input", autoFocus: true, disabled: locked, value: name, placeholder: groups.length ? "New group…" : "Group name (e.g. Research)", onChange: (e2) => setName(e2.target.value) }),
+              /* @__PURE__ */ jsx15("button", { type: "submit", className: "gbo-btn is-small", disabled: locked || !name.trim() || busy, children: "Create & join" })
             ]
           }
         ),
-        error ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: error }) : null
+        error ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
 }
 function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }) {
   useStore(app.roster);
-  const [name, setName] = React13.useState("");
-  const [title, setTitle] = React13.useState("");
-  const [description, setDescription] = React13.useState("");
-  const [look, setLook] = React13.useState({ shape: blobatarMarkup("x", 8) !== null ? "blobatar" : "circle", color: null, image: null });
-  const [tab, setTab] = React13.useState(initialTab);
-  const [target, setTarget] = React13.useState("");
-  const [connections, setConnections] = React13.useState([]);
-  const [cloneFrom, setCloneFrom] = React13.useState("default");
-  const [model, setModel] = React13.useState({ provider: "", model: "" });
-  const [soul, setSoul] = React13.useState("");
-  const [noSkills, setNoSkills] = React13.useState(false);
-  const [shareAuth, setShareAuth] = React13.useState(true);
-  const [caps, setCaps] = React13.useState(initialCaps ? { target: "", ...initialCaps } : null);
-  const [capsError, setCapsError] = React13.useState(null);
-  const [dirtyCaps, setDirtyCaps] = React13.useState({ skills: false, toolsets: false, mcp: false });
-  const [busy, setBusy] = React13.useState(false);
-  const [error, setError] = React13.useState(null);
-  React13.useEffect(() => {
+  const [name, setName] = React14.useState("");
+  const [title, setTitle] = React14.useState("");
+  const [description, setDescription] = React14.useState("");
+  const [look, setLook] = React14.useState({ shape: blobatarMarkup("x", 8) !== null ? "blobatar" : "circle", color: null, image: null });
+  const [tab, setTab] = React14.useState(initialTab);
+  const [target, setTarget] = React14.useState("");
+  const [connections, setConnections] = React14.useState([]);
+  const [cloneFrom, setCloneFrom] = React14.useState("default");
+  const [model, setModel] = React14.useState({ provider: "", model: "" });
+  const [soul, setSoul] = React14.useState("");
+  const [noSkills, setNoSkills] = React14.useState(false);
+  const [shareAuth, setShareAuth] = React14.useState(true);
+  const [caps, setCaps] = React14.useState(initialCaps ? { target: "", ...initialCaps } : null);
+  const [capsError, setCapsError] = React14.useState(null);
+  const [dirtyCaps, setDirtyCaps] = React14.useState({ skills: false, toolsets: false, mcp: false });
+  const [busy, setBusy] = React14.useState(false);
+  const [error, setError] = React14.useState(null);
+  React14.useEffect(() => {
     void listConnections().then(setConnections);
   }, []);
   const active = String(activeConnection() || "");
@@ -26588,7 +27675,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
   const remote = Boolean(target);
   const taken = slugTaken(rows, slug, target);
   const capSource = cloneFrom === "__none__" || remote ? "default" : cloneFrom;
-  React13.useEffect(() => {
+  React14.useEffect(() => {
     if (tab !== "capabilities" || caps && caps.source === capSource && caps.target === target) return;
     let live = true;
     setCapsError(null);
@@ -26631,7 +27718,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
     }
   };
   const otherConnections = connections.filter((c2) => c2?.id && c2.id !== "local" && c2.id !== active);
-  return /* @__PURE__ */ jsxs13(
+  return /* @__PURE__ */ jsxs14(
     Dialog,
     {
       open: true,
@@ -26640,13 +27727,13 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
       onClose,
       title: "New bot",
       description: "A named agent with its own memory, skills and Bot Chat.",
-      footer: /* @__PURE__ */ jsxs13(Fragment8, { children: [
-        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !valid || taken, onClick: () => void submit(), children: busy ? "Creating…" : "Create bot" })
+      footer: /* @__PURE__ */ jsxs14(Fragment10, { children: [
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !valid || taken, onClick: () => void submit(), children: busy ? "Creating…" : "Create bot" })
       ] }),
       children: [
-        /* @__PURE__ */ jsx14("div", { className: "gbo-avatar-hero", children: /* @__PURE__ */ jsx14(BotAvatar, { look: "hermes", name: slug || "agent", meta: { ...look, custom: true, color: look.color || botColor(slug || "agent", null) }, size: 56 }) }),
-        /* @__PURE__ */ jsx14(
+        /* @__PURE__ */ jsx15("div", { className: "gbo-avatar-hero", children: /* @__PURE__ */ jsx15(BotAvatar, { look: "hermes", name: slug || "agent", meta: { ...look, custom: true, color: look.color || botColor(slug || "agent", null) }, size: 56 }) }),
+        /* @__PURE__ */ jsx15(
           Tabs,
           {
             value: tab,
@@ -26658,14 +27745,14 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
             ]
           }
         ),
-        tab === "general" ? /* @__PURE__ */ jsxs13(Fragment8, { children: [
-          /* @__PURE__ */ jsx14(AvatarPicker, { name: slug, title: botTitle, description, look, setLook }),
-          /* @__PURE__ */ jsxs13("div", { className: "gbo-row2", children: [
-            /* @__PURE__ */ jsx14(Field, { label: "Name", hint: name && !valid ? "Letters, digits, - and _ only" : taken ? "A bot with this name already exists there" : slug && slug !== name.trim() ? `Profile id: ${slug}` : void 0, children: /* @__PURE__ */ jsx14("input", { className: "gbo-input", autoFocus: true, value: name, placeholder: "scout", onChange: (e2) => setName(e2.target.value) }) }),
-            /* @__PURE__ */ jsx14(Field, { label: "Title (optional)", children: /* @__PURE__ */ jsx14("input", { className: "gbo-input", value: title, placeholder: "Research scout", onChange: (e2) => setTitle(e2.target.value) }) })
+        tab === "general" ? /* @__PURE__ */ jsxs14(Fragment10, { children: [
+          /* @__PURE__ */ jsx15(AvatarPicker, { name: slug, title: botTitle, description, look, setLook }),
+          /* @__PURE__ */ jsxs14("div", { className: "gbo-row2", children: [
+            /* @__PURE__ */ jsx15(Field, { label: "Name", hint: name && !valid ? "Letters, digits, - and _ only" : taken ? "A bot with this name already exists there" : slug && slug !== name.trim() ? `Profile id: ${slug}` : void 0, children: /* @__PURE__ */ jsx15("input", { className: "gbo-input", autoFocus: true, value: name, placeholder: "scout", onChange: (e2) => setName(e2.target.value) }) }),
+            /* @__PURE__ */ jsx15(Field, { label: "Title (optional)", children: /* @__PURE__ */ jsx15("input", { className: "gbo-input", value: title, placeholder: "Research scout", onChange: (e2) => setTitle(e2.target.value) }) })
           ] }),
-          /* @__PURE__ */ jsx14(Field, { label: "What is it for?", children: /* @__PURE__ */ jsx14("textarea", { className: "gbo-textarea", value: description, placeholder: "Finds and summarises what matters.", onChange: (e2) => setDescription(e2.target.value) }) }),
-          otherConnections.length ? /* @__PURE__ */ jsx14(Field, { label: "Create on", children: /* @__PURE__ */ jsx14(
+          /* @__PURE__ */ jsx15(Field, { label: "What is it for?", children: /* @__PURE__ */ jsx15("textarea", { className: "gbo-textarea", value: description, placeholder: "Finds and summarises what matters.", onChange: (e2) => setDescription(e2.target.value) }) }),
+          otherConnections.length ? /* @__PURE__ */ jsx15(Field, { label: "Create on", children: /* @__PURE__ */ jsx15(
             Select,
             {
               label: "Create on",
@@ -26675,27 +27762,27 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
             }
           ) }) : null
         ] }) : null,
-        tab === "model" ? /* @__PURE__ */ jsxs13(Fragment8, { children: [
-          remote ? null : /* @__PURE__ */ jsx14(Field, { label: "Start from", hint: "Copies config, skills and SOUL from that profile.", children: /* @__PURE__ */ jsx14(Select, { label: "Start from", value: cloneFrom, onChange: setCloneFrom, options: [["default", "Hermes (default profile)"], ...localBots.filter((b2) => b2.name !== "default").map((b2) => [b2.name, displayName(b2, metaFor(b2))]), ["__none__", "A fresh profile"]] }) }),
-          /* @__PURE__ */ jsx14(ModelPicker, { bot: remote ? { name: "default", connectionId: target, remoteSource: true, sourceScoped: true, route: { connectionId: target, mode: "remote", profile: "default", targetProfile: "default" } } : null, value: model, onChange: (patch) => setModel((m) => ({ ...m, ...patch })) }),
-          /* @__PURE__ */ jsx14(Field, { label: "SOUL (optional)", hint: "Leave empty for an identity built from the name and description.", children: /* @__PURE__ */ jsx14("textarea", { className: "gbo-textarea is-mono", value: soul, onChange: (e2) => setSoul(e2.target.value) }) }),
-          /* @__PURE__ */ jsx14(Check, { checked: shareAuth, onChange: setShareAuth, children: "Share sign-ins with the main profile" }),
-          /* @__PURE__ */ jsx14(Check, { checked: noSkills, onChange: setNoSkills, children: "Start with no skills" })
+        tab === "model" ? /* @__PURE__ */ jsxs14(Fragment10, { children: [
+          remote ? null : /* @__PURE__ */ jsx15(Field, { label: "Start from", hint: "Copies config, skills and SOUL from that profile.", children: /* @__PURE__ */ jsx15(Select, { label: "Start from", value: cloneFrom, onChange: setCloneFrom, options: [["default", "Hermes (default profile)"], ...localBots.filter((b2) => b2.name !== "default").map((b2) => [b2.name, displayName(b2, metaFor(b2))]), ["__none__", "A fresh profile"]] }) }),
+          /* @__PURE__ */ jsx15(ModelPicker, { bot: remote ? { name: "default", connectionId: target, remoteSource: true, sourceScoped: true, route: { connectionId: target, mode: "remote", profile: "default", targetProfile: "default" } } : null, value: model, onChange: (patch) => setModel((m) => ({ ...m, ...patch })) }),
+          /* @__PURE__ */ jsx15(Field, { label: "SOUL (optional)", hint: "Leave empty for an identity built from the name and description.", children: /* @__PURE__ */ jsx15("textarea", { className: "gbo-textarea is-mono", value: soul, onChange: (e2) => setSoul(e2.target.value) }) }),
+          /* @__PURE__ */ jsx15(Check, { checked: shareAuth, onChange: setShareAuth, children: "Share sign-ins with the main profile" }),
+          /* @__PURE__ */ jsx15(Check, { checked: noSkills, onChange: setNoSkills, children: "Start with no skills" })
         ] }) : null,
-        tab === "capabilities" ? capsError ? /* @__PURE__ */ jsxs13("div", { className: "gbo-form-note", children: [
+        tab === "capabilities" ? capsError ? /* @__PURE__ */ jsxs14("div", { className: "gbo-form-note", children: [
           "Could not read the starting profile’s capabilities (",
           capsError,
           "). You can change them after creating the bot."
-        ] }) : !caps ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-note", children: "Loading…" }) : /* @__PURE__ */ jsx14(Fragment8, { children: ["skills", "toolsets", "mcp"].map((kind) => /* @__PURE__ */ jsx14(Field, { label: kind === "mcp" ? "MCP servers" : kind === "skills" ? "Skills" : "Toolsets", children: /* @__PURE__ */ jsx14("div", { className: `gbo-check-list${kind === "mcp" ? " is-one" : ""}`, children: (caps[kind] || []).map((x) => /* @__PURE__ */ jsx14(Check, { title: x.description || x.name, checked: Boolean(x.enabled), onChange: (v) => toggleCap(kind, x.name, v), children: x.name }, x.name)) }) }, kind)) }) : null,
-        error ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: error }) : null
+        ] }) : !caps ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-note", children: "Loading…" }) : /* @__PURE__ */ jsx15(Fragment10, { children: ["skills", "toolsets", "mcp"].map((kind) => /* @__PURE__ */ jsx15(Field, { label: kind === "mcp" ? "MCP servers" : kind === "skills" ? "Skills" : "Toolsets", children: /* @__PURE__ */ jsx15("div", { className: `gbo-check-list${kind === "mcp" ? " is-one" : ""}`, children: (caps[kind] || []).map((x) => /* @__PURE__ */ jsx15(Check, { title: x.description || x.name, checked: Boolean(x.enabled), onChange: (v) => toggleCap(kind, x.name, v), children: x.name }, x.name)) }) }, kind)) }) : null,
+        error ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
 }
 
 // src/ui/Rooms.tsx
-import * as React14 from "react";
-import { jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
+import * as React15 from "react";
+import { jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
 function botFor(profile, route) {
   return app.roster.get().rows.find(
     (bot) => String(bot?.route?.targetProfile || bot?.name) === profile && String(bot?.route?.connectionId || bot?.connectionId || "local") === String(route?.connectionId || "local")
@@ -26703,16 +27790,16 @@ function botFor(profile, route) {
 }
 function Face({ profile, route, size = 28, working = false }) {
   const bot = botFor(profile, route);
-  return /* @__PURE__ */ jsx15(BotAvatar, { shapeKey: bot ? rowKey(bot) : profile, name: profile, meta: bot ? metaFor(bot) : null, size, working });
+  return /* @__PURE__ */ jsx16(BotAvatar, { shapeKey: bot ? rowKey(bot) : profile, name: profile, meta: bot ? metaFor(bot) : null, size, working });
 }
 function NewGroup({ route, onDone }) {
   const roster = useStore(app.roster);
-  const [name, setName] = React14.useState("");
-  const [picked, setPicked] = React14.useState([]);
-  const [error, setError] = React14.useState("");
-  const [busy, setBusy] = React14.useState(false);
+  const [name, setName] = React15.useState("");
+  const [picked, setPicked] = React15.useState([]);
+  const [error, setError] = React15.useState("");
+  const [busy, setBusy] = React15.useState(false);
   const eligible = roster.rows.filter((bot) => String(bot?.route?.connectionId || bot?.connectionId || "local") === String(route?.connectionId || "local") && !metaFor(bot)?.hidden);
-  return /* @__PURE__ */ jsxs14(
+  return /* @__PURE__ */ jsxs15(
     "form",
     {
       className: "gbo-new-group",
@@ -26730,20 +27817,20 @@ function NewGroup({ route, onDone }) {
         }
       },
       children: [
-        /* @__PURE__ */ jsx15("input", { className: "gbo-input", placeholder: "Group name", "aria-label": "Group name", value: name, onChange: (event) => setName(event.target.value) }),
-        /* @__PURE__ */ jsx15("div", { className: "gbo-pick", role: "group", "aria-label": "Members", children: eligible.map((bot) => {
+        /* @__PURE__ */ jsx16("input", { className: "gbo-input", placeholder: "Group name", "aria-label": "Group name", value: name, onChange: (event) => setName(event.target.value) }),
+        /* @__PURE__ */ jsx16("div", { className: "gbo-pick", role: "group", "aria-label": "Members", children: eligible.map((bot) => {
           const key = rowKey(bot);
           const on = picked.includes(key);
-          return /* @__PURE__ */ jsxs14("label", { className: `gbo-pick-row${on ? " is-on" : ""}`, children: [
-            /* @__PURE__ */ jsx15("input", { type: "checkbox", checked: on, onChange: () => setPicked((list) => on ? list.filter((k) => k !== key) : [...list, key]) }),
-            /* @__PURE__ */ jsx15(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 22 }),
+          return /* @__PURE__ */ jsxs15("label", { className: `gbo-pick-row${on ? " is-on" : ""}`, children: [
+            /* @__PURE__ */ jsx16("input", { type: "checkbox", checked: on, onChange: () => setPicked((list) => on ? list.filter((k) => k !== key) : [...list, key]) }),
+            /* @__PURE__ */ jsx16(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 22 }),
             displayName(bot, metaFor(bot))
           ] }, key);
         }) }),
-        error ? /* @__PURE__ */ jsx15("div", { className: "gbo-card-error", children: error }) : null,
-        /* @__PURE__ */ jsxs14("div", { className: "gbo-card-actions", children: [
-          /* @__PURE__ */ jsx15("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy || !name.trim() || picked.length < 2 || picked.length > 6, children: busy ? "Creating…" : "Create group" }),
-          /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn", onClick: onDone, children: "Cancel" })
+        error ? /* @__PURE__ */ jsx16("div", { className: "gbo-card-error", children: error }) : null,
+        /* @__PURE__ */ jsxs15("div", { className: "gbo-card-actions", children: [
+          /* @__PURE__ */ jsx16("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy || !name.trim() || picked.length < 2 || picked.length > 6, children: busy ? "Creating…" : "Create group" }),
+          /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn", onClick: onDone, children: "Cancel" })
         ] })
       ]
     }
@@ -26761,94 +27848,94 @@ function RoomsSection({ query = "" }) {
   if (!state.loaded || !state.route) return null;
   const q = String(query || "").trim().toLowerCase();
   const rooms = q ? state.rooms.filter((room) => String(room?.name || "").toLowerCase().includes(q)) : state.rooms;
-  return /* @__PURE__ */ jsxs14("div", { role: "group", "aria-label": "Group chats", className: "gbo-rooms", children: [
-    /* @__PURE__ */ jsxs14("div", { className: "gbo-section-head is-rooms", children: [
-      /* @__PURE__ */ jsxs14("button", { type: "button", className: "gbo-section-toggle", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: [
-        /* @__PURE__ */ jsx15(IconChevronDown, {}),
+  return /* @__PURE__ */ jsxs15("div", { role: "group", "aria-label": "Group chats", className: "gbo-rooms", children: [
+    /* @__PURE__ */ jsxs15("div", { className: "gbo-section-head is-rooms", children: [
+      /* @__PURE__ */ jsxs15("button", { type: "button", className: "gbo-section-toggle", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: [
+        /* @__PURE__ */ jsx16(IconChevronDown, {}),
         "Group chats",
-        /* @__PURE__ */ jsx15("span", { className: "gbo-count", children: rooms.length })
+        /* @__PURE__ */ jsx16("span", { className: "gbo-count", children: rooms.length })
       ] }),
-      /* @__PURE__ */ jsx15("button", { type: "button", className: "icon-btn icon-btn--plain", title: "New group chat", "aria-label": "New group chat", onClick: () => setCreating((v) => !v), children: /* @__PURE__ */ jsx15(IconPlus, {}) })
+      /* @__PURE__ */ jsx16("button", { type: "button", className: "icon-btn icon-btn--plain", title: "New group chat", "aria-label": "New group chat", onClick: () => setCreating((v) => !v), children: /* @__PURE__ */ jsx16(IconPlus, {}) })
     ] }),
-    creating ? /* @__PURE__ */ jsx15(NewGroup, { route: state.route, onDone: () => setCreating(false) }) : null,
-    open ? rooms.map((room) => /* @__PURE__ */ jsxs14("button", { type: "button", className: "bot-row gbo-row gbo-room-row", title: room.name, onClick: () => openRoom(state.route, room), children: [
-      /* @__PURE__ */ jsx15("span", { className: "bot-row__avatar gbo-room-faces", "aria-hidden": true, children: (room.members || []).slice(0, 3).map((m) => /* @__PURE__ */ jsx15(Face, { profile: String(m.profile || m.member_id), route: state.route, size: 20 }, m.member_id)) }),
-      /* @__PURE__ */ jsxs14("span", { className: "bot-row__text gbo-row-main", children: [
-        /* @__PURE__ */ jsx15("span", { className: "gbo-row-line", children: /* @__PURE__ */ jsx15("span", { className: "bot-row__name gbo-row-name", children: room.name }) }),
-        /* @__PURE__ */ jsx15("span", { className: "bot-row__preview gbo-row-preview", children: (room.members || []).map((m) => m.display_name || m.handle || m.member_id).join(", ") })
+    creating ? /* @__PURE__ */ jsx16(NewGroup, { route: state.route, onDone: () => setCreating(false) }) : null,
+    open ? rooms.map((room) => /* @__PURE__ */ jsxs15("button", { type: "button", className: "bot-row gbo-row gbo-room-row", title: room.name, onClick: () => openRoom(state.route, room), children: [
+      /* @__PURE__ */ jsx16("span", { className: "bot-row__avatar gbo-room-faces", "aria-hidden": true, children: (room.members || []).slice(0, 3).map((m) => /* @__PURE__ */ jsx16(Face, { profile: String(m.profile || m.member_id), route: state.route, size: 20 }, m.member_id)) }),
+      /* @__PURE__ */ jsxs15("span", { className: "bot-row__text gbo-row-main", children: [
+        /* @__PURE__ */ jsx16("span", { className: "gbo-row-line", children: /* @__PURE__ */ jsx16("span", { className: "bot-row__name gbo-row-name", children: room.name }) }),
+        /* @__PURE__ */ jsx16("span", { className: "bot-row__preview gbo-row-preview", children: (room.members || []).map((m) => m.display_name || m.handle || m.member_id).join(", ") })
       ] })
     ] }, room.room_id)) : null,
-    state.error ? /* @__PURE__ */ jsxs14("div", { className: "gbo-roster-empty", children: [
+    state.error ? /* @__PURE__ */ jsxs15("div", { className: "gbo-roster-empty", children: [
       "Could not load group chats: ",
       state.error
     ] }) : null
   ] });
 }
 function PendingAction({ action, controller: controller2, members, route, acting }) {
-  const [error, setError] = React14.useState("");
+  const [error, setError] = React15.useState("");
   const member = members.find((m) => m.member_id === action.member_id);
   const who = member?.display_name || member?.handle || action.member_id;
   const run = (choice) => controller2.act(action, choice).catch((err2) => setError(String(err2?.message || err2)));
   if (action.kind === "approval") {
     const preview = approvalPreview(action);
     const choices = Array.isArray(action.approval?.choices) ? action.approval.choices : [];
-    return /* @__PURE__ */ jsxs14("div", { className: "gbo-card", role: "group", "aria-label": "Approval needed", children: [
-      /* @__PURE__ */ jsxs14("div", { className: "gbo-card-title", children: [
-        /* @__PURE__ */ jsx15(Face, { profile: String(member?.profile || action.member_id), route, size: 20 }),
+    return /* @__PURE__ */ jsxs15("div", { className: "gbo-card", role: "group", "aria-label": "Approval needed", children: [
+      /* @__PURE__ */ jsxs15("div", { className: "gbo-card-title", children: [
+        /* @__PURE__ */ jsx16(Face, { profile: String(member?.profile || action.member_id), route, size: 20 }),
         " ",
         who,
         " asks: may I run this?"
       ] }),
-      preview.description ? /* @__PURE__ */ jsx15("div", { className: "gbo-card-desc", children: preview.description }) : null,
-      preview.actualCommand ? /* @__PURE__ */ jsx15("code", { children: preview.actualCommand }) : null,
-      /* @__PURE__ */ jsxs14("div", { className: "gbo-card-actions", children: [
-        choices.includes("once") && preview.reviewable ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: acting, onClick: () => void run("once"), children: "Allow once" }) : null,
-        choices.includes("deny") ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn", disabled: acting, onClick: () => void run("deny"), children: "Deny" }) : null
+      preview.description ? /* @__PURE__ */ jsx16("div", { className: "gbo-card-desc", children: preview.description }) : null,
+      preview.actualCommand ? /* @__PURE__ */ jsx16("code", { children: preview.actualCommand }) : null,
+      /* @__PURE__ */ jsxs15("div", { className: "gbo-card-actions", children: [
+        choices.includes("once") && preview.reviewable ? /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: acting, onClick: () => void run("once"), children: "Allow once" }) : null,
+        choices.includes("deny") ? /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn", disabled: acting, onClick: () => void run("deny"), children: "Deny" }) : null
       ] }),
-      error ? /* @__PURE__ */ jsx15("div", { className: "gbo-card-error", children: error }) : null
+      error ? /* @__PURE__ */ jsx16("div", { className: "gbo-card-error", children: error }) : null
     ] });
   }
-  return /* @__PURE__ */ jsxs14("div", { className: "gbo-card", role: "group", "aria-label": `${who} needs a decision`, children: [
-    /* @__PURE__ */ jsxs14("div", { className: "gbo-card-title", children: [
+  return /* @__PURE__ */ jsxs15("div", { className: "gbo-card", role: "group", "aria-label": `${who} needs a decision`, children: [
+    /* @__PURE__ */ jsxs15("div", { className: "gbo-card-title", children: [
       who,
       "’s turn ",
       action.kind === "retry" ? "failed" : "is waiting"
     ] }),
-    /* @__PURE__ */ jsx15("div", { className: "gbo-card-actions", children: /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: acting, onClick: () => void run(), children: action.kind === "retry" ? "Retry" : "Discard" }) }),
-    error ? /* @__PURE__ */ jsx15("div", { className: "gbo-card-error", children: error }) : null
+    /* @__PURE__ */ jsx16("div", { className: "gbo-card-actions", children: /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: acting, onClick: () => void run(), children: action.kind === "retry" ? "Retry" : "Discard" }) }),
+    error ? /* @__PURE__ */ jsx16("div", { className: "gbo-card-error", children: error }) : null
   ] });
 }
 function RoomItem({ item, route, onContinue, onStop }) {
   switch (item.kind) {
     case "divider":
-      return /* @__PURE__ */ jsx15("div", { className: "divider gbo-divider", children: item.label });
+      return /* @__PURE__ */ jsx16("div", { className: "divider gbo-divider", children: item.label });
     case "room-user":
-      return /* @__PURE__ */ jsxs14("div", { className: "gbo-msg is-user", children: [
-        item.author !== "You" ? /* @__PURE__ */ jsxs14("div", { className: "gbo-room-author is-user", children: [
+      return /* @__PURE__ */ jsxs15("div", { className: "gbo-msg is-user", children: [
+        item.author !== "You" ? /* @__PURE__ */ jsxs15("div", { className: "gbo-room-author is-user", children: [
           item.author,
           item.scheduled ? " · scheduled" : ""
         ] }) : null,
-        item.text ? /* @__PURE__ */ jsx15("div", { className: "bubble is-user", children: /* @__PURE__ */ jsx15("div", { className: "bubble__plain", children: item.text }) }) : null,
-        item.attachments?.length ? /* @__PURE__ */ jsx15("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx15("span", { className: "gbo-chip", children: a2.name }, i)) }) : null
+        item.text ? /* @__PURE__ */ jsx16("div", { className: "bubble is-user", children: /* @__PURE__ */ jsx16("div", { className: "bubble__plain", children: item.text }) }) : null,
+        item.attachments?.length ? /* @__PURE__ */ jsx16("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx16("span", { className: "gbo-chip", children: a2.name }, i)) }) : null
       ] });
     case "room-member":
-      return /* @__PURE__ */ jsxs14("div", { className: "gbo-msg is-bot gbo-room-msg", children: [
-        /* @__PURE__ */ jsx15(Face, { profile: item.profile, route, size: 26 }),
-        /* @__PURE__ */ jsxs14("div", { className: "gbo-room-body", children: [
-          /* @__PURE__ */ jsx15("div", { className: "gbo-room-author", children: item.author }),
-          item.text ? /* @__PURE__ */ jsx15("div", { className: "bubble is-agent", children: /* @__PURE__ */ jsx15("div", { className: "md", children: /* @__PURE__ */ jsx15(Markdown, { text: item.text }) }) }) : null
+      return /* @__PURE__ */ jsxs15("div", { className: "gbo-msg is-bot gbo-room-msg", children: [
+        /* @__PURE__ */ jsx16(Face, { profile: item.profile, route, size: 26 }),
+        /* @__PURE__ */ jsxs15("div", { className: "gbo-room-body", children: [
+          /* @__PURE__ */ jsx16("div", { className: "gbo-room-author", children: item.author }),
+          item.text ? /* @__PURE__ */ jsx16("div", { className: "bubble is-agent", children: /* @__PURE__ */ jsx16("div", { className: "md", children: /* @__PURE__ */ jsx16(Markdown, { text: item.text }) }) }) : null
         ] })
       ] });
     case "room-paused":
-      return /* @__PURE__ */ jsxs14("div", { className: "gbo-card", role: "group", "aria-label": "Paused", children: [
-        /* @__PURE__ */ jsx15("div", { className: "gbo-card-desc", children: item.text }),
-        /* @__PURE__ */ jsxs14("div", { className: "gbo-card-actions", children: [
-          item.discussionEventId ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => onContinue(item.discussionEventId), children: "Continue" }) : null,
-          /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn", onClick: onStop, children: "Stop" })
+      return /* @__PURE__ */ jsxs15("div", { className: "gbo-card", role: "group", "aria-label": "Paused", children: [
+        /* @__PURE__ */ jsx16("div", { className: "gbo-card-desc", children: item.text }),
+        /* @__PURE__ */ jsxs15("div", { className: "gbo-card-actions", children: [
+          item.discussionEventId ? /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => onContinue(item.discussionEventId), children: "Continue" }) : null,
+          /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn", onClick: onStop, children: "Stop" })
         ] })
       ] });
     case "notice":
-      return /* @__PURE__ */ jsx15("div", { className: "system-event gbo-notice", children: item.text });
+      return /* @__PURE__ */ jsx16("div", { className: "system-event gbo-notice", children: item.text });
     default:
       return null;
   }
@@ -26857,48 +27944,48 @@ function RoomWorkspace({ slot }) {
   const state = useStore(slot.chat);
   const controller2 = slot.controller();
   const route = slot.route;
-  const [draft, setDraft] = React14.useState("");
-  const [note, setNote] = React14.useState("");
-  const [renaming, setRenaming] = React14.useState(false);
-  const [newName, setNewName] = React14.useState("");
-  const [confirmDisband, setConfirmDisband] = React14.useState(false);
-  const scroller = React14.useRef(null);
+  const [draft, setDraft] = React15.useState("");
+  const [note, setNote] = React15.useState("");
+  const [renaming, setRenaming] = React15.useState(false);
+  const [newName, setNewName] = React15.useState("");
+  const [confirmDisband, setConfirmDisband] = React15.useState(false);
+  const scroller = React15.useRef(null);
   const room = state.room || slot.room;
   const members = room?.members || [];
   const driver = state.driver;
   const working = new Set((driver?.member_activity || []).filter((a2) => a2.status === "working" || a2.status === "running").map((a2) => a2.member_id));
-  const items = React14.useMemo(() => withDividers(state.items || []), [state.items]);
-  React14.useLayoutEffect(() => {
+  const items = React15.useMemo(() => withDividers(state.items || []), [state.items]);
+  React15.useLayoutEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length, state.posts?.length]);
   const send = async () => {
-    const text = draft;
-    if (!text.trim()) return;
+    const text2 = draft;
+    if (!text2.trim()) return;
     setDraft("");
     setNote("");
-    const res = await controller2.post(text);
+    const res = await controller2.post(text2);
     if (!res.ok && res.posted === "no") {
-      setDraft((current) => current.trim() ? current : text);
+      setDraft((current) => current.trim() ? current : text2);
       setNote(`Not posted: ${res.error || "refused"}. Your message is back in the composer.`);
     }
   };
-  return /* @__PURE__ */ jsx15("div", { "data-gbo-root": "", className: "gbo-ws", children: /* @__PURE__ */ jsxs14("main", { className: "chat gbo-chat", children: [
-    /* @__PURE__ */ jsxs14("header", { className: "chat__header gbo-head", children: [
-      /* @__PURE__ */ jsxs14("div", { className: "chat__pill gbo-head-pill gbo-room-head", children: [
-        /* @__PURE__ */ jsx15("span", { className: "gbo-room-faces", "aria-hidden": true, children: members.slice(0, 4).map((m) => /* @__PURE__ */ jsx15(Face, { profile: String(m.profile || m.member_id), route, size: 22, working: working.has(m.member_id) }, m.member_id)) }),
-        /* @__PURE__ */ jsx15("span", { className: "chat__pill-name", children: room?.name || "Group" })
+  return /* @__PURE__ */ jsx16("div", { "data-gbo-root": "", className: "gbo-ws", children: /* @__PURE__ */ jsxs15("main", { className: "chat gbo-chat", children: [
+    /* @__PURE__ */ jsxs15("header", { className: "chat__header gbo-head", children: [
+      /* @__PURE__ */ jsxs15("div", { className: "chat__pill gbo-head-pill gbo-room-head", children: [
+        /* @__PURE__ */ jsx16("span", { className: "gbo-room-faces", "aria-hidden": true, children: members.slice(0, 4).map((m) => /* @__PURE__ */ jsx16(Face, { profile: String(m.profile || m.member_id), route, size: 22, working: working.has(m.member_id) }, m.member_id)) }),
+        /* @__PURE__ */ jsx16("span", { className: "chat__pill-name", children: room?.name || "Group" })
       ] }),
-      /* @__PURE__ */ jsxs14("div", { className: "chat__header-right gbo-head-right", children: [
-        driver?.working || driver?.running ? /* @__PURE__ */ jsx15("button", { type: "button", className: "share-btn", onClick: () => void controller2.stop(), children: "Stop" }) : null,
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "icon-btn icon-btn--bordered", title: "Rename group", "aria-label": "Rename group", onClick: () => {
+      /* @__PURE__ */ jsxs15("div", { className: "chat__header-right gbo-head-right", children: [
+        driver?.working || driver?.running ? /* @__PURE__ */ jsx16("button", { type: "button", className: "share-btn", onClick: () => void controller2.stop(), children: "Stop" }) : null,
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "icon-btn icon-btn--bordered", title: "Rename group", "aria-label": "Rename group", onClick: () => {
           setNewName(room?.name || "");
           setRenaming((v) => !v);
         }, children: "✎" }),
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "icon-btn icon-btn--bordered", title: "Disband group", "aria-label": "Disband group", onClick: () => setConfirmDisband(true), children: "×" })
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "icon-btn icon-btn--bordered", title: "Disband group", "aria-label": "Disband group", onClick: () => setConfirmDisband(true), children: "×" })
       ] })
     ] }),
-    renaming ? /* @__PURE__ */ jsxs14(
+    renaming ? /* @__PURE__ */ jsxs15(
       "form",
       {
         className: "gbo-confirm gbo-room-bar",
@@ -26908,31 +27995,31 @@ function RoomWorkspace({ slot }) {
           setRenaming(false);
         },
         children: [
-          /* @__PURE__ */ jsx15("input", { className: "gbo-input", "aria-label": "Group name", value: newName, onChange: (event) => setNewName(event.target.value) }),
-          /* @__PURE__ */ jsx15("button", { type: "submit", className: "gbo-pill-btn is-primary", children: "Rename" })
+          /* @__PURE__ */ jsx16("input", { className: "gbo-input", "aria-label": "Group name", value: newName, onChange: (event) => setNewName(event.target.value) }),
+          /* @__PURE__ */ jsx16("button", { type: "submit", className: "gbo-pill-btn is-primary", children: "Rename" })
         ]
       }
     ) : null,
-    confirmDisband ? /* @__PURE__ */ jsxs14("div", { className: "gbo-confirm gbo-room-bar", role: "alertdialog", "aria-label": "Disband", children: [
-      /* @__PURE__ */ jsxs14("span", { children: [
+    confirmDisband ? /* @__PURE__ */ jsxs15("div", { className: "gbo-confirm gbo-room-bar", role: "alertdialog", "aria-label": "Disband", children: [
+      /* @__PURE__ */ jsxs15("span", { children: [
         "Disband ",
         room?.name,
         "? The members stop and the group is closed for everyone."
       ] }),
-      /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => void disbandGroupChat(slot.id).catch((err2) => setNote(String(err2?.message || err2))), children: "Disband" }),
-      /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn", onClick: () => setConfirmDisband(false), children: "Cancel" })
+      /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => void disbandGroupChat(slot.id).catch((err2) => setNote(String(err2?.message || err2))), children: "Disband" }),
+      /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn", onClick: () => setConfirmDisband(false), children: "Cancel" })
     ] }) : null,
-    /* @__PURE__ */ jsx15("div", { className: "transcript gbo-transcript gbo-room-transcript", ref: scroller, children: /* @__PURE__ */ jsxs14("div", { className: "transcript__col gbo-column", children: [
-      state.phase === "loading" ? /* @__PURE__ */ jsxs14("div", { className: "gbo-center", children: [
+    /* @__PURE__ */ jsx16("div", { className: "transcript gbo-transcript gbo-room-transcript", ref: scroller, children: /* @__PURE__ */ jsxs15("div", { className: "transcript__col gbo-column", children: [
+      state.phase === "loading" ? /* @__PURE__ */ jsxs15("div", { className: "gbo-center", children: [
         "Opening ",
         room?.name,
         "…"
       ] }) : null,
-      state.phase === "error" ? /* @__PURE__ */ jsxs14("div", { className: "gbo-error", children: [
+      state.phase === "error" ? /* @__PURE__ */ jsxs15("div", { className: "gbo-error", children: [
         "Could not open this group: ",
         state.error
       ] }) : null,
-      items.map((item) => /* @__PURE__ */ jsx15(
+      items.map((item) => /* @__PURE__ */ jsx16(
         RoomItem,
         {
           item,
@@ -26942,14 +28029,14 @@ function RoomWorkspace({ slot }) {
         },
         item.id
       )),
-      (state.posts || []).map((p) => /* @__PURE__ */ jsxs14("div", { className: "gbo-msg is-user", children: [
-        /* @__PURE__ */ jsx15("div", { className: "bubble is-user", children: /* @__PURE__ */ jsx15("div", { className: "bubble__plain", children: p.text }) }),
-        /* @__PURE__ */ jsxs14("div", { className: `gbo-msg-meta${p.status === "unknown" ? " gbo-msg-failed" : ""}`, children: [
+      (state.posts || []).map((p) => /* @__PURE__ */ jsxs15("div", { className: "gbo-msg is-user", children: [
+        /* @__PURE__ */ jsx16("div", { className: "bubble is-user", children: /* @__PURE__ */ jsx16("div", { className: "bubble__plain", children: p.text }) }),
+        /* @__PURE__ */ jsxs15("div", { className: `gbo-msg-meta${p.status === "unknown" ? " gbo-msg-failed" : ""}`, children: [
           p.status === "sending" ? "Posting…" : p.status === "sent" ? "Posted" : "Not confirmed. Retrying is safe: the group recognises this message and never posts it twice.",
-          p.status === "unknown" ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-pill-btn", onClick: () => void controller2.retryPost(p.eventId), children: "Retry" }) : null
+          p.status === "unknown" ? /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-pill-btn", onClick: () => void controller2.retryPost(p.eventId), children: "Retry" }) : null
         ] })
       ] }, p.eventId)),
-      (driver?.pending_actions || []).map((action) => /* @__PURE__ */ jsx15(
+      (driver?.pending_actions || []).map((action) => /* @__PURE__ */ jsx16(
         PendingAction,
         {
           action,
@@ -26960,17 +28047,17 @@ function RoomWorkspace({ slot }) {
         },
         `${action.member_id}:${action.task_id}:${action.request_id || ""}`
       )),
-      working.size ? /* @__PURE__ */ jsx15("div", { className: "activity-line gbo-activity", children: /* @__PURE__ */ jsxs14("span", { className: "activity-line__text shimmer", children: [
+      working.size ? /* @__PURE__ */ jsx16("div", { className: "activity-line gbo-activity", children: /* @__PURE__ */ jsxs15("span", { className: "activity-line__text shimmer", children: [
         members.filter((m) => working.has(m.member_id)).map((m) => m.display_name || m.handle || m.member_id).join(", "),
         " ",
         working.size === 1 ? "is" : "are",
         " working…"
       ] }) }) : null,
-      driver?.last_error ? /* @__PURE__ */ jsx15("div", { className: "gbo-error", children: driver.last_error }) : null
+      driver?.last_error ? /* @__PURE__ */ jsx16("div", { className: "gbo-error", children: driver.last_error }) : null
     ] }) }),
-    /* @__PURE__ */ jsxs14("div", { className: "composer-area gbo-composer-wrap", children: [
-      /* @__PURE__ */ jsxs14("div", { className: "composer gbo-composer", children: [
-        /* @__PURE__ */ jsx15("div", { className: "composer__left", children: /* @__PURE__ */ jsx15(
+    /* @__PURE__ */ jsxs15("div", { className: "composer-area gbo-composer-wrap", children: [
+      /* @__PURE__ */ jsxs15("div", { className: "composer gbo-composer", children: [
+        /* @__PURE__ */ jsx16("div", { className: "composer__left", children: /* @__PURE__ */ jsx16(
           "textarea",
           {
             className: "composer__input",
@@ -26988,15 +28075,15 @@ function RoomWorkspace({ slot }) {
             }
           }
         ) }),
-        /* @__PURE__ */ jsx15("div", { className: "composer__right gbo-composer-actions", children: /* @__PURE__ */ jsx15("button", { type: "button", className: "composer__cta gbo-round is-send", title: "Send", "aria-label": "Send", disabled: !draft.trim() || state.phase !== "ready", onClick: () => void send(), children: /* @__PURE__ */ jsx15(IconArrowUp, {}) }) })
+        /* @__PURE__ */ jsx16("div", { className: "composer__right gbo-composer-actions", children: /* @__PURE__ */ jsx16("button", { type: "button", className: "composer__cta gbo-round is-send", title: "Send", "aria-label": "Send", disabled: !draft.trim() || state.phase !== "ready", onClick: () => void send(), children: /* @__PURE__ */ jsx16(IconArrowUp, {}) }) })
       ] }),
-      note ? /* @__PURE__ */ jsx15("div", { className: "gbo-composer-note", children: /* @__PURE__ */ jsx15("span", { children: note }) }) : null
+      note ? /* @__PURE__ */ jsx16("div", { className: "gbo-composer-note", children: /* @__PURE__ */ jsx16("span", { children: note }) }) : null
     ] })
   ] }) });
 }
 
 // src/ui/Screen.tsx
-import * as React15 from "react";
+import * as React16 from "react";
 
 // src/core/screen.js
 var CLOSE_CONTROL_TAKEN = 4e3;
@@ -27120,7 +28207,7 @@ function handBackParams(viewer, force = false) {
 }
 
 // src/ui/RosterMenus.tsx
-import { jsx as jsx16 } from "react/jsx-runtime";
+import { jsx as jsx17 } from "react/jsx-runtime";
 var newGroupOpener = null;
 function setNewGroupOpener(fn) {
   newGroupOpener = fn;
@@ -27135,22 +28222,22 @@ function botMenuEntries(bot) {
   const top = isPinnedTop(bot);
   const full = !top && !canPinMore();
   const entries = [
-    { label: "Open Bot Chat", icon: /* @__PURE__ */ jsx16(IconChatPlus, {}), onSelect: () => selectBot(bot) },
-    { label: "Open in new tab", icon: /* @__PURE__ */ jsx16(IconTab, {}), onSelect: () => void openInNewTab(bot) },
-    ...screenOpener ? [{ label: "Bot’s computer", icon: /* @__PURE__ */ jsx16(IconScreen, {}), onSelect: () => screenOpener?.(bot) }] : [],
+    { label: "Open Bot Chat", icon: /* @__PURE__ */ jsx17(IconChatPlus, {}), onSelect: () => selectBot(bot) },
+    { label: "Open in new tab", icon: /* @__PURE__ */ jsx17(IconTab, {}), onSelect: () => void openInNewTab(bot) },
+    ...screenOpener ? [{ label: "Bot’s computer", icon: /* @__PURE__ */ jsx17(IconScreen, {}), onSelect: () => screenOpener?.(bot) }] : [],
     "sep",
-    { label: top ? "Unpin" : "Pin to top", icon: /* @__PURE__ */ jsx16(IconPin, {}), disabled: full, meta: full ? "4 max" : void 0, onSelect: () => void toggleTopPin(bot) },
-    { label: meta?.pinned ? "Unpin from section" : "Pin first in section", icon: /* @__PURE__ */ jsx16(IconPin, {}), onSelect: () => void togglePinned(bot) },
-    { label: meta?.hidden ? "Unhide" : "Hide", icon: meta?.hidden ? /* @__PURE__ */ jsx16(IconEye, {}) : /* @__PURE__ */ jsx16(IconEyeOff, {}), onSelect: () => void toggleHidden(bot) },
+    { label: top ? "Unpin" : "Pin to top", icon: /* @__PURE__ */ jsx17(IconPin, {}), disabled: full, meta: full ? "4 max" : void 0, onSelect: () => void toggleTopPin(bot) },
+    { label: meta?.pinned ? "Unpin from section" : "Pin first in section", icon: /* @__PURE__ */ jsx17(IconPin, {}), onSelect: () => void togglePinned(bot) },
+    { label: meta?.hidden ? "Unhide" : "Hide", icon: meta?.hidden ? /* @__PURE__ */ jsx17(IconEye, {}) : /* @__PURE__ */ jsx17(IconEyeOff, {}), onSelect: () => void toggleHidden(bot) },
     "sep",
-    { label: "Edit profile…", icon: /* @__PURE__ */ jsx16(IconEdit, {}), onSelect: () => openDialog({ kind: "edit", bot }) },
-    { label: "Skills, tools and model…", icon: /* @__PURE__ */ jsx16(IconSettings, {}), onSelect: () => openDialog({ kind: "config", bot }) },
-    { label: groups.length ? `Groups: ${groups.join(", ")}` : "Manage groups…", icon: /* @__PURE__ */ jsx16(IconUsers, {}), onSelect: () => openDialog({ kind: "groups", bot }) },
-    { label: "Duplicate", icon: /* @__PURE__ */ jsx16(IconDuplicate, {}), onSelect: () => void duplicateBot(bot) },
+    { label: "Edit profile…", icon: /* @__PURE__ */ jsx17(IconEdit, {}), onSelect: () => openDialog({ kind: "edit", bot }) },
+    { label: "Skills, tools and model…", icon: /* @__PURE__ */ jsx17(IconSettings, {}), onSelect: () => openDialog({ kind: "config", bot }) },
+    { label: groups.length ? `Groups: ${groups.join(", ")}` : "Manage groups…", icon: /* @__PURE__ */ jsx17(IconUsers, {}), onSelect: () => openDialog({ kind: "groups", bot }) },
+    { label: "Duplicate", icon: /* @__PURE__ */ jsx17(IconDuplicate, {}), onSelect: () => void duplicateBot(bot) },
     "sep",
-    { label: "New chat with this agent", icon: /* @__PURE__ */ jsx16(IconChatPlus, {}), onSelect: () => newChatWith(bot) }
+    { label: "New chat with this agent", icon: /* @__PURE__ */ jsx17(IconChatPlus, {}), onSelect: () => newChatWith(bot) }
   ];
-  if (!isDefaultBot(bot)) entries.push("sep", { label: "Delete…", icon: /* @__PURE__ */ jsx16(IconTrash, {}), destructive: true, onSelect: () => openDialog({ kind: "delete", bot }) });
+  if (!isDefaultBot(bot)) entries.push("sep", { label: "Delete…", icon: /* @__PURE__ */ jsx17(IconTrash, {}), destructive: true, onSelect: () => openDialog({ kind: "delete", bot }) });
   return entries;
 }
 function filterMenuEntries(view, groupCount = 0) {
@@ -27188,7 +28275,7 @@ function newMenuEntries() {
 }
 
 // src/ui/Screen.tsx
-import { Fragment as Fragment9, jsx as jsx17, jsxs as jsxs15 } from "react/jsx-runtime";
+import { Fragment as Fragment11, jsx as jsx18, jsxs as jsxs16 } from "react/jsx-runtime";
 var stores = /* @__PURE__ */ new Map();
 function screenStore(bot) {
   const key = rowKey(bot);
@@ -27197,7 +28284,7 @@ function screenStore(bot) {
   return store;
 }
 function useScreenState(store) {
-  return React15.useSyncExternalStore(store.subscribe, store.get, store.get);
+  return React16.useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 async function loadRfb() {
   const mod = await init_novnc_rfb().then(() => novnc_rfb_exports);
@@ -27217,26 +28304,26 @@ function BotScreen({ bot }) {
   const lease = state.lease ?? status?.lease ?? null;
   const viewer = state.viewer;
   const iHold = leaseHeldBy(lease, viewer);
-  const canvasHost = React15.useRef(null);
-  const rfb = React15.useRef(null);
-  const socket = React15.useRef(null);
-  const retention = React15.useRef(null);
-  const installRetention = React15.useRef(null);
-  const unmounted = React15.useRef(false);
-  const releaseInstall = React15.useCallback(() => {
+  const canvasHost = React16.useRef(null);
+  const rfb = React16.useRef(null);
+  const socket = React16.useRef(null);
+  const retention = React16.useRef(null);
+  const installRetention = React16.useRef(null);
+  const unmounted = React16.useRef(false);
+  const releaseInstall = React16.useCallback(() => {
     installRetention.current?.();
     installRetention.current = null;
   }, []);
-  const pasteCleanup = React15.useRef(null);
-  const generation2 = React15.useRef(0);
-  const dialedAt = React15.useRef(0);
-  const evictions = React15.useRef(0);
-  const [conn, setConn] = React15.useState("idle");
-  const [error, setError] = React15.useState(null);
-  const [busy, setBusy] = React15.useState(false);
-  const [evicted, setEvicted] = React15.useState(false);
-  const [installLog, setInstallLog] = React15.useState([]);
-  const refresh = React15.useCallback(async () => {
+  const pasteCleanup = React16.useRef(null);
+  const generation2 = React16.useRef(0);
+  const dialedAt = React16.useRef(0);
+  const evictions = React16.useRef(0);
+  const [conn, setConn] = React16.useState("idle");
+  const [error, setError] = React16.useState(null);
+  const [busy, setBusy] = React16.useState(false);
+  const [evicted, setEvicted] = React16.useState(false);
+  const [installLog, setInstallLog] = React16.useState([]);
+  const refresh = React16.useCallback(async () => {
     const request2 = store.beginRequest();
     try {
       store.setStatus(await displayRequest(host2, bot, "display.status"), request2);
@@ -27246,7 +28333,7 @@ function BotScreen({ bot }) {
       setError(errText(err2));
     }
   }, [rowKey(bot)]);
-  React15.useEffect(() => {
+  React16.useEffect(() => {
     void refresh();
     const key = () => store.get().status?.profile_key;
     const offLease = onDisplayEvent("display.lease", (event) => {
@@ -27271,7 +28358,7 @@ function BotScreen({ bot }) {
       offDone?.();
     };
   }, [refresh, releaseInstall]);
-  const detach = React15.useCallback((handBack2 = false) => {
+  const detach = React16.useCallback((handBack2 = false) => {
     generation2.current += 1;
     if (handBack2) socket.current?.close(1e3);
     try {
@@ -27286,7 +28373,7 @@ function BotScreen({ bot }) {
     pasteCleanup.current?.();
     pasteCleanup.current = null;
   }, []);
-  const attach = React15.useCallback(
+  const attach = React16.useCallback(
     async (auto = false) => {
       if (!canvasHost.current) return;
       if (!auto) evictions.current = 0;
@@ -27358,10 +28445,10 @@ function BotScreen({ bot }) {
         const target = canvasHost.current;
         const onPaste = (event) => {
           if (client.viewOnly) return;
-          const text = event.clipboardData?.getData("text");
-          if (text && text.length <= MAX_PASTE_CUT_TEXT) {
+          const text2 = event.clipboardData?.getData("text");
+          if (text2 && text2.length <= MAX_PASTE_CUT_TEXT) {
             event.preventDefault();
-            client.clipboardPasteFrom(text);
+            client.clipboardPasteFrom(text2);
           }
         };
         target.addEventListener("paste", onPaste);
@@ -27375,7 +28462,7 @@ function BotScreen({ bot }) {
     },
     [rowKey(bot), detach, refresh]
   );
-  React15.useEffect(() => {
+  React16.useEffect(() => {
     unmounted.current = false;
     return () => {
       unmounted.current = true;
@@ -27383,10 +28470,10 @@ function BotScreen({ bot }) {
       detach(true);
     };
   }, [detach, releaseInstall]);
-  React15.useEffect(() => {
+  React16.useEffect(() => {
     if (status?.running && conn === "idle") void attach(true);
   }, [status?.running, conn, attach]);
-  React15.useEffect(() => {
+  React16.useEffect(() => {
     if (rfb.current) {
       rfb.current.viewOnly = !iHold;
       if (iHold) rfb.current.focus?.();
@@ -27432,11 +28519,11 @@ function BotScreen({ bot }) {
   });
   const phase = screenPhase(state);
   const who = displayName(bot, metaFor(bot));
-  const center = (title, body, actions) => /* @__PURE__ */ jsxs15("div", { className: "gbo-center", children: [
-    /* @__PURE__ */ jsx17("h2", { children: title }),
-    /* @__PURE__ */ jsx17("p", { children: body }),
+  const center = (title, body, actions) => /* @__PURE__ */ jsxs16("div", { className: "gbo-center", children: [
+    /* @__PURE__ */ jsx18("h2", { children: title }),
+    /* @__PURE__ */ jsx18("p", { children: body }),
     actions,
-    error ? /* @__PURE__ */ jsx17("div", { className: "gbo-card-error", children: error }) : null
+    error ? /* @__PURE__ */ jsx18("div", { className: "gbo-card-error", children: error }) : null
   ] });
   let content;
   if (phase === "unavailable") {
@@ -27446,69 +28533,69 @@ function BotScreen({ bot }) {
   } else if (phase === "unsupported") {
     content = center("No screen for this bot", "Its machine cannot run a headless desktop.");
   } else if (phase === "not-installed") {
-    content = /* @__PURE__ */ jsxs15("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsx17("h2", { children: "The screen is not installed" }),
-      /* @__PURE__ */ jsx17("p", { children: status?.missing?.length ? `Missing: ${status.missing.join(", ")}.` : "A few desktop packages are needed on the bot’s machine." }),
-      status?.install_command ? /* @__PURE__ */ jsx17("code", { className: "gbo-pre", children: status.install_command }) : null,
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void install(), children: busy ? "Installing…" : "Install" }),
-      /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint", children: "If the install needs a password, Hermes asks for it in its own prompt." }),
-      installLog.length ? /* @__PURE__ */ jsx17("pre", { className: "gbo-log", children: installLog.join("\n") }) : null,
-      error ? /* @__PURE__ */ jsx17("div", { className: "gbo-card-error", children: error }) : null
+    content = /* @__PURE__ */ jsxs16("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsx18("h2", { children: "The screen is not installed" }),
+      /* @__PURE__ */ jsx18("p", { children: status?.missing?.length ? `Missing: ${status.missing.join(", ")}.` : "A few desktop packages are needed on the bot’s machine." }),
+      status?.install_command ? /* @__PURE__ */ jsx18("code", { className: "gbo-pre", children: status.install_command }) : null,
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void install(), children: busy ? "Installing…" : "Install" }),
+      /* @__PURE__ */ jsx18("span", { className: "gbo-field-hint", children: "If the install needs a password, Hermes asks for it in its own prompt." }),
+      installLog.length ? /* @__PURE__ */ jsx18("pre", { className: "gbo-log", children: installLog.join("\n") }) : null,
+      error ? /* @__PURE__ */ jsx18("div", { className: "gbo-card-error", children: error }) : null
     ] });
   } else if (phase === "image-switch") {
     const sw = status.image_switch;
     content = center(
       "A newer sandbox image is available",
       `Switch from ${sw.current_image} to ${sw.target_image}? ${sw.containers} container(s) are recreated on next use.`,
-      /* @__PURE__ */ jsxs15("div", { className: "gbo-card-actions", children: [
-        /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void decideImage(true), children: "Switch" }),
-        /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: () => void decideImage(false), children: "Keep the current one" })
+      /* @__PURE__ */ jsxs16("div", { className: "gbo-card-actions", children: [
+        /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void decideImage(true), children: "Switch" }),
+        /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: () => void decideImage(false), children: "Keep the current one" })
       ] })
     );
   } else if (phase === "stopped") {
     content = center(
       `${who}’s computer is asleep`,
       status?.blocker ?? "Start it to watch the bot work, or to take over.",
-      /* @__PURE__ */ jsxs15("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || Boolean(status?.blocker), onClick: () => void start2(), children: [
-        /* @__PURE__ */ jsx17(IconPlay, {}),
+      /* @__PURE__ */ jsxs16("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || Boolean(status?.blocker), onClick: () => void start2(), children: [
+        /* @__PURE__ */ jsx18(IconPlay, {}),
         busy ? "Starting…" : "Start"
       ] })
     );
   } else {
     const humanOther = lease?.holder === "human" && !iHold;
-    content = /* @__PURE__ */ jsxs15(Fragment9, { children: [
-      /* @__PURE__ */ jsxs15("div", { className: "gbo-screen-bar", children: [
-        /* @__PURE__ */ jsxs15("strong", { children: [
+    content = /* @__PURE__ */ jsxs16(Fragment11, { children: [
+      /* @__PURE__ */ jsxs16("div", { className: "gbo-screen-bar", children: [
+        /* @__PURE__ */ jsxs16("strong", { children: [
           who,
           "’s computer"
         ] }),
-        status?.display ? /* @__PURE__ */ jsxs15("span", { className: "gbo-field-hint", children: [
+        status?.display ? /* @__PURE__ */ jsxs16("span", { className: "gbo-field-hint", children: [
           status.display,
           " · ",
           status.geometry
         ] }) : null,
-        String(status?.placement || "").startsWith("terminal:") ? /* @__PURE__ */ jsxs15("span", { className: "gbo-screen-tag", children: [
+        String(status?.placement || "").startsWith("terminal:") ? /* @__PURE__ */ jsxs16("span", { className: "gbo-screen-tag", children: [
           "in sandbox ",
           String(status.placement).slice(9)
         ] }) : null,
-        /* @__PURE__ */ jsx17("span", { className: "gbo-spacer" }),
-        lease?.holder === "human" && lease.reason ? /* @__PURE__ */ jsx17("span", { className: "gbo-screen-tag is-reason", title: lease.reason, children: lease.reason }) : null,
-        /* @__PURE__ */ jsx17("span", { className: `gbo-screen-tag${iHold ? " is-you" : ""}`, children: iHold ? "You have control" : humanOther ? "Someone else has control" : "The bot has control" }),
-        iHold ? /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-btn is-small", disabled: busy, onClick: () => void handBack(), children: "Hand back" }) : /* @__PURE__ */ jsxs15(Fragment9, { children: [
-          humanOther ? /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-btn is-small", disabled: busy, title: "Take control back from a viewer that is gone", onClick: () => void handBack(true), children: "Force hand back" }) : null,
-          /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-btn is-small is-primary", disabled: busy || conn === "attaching" || !viewer, onClick: () => void takeOver(), children: "Take over" })
+        /* @__PURE__ */ jsx18("span", { className: "gbo-spacer" }),
+        lease?.holder === "human" && lease.reason ? /* @__PURE__ */ jsx18("span", { className: "gbo-screen-tag is-reason", title: lease.reason, children: lease.reason }) : null,
+        /* @__PURE__ */ jsx18("span", { className: `gbo-screen-tag${iHold ? " is-you" : ""}`, children: iHold ? "You have control" : humanOther ? "Someone else has control" : "The bot has control" }),
+        iHold ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-btn is-small", disabled: busy, onClick: () => void handBack(), children: "Hand back" }) : /* @__PURE__ */ jsxs16(Fragment11, { children: [
+          humanOther ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-btn is-small", disabled: busy, title: "Take control back from a viewer that is gone", onClick: () => void handBack(true), children: "Force hand back" }) : null,
+          /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-btn is-small is-primary", disabled: busy || conn === "attaching" || !viewer, onClick: () => void takeOver(), children: "Take over" })
         ] }),
-        /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: conn === "attaching", onClick: () => void attach(), children: /* @__PURE__ */ jsx17(IconRefresh, {}) })
+        /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: conn === "attaching", onClick: () => void attach(), children: /* @__PURE__ */ jsx18(IconRefresh, {}) })
       ] }),
-      /* @__PURE__ */ jsxs15("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}`, children: [
-        /* @__PURE__ */ jsx17("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
-        conn === "attaching" ? /* @__PURE__ */ jsx17("div", { className: "gbo-screen-overlay", children: "Connecting…" }) : null,
-        evicted ? /* @__PURE__ */ jsx17("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
-        conn === "error" && error ? /* @__PURE__ */ jsx17("div", { className: "gbo-screen-banner is-bottom", children: error }) : null
+      /* @__PURE__ */ jsxs16("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}`, children: [
+        /* @__PURE__ */ jsx18("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
+        conn === "attaching" ? /* @__PURE__ */ jsx18("div", { className: "gbo-screen-overlay", children: "Connecting…" }) : null,
+        evicted ? /* @__PURE__ */ jsx18("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
+        conn === "error" && error ? /* @__PURE__ */ jsx18("div", { className: "gbo-screen-banner is-bottom", children: error }) : null
       ] })
     ] });
   }
-  return /* @__PURE__ */ jsx17("div", { "data-gbo-root": "", className: "gbo-screen", children: content });
+  return /* @__PURE__ */ jsx18("div", { "data-gbo-root": "", className: "gbo-screen", children: content });
 }
 var openScreens = /* @__PURE__ */ new Map();
 function screenWorkspaceId(bot) {
@@ -27531,7 +28618,7 @@ function openBotScreen(bot) {
     title: `${displayName(bot, metaFor(bot))} · Computer`,
     minWidth: "24rem",
     dock: { pane: "workspace", pos: "center" },
-    render: () => /* @__PURE__ */ jsx17(OverrideBoundary, { area: "screen", children: /* @__PURE__ */ jsx17(BotScreen, { bot }) }),
+    render: () => /* @__PURE__ */ jsx18(OverrideBoundary, { area: "screen", children: /* @__PURE__ */ jsx18(BotScreen, { bot }) }),
     onClose: () => openScreens.delete(id)
   });
   openScreens.set(id, typeof close === "function" ? close : () => void 0);
@@ -27548,62 +28635,8 @@ function closeAllScreens() {
 setScreenOpener(openBotScreen);
 onRosterParityStop(closeAllScreens);
 
-// src/ui/UsageMeter.tsx
-import { jsx as jsx18, jsxs as jsxs16 } from "react/jsx-runtime";
-function Bar({ percent }) {
-  if (percent === null) return null;
-  return /* @__PURE__ */ jsx18("span", { className: `gbo-meter-bar${percent >= 80 ? " is-high" : ""}`, role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-label": "Context used", children: /* @__PURE__ */ jsx18("span", { style: { width: `${percent}%` } }) });
-}
-function useBotUsage(bot) {
-  const u = useStore(roster2.usage);
-  useStore(app.chat);
-  return bot && u.key === rowKey(bot) ? u : null;
-}
-function UsageBlock({ bot }) {
-  const u = useBotUsage(bot);
-  const usage = u?.usage;
-  const label = usageContextLabel(usage);
-  if (!u || !label && !u.error) {
-    return /* @__PURE__ */ jsx18("div", { className: "panel-empty gbo-panel-empty", children: u?.runtimeId ? "No usage reported yet." : "Shown once the chat is attached." });
-  }
-  if (!label) return /* @__PURE__ */ jsxs16("div", { className: "panel-empty gbo-panel-empty", children: [
-    "Usage unavailable: ",
-    u.error
-  ] });
-  const percent = contextPercent(usage);
-  return /* @__PURE__ */ jsxs16("div", { className: "gbo-meter", children: [
-    /* @__PURE__ */ jsxs16("div", { className: "gbo-meter-line", children: [
-      /* @__PURE__ */ jsxs16("span", { children: [
-        "Context ",
-        label
-      ] }),
-      /* @__PURE__ */ jsx18("span", { children: percent === null ? "" : `${percent}%` })
-    ] }),
-    /* @__PURE__ */ jsx18(Bar, { percent }),
-    usageDetailRows(usage).filter((r) => r.label !== "Context" && r.label !== "Used").map((r) => /* @__PURE__ */ jsxs16("div", { className: "gbo-meter-line", children: [
-      /* @__PURE__ */ jsx18("span", { children: r.label }),
-      /* @__PURE__ */ jsx18("span", { children: r.value })
-    ] }, r.label))
-  ] });
-}
-function UsageStatusChip() {
-  const u = useStore(roster2.usage);
-  const enabled = useStore(app.enabled);
-  const label = usageContextLabel(u.usage);
-  if (!enabled || !u.runtimeId || !label) return null;
-  const cost = costLabel(u.usage);
-  return /* @__PURE__ */ jsxs16("span", { "data-gbo-root": "", className: "gbo-status-meter", style: { height: "auto", width: "auto" }, title: "Open Bot Chat: context used", children: [
-    /* @__PURE__ */ jsx18(Bar, { percent: contextPercent(u.usage) }),
-    /* @__PURE__ */ jsx18("span", { children: label }),
-    cost ? /* @__PURE__ */ jsxs16("span", { children: [
-      "· ",
-      cost
-    ] }) : null
-  ] });
-}
-
 // src/ui/OverlayScroll.tsx
-import * as React16 from "react";
+import * as React17 from "react";
 import { jsx as jsx19, jsxs as jsxs17 } from "react/jsx-runtime";
 var MIN_THUMB_PX = 28;
 function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
@@ -27615,10 +28648,10 @@ function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
   return { size, offset, travel, range };
 }
 function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, children, ...rest }) {
-  const scroller = React16.useRef(null);
-  const thumb = React16.useRef(null);
-  const [dragging, setDragging] = React16.useState(false);
-  const update = React16.useCallback(() => {
+  const scroller = React17.useRef(null);
+  const thumb = React17.useRef(null);
+  const [dragging, setDragging] = React17.useState(false);
+  const update = React17.useCallback(() => {
     const el = scroller.current;
     const bar = thumb.current;
     if (!el || !bar) return;
@@ -27631,7 +28664,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     bar.style.height = `${geo.size}px`;
     bar.style.transform = `translateY(${el.offsetTop + geo.offset}px)`;
   }, []);
-  React16.useLayoutEffect(() => {
+  React17.useLayoutEffect(() => {
     update();
     const el = scroller.current;
     const RO = globalThis.ResizeObserver;
@@ -27680,7 +28713,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     target.addEventListener("pointercancel", end);
   };
   return /* @__PURE__ */ jsxs17("div", { className: `gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ""}${dragging ? " is-dragging" : ""}`, children: [
-    React16.createElement(
+    React17.createElement(
       as,
       {
         ...rest,
@@ -27711,6 +28744,22 @@ function jobWhen(job) {
     }
   }
   return schedule && schedule !== "?" ? schedule : "";
+}
+function ModelCard({ bot }) {
+  const key = rowKey(bot);
+  const current = useStore(roster2.models)[key];
+  React18.useEffect(() => {
+    void loadBotModel(bot);
+  }, [key]);
+  const value = current?.loaded ? current.model || "Default" : current?.error ? "Unavailable" : "…";
+  const title = current?.loaded ? `Model: ${current.model ? [current.provider, current.model].filter(Boolean).join(" · ") : "the profile’s default"}` : current?.error ? `Model: could not read it (${current.error})` : "Model";
+  return /* @__PURE__ */ jsx20("section", { className: "gbo-panel-section gbo-model-section", children: /* @__PURE__ */ jsx20("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--setting gbo-model-row", title, "aria-label": `Model: ${value}. Change the model`, onClick: () => openDialog({ kind: "model", bot }), children: [
+    /* @__PURE__ */ jsx20("span", { className: "panel-row__title", children: "Model" }),
+    /* @__PURE__ */ jsxs18("span", { className: "gbo-model-value", children: [
+      /* @__PURE__ */ jsx20("span", { className: "gbo-model-name", children: value }),
+      /* @__PURE__ */ jsx20(IconChevronDown, {})
+    ] })
+  ] }) }) });
 }
 function ProfilePanel({ bot, onClose }) {
   const cron = useStore(app.cron);
@@ -27815,10 +28864,7 @@ function ProfilePanel({ bot, onClose }) {
           ] }) : null
         ] })
       ] }),
-      /* @__PURE__ */ jsxs18("section", { className: "gbo-panel-section", children: [
-        /* @__PURE__ */ jsx20("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx20("span", { children: "Context" }) }),
-        /* @__PURE__ */ jsx20("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsx20(UsageBlock, { bot }) })
-      ] }),
+      /* @__PURE__ */ jsx20(ModelCard, { bot }),
       /* @__PURE__ */ jsxs18("section", { className: "gbo-panel-section", children: [
         /* @__PURE__ */ jsx20("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx20("span", { children: "Profile" }) }),
         /* @__PURE__ */ jsxs18("div", { className: "panel-card gbo-panel-box", children: [
@@ -27862,10 +28908,9 @@ function ProfilePanel({ bot, onClose }) {
 }
 
 // src/ui/Prompts.tsx
-import * as React17 from "react";
-import { Fragment as Fragment10, jsx as jsx21, jsxs as jsxs19 } from "react/jsx-runtime";
+import * as React19 from "react";
+import { Fragment as Fragment12, jsx as jsx21, jsxs as jsxs19 } from "react/jsx-runtime";
 var TITLES = {
-  clarify: "has a question for you",
   sudo: "needs your administrator password",
   secret: "needs a secret value",
   "vault-unlock": "needs your password manager unlocked",
@@ -27873,8 +28918,6 @@ var TITLES = {
   "vault-code": "needs a one-time code",
   connection: "wants to connect"
 };
-var RECOMMENDED = "(Recommended)";
-var bare = (choice) => choice.endsWith(RECOMMENDED) ? choice.slice(0, -RECOMMENDED.length).trim() : choice;
 function Footer({ waiting, bot }) {
   if (!waiting.error) return null;
   return /* @__PURE__ */ jsxs19("div", { className: "gbo-card-error", role: "alert", children: [
@@ -27882,83 +28925,99 @@ function Footer({ waiting, bot }) {
     waiting.unsupported ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-link-btn", onClick: () => void openInBotMode(bot, "Answer the question in the Hermes Bot Chat."), children: "Answer in Hermes Bot Mode" }) : null
   ] });
 }
-function ClarifyCard({ waiting, onAnswer }) {
-  const questions = waiting.questions || [];
-  const [answers, setAnswers] = React17.useState(() => ({ ...waiting.locked || {} }));
-  const [typed, setTyped] = React17.useState({});
-  const busy = Boolean(waiting.answering);
-  const value = (q) => typed[q.qid]?.trim() ? typed[q.qid].trim() : answers[q.qid];
-  const complete = questions.every((q) => {
-    const v = value(q);
-    return Array.isArray(v) ? v.length > 0 : typeof v === "string" && v.length > 0;
-  });
-  const submit = (overrides) => {
-    const out = {};
-    for (const q of questions) out[q.qid] = overrides && q.qid in overrides ? overrides[q.qid] : value(q) ?? null;
-    onAnswer(out);
-  };
-  const single = questions.length === 1 && !questions[0].multiSelect && questions[0].choices;
-  return /* @__PURE__ */ jsxs19(Fragment10, { children: [
-    questions.map((q) => /* @__PURE__ */ jsxs19("fieldset", { className: "gbo-q", disabled: busy, children: [
-      /* @__PURE__ */ jsx21("legend", { children: q.question }),
-      q.choices ? /* @__PURE__ */ jsx21("div", { className: "gbo-choices", role: q.multiSelect ? "group" : "radiogroup", children: q.choices.map((choice) => {
-        const label = bare(choice);
-        const picked = q.multiSelect ? (answers[q.qid] || []).includes(label) : answers[q.qid] === label;
-        return /* @__PURE__ */ jsxs19(
-          "button",
-          {
-            type: "button",
-            role: q.multiSelect ? "checkbox" : "radio",
-            "aria-checked": picked,
-            className: `gbo-choice${picked ? " is-on" : ""}${choice !== label ? " is-recommended" : ""}`,
-            onClick: () => {
-              if (single) return submit({ [q.qid]: label });
-              setAnswers((current) => {
-                if (!q.multiSelect) return { ...current, [q.qid]: label };
-                const list = current[q.qid] || [];
-                return { ...current, [q.qid]: list.includes(label) ? list.filter((x) => x !== label) : [...list, label] };
-              });
-            },
-            children: [
-              label,
-              choice !== label ? /* @__PURE__ */ jsx21("span", { className: "gbo-choice-tag", children: "Recommended" }) : null
-            ]
-          },
-          choice
-        );
-      }) }) : null,
-      !q.multiSelect ? /* @__PURE__ */ jsx21(
-        "input",
-        {
-          className: "gbo-input",
-          placeholder: q.choices ? "Or type your own answer" : "Your answer",
-          "aria-label": q.question,
-          value: typed[q.qid] || "",
-          onChange: (event) => setTyped((current) => ({ ...current, [q.qid]: event.target.value })),
-          onKeyDown: (event) => {
-            if (event.key === "Enter" && questions.length === 1 && event.currentTarget.value.trim()) submit();
-          }
-        }
-      ) : null
-    ] }, q.qid)),
-    /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-      !single ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !complete, onClick: () => submit(), children: busy ? "Sending…" : "Answer" }) : null,
-      /* @__PURE__ */ jsx21(
-        "button",
-        {
-          type: "button",
-          className: "gbo-pill-btn",
-          disabled: busy,
-          onClick: () => onAnswer(Object.fromEntries(questions.map((q) => [q.qid, null]))),
-          children: "Skip"
-        }
-      )
-    ] })
-  ] });
+var SETTLED_NOTE = {
+  skipped: "Skipped",
+  expired: "No longer waiting for an answer"
+};
+function ChoiceCard({
+  questions,
+  picks,
+  settled = null,
+  busy = false,
+  name = "",
+  onPick,
+  onAnswer,
+  footer = null
+}) {
+  const live = !settled;
+  const single = questions.length === 1 && !questions[0].multiSelect && Boolean(questions[0].choices);
+  const complete = questions.every((q) => clarifyFilled(picks[q.qid]));
+  const answerWith = (overrides = {}) => onAnswer?.(Object.fromEntries(questions.map((q) => [q.qid, q.qid in overrides ? overrides[q.qid] : picks[q.qid] ?? null])));
+  const baseId = React19.useId();
+  return /* @__PURE__ */ jsxs19(
+    "div",
+    {
+      className: `gbo-ask${live ? "" : " is-settled"}${busy ? " is-busy" : ""}`,
+      role: "group",
+      "aria-label": name ? `Question from ${name}` : "Question",
+      "aria-busy": busy || void 0,
+      children: [
+        questions.map((q, qi) => {
+          const value = picks[q.qid];
+          const chosen = Array.isArray(value) ? value : typeof value === "string" && value ? [value] : [];
+          const labels = (q.choices || []).map((choice) => bareChoice(choice));
+          const typed = chosen.filter((v) => !labels.includes(v));
+          const titleId = `${baseId}-q${qi}`;
+          return /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-q", children: [
+            /* @__PURE__ */ jsx21("div", { className: "gbo-ask-title", id: titleId, children: q.question }),
+            q.choices ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-rows", role: q.multiSelect ? "group" : "radiogroup", "aria-labelledby": titleId, children: q.choices.map((choice, i) => {
+              const label = labels[i];
+              const on = chosen.includes(label);
+              return /* @__PURE__ */ jsxs19(
+                "button",
+                {
+                  type: "button",
+                  role: q.multiSelect ? "checkbox" : "radio",
+                  "aria-checked": on,
+                  disabled: !live || busy,
+                  className: `gbo-ask-row${on ? " is-on" : ""}`,
+                  onClick: () => {
+                    if (single) return answerWith({ [q.qid]: label });
+                    if (!q.multiSelect) return onPick?.(q.qid, label);
+                    onPick?.(q.qid, on ? chosen.filter((v) => v !== label) : [...chosen, label]);
+                  },
+                  children: [
+                    /* @__PURE__ */ jsx21("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
+                    /* @__PURE__ */ jsx21("span", { className: "gbo-ask-label", children: label }),
+                    choice !== label ? /* @__PURE__ */ jsx21("span", { className: "gbo-ask-tag", children: "Recommended" }) : null,
+                    on ? /* @__PURE__ */ jsx21("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx21(IconCheck, {}) }) : null
+                  ]
+                },
+                choice
+              );
+            }) }) : null,
+            typed.map((text2, j) => /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-row is-on is-typed", role: "note", "aria-label": `Your answer: ${text2}`, children: [
+              /* @__PURE__ */ jsx21("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(labels.length + j) }),
+              /* @__PURE__ */ jsx21("span", { className: "gbo-ask-label", children: text2 }),
+              /* @__PURE__ */ jsx21("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx21(IconCheck, {}) })
+            ] }, text2)),
+            live && !q.choices && !typed.length ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-hint", children: "Type your answer below." }) : null
+          ] }, q.qid);
+        }),
+        live ? /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-actions", children: [
+          !single ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !complete, onClick: () => answerWith(), children: busy ? "Sending…" : "Answer" }) : null,
+          /* @__PURE__ */ jsx21(
+            "button",
+            {
+              type: "button",
+              className: "gbo-ask-skip",
+              disabled: busy,
+              onClick: () => onAnswer?.(Object.fromEntries(questions.map((q) => [q.qid, null]))),
+              children: busy && single ? "Sending…" : "Skip"
+            }
+          )
+        ] }) : SETTLED_NOTE[settled.status] ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-note", children: SETTLED_NOTE[settled.status] }) : null,
+        footer
+      ]
+    }
+  );
+}
+function SettledChoiceCard({ item }) {
+  return /* @__PURE__ */ jsx21(ChoiceCard, { questions: item.questions || [], picks: item.answers || {}, settled: { status: item.status } });
 }
 function ValueCard({ waiting, onAnswer }) {
-  const first = React17.useRef(null);
-  const second = React17.useRef(null);
+  const first = React19.useRef(null);
+  const second = React19.useRef(null);
   const busy = Boolean(waiting.answering);
   const login = waiting.kind === "vault-login";
   const secret = waiting.kind !== "vault-code";
@@ -28016,6 +29075,7 @@ var TARGET_STATE = {
   not_connected: "Not connected"
 };
 function openExternal(url) {
+  if (!isOpenableConnectUrl(url)) return;
   try {
     ;
     globalThis.window?.open?.(url, "_blank", "noopener,noreferrer");
@@ -28024,9 +29084,9 @@ function openExternal(url) {
 }
 function ConnectionCard({ waiting, onRespond }) {
   const busy = Boolean(waiting.answering);
-  const forms = React17.useRef({});
+  const forms = React19.useRef({});
   const targets = waiting.targets || [];
-  return /* @__PURE__ */ jsxs19(Fragment10, { children: [
+  return /* @__PURE__ */ jsxs19(Fragment12, { children: [
     targets.length === 0 ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
     targets.map((target) => {
       const name = String(target?.name || "");
@@ -28073,7 +29133,10 @@ function ConnectionCard({ waiting, onRespond }) {
               field.name
             )) : null,
             open ? /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-              target?.connect_url ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => openExternal(String(target.connect_url)), children: "Sign in" }) : /* @__PURE__ */ jsx21("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: "Approve" }),
+              target?.connect_url && !isOpenableConnectUrl(String(target.connect_url)) ? /* @__PURE__ */ jsxs19("div", { className: "gbo-card-desc gbo-connect-url-blocked", children: [
+                "This sign-in link was not opened because it is not an https address: ",
+                /* @__PURE__ */ jsx21("code", { children: String(target.connect_url) })
+              ] }) : target?.connect_url ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => openExternal(String(target.connect_url)), children: "Sign in" }) : /* @__PURE__ */ jsx21("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: "Approve" }),
               /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ targets: [{ name, status: "skipped" }] }), children: "Not now" })
             ] }) : null
           ]
@@ -28087,29 +29150,44 @@ function ConnectionCard({ waiting, onRespond }) {
 function WaitingCard({ waiting, bot, name, controller: controller2 }) {
   const answer = (value) => void controller2?.answerPrompt(value);
   const respond = (result) => void controller2?.respondConnection(result);
+  if (waiting.kind === "clarify") {
+    return /* @__PURE__ */ jsx21(
+      ChoiceCard,
+      {
+        questions: waiting.questions || [],
+        picks: clarifyPicks(waiting),
+        busy: Boolean(waiting.answering),
+        name,
+        onPick: (qid, value) => void controller2?.pickClarify(qid, value),
+        onAnswer: answer,
+        footer: /* @__PURE__ */ jsx21(Footer, { waiting, bot })
+      },
+      waiting.id
+    );
+  }
   return /* @__PURE__ */ jsxs19("div", { className: "gbo-card is-question", role: "group", "aria-label": "Waiting for your answer", children: [
     /* @__PURE__ */ jsx21("div", { className: "gbo-card-title", children: "Waiting for your answer" }),
     /* @__PURE__ */ jsxs19("div", { className: "gbo-card-desc", children: [
       name,
       " ",
       TITLES[waiting.kind] || "is waiting for you",
-      waiting.kind !== "clarify" && waiting.kind !== "sudo" && waiting.kind !== "secret" && waiting.text ? `: ${waiting.text}` : "."
+      waiting.kind !== "sudo" && waiting.kind !== "secret" && waiting.text ? `: ${waiting.text}` : "."
     ] }),
-    waiting.kind === "clarify" ? /* @__PURE__ */ jsx21(ClarifyCard, { waiting, onAnswer: answer }, waiting.id) : waiting.kind === "connection" ? /* @__PURE__ */ jsx21(ConnectionCard, { waiting, onRespond: respond }) : /* @__PURE__ */ jsx21(ValueCard, { waiting, onAnswer: answer }, waiting.id),
+    waiting.kind === "connection" ? /* @__PURE__ */ jsx21(ConnectionCard, { waiting, onRespond: respond }) : /* @__PURE__ */ jsx21(ValueCard, { waiting, onAnswer: answer }, waiting.id),
     /* @__PURE__ */ jsx21(Footer, { waiting, bot })
   ] });
 }
 
 // src/ui/Tools.tsx
-import * as React18 from "react";
+import * as React20 from "react";
 import { jsx as jsx22, jsxs as jsxs20 } from "react/jsx-runtime";
 var PREVIEW_CHARS = 4e3;
-function LongText({ text, label }) {
-  const [all, setAll] = React18.useState(false);
-  const long = text.length > PREVIEW_CHARS;
+function LongText({ text: text2, label }) {
+  const [all, setAll] = React20.useState(false);
+  const long = text2.length > PREVIEW_CHARS;
   return /* @__PURE__ */ jsxs20("div", { className: "gbo-tool-block", children: [
     /* @__PURE__ */ jsx22("div", { className: "gbo-tool-block-label", children: label }),
-    /* @__PURE__ */ jsx22("pre", { children: all || !long ? text : `${text.slice(0, PREVIEW_CHARS)}…` }),
+    /* @__PURE__ */ jsx22("pre", { children: all || !long ? text2 : `${text2.slice(0, PREVIEW_CHARS)}…` }),
     long ? /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-link-btn", onClick: () => setAll((v) => !v), children: all ? "Show less" : "Show all" }) : null
   ] });
 }
@@ -28169,14 +29247,14 @@ function ToolGroup({ item, bot }) {
 }
 
 // src/ui/Chat.tsx
-import { Fragment as Fragment11, jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
-function Thinking({ text }) {
+import { Fragment as Fragment13, jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
+function Thinking({ text: text2 }) {
   return /* @__PURE__ */ jsxs21("details", { className: "gbo-think", children: [
     /* @__PURE__ */ jsxs21("summary", { children: [
       /* @__PURE__ */ jsx23(IconChevron, {}),
       "Thought"
     ] }),
-    /* @__PURE__ */ jsx23("div", { className: "gbo-think-body", children: text })
+    /* @__PURE__ */ jsx23("div", { className: "gbo-think-body", children: text2 })
   ] });
 }
 function ApprovalCard({ item, onAnswer }) {
@@ -28250,6 +29328,23 @@ function UserMeta({
   }
   return null;
 }
+function AssistantBody({ item, bot, pos }) {
+  const { segments, scope } = useDirectiveSegments(item.streaming ? "" : item.text);
+  const time = item.at ? /* @__PURE__ */ jsx23("span", { className: "bubble__time", children: clock(item.at) }) : null;
+  if (item.streaming || !segments || !scope) {
+    return /* @__PURE__ */ jsxs21("div", { className: "bubble-wrap is-left", children: [
+      /* @__PURE__ */ jsx23("div", { className: `bubble is-agent${pos}${item.streaming ? " is-streaming" : ""}`, children: item.streaming ? /* @__PURE__ */ jsx23("div", { className: "bubble__plain", children: item.text }) : /* @__PURE__ */ jsx23("div", { className: "md", children: /* @__PURE__ */ jsx23(BotText, { bot, text: item.text }) }) }),
+      time
+    ] });
+  }
+  const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
+  return /* @__PURE__ */ jsx23(Fragment13, { children: segments.map(
+    (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsxs21("div", { className: "bubble-wrap is-left", children: [
+      /* @__PURE__ */ jsx23("div", { className: `bubble is-agent${pos}`, children: /* @__PURE__ */ jsx23("div", { className: "md", children: /* @__PURE__ */ jsx23(BotText, { bot, text: segment.text }) }) }),
+      index === lastProse ? time : null
+    ] }, index) : /* @__PURE__ */ jsx23(DirectiveBlock, { segment, poll: scope.recent.has(item.id), scope }, index)
+  ) });
+}
 function Item({
   item,
   bot,
@@ -28266,6 +29361,8 @@ function Item({
   switch (item.kind) {
     case "divider":
       return /* @__PURE__ */ jsx23("div", { className: "divider gbo-divider", children: item.label });
+    case "new":
+      return /* @__PURE__ */ jsx23(NewLine, {});
     case "user":
       return /* @__PURE__ */ jsxs21("div", { className: "gbo-msg is-user", children: [
         item.attachments?.length ? /* @__PURE__ */ jsx23("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx23("span", { className: "gbo-chip", children: a2.name || a2.kind }, i)) }) : null,
@@ -28280,10 +29377,7 @@ function Item({
     case "assistant":
       return /* @__PURE__ */ jsxs21("div", { className: "gbo-msg is-bot", children: [
         item.reasoning ? /* @__PURE__ */ jsx23(Thinking, { text: item.reasoning }) : null,
-        item.text ? /* @__PURE__ */ jsxs21("div", { className: "bubble-wrap is-left", children: [
-          /* @__PURE__ */ jsx23("div", { className: `bubble is-agent${pos}${item.streaming ? " is-streaming" : ""}`, children: item.streaming ? /* @__PURE__ */ jsx23("div", { className: "bubble__plain", children: item.text }) : /* @__PURE__ */ jsx23("div", { className: "md", children: /* @__PURE__ */ jsx23(BotText, { bot, text: item.text }) }) }),
-          item.at ? /* @__PURE__ */ jsx23("span", { className: "bubble__time", children: clock(item.at) }) : null
-        ] }) : null,
+        item.text ? /* @__PURE__ */ jsx23(AssistantBody, { item, bot, pos }) : null,
         /* @__PURE__ */ jsx23(Reactions, { item, onReact: react }),
         item.text && !item.streaming ? /* @__PURE__ */ jsx23(AssistantActions, { item, controller: controller2, busy }) : null
       ] });
@@ -28291,6 +29385,8 @@ function Item({
       return /* @__PURE__ */ jsx23(ToolGroup, { item, bot });
     case "approval":
       return /* @__PURE__ */ jsx23(ApprovalCard, { item, onAnswer });
+    case "clarify":
+      return /* @__PURE__ */ jsx23(SettledChoiceCard, { item });
     case "notice":
       return /* @__PURE__ */ jsx23("div", { className: "system-event gbo-notice", children: item.text });
     case "command":
@@ -28304,39 +29400,102 @@ function Item({
       return null;
   }
 }
-function useStickToBottom(dep) {
-  const ref = React19.useRef(null);
-  const stick = React19.useRef(true);
-  React19.useLayoutEffect(() => {
+var STICK_PX = 16;
+function useStickToBottom(dep, mine) {
+  const ref = React21.useRef(null);
+  const stick = React21.useRef(true);
+  const lastMine = React21.useRef(mine);
+  React21.useLayoutEffect(() => {
     const el = ref.current;
+    if (mine !== lastMine.current) {
+      lastMine.current = mine;
+      if (mine) stick.current = true;
+    }
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [dep]);
+  }, [dep, mine]);
   const onScroll = () => {
     const el = ref.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
   };
   const pin = () => {
     stick.current = true;
   };
-  return { ref, onScroll, pin };
+  return { ref, onScroll, pin, stick };
 }
-var SlotContext = React19.createContext(mainSlot);
-var useController = () => React19.useContext(SlotContext).controller();
+function lookingAt(el) {
+  const doc = el?.ownerDocument;
+  if (!el || !doc || !el.isConnected) return false;
+  if (doc.visibilityState === "hidden") return false;
+  if (typeof doc.hasFocus === "function" && !doc.hasFocus()) return false;
+  if (!el.clientHeight) return false;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+}
+function useNewLine(key, items, ready, ref) {
+  const line = useStore(roster2.newLine);
+  const latest = React21.useRef({ key, items, ready });
+  latest.current = { key, items, ready };
+  const note = React21.useCallback(() => {
+    const { key: k, items: list, ready: ok } = latest.current;
+    noteTranscript(k, list, ok, lookingAt(ref.current));
+  }, [ref]);
+  React21.useEffect(() => {
+    note();
+  }, [key, items, ready, note]);
+  React21.useEffect(() => {
+    const win = globalThis.window;
+    const doc = globalThis.document;
+    win?.addEventListener?.("focus", note);
+    doc?.addEventListener?.("visibilitychange", note);
+    return () => {
+      win?.removeEventListener?.("focus", note);
+      doc?.removeEventListener?.("visibilitychange", note);
+    };
+  }, [note]);
+  return { id: line.markers[key] ?? null, note };
+}
+function NewLine() {
+  return /* @__PURE__ */ jsx23("div", { className: "gbo-new-line", role: "separator", "aria-label": "New messages", children: /* @__PURE__ */ jsx23("span", { children: "NEW" }) });
+}
+var SlotContext = React21.createContext(mainSlot);
+var useController = () => React21.useContext(SlotContext).controller();
 function Transcript({ state, bot, meta, onPrefill }) {
   const items = state.chat.items;
   const showWork = useStore(app.showWork);
-  const decorated = React19.useMemo(() => groupMessages(withDividers(visibleItems(items, showWork))), [items, showWork]);
-  const { ref, onScroll, pin } = useStickToBottom(items);
+  const mine = React21.useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === "user") return String(items[i].id);
+    return "";
+  }, [items]);
+  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items, mine);
+  const newLine = useNewLine(rowKey(bot), items, state.phase === "ready", ref);
+  const onScroll = () => {
+    onStickScroll();
+    newLine.note();
+  };
+  const decorated = React21.useMemo(
+    () => groupMessages(withNewMarker(withDividers(visibleItems(items, showWork)), newLine.id)),
+    [items, showWork, newLine.id]
+  );
   const controller2 = useController();
   const answer = (requestId, choice) => void controller2?.respondApproval(requestId, choice);
   const retry = (clientId) => void controller2?.retry(clientId);
   const recheck = (clientId) => void controller2?.recheck(clientId);
   const openStock = () => void openInBotMode(bot, "Check whether your message arrived before sending anything again.");
   const activity2 = state.chat.busy ? activityLabel(state.chat, showWork) : "";
-  React19.useEffect(() => {
+  const recentKey = items.slice(-8).map((item) => item.id).join("|");
+  const outer = React21.useContext(DirectiveContext);
+  const directives = React21.useMemo(
+    () => !controller2 ? outer : state.storedId ? {
+      bot,
+      sessionId: String(state.storedId),
+      sendIntent: (text2) => controller2.sendIntent(text2),
+      recent: new Set(recentKey.split("|"))
+    } : null,
+    [bot, state.storedId, controller2, recentKey, outer]
+  );
+  React21.useEffect(() => {
     pin();
   }, [state.storedId]);
-  return /* @__PURE__ */ jsx23(OverlayScroll, { wrapClassName: "transcript-wrap gbo-transcript-scroll", className: "transcript gbo-transcript", scrollRef: ref, onScroll, children: /* @__PURE__ */ jsxs21("div", { className: "transcript__col gbo-column", children: [
+  return /* @__PURE__ */ jsx23(DirectiveContext.Provider, { value: directives, children: /* @__PURE__ */ jsx23(OverlayScroll, { wrapClassName: "transcript-wrap gbo-transcript-scroll", className: "transcript gbo-transcript", scrollRef: ref, onScroll, children: /* @__PURE__ */ jsxs21("div", { className: "transcript__col gbo-column", children: [
     state.hasMore ? /* @__PURE__ */ jsx23("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void controller2?.loadEarlier(), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
     !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs21("div", { className: "empty-chat", children: [
       /* @__PURE__ */ jsx23(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
@@ -28358,11 +29517,11 @@ function Transcript({ state, bot, meta, onPrefill }) {
       ] })
     ] }) : null,
     state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx23("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
-  ] }) });
+  ] }) }) });
 }
 function Center({ state, bot }) {
   const controller2 = useController();
-  const slot = React19.useContext(SlotContext);
+  const slot = React21.useContext(SlotContext);
   const name = displayName(bot, metaFor(bot));
   if (state.phase === "no-chat") {
     return /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
@@ -28416,7 +29575,7 @@ function Center({ state, bot }) {
 }
 var NARROW_PANE_PX = 900;
 function usePaneWidth(ref, enabled = true) {
-  React19.useEffect(() => {
+  React21.useEffect(() => {
     const el = ref.current;
     if (!enabled) return void 0;
     const RO = globalThis.ResizeObserver;
@@ -28470,12 +29629,12 @@ function PanelSash({ rootRef }) {
   );
 }
 function ProfileDrawer({ bot, onClose, backgroundRef }) {
-  const ref = React19.useRef(null);
-  React19.useEffect(() => {
+  const ref = React21.useRef(null);
+  React21.useEffect(() => {
     if (!ref.current) return;
     return trapFocus(ref.current, { background: backgroundRef.current });
   }, [backgroundRef]);
-  return /* @__PURE__ */ jsxs21(Fragment11, { children: [
+  return /* @__PURE__ */ jsxs21(Fragment13, { children: [
     /* @__PURE__ */ jsx23("div", { className: "gbo-scrim", "aria-hidden": "true", onClick: onClose }),
     /* @__PURE__ */ jsxs21(
       "div",
@@ -28504,14 +29663,14 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const panelWidth = useStore(app.panelWidth);
   const roster = useStore(app.roster);
   const rosterShown = useStore(app.rosterShown);
-  const rootRef = React19.useRef(null);
-  const draftRef = React19.useRef(null);
-  const chatRef = React19.useRef(null);
+  const rootRef = React21.useRef(null);
+  const draftRef = React21.useRef(null);
+  const chatRef = React21.useRef(null);
   usePaneWidth(rootRef, !slot.extra);
-  const closeDrawer = React19.useCallback(() => app.drawerOpen.set(false), []);
+  const closeDrawer = React21.useCallback(() => app.drawerOpen.set(false), []);
   const bot = state?.bot ? findBot(rowKey(state.bot)) || state.bot : findBot(selectedKey);
   const pending = !state && bot && !slot.extra ? rowKey(bot) : "";
-  React19.useEffect(() => {
+  React21.useEffect(() => {
     if (!pending || app.chat.get()) return;
     const target = findBot(pending);
     if (target) selectBot(target, { openWorkspace: false });
@@ -28530,7 +29689,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const extra = slot.extra;
   const shown = extra ? false : narrow ? drawerOpen : panelOpen;
   const togglePanel = () => extra ? selectBot(bot) : narrow ? app.drawerOpen.set(!drawerOpen) : setPanelOpen(!panelOpen);
-  const completeSlash = (text) => controller2?.completeSlash(text) ?? Promise.resolve({ items: [], replaceFrom: 0 });
+  const completeSlash = (text2) => controller2?.completeSlash(text2) ?? Promise.resolve({ items: [], replaceFrom: 0 });
   const view = /* @__PURE__ */ jsxs21("div", { "data-gbo-root": "", className: `gbo-ws${narrow && !extra ? " is-narrow" : ""}`, style, ref: rootRef, children: [
     /* @__PURE__ */ jsxs21("main", { className: "chat gbo-chat", ref: chatRef, children: [
       /* @__PURE__ */ jsxs21("header", { className: "chat__header gbo-head", children: [
@@ -28552,7 +29711,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
           )
         ] })
       ] }),
-      ready ? /* @__PURE__ */ jsx23(Transcript, { state, bot, meta, onPrefill: (text) => draftRef.current?.(text, draftOwnerKey(bot)) }) : /* @__PURE__ */ jsx23(Center, { state, bot }),
+      ready ? /* @__PURE__ */ jsx23(Transcript, { state, bot, meta, onPrefill: (text2) => draftRef.current?.(text2, draftOwnerKey(bot)) }) : /* @__PURE__ */ jsx23(Center, { state, bot }),
       /* @__PURE__ */ jsx23(
         Composer,
         {
@@ -28564,12 +29723,14 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
           stopError: state.stopError,
           blocked: state.sendBlocked,
           draftRef,
-          onSend: (text, attachments, options) => controller2?.sendDraft(text, attachments, options) ?? Promise.resolve({ ok: false, delivery: "not-sent", error: "This chat is closed" }),
-          onSlash: (text) => controller2?.runSlash(text) ?? Promise.resolve({ ok: false }),
+          onSend: (text2, attachments, options) => controller2?.sendDraft(text2, attachments, options) ?? Promise.resolve({ ok: false, delivery: "not-sent", error: "This chat is closed" }),
+          onSlash: (text2) => controller2?.runSlash(text2) ?? Promise.resolve({ ok: false }),
           onCompleteSlash: completeSlash,
           onRestored: (clientId) => controller2?.dropFailed(clientId),
           onDiscard: (id) => void controller2?.discardStaged([id]),
-          onStop: () => void controller2?.interrupt()
+          onStop: () => void controller2?.interrupt(),
+          answering: state.chat.waiting?.kind === "clarify",
+          onAnswer: (text2) => controller2?.answerClarifyText(text2) ?? Promise.resolve({ ok: false, error: "This chat is closed" })
         },
         rowKey(bot)
       )
@@ -28584,23 +29745,37 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
 }
 
 // src/ui/Roster.tsx
-import * as React21 from "react";
+import * as React23 from "react";
+
+// src/core/person.js
+function initialsOf(name) {
+  const words = String(name || "").split(/[\s._-]+/).map((word) => word.match(/\p{L}/u)?.[0] || "").filter(Boolean);
+  if (!words.length) return "";
+  const picked = words.length > 1 ? [words[0], words[words.length - 1]] : [words[0]];
+  return picked.join("").toLocaleUpperCase();
+}
+function footerPerson(name) {
+  const clean = String(name || "").trim();
+  const initials = initialsOf(clean);
+  if (!clean || !initials) return { initials: "You", name: "", known: false };
+  return { initials, name: clean, known: true };
+}
 
 // src/ui/Unread.tsx
-import * as React20 from "react";
+import * as React22 from "react";
 import { jsx as jsx24 } from "react/jsx-runtime";
 function UnreadDot({ bot }) {
   const Dot = sdk.SessionStatusDot;
   const id = botCanonicalSessionId(bot);
   if (!id || !(typeof Dot === "function" || Dot && typeof Dot === "object")) return null;
-  return /* @__PURE__ */ jsx24("span", { className: "gbo-row-dot", children: React20.createElement(Dot, { storedSessionId: id }) });
+  return /* @__PURE__ */ jsx24("span", { className: "gbo-row-dot", children: React22.createElement(Dot, { storedSessionId: id }) });
 }
 
 // src/ui/Roster.tsx
-import { Fragment as Fragment12, jsx as jsx25, jsxs as jsxs22 } from "react/jsx-runtime";
+import { Fragment as Fragment14, jsx as jsx25, jsxs as jsxs22 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
-  const [now, setNow] = React21.useState(() => Date.now());
-  React21.useEffect(() => {
+  const [now, setNow] = React23.useState(() => Date.now());
+  React23.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(id);
   }, [ms]);
@@ -28670,7 +29845,7 @@ function PinnedBot({ bot, size, selected, working }) {
   ) }) });
 }
 function useRosterShown(ref) {
-  React21.useEffect(() => {
+  React23.useEffect(() => {
     app.rosterShown.set(true);
     const el = ref.current;
     const RO = globalThis.ResizeObserver;
@@ -28685,6 +29860,24 @@ function useRosterShown(ref) {
     return () => observer2?.disconnect();
   }, [ref]);
 }
+var NAV_KEYS = /* @__PURE__ */ new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
+function usePointerMode(ref) {
+  React23.useEffect(() => {
+    const el = ref.current;
+    const doc = el?.ownerDocument;
+    if (!el || !doc) return;
+    const onPointer = () => el.setAttribute("data-gbo-pointer", "");
+    const onKey = (event) => {
+      if (NAV_KEYS.has(event.key)) el.removeAttribute("data-gbo-pointer");
+    };
+    doc.addEventListener("pointerdown", onPointer, true);
+    doc.addEventListener("keydown", onKey, true);
+    return () => {
+      doc.removeEventListener("pointerdown", onPointer, true);
+      doc.removeEventListener("keydown", onKey, true);
+    };
+  }, [ref]);
+}
 function RosterPane() {
   useStore(app.roster);
   const query = useStore(app.query);
@@ -28697,10 +29890,13 @@ function RosterPane() {
   useStore(roster2.metaWrites);
   useStore(roster2.attention);
   const pins = useStore(app.pinnedBots);
-  const [searching, setSearching] = React21.useState(false);
+  const person = footerPerson(useStore(app.userName));
+  React23.useEffect(() => loadUserName(), []);
+  const [searching, setSearching] = React23.useState(false);
   const now = useNow();
-  const rootRef = React21.useRef(null);
+  const rootRef = React23.useRef(null);
   useRosterShown(rootRef);
+  usePointerMode(rootRef);
   const roster = app.roster.get();
   const workingKey = chat && chat.chat?.busy ? rowKey(chat.bot) : "";
   const rooms = useStore(app.rooms);
@@ -28814,7 +30010,7 @@ function RosterPane() {
         /* @__PURE__ */ jsx25("strong", { children: "All bots are hidden" }),
         /* @__PURE__ */ jsx25("span", { children: "Hidden bots keep working; they are just not listed." }),
         /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
-      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx25("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs22(Fragment12, { children: [
+      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx25("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs22(Fragment14, { children: [
         list.map((section) => {
           const isCollapsed = collapsed.includes(section.name);
           return /* @__PURE__ */ jsxs22("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
@@ -28847,14 +30043,37 @@ function RosterPane() {
       ] }),
       showGroups ? /* @__PURE__ */ jsx25(RoomsSection, { query }) : null
     ] }),
-    /* @__PURE__ */ jsxs22("div", { className: "sidebar__footer gbo-roster-foot", children: [
+    /* @__PURE__ */ jsxs22("div", { className: "sidebar__footer gbo-roster-foot", title: roster.rows.length ? `${roster.rows.length} bots` : void 0, children: [
       /* @__PURE__ */ jsx25("div", { className: "sidebar__fade" }),
       /* @__PURE__ */ jsx25("div", { className: "account", children: /* @__PURE__ */ jsxs22("span", { className: "account__btn", children: [
-        /* @__PURE__ */ jsx25("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: "You" }),
-        /* @__PURE__ */ jsx25("span", { className: "account__name gbo-user-name", children: roster.rows.length ? `${roster.rows.length} bots` : "Bots" })
-      ] }) })
+        /* @__PURE__ */ jsx25("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: person.initials }),
+        person.known ? /* @__PURE__ */ jsx25("span", { className: "account__name gbo-user-name", children: person.name }) : null
+      ] }) }),
+      canOpenSettings() ? /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn gbo-foot-btn", title: "Hermes settings", "aria-label": "Open Hermes settings", onClick: () => void openSettings(), children: /* @__PURE__ */ jsx25(IconSettings, {}) }) : null
     ] }),
     /* @__PURE__ */ jsx25(RosterDialogs, {})
+  ] });
+}
+
+// src/ui/UsageMeter.tsx
+import { jsx as jsx26, jsxs as jsxs23 } from "react/jsx-runtime";
+function Bar({ percent }) {
+  if (percent === null) return null;
+  return /* @__PURE__ */ jsx26("span", { className: `gbo-meter-bar${percent >= 80 ? " is-high" : ""}`, role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-label": "Context used", children: /* @__PURE__ */ jsx26("span", { style: { width: `${percent}%` } }) });
+}
+function UsageStatusChip() {
+  const u = useStore(roster2.usage);
+  const enabled = useStore(app.enabled);
+  const label = usageContextLabel(u.usage);
+  if (!enabled || !u.runtimeId || !label) return null;
+  const cost = costLabel(u.usage);
+  return /* @__PURE__ */ jsxs23("span", { "data-gbo-root": "", className: "gbo-status-meter", style: { height: "auto", width: "auto" }, title: "Open Bot Chat: context used", children: [
+    /* @__PURE__ */ jsx26(Bar, { percent: contextPercent(u.usage) }),
+    /* @__PURE__ */ jsx26("span", { children: label }),
+    cost ? /* @__PURE__ */ jsxs23("span", { children: [
+      "· ",
+      cost
+    ] }) : null
   ] });
 }
 
@@ -28921,7 +30140,7 @@ function unwireParity() {
 }
 
 // src/index.tsx
-import { jsx as jsx26 } from "react/jsx-runtime";
+import { jsx as jsx27 } from "react/jsx-runtime";
 var index_default = {
   id: PLUGIN_ID,
   name: "Grokbot Override",
@@ -28929,10 +30148,10 @@ var index_default = {
   description: 'A chat-app Bot Mode screen (roster, Bot Chat, profile panel) on the same chats and gateway as Hermes Bot Mode. Palette: "Grokbot Override: toggle" switches back to stock Bot Mode instantly.',
   register(ctx) {
     setRenderers({
-      roster: () => /* @__PURE__ */ jsx26(OverrideBoundary, { area: "roster", children: /* @__PURE__ */ jsx26(RosterPane, {}) }),
-      workspace: () => /* @__PURE__ */ jsx26(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx26(ChatWorkspace, {}) }),
-      tab: (slot) => /* @__PURE__ */ jsx26(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx26(ChatWorkspace, { slot }) }),
-      room: (slot) => /* @__PURE__ */ jsx26(OverrideBoundary, { area: "room", children: /* @__PURE__ */ jsx26(RoomWorkspace, { slot }) })
+      roster: () => /* @__PURE__ */ jsx27(OverrideBoundary, { area: "roster", children: /* @__PURE__ */ jsx27(RosterPane, {}) }),
+      workspace: () => /* @__PURE__ */ jsx27(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx27(ChatWorkspace, {}) }),
+      tab: (slot) => /* @__PURE__ */ jsx27(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx27(ChatWorkspace, { slot }) }),
+      room: (slot) => /* @__PURE__ */ jsx27(OverrideBoundary, { area: "room", children: /* @__PURE__ */ jsx27(RoomWorkspace, { slot }) })
     });
     ctx.registerMany([
       {
@@ -29011,7 +30230,7 @@ var index_default = {
         id: "usage-meter",
         area: sdk.STATUSBAR_AREAS?.right ?? "statusBar.right",
         order: 90,
-        render: () => /* @__PURE__ */ jsx26(OverrideBoundary, { area: "usage", compact: true, children: /* @__PURE__ */ jsx26(UsageStatusChip, {}) })
+        render: () => /* @__PURE__ */ jsx27(OverrideBoundary, { area: "usage", compact: true, children: /* @__PURE__ */ jsx27(UsageStatusChip, {}) })
       },
       {
         id: "palette-self-check",

@@ -47,6 +47,12 @@ function hostCss() {
  *  payloads shaped like GET /api/messaging/platforms and /api/status; the
  *  served case is a bot on a remote host: a working multiplexed Slack with
  *  no per-profile row, state pending_restart). */
+/** A connected Slack entry (GET /api/messaging/platforms), for the hero. */
+function slackConnected() {
+  const vars = [{ key: 'SLACK_BOT_TOKEN', required: true, is_set: true }, { key: 'SLACK_APP_TOKEN', required: true, is_set: true }]
+  return { id: 'slack', name: 'Slack', enabled: true, configured: true, gateway_running: true, state: 'connected', env_vars: vars, updated_at: '2026-11-09T17:40:00Z', home_channel: { platform: 'slack', chat_id: 'C0123456789', name: 'bots' } }
+}
+
 function slackPages() {
   const vars = set => [
     { key: 'SLACK_BOT_TOKEN', required: true, is_set: set },
@@ -84,7 +90,7 @@ function slackPages() {
 
 mkdirSync(outDir, { recursive: true })
 const file = await bundlePreview()
-const { render, renderAvatarSheet, MD_ITEMS, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
+const { render, renderAvatarSheet, CARDS_DEMO_FILES, CARDS_DEMO_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
 const host = live ? hostCss() : ''
 if (live && !host) console.warn('no Hermes stylesheet found: rendering without the host cascade')
 // ROSTER indexes: 0 travel, 1 scholar, 4 recipes (pink), 5 sunny (yellow).
@@ -96,16 +102,49 @@ const pages = live ? {
   'light-markdown.html': { theme: 'light', botIndex: 1, items: MD_ITEMS, busy: false, panelOpen: false, hasMore: false, pins: ['scholar'] },
   'light-markdown-panel.html': { theme: 'light', botIndex: 1, items: MD_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
   'dark-markdown.html': { theme: 'dark', botIndex: 1, items: MD_ITEMS, busy: false, panelOpen: false, hasMore: false, pins: ['scholar'] },
-  'dark-short.html': { theme: 'dark', botIndex: 1, items: SHORT_ITEMS, busy: false, pins: ['scholar', 'travel'] },
+  'dark-short.html': { theme: 'dark', botIndex: 1, items: SHORT_ITEMS, busy: false, pins: ['scholar', 'travel'], userName: 'Alex Rivera' },
+  // Look 9: the footer (demo name, settings button) and the NEW line above
+  // the first unread bot message; the "You" fallback with no settings door;
+  // a long name truncating.
+  'light-new-line.html': { theme: 'light', botIndex: 1, items: NEW_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alex Rivera', newLine: NEW_ITEMS_FIRST_UNREAD },
+  'dark-new-line.html': { theme: 'dark', botIndex: 1, items: NEW_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alex Rivera', newLine: NEW_ITEMS_FIRST_UNREAD },
+  'light-footer-fallback.html': { theme: 'light', botIndex: 1, items: NEW_ITEMS, busy: false, hasMore: false, pins: ['scholar'], settings: false },
+  'dark-footer-long.html': { theme: 'dark', botIndex: 1, items: NEW_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alexandra Maximiliana Rivera-Castellanos' },
   'light-chat.html': { theme: 'light' },
   'light-chat-work-shown.html': { theme: 'light', showWork: true },
   'light-empty.html': { theme: 'light', items: [], busy: false },
-  // The README screenshots: light-pink.html (light.png), dark-short.html (dark.png).
-  'light-pink.html': { theme: 'light', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'] },
+  // The README pictures (screenshots/): the hero window in both themes (a
+  // pinned bot, the open chat, the panel with Scheduled, Slack Connected and
+  // the Model row), a question card and a live approval card in one chat.
+  'light-hero.html': { theme: 'light', botIndex: 1, items: MD_ITEMS, busy: false, hasMore: false, pins: ['scholar', 'recipes', 'sunny'], userName: 'Alex Rivera', slack: { platform: slackConnected() } },
+  'dark-hero.html': { theme: 'dark', botIndex: 1, items: MD_ITEMS, busy: false, hasMore: false, pins: ['scholar', 'recipes', 'sunny'], userName: 'Alex Rivera', slack: { platform: slackConnected() } },
+  'light-cards-demo.html': { theme: 'light', botIndex: 0, items: CARDS_DEMO_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alex Rivera', directiveFiles: CARDS_DEMO_FILES },
+  'dark-cards-demo.html': { theme: 'dark', botIndex: 0, items: CARDS_DEMO_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alex Rivera', directiveFiles: CARDS_DEMO_FILES },
+  // Older README pictures: light-pink.html (light.png), dark-short.html (dark.png).
+  'light-pink.html': { theme: 'light', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'], userName: 'Alex Rivera' },
   'dark-pink.html': { theme: 'dark', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar'] },
   'light-yellow.html': { theme: 'light', botIndex: 5, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'] },
   'dark-yellow.html': { theme: 'dark', botIndex: 5, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny', 'travel'] },
-  ...slackPages()
+  ...slackPages(),
+  // Cards 7: the choice card waiting (the composer asks for the answer),
+  // settled, and with two questions.
+  'light-card-waiting.html': { theme: 'light', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_WAITING, hasMore: false, pins: ['scholar'] },
+  'dark-card-waiting.html': { theme: 'dark', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_WAITING, hasMore: false, pins: ['scholar'] },
+  'light-card-settled.html': { theme: 'light', botIndex: 1, items: CARD_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
+  'dark-card-settled.html': { theme: 'dark', botIndex: 1, items: CARD_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
+  'light-card-multi.html': { theme: 'light', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
+  'dark-card-multi.html': { theme: 'dark', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
+  // Live ::card and ::preview directives in the open chat.
+  'light-card-directives.html': { theme: 'light', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES },
+  'dark-card-directives.html': { theme: 'dark', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES },
+  // Cards 8: live cards in the choice card's shell (an approval card waiting
+  // and settled, a running task card, a draft-email card).
+  ...Object.fromEntries(['light', 'dark'].flatMap(theme => [
+    [`${theme}-live-approval.html`, { theme, botIndex: 1, items: LIVE_APPROVAL_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: LIVE_APPROVAL_FILES }],
+    [`${theme}-live-approval-settled.html`, { theme, botIndex: 1, items: LIVE_APPROVAL_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: LIVE_APPROVAL_SETTLED_FILES }],
+    [`${theme}-live-task.html`, { theme, botIndex: 1, items: LIVE_TASK_ITEMS, busy: true, hasMore: false, pins: ['scholar'], directiveFiles: LIVE_TASK_FILES }],
+    [`${theme}-live-email.html`, { theme, botIndex: 1, items: LIVE_EMAIL_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES }]
+  ]))
 } : {
   'dark-chat.html': { theme: 'dark' },
   'light-chat.html': { theme: 'light' },

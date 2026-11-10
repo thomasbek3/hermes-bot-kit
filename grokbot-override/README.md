@@ -5,20 +5,30 @@ and a profile panel with scheduled jobs. It runs on the Hermes engine and opens 
 Hermes Bot Mode opens, so history is shared both ways.
 
 <p align="center">
-  <img src="screenshots/light.png" alt="The override in light mode with three pinned bots" width="420">
-  <img src="screenshots/dark.png" alt="The override in dark mode" width="420">
+  <img src="screenshots/light.png" alt="The override in light mode: three pinned bots, the open chat, and the profile panel with Scheduled, Slack Connected and the Model row" width="420">
+  <img src="screenshots/dark.png" alt="The same window in dark mode" width="420">
 </p>
+<p align="center"><em>Demo bots and demo text, rendered from the preview harness (<code>dev/</code>).</em></p>
 
 The look follows Hermes's light and dark themes. Each bot wears a simple shape (blob, cloud, clover, flower,
 heart, hexagon, house, sparkle, square, star, teardrop or pebble) in its own colour, chosen from its exact
 route key; a bot with a photo shows the photo. Your bubbles, the send button and switches take the open
-bot's colour. Thinking and tool rows are hidden in the chat unless Bubble Mode's "toggle work rows"
-preference shows them.
+bot's colour; the bot's bubbles are one flat grey. Thinking and tool rows are hidden in the chat unless Bubble
+Mode's "toggle work rows" preference shows them. A thin red **NEW** line marks the first bot message you have not
+seen when you open a chat. The sidebar footer shows your initials and name (this computer's account name, the only
+one Hermes gives plugins; "You" without it) and a round button that opens Hermes Settings. The transcript stays put
+while you scroll past live cards, and message actions float beside the message on hover.
+
+<p align="center">
+  <img src="screenshots/new-line.png" alt="The NEW line above the first unread bot message" width="300">
+  <img src="screenshots/footer.png" alt="The sidebar footer with a demo name and the settings button" width="300">
+</p>
 
 Hermes Bot Mode is never removed or disabled. The override hides the stock **Bots** tab while it is on and
 does the chat itself: creating a Bot Chat, answering questions and password prompts, slash commands and
-skills, @mentions, tool detail, media, edit / regenerate / rewind, reactions, voice input, chats side by
-side, unread dots and gateway group chats. The palette toggle is the escape hatch back to stock; **Open in
+skills, @mentions, tool detail, media, choice cards for the bot's questions, live `::card` and `::preview`
+widgets, edit / regenerate / rewind, reactions, voice input, chats side by side, unread dots and gateway
+group chats. The palette toggle is the escape hatch back to stock; **Open in
 Hermes Bot Mode** shows up only in error states. The full capability list is in [PARITY.md](PARITY.md).
 
 ## Use
@@ -38,9 +48,16 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
   override's own plugin storage and never touch Bot Mode's data.
 - The profile panel's **Slack** card shows whether the bot is in Slack. **Test connection** asks Slack
   itself (`auth.test`) through the optional [slack-check](../slack-check/README.md) backend plugin;
-  when the backend does not have it, the card shows a short hint in place of the button. **Add to Slack** is an optional add-on
-  ([slack-connect](../slack-connect/README.md)) that needs an always-on Hermes host with a public HTTPS
-  address.
+  when the backend does not have it, the card shows a short hint in place of the button.
+- **One-click Add to Slack** (optional add-on, [slack-connect](../slack-connect/README.md)): pick the
+  workspace and click **Connect**, click **Allow** in your browser, and the window says **Connected**; the bot
+  sends you a welcome DM and the Slack card reads Connected. **Remove from Slack** deletes the app again in
+  one click. It needs an always-on Hermes host with a public HTTPS address and one Slack configuration token
+  per workspace; without it, the paste-two-tokens window still works.
+
+<p align="center">
+  <img src="screenshots/slack-strip.png" alt="Add to Slack in three steps: the Add to Slack window with the Acme Team workspace and Connect, the Connected to Acme Team Slack window, and the Slack card reading Connected" width="860">
+</p>
 - Right-click a bot (or its ⋯) for pin, hide, edit profile, skills / tools / model, groups, duplicate,
   delete, a new chat or a second override chat tab beside the first. **+** creates a bot (its Bot Chat is
   born with the intro, as in Bot Mode) or a gateway group chat. The filter button narrows the roster by
@@ -48,8 +65,11 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
 - **Group chats** (gateway-owned rooms) are listed under the bots and open as their own tab. A member's
   failed group turn puts the needs-attention badge on its row, like a failed Bot Chat turn.
 - The profile panel creates, edits, runs and deletes scheduled jobs, opens the bot's computer (live screen
-  with take over / hand back), lists the group chats the bot is in, and shows the open chat's context and
-  cost meter (also in the status bar).
+  with take over / hand back), lists the group chats the bot is in, and shows the bot's model in one
+  **Model** row that opens the model picker. The open chat's context and cost meter is in the status bar.
+- Bot Chats opened here are **desktop sessions** (as in stock Desktop), so the bot knows markdown, files and
+  cards render. A chat whose session started before you installed or updated the override keeps its old mode
+  until that session restarts.
 - Palette doors: **new bot**, **edit this bot's profile**, **this bot's skills, tools and model**, **new
   scheduled job for this bot**, **open this bot's computer**.
 - **Grokbot Override: self-check (read-only)**: reads the roster, one bot's Bot Chat registry and history
@@ -59,6 +79,60 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
 A bot that has never been opened has no Bot Chat yet. Clicking it creates one exactly as Bot Mode does
 (registry first, adopt the existing chat on a conflict, so the two can never make two); a chat tab that
 merely restores the last bot offers **Start Bot Chat** instead.
+
+## Cards
+
+<p align="center">
+  <img src="screenshots/cards-light.png" alt="A question card the bot asked, answered Friday, then an approval card with Book it and Not yet" width="320">
+  <img src="screenshots/cards-dark.png" alt="The same cards in dark mode" width="320">
+</p>
+
+In the override's chat a bot can show cards instead of describing things in prose.
+
+- **Question cards work out of the box.** They come from Hermes's built-in `clarify` tool: the question,
+  lettered choices, a typed answer in the composer, multi-select and several questions with **Answer**.
+- **Approval, task and email-draft cards need the agent-cards skill.** The bot writes a small `card.v1` JSON
+  file in its working directory and puts one `::card{…}` line in its reply; the card updates live as the bot
+  rewrites the file, and a button click goes back to the bot as a hidden message. The skill that teaches
+  this is [`skills/agent-cards/SKILL.md`](skills/agent-cards/SKILL.md). Install it with the kit's root `install.sh`, from a clone
+  (off by default):
+
+  ```bash
+  KIT_CARDS_SKILL=1 bash install.sh                                # the default profile and every profile
+  KIT_CARDS_SKILL=1 KIT_CARDS_PROFILES=default,helper bash install.sh
+  KIT_CARDS_SKILL=remove bash install.sh                           # remove it again (installs nothing)
+  ```
+
+  It goes to `<profile-home>/skills/agent-cards/SKILL.md`. An `agent-cards` skill you wrote yourself is
+  left alone. The `::preview{file="page.html"}` line (a small HTML page in a sandboxed frame) works the same
+  way and needs no skill beyond a bot that writes the file. A preview has **no network** (its frame carries
+  the policy `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
+  font-src data:; media-src data: blob:`), so a page must be self-contained: inline styles and scripts,
+  images as `data:` URLs. A page's `window.hermes.send` / `data-hermes-send` message goes out at once only
+  right after you clicked into that frame; otherwise the exact text waits under the frame with **Send** and
+  **Dismiss**.
+- **What bot output can do on its own.** A card row shows the message it sends under its label when the two
+  differ. A web image in a reply (`![…](https://…)`) is not fetched until you click **Load** on its
+  "Image from <host>" placeholder; files from the bot's own machine show at once. A connection's
+  **Sign in** opens only `https:` links (and `http:` to this machine); any other link is shown as text.
+- **Toolsets.** For Desktop chat a bot needs the **`file`** toolset (to write card files) and the
+  **`clarify`** toolset (to ask question cards). Check them under **Skills, tools and model** in the
+  profile panel.
+- **Running chats.** A chat started before you installed the override or the skill keeps its old mode until
+  its session restarts (start a new chat, or restart the bot).
+
+To make a bot use cards well, add this to its `SOUL.md`:
+
+```text
+When to show a card (Hermes Desktop chat only):
+1. A choice or a yes/no confirmation: ask with the clarify tool (a question card).
+2. Before anything outward or irreversible (sending, posting, paying, booking, deleting): an approval card, then wait.
+3. A job that takes more than about a minute: one task card, kept up to date.
+4. Everything else: plain text. On Slack, Telegram or the CLI, never write a ::card line.
+```
+
+Cards are drawn only in the open Bot Chat of this override. Group rooms, other surfaces and other channels
+show the `::card` line as plain text.
 
 ## Supported Hermes version
 
@@ -121,6 +195,11 @@ npm test               # node:test; the render, app-layer and loader smoke tests
 node dev/preview.mjs out/   # fixture-data preview pages (HTML + SVG)
 node dev/preview.mjs out/ --live   # framed like the live window, plus avatars-sheet.html
 ```
+
+The pictures in `screenshots/` are screenshots of `--live` pages with demo data: `light-hero.html` and
+`dark-hero.html` (`light.png`, `dark.png`), `light-cards-demo.html` / `dark-cards-demo.html` (the cards),
+`light-new-line.html` and `dark-new-line.html` (the NEW line and footer), and `light-slack-connect-new.html`,
+`light-slack-connect-connected.html` and `light-slack-connected.html` (the Add to Slack strip).
 
 `node build.mjs --default-off --out <file>` writes a single copy whose toggle starts off (that is what
 `plugin.default-off.js` is). `--probe` additionally runs the read-only self-check once,

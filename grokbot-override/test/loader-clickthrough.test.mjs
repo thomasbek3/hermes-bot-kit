@@ -73,6 +73,7 @@ test('loader-faithful click-through: roster → chat → switch bots repeatedly 
   await expectDialog(click(panel, 'Delete Digest'), 'Delete this job?')
   await expectDialog(click(panel, () => buttonWithText(panel, 'Edit profile and avatar')), 'Edit profile')
   await expectDialog(click(panel, () => buttonWithText(panel, 'Skills, tools, MCP and model')), 'skills, tools and model')
+  await expectDialog(click(panel, () => panel.querySelector('button.gbo-model-row')), 'Scout: model')
   await expectDialog(click(panel, () => [...panel.querySelectorAll('button.gbo-panel-link')].find(b => b.textContent.trim() === 'Groups')), 'Groups')
 
   // And back to switching after the dialogs.

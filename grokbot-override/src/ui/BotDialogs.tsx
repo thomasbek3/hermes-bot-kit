@@ -1,5 +1,6 @@
 // The roster-side dialogs: Edit profile (R12), Delete (R12), Groups (R12),
-// New bot (R13), Skills/tools/model (P6, C21), the scheduled-job dialogs (P3)
+// New bot (R13), Skills/tools/model (P6, C21), the panel's Model picker, the
+// scheduled-job dialogs (P3)
 // and the expensive-model confirmation (C21). One dialog at a time
 // (rosterStores.dialog); whichever override surface mounts first hosts them.
 
@@ -23,9 +24,11 @@ import {
   generateAvatar,
   groupHasRoom,
   listConnections,
+  loadBotModel,
   loadCreateCatalog,
   probeImageGeneration,
   saveAdvanced,
+  saveBotModel,
   saveMeta,
   saveProfileEdits,
   setConfirmAsker
@@ -79,6 +82,7 @@ export function RosterDialogs() {
     <OverrideBoundary key={dialog?.kind || 'none'} area="dialog" onReset={close}>
       {dialog?.kind === 'edit' ? <EditProfileDialog bot={dialog.bot} onClose={close} /> : null}
       {dialog?.kind === 'config' ? <ConfigDialog bot={dialog.bot} initial={dialog.initial} onClose={close} /> : null}
+      {dialog?.kind === 'model' ? <ModelDialog bot={dialog.bot} onClose={close} /> : null}
       {dialog?.kind === 'groups' ? <GroupsDialog bot={dialog.bot} onClose={close} /> : null}
       {dialog?.kind === 'create' ? <CreateBotDialog initialTab={dialog.tab} initialCaps={dialog.caps} onClose={close} /> : null}
       {dialog?.kind === 'delete' ? (
@@ -407,6 +411,72 @@ export function ConfigDialog({ bot, initial, onClose }: { bot: any; initial?: an
       }
     >
       <AdvancedConfig bot={bot} state={adv} setState={setAdv} />
+      {error ? <div className="gbo-form-error">{error}</div> : null}
+    </Dialog>
+  )
+}
+
+/** The panel's Model row: the same ModelPicker as the config screen, for
+ *  the model only, saved the same way (rosterActions saveBotModel). */
+export function ModelDialog({ bot, onClose }: { bot: any; onClose: () => void }) {
+  const current = useStore(roster2.models)[rowKey(bot)]
+  const [value, setValue] = React.useState<null | { provider: string; model: string }>(() => (current?.loaded ? { provider: current.provider, model: current.model } : null))
+  const [dirty, setDirty] = React.useState(false)
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<null | string>(null)
+  React.useEffect(() => {
+    void loadBotModel(bot)
+  }, [rowKey(bot)])
+  React.useEffect(() => {
+    if (!value && current?.loaded) setValue({ provider: current.provider, model: current.model })
+  }, [current?.loaded])
+  const save = async () => {
+    if (!value) return
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await saveBotModel(bot, value)
+      if (res?.applied?.model === true) onClose()
+      else if (res?.confirmation?.accepted === false) setError('Not saved: the model was not confirmed.')
+      else setError('Not saved: model')
+    } catch (err: any) {
+      setError(String(err?.message || err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog
+      open
+      busy={busy}
+      onClose={onClose}
+      title={`${displayName(bot, metaFor(bot))}: model`}
+      description="Written to the bot’s own Hermes profile on save."
+      footer={
+        <>
+          <button type="button" className="gbo-btn is-ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="gbo-btn is-primary" disabled={busy || !dirty || !value} onClick={() => void save()}>
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      {value ? (
+        <ModelPicker
+          bot={bot}
+          value={value}
+          onChange={patch => {
+            setDirty(true)
+            setValue(v => ({ ...(v || { provider: '', model: '' }), ...patch }))
+          }}
+        />
+      ) : current?.error ? (
+        <div className="gbo-form-error">Could not read the bot’s model: {current.error}</div>
+      ) : (
+        <div className="gbo-form-note">Loading the bot’s model…</div>
+      )}
       {error ? <div className="gbo-form-error">{error}</div> : null}
     </Dialog>
   )

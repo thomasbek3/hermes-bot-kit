@@ -352,6 +352,23 @@ stream), paste the printed token, turn on HD.
   string (the browser API cannot set headers), so it stays out of logs and
   argv — but on a plaintext `ws://` link anyone who can read the wire can
   still read it. The desktop plugin refuses `ws://` to public hosts.
+- **Windows files are locked down.** The installers give `C:\usbmmidd_v2`
+  (the SYSTEM startup task's program) and `C:\ProgramData\hermes-cv` a
+  protected ACL: inheritance removed, owner Administrators, Administrators and
+  SYSTEM full control. The HD agent tree (`hermes-cv\hiperf`, its venv) is
+  read+execute for the installing user only; `hiperf-token.txt` is readable
+  only by that user, Administrators and SYSTEM; `hiperf.log` is the one file
+  the user may write. An existing `C:\usbmmidd_v2` not owned by
+  Administrators, SYSTEM or TrustedInstaller stops the virtual-display step.
+  `C:\ffmpeg\bin\ffmpeg.exe` is used only after the Program Files and winget
+  locations, and never when a non-administrator can change it. If you
+  installed the HD agent before this, re-run `hiperf-windows.ps1` and, if
+  other people use that PC, delete `hiperf-token.txt` first so a new token is
+  made.
+- **Approvals show the whole command.** The Orgo hands, `run` and `bash` tools
+  ask Hermes for approval with the argument as it will run: control
+  characters escaped (`\r`, `\t`, `\x1b`), up to 2000 characters, then
+  `… [+N more characters, M total]`; a click names its button and double.
 - **August 2026 macOS Screen Sharing CVE (CVE-2026-65400).** Unpatched Screen
   Sharing can authenticate an attacker on the network **without valid
   credentials**. Apple patched this in macOS **Sonoma 14.8.9**,
@@ -388,8 +405,8 @@ chmod +x ~/.hermes/desktop-plugins/computer-viewer/connect-*.sh ~/.hermes/deskto
 ```
 
 The kit installer places `novnc-rfb.mjs` in `computer-viewer/vendor/`. The
-plugin verifies that file's SHA-256 before loading it, and only then falls back
-to the CDN. A copy left next to `plugin.js` by an older release is still read
+plugin verifies that file's SHA-256 before loading it; there is no CDN
+fallback. A copy left next to `plugin.js` by an older release is still read
 (and hash-checked) if `vendor/` has none.
 
 One install covers every profile — do not copy this into
@@ -739,18 +756,18 @@ The address field picks a mode for you. These names only appear under
 
 | Mode | How it connects | When to use |
 |---|---|---|
-| **WebSocket** (default) | Loads the vendored noVNC 1.7.0 (`RFB`) the installer places in `computer-viewer/vendor/`, after a SHA-256 check. Falls back to jsDelivr then `esm.sh` only if that file is **missing, truncated, or unreadable**; those CDN copies are unverified. A file that is present but **fails the hash check, or fails to import**, is treated as tampering: the pane stops with **Viewer file failed verification** and no CDN copy is loaded. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
-| **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. Sandboxed; the page cannot read the clipboard unless **Allow this computer to use my clipboard** is on for that computer (Advanced, off by default). | CSP blocks the noVNC module, you're offline, or you already have `vnc.html`. |
+| **WebSocket** (default) | Loads the vendored noVNC 1.7.0 (`RFB`) the installer places in `computer-viewer/vendor/`, after a SHA-256 check, and nothing else: no CDN copy is ever loaded. If that file is **missing, truncated, or unreadable**, the pane stops with **Couldn't load the viewer** and asks you to re-run the kit installer. A file that is present but **fails the hash check, or fails to import**, is treated as tampering: the pane stops with **Viewer file failed verification**. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
+| **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. Sandboxed; the page cannot read the clipboard unless **Allow this computer to use my clipboard** is on for that computer (Advanced, off by default). | The vendored noVNC is missing, or you already have `vnc.html`. |
 | **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Rotating desktops (paste the API URL or an API key). |
 
-If noVNC cannot be loaded (missing vendored copy, network, or CSP), the pane
-shows **Couldn't load the viewer** and tells you to switch the endpoint to
-iframe mode (Advanced, or paste a `vnc.html` URL). Iframe endpoints keep
-working in that situation. CDN fallback is unverified.
+If the vendored noVNC cannot be loaded (missing, truncated or unreadable), the
+pane shows **Couldn't load the viewer**: re-run the kit installer, or switch the
+endpoint to iframe mode (Advanced, or paste a `vnc.html` URL). Iframe endpoints
+keep working in that situation. The loader fails closed on purpose: an
+unverified module from a CDN would run inside the desktop app.
 
-The status line always names the live source and, when the vendored copy
-lost, why: `noVNC from CDN (unverified); vendored file missing` (or
-`vendored file truncated`, `vendored read failed`, `no desktop bridge`).
+The error names why the vendored copy did not load: `vendored file missing`
+(or `vendored file truncated`, `vendored read failed`, `no desktop bridge`).
 Only a verified vendored constructor is cached, so dropping a good file into
 place takes effect on the next connect without restarting Hermes.
 
@@ -856,8 +873,8 @@ the other variant and the working choice is remembered per endpoint.
   (`hermes.plugin.computer-viewer.*`).
 - Websocket mode loads the vendored noVNC from `computer-viewer/vendor/`
   after a SHA-256 check. Installs without that file (missing, truncated, unreadable)
-  fall back to the CDN (unverified); if the CDN is blocked too, use iframe
-  mode. A hash mismatch does **not** fall back — it stops the connection.
+  stop with **Couldn't load the viewer** (re-run the installer, or use iframe
+  mode); there is no CDN fallback. A hash mismatch stops the connection too.
 - The VNC server's RSA key is pinned on first connect (trust on first use).
   A changed key stops the connection with **Server key changed**; clear the
   pin with **Forget pinned server key** under Advanced if the change was

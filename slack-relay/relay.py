@@ -1,11 +1,13 @@
 """Narrow public Slack ingress; backend and profile state remain private."""
 import asyncio
 import html
+import ipaddress
 import json
 import logging
 import os
 import re
 import time
+import unicodedata
 from pathlib import Path
 from urllib.parse import quote
 
@@ -18,6 +20,58 @@ APP_KEY = re.compile(r'^[a-f0-9]{32}$')
 PROFILE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
 LIMIT = 1024 * 1024
 VERIFICATION_KEY = web.RequestKey('url_verification', bool)
+# Set by a handler once the request proved itself (a valid Slack signature for
+# a known app, or an OAuth callback with a valid state). Such a request is
+# always processed and never charged to the rate limit.
+AUTHENTICATED_KEY = web.RequestKey('authenticated', bool)
+BUCKET_SIZE = 60.0
+MAX_IDENTITIES = 4096
+TEAM_NAME_MAX = 100
+OWNER_RE = re.compile(r'^[A-Za-z0-9]{1,32}$')
+# Characters that could end, quote or interpolate a .env value.
+ENV_UNSAFE = set('"\'\\`$')
+
+
+def safe_team_name(value):
+    """Slack's team name, reduced to printable text that is safe in a .env
+    value: no control, format or line-separator characters (CR, LF, NUL,
+    escapes, bidi controls), no quote, backslash, backtick or dollar sign,
+    whitespace collapsed, at most TEAM_NAME_MAX characters."""
+    if not isinstance(value, str):
+        return ''
+    kept = []
+    for ch in value:
+        cat = unicodedata.category(ch)
+        if cat[0] == 'C' or cat in ('Zl', 'Zp'):
+            kept.append(' ')
+        elif ch not in ENV_UNSAFE:
+            kept.append(ch)
+    return ' '.join(''.join(kept).split())[:TEAM_NAME_MAX].strip()
+
+
+def safe_owner(value):
+    """The installing user's Slack id, or None: it becomes the only allowed
+    user, so it is never altered, only accepted as a plain id or refused."""
+    return value if isinstance(value, str) and OWNER_RE.fullmatch(value) else None
+
+
+def client_identity(peer, forwarded):
+    """The rate-limit identity. Behind the required loopback proxy the TCP
+    peer is the proxy itself, so for a loopback peer the right-most
+    X-Forwarded-For address (the one the proxy appended) is used when it is
+    a syntactically valid IP; otherwise the peer."""
+    peer = peer or 'unknown'
+    try:
+        loopback = ipaddress.ip_address(peer.split('%', 1)[0]).is_loopback
+    except ValueError:
+        loopback = False
+    if loopback and forwarded:
+        last = forwarded[-1].split(',')[-1].strip()
+        try:
+            return str(ipaddress.ip_address(last))
+        except ValueError:
+            pass
+    return peer
 
 
 def welcome(bot, workspace):
@@ -41,6 +95,23 @@ class Relay:
         self.base_url, self.upstream = base_url.rstrip('/'), upstream.rstrip('/')
         self.slack, self.writer, self.notifier = slack, writer, notifier
         self.buckets = {}
+
+    def _tokens(self, ident, now):
+        """The identity's tokens now (refilled at 1 per second, at most
+        BUCKET_SIZE), without charging. The table stays bounded: identities
+        whose bucket is full again are dropped (they equal a new one), and if
+        that is not enough the least recently seen are evicted. A full table
+        never refuses anyone."""
+        if ident not in self.buckets and len(self.buckets) >= MAX_IDENTITIES:
+            self.buckets = {k: v for k, v in self.buckets.items() if v[0] + (now - v[1]) < BUCKET_SIZE}
+            if len(self.buckets) >= MAX_IDENTITIES:
+                keep = sorted(self.buckets.items(), key=lambda item: item[1][1])[-(MAX_IDENTITIES // 2):]
+                self.buckets = dict(keep)
+        tokens, previous = self.buckets.get(ident, (BUCKET_SIZE, now))
+        return min(BUCKET_SIZE, tokens + (now - previous))
+
+    def _charge(self, ident, now, tokens):
+        self.buckets[ident] = (max(0.0, tokens - 1), now)
 
     def profile_env(self, profile):
         if not PROFILE.fullmatch(profile) or profile == 'default':
@@ -110,6 +181,7 @@ class Relay:
         signing_secret = env.get('SLACK_SIGNING_SECRET') or ''
         if not signing_secret or not verify_slack_signature(signing_secret, request.headers.get('X-Slack-Request-Timestamp'), body, request.headers.get('X-Slack-Signature')):
             raise web.HTTPUnauthorized()
+        request[AUTHENTICATED_KEY] = True
         if isinstance(payload, dict) and payload.get('type') == 'url_verification' and isinstance(payload.get('challenge'), str):
             return web.json_response({'challenge': payload['challenge']})
         headers = {key: val for key, val in request.headers.items() if key.lower().startswith('x-slack-') or key.lower() == 'content-type'}
@@ -130,6 +202,7 @@ class Relay:
                 raise ValueError('invalid state')
         except (ValueError, OSError, TypeError, KeyError):
             raise web.HTTPBadRequest(text='This authorization has expired or is invalid.')
+        request[AUTHENTICATED_KEY] = True
         key, profile = state['app_key'], state['profile']
         if request.query.get('error'):
             self.pending(key, 'denied')
@@ -142,9 +215,11 @@ class Relay:
             result = await self.slack_call('oauth.v2.access', {'client_id': env['SLACK_CLIENT_ID'], 'client_secret': env['SLACK_CLIENT_SECRET'], 'code': code, 'redirect_uri': self.base_url + '/oauth/callback'})
             if not result.get('ok') or result.get('app_id') != record.get('app_id') or (result.get('team') or {}).get('id') != state['team_id']:
                 raise ValueError('authorization mismatch')
-            owner = (result.get('authed_user') or {}).get('id')
+            # Slack-supplied text goes into the profile's .env: refuse an odd
+            # owner id, reduce the team name to safe printable text.
+            owner = safe_owner((result.get('authed_user') or {}).get('id'))
             token = result.get('access_token')
-            team_name = (result.get('team') or {}).get('name') or 'Slack'
+            team_name = safe_team_name((result.get('team') or {}).get('name')) or 'Slack'
             if not all(isinstance(x, str) and x for x in (owner, token, team_name)):
                 raise ValueError('incomplete authorization')
             existing = [x.strip() for x in (env.get('SLACK_ALLOWED_USERS') or '').split(',') if x.strip()]
@@ -166,21 +241,38 @@ class Relay:
     def application(self):
         @web.middleware
         async def guard(request, handler):
+            # The pre-auth rate limit is charged only for outcomes that did not
+            # authenticate (unknown key or path, bad signature or state,
+            # malformed or oversized body, health checks). A request that
+            # authenticates is always processed, whatever its bucket says, so
+            # unauthenticated traffic can never lock Slack or an installer out.
             status = 500
             try:
-                ip = request.remote or 'unknown'
+                ident = client_identity(request.remote, request.headers.getall('X-Forwarded-For', []))
                 now = time.monotonic()
-                # Bound the number of identities as well as the rate.
-                if len(self.buckets) > 4096:
-                    self.buckets = {k: v for k, v in self.buckets.items() if now - v[1] < 600}
-                    if len(self.buckets) > 4096:
+                tokens = self._tokens(ident, now)
+                limited = tokens < 1
+                unrouted = request.match_info.http_exception is not None
+                if unrouted or request.path in ('/healthz', '/slack/healthz'):
+                    # These can never authenticate: charge and answer cheaply.
+                    self._charge(ident, now, tokens)
+                    if limited:
                         raise web.HTTPTooManyRequests()
-                tokens, previous = self.buckets.get(ip, (60.0, now))
-                tokens = min(60.0, tokens + (now - previous))
-                self.buckets[ip] = (max(0, tokens - 1), now)
-                if tokens < 1:
-                    raise web.HTTPTooManyRequests()
-                response = await handler(request)
+                    response = await handler(request)
+                    status = response.status
+                    return response
+                try:
+                    response = await handler(request)
+                except web.HTTPException:
+                    if not request.get(AUTHENTICATED_KEY, False):
+                        self._charge(ident, now, tokens)
+                        if limited:
+                            raise web.HTTPTooManyRequests()
+                    raise
+                if not request.get(AUTHENTICATED_KEY, False):
+                    self._charge(ident, now, tokens)
+                    if limited:
+                        raise web.HTTPTooManyRequests()
                 status = response.status
                 return response
             except web.HTTPException as exc:

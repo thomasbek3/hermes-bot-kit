@@ -329,7 +329,7 @@ test('#7 @mentions of other roster bots are detected (not emails, not code, not 
   assert.deepEqual(names('@research hi'), ['research'])
   assert.deepEqual(names('@hermes ping'), ['default'])
   assert.deepEqual(names('@scout-bot go'), ['scout'])
-  assert.deepEqual(names('mail me at me@research.org'), [])
+  assert.deepEqual(names('mail me at me@research.example'), [])
   assert.deepEqual(names('run `@research` literally'), [])
   assert.deepEqual(names('@scholar talking to myself'), [], 'the open bot is not a relay target')
   assert.deepEqual(names('@nobody here'), [])

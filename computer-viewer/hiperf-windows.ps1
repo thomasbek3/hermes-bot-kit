@@ -143,15 +143,33 @@ function Test-PythonWorks([string]$Exe) {
 
 function Resolve-Ffmpeg {
     Refresh-ProcessPath
+    # Program Files and the machine-scope winget locations first. C:\ffmpeg is
+    # last and only used when no standard user can change it: any account may
+    # create folders in C:\, and the logon task runs this ffmpeg.
     $candidates = @(
-        (Join-Path 'C:\ffmpeg\bin' 'ffmpeg.exe'),
         (Join-Path ${env:ProgramFiles} 'ffmpeg\bin\ffmpeg.exe'),
-        (Join-Path ${env:ProgramFiles} 'Gyan\FFmpeg\bin\ffmpeg.exe')
+        (Join-Path ${env:ProgramFiles} 'Gyan\FFmpeg\bin\ffmpeg.exe'),
+        (Join-Path ${env:ProgramFiles} 'WinGet\Links\ffmpeg.exe')
     )
+    $wingetPackages = Join-Path ${env:ProgramFiles} 'WinGet\Packages'
+    if (Test-Path -LiteralPath $wingetPackages) {
+        $candidates += @(Get-ChildItem -LiteralPath $wingetPackages -Directory -Filter 'Gyan.FFmpeg*' -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter 'ffmpeg.exe' -ErrorAction SilentlyContinue } |
+            Select-Object -ExpandProperty FullName)
+    }
     $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source) { $candidates = @($cmd.Source) + $candidates }
     foreach ($c in $candidates) {
         if ($c -and (Test-Path -LiteralPath $c)) { return $c }
+    }
+    $rootFfmpeg = 'C:\ffmpeg\bin\ffmpeg.exe'
+    if (Test-Path -LiteralPath $rootFfmpeg) {
+        $unsafe = $false
+        foreach ($p in @('C:\ffmpeg', 'C:\ffmpeg\bin', $rootFfmpeg)) {
+            if ((Test-IsLink $p) -or (Test-WritableByNonAdmins $p)) { $unsafe = $true }
+        }
+        if (-not $unsafe) { return $rootFfmpeg }
+        Write-Warning "Skipping $rootFfmpeg : a non-administrator can change it (C:\ffmpeg is writable by other accounts or not owned by Administrators)."
     }
     return $null
 }
@@ -185,22 +203,104 @@ function Get-OrCreateToken {
     return $tok
 }
 
-function Grant-UserAcl([string]$Path, [string]$User, [string]$Rights, [bool]$Inherit) {
-    if (-not (Test-Path -LiteralPath $Path)) { return }
-    try {
-        $acl = Get-Acl -LiteralPath $Path
-        if ($Inherit) {
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                $User, $Rights, 'ContainerInherit, ObjectInherit', 'None', 'Allow')
-        } else {
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                $User, $Rights, 'Allow')
+# --- ACL helpers (well-known SIDs: independent of the display language) -----
+$SidAdministrators = 'S-1-5-32-544'
+$SidSystem = 'S-1-5-18'
+$SidTrustedInstaller = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+$TrustedOwnerSids = @($SidAdministrators, $SidSystem, $SidTrustedInstaller)
+
+function Test-IsLink([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    return [bool]($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint))
+}
+
+function Test-TrustedOwner([string]$Path) {
+    $owner = (Get-Acl -LiteralPath $Path).GetOwner([System.Security.Principal.SecurityIdentifier])
+    return ($owner -and ($TrustedOwnerSids -contains $owner.Value))
+}
+
+function Reset-ChildAcls([string]$Dir, [System.Security.Principal.SecurityIdentifier]$Owner) {
+    # Every item below $Dir: owner $Owner, explicit entries removed, only what
+    # it inherits. These trees are the installer's own and hold no links, so a
+    # link found here was planted: it is removed (the link only, never its
+    # target) instead of followed; Set-Acl on a link would change its target.
+    foreach ($child in @(Get-ChildItem -LiteralPath $Dir -Force)) {
+        if ($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            Write-Warning "Removing unexpected link $($child.FullName)"
+            if ($child.PSIsContainer) { [System.IO.Directory]::Delete($child.FullName, $false) }
+            else { [System.IO.File]::Delete($child.FullName) }
+            continue
         }
-        $acl.AddAccessRule($rule)
-        Set-Acl -LiteralPath $Path -AclObject $acl
-    } catch {
-        Write-Warning "Could not grant $Rights on $Path to $User : $_"
+        $childAcl = Get-Acl -LiteralPath $child.FullName
+        foreach ($ace in @($childAcl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
+            [void]$childAcl.RemoveAccessRuleSpecific($ace)
+        }
+        $childAcl.SetAccessRuleProtection($false, $false)
+        $childAcl.SetOwner($Owner)
+        Set-Acl -LiteralPath $child.FullName -AclObject $childAcl
+        if ($child.PSIsContainer) { Reset-ChildAcls -Dir $child.FullName -Owner $Owner }
     }
+}
+
+function Set-ProtectedAcl {
+    # Replaces the ACL on $Path: inheritance removed, owner Administrators,
+    # Administrators and SYSTEM full control, plus each $Extra grant
+    # (@{ Identity = 'DOMAIN\user'; Rights = 'ReadAndExecute'; Inherit = $true }).
+    # -Recurse resets everything below to inherit only from it.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [object[]]$Extra = @(),
+        [switch]$Recurse
+    )
+    if (Test-IsLink $Path) { throw "$Path is a link; refusing to set its ACL." }
+    $isDir = (Get-Item -LiteralPath $Path -Force).PSIsContainer
+    if ($isDir) { $acl = New-Object System.Security.AccessControl.DirectorySecurity }
+    else { $acl = New-Object System.Security.AccessControl.FileSecurity }
+    $admins = New-Object System.Security.Principal.SecurityIdentifier($SidAdministrators)
+    $system = New-Object System.Security.Principal.SecurityIdentifier($SidSystem)
+    $acl.SetOwner($admins)
+    $acl.SetAccessRuleProtection($true, $false)
+    $grants = @(
+        @{ Identity = $admins; Rights = 'FullControl'; Inherit = $true },
+        @{ Identity = $system; Rights = 'FullControl'; Inherit = $true }
+    ) + @($Extra)
+    foreach ($g in $grants) {
+        $flags = 'None'
+        if ($isDir -and $g.Inherit) { $flags = 'ContainerInherit, ObjectInherit' }
+        $identity = $g.Identity
+        if ($identity -is [string]) { $identity = New-Object System.Security.Principal.NTAccount($identity) }
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, $g.Rights, $flags, 'None', 'Allow')
+        $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+    if ($Recurse -and $isDir) { Reset-ChildAcls -Dir $Path -Owner $admins }
+}
+
+function Test-WritableByNonAdmins([string]$Path) {
+    # True when anyone other than Administrators, SYSTEM or TrustedInstaller
+    # owns $Path or may write, delete or re-permission it.
+    $acl = Get-Acl -LiteralPath $Path
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if (-not $owner -or -not ($TrustedOwnerSids -contains $owner.Value)) { return $true }
+    # WriteData, AppendData, WriteExtendedAttributes, DeleteSubdirectoriesAndFiles,
+    # WriteAttributes, Delete, ChangePermissions, TakeOwnership, GENERIC_ALL, GENERIC_WRITE.
+    $writeMask = [long](0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+    foreach ($ace in @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        if ($ace.AccessControlType -ne 'Allow') { continue }
+        if ($TrustedOwnerSids -contains $ace.IdentityReference.Value) { continue }
+        if (([long]$ace.FileSystemRights -band $writeMask) -ne 0) { return $true }
+    }
+    return $false
+}
+
+function Protect-HiperfState {
+    # The state folder: Administrators and SYSTEM, the install user may only
+    # list it. The hiperf tree (agent + venv): the install user reads and runs
+    # it, nothing more, so no other account can drop a .pth or swap a file the
+    # logon task runs. Whoever created any of it before, it is re-owned by
+    # Administrators and its inherited and explicit entries are replaced.
+    Set-ProtectedAcl -Path $StateDir -Extra @(@{ Identity = $InstallUser; Rights = 'ReadAndExecute'; Inherit = $false })
+    Set-ProtectedAcl -Path $HiperfDir -Recurse -Extra @(@{ Identity = $InstallUser; Rights = 'ReadAndExecute'; Inherit = $true })
 }
 
 # --- ffmpeg + Python --------------------------------------------------------
@@ -238,6 +338,8 @@ if (-not (Test-PythonWorks $python)) {
 Write-Step "Using Python: $python"
 
 New-Item -ItemType Directory -Force -Path $HiperfDir | Out-Null
+# Locked down before the venv, the agent and the token are written into it.
+Protect-HiperfState
 $token = Get-OrCreateToken
 
 $venvPython = Join-Path $VenvDir 'Scripts\python.exe'
@@ -345,11 +447,13 @@ if (-not (Test-Path -LiteralPath $LogFile)) {
     Set-Content -LiteralPath $LogFile -Value '' -Encoding ASCII
 }
 
-# Token + venv must be readable by the interactive user (not only Admin/SYSTEM).
-Grant-UserAcl -Path $HiperfDir -User $InstallUser -Rights 'ReadAndExecute' -Inherit $true
-Grant-UserAcl -Path $TokenFile -User $InstallUser -Rights 'Read' -Inherit $false
-Grant-UserAcl -Path $LogFile -User $InstallUser -Rights 'Modify' -Inherit $false
-Grant-UserAcl -Path $StateDir -User $InstallUser -Rights 'Read' -Inherit $false
+# Protected ACLs (inheritance removed): the agent tree and venv read+execute
+# for the install user; the token readable only by the install user,
+# Administrators and SYSTEM; the log (the agent's only runtime write, next to
+# the token) modifiable by the install user.
+Protect-HiperfState
+Set-ProtectedAcl -Path $TokenFile -Extra @(@{ Identity = $InstallUser; Rights = 'Read'; Inherit = $false })
+Set-ProtectedAcl -Path $LogFile -Extra @(@{ Identity = $InstallUser; Rights = 'Modify'; Inherit = $false })
 
 # --- Scheduled Task (interactive user, AtLogOn, no 72h kill) ----------------
 

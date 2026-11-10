@@ -13,17 +13,20 @@ import { drawerKeyDown, trapFocus } from '../core/focus.js'
 import { displayName, rowKey } from '../core/roster.js'
 import { cornerClass, groupMessages } from '../core/groups.js'
 import { clock, withDividers } from '../core/time.js'
+import { withNewMarker } from '../core/newMarker.js'
 import { activityLabel, visibleItems } from '../core/workRows.js'
-import { app, canToggleSidebar, type ChatSlot, findBot, freshBot, mainSlot, metaFor, openBotInNewTab, openInBotMode, resetPanelWidth, selectBot, setPanelOpen, startPanelResize, stockHandoffProblem, toggleSidebar } from './app'
+import { app, canToggleSidebar, type ChatSlot, findBot, freshBot, mainSlot, metaFor, noteTranscript, openBotInNewTab, openInBotMode, resetPanelWidth, selectBot, setPanelOpen, startPanelResize, stockHandoffProblem, toggleSidebar } from './app'
+import { roster2 } from './rosterStores'
 import { BotAvatar, botColor } from './Avatar'
 import { Composer } from './Composer'
 import { IconChevron, IconOpen, IconPanel, IconSidebar, IconX } from './icons'
 import { MenuButton } from './kit'
+import { DirectiveBlock, DirectiveContext, type DirectiveScope, useDirectiveSegments } from './Directives'
 import { BotText } from './Media'
 import { AssistantActions, Reactions, UserActions } from './MessageActions'
 import { ProfilePanel } from './Profile'
 import { OverlayScroll } from './OverlayScroll'
-import { WaitingCard } from './Prompts'
+import { SettledChoiceCard, WaitingCard } from './Prompts'
 import { ToolGroup } from './Tools'
 import { useStore } from './store'
 
@@ -172,6 +175,42 @@ export function UserMeta({
   return null
 }
 
+/** An assistant message: one bubble, or, in the open chat, bubbles with its
+ *  live `::card` / `::preview` directives between them (Directives.tsx). */
+function AssistantBody({ item, bot, pos }: { item: any; bot: any; pos: string }) {
+  const { segments, scope } = useDirectiveSegments(item.streaming ? '' : item.text)
+  const time = item.at ? <span className="bubble__time">{clock(item.at)}</span> : null
+  if (item.streaming || !segments || !scope) {
+    return (
+      <div className="bubble-wrap is-left">
+        <div className={`bubble is-agent${pos}${item.streaming ? ' is-streaming' : ''}`}>
+          {item.streaming ? <div className="bubble__plain">{item.text}</div> : <div className="md"><BotText bot={bot} text={item.text} /></div>}
+        </div>
+        {time}
+      </div>
+    )
+  }
+  const lastProse = segments.map((segment: any) => segment.kind).lastIndexOf('prose')
+  return (
+    <>
+      {segments.map((segment: any, index: number) =>
+        segment.kind === 'prose' ? (
+          <div key={index} className="bubble-wrap is-left">
+            <div className={`bubble is-agent${pos}`}>
+              <div className="md">
+                <BotText bot={bot} text={segment.text} />
+              </div>
+            </div>
+            {index === lastProse ? time : null}
+          </div>
+        ) : (
+          <DirectiveBlock key={index} segment={segment} poll={scope.recent.has(item.id)} scope={scope} />
+        )
+      )}
+    </>
+  )
+}
+
 function Item({
   item,
   bot,
@@ -200,6 +239,8 @@ function Item({
   switch (item.kind) {
     case 'divider':
       return <div className="divider gbo-divider">{item.label}</div>
+    case 'new':
+      return <NewLine />
     case 'user':
       return (
         <div className="gbo-msg is-user">
@@ -229,14 +270,7 @@ function Item({
       return (
         <div className="gbo-msg is-bot">
           {item.reasoning ? <Thinking text={item.reasoning} /> : null}
-          {item.text ? (
-            <div className="bubble-wrap is-left">
-              <div className={`bubble is-agent${pos}${item.streaming ? ' is-streaming' : ''}`}>
-                {item.streaming ? <div className="bubble__plain">{item.text}</div> : <div className="md"><BotText bot={bot} text={item.text} /></div>}
-              </div>
-              {item.at ? <span className="bubble__time">{clock(item.at)}</span> : null}
-            </div>
-          ) : null}
+          {item.text ? <AssistantBody item={item} bot={bot} pos={pos} /> : null}
           <Reactions item={item} onReact={react} />
           {item.text && !item.streaming ? <AssistantActions item={item} controller={controller} busy={busy} /> : null}
         </div>
@@ -245,6 +279,8 @@ function Item({
       return <ToolGroup item={item} bot={bot} />
     case 'approval':
       return <ApprovalCard item={item} onAnswer={onAnswer} />
+    case 'clarify':
+      return <SettledChoiceCard item={item} />
     case 'notice':
       return <div className="system-event gbo-notice">{item.text}</div>
     case 'command':
@@ -261,21 +297,83 @@ function Item({
   }
 }
 
-function useStickToBottom(dep: unknown) {
+/** How close to the bottom still counts as "at the bottom" (CSS px). Small on
+ *  purpose: a reader a few lines up is reading, and a transcript update must
+ *  not pull them down (it was 80px, three lines). */
+export const STICK_PX = 16
+
+/** Follow new messages while the transcript is at its bottom. Once the user
+ *  scrolls up, nothing moves their position until they come back to the
+ *  bottom themselves or send a message (`mine`: the id of their newest
+ *  message; a new one pins). */
+function useStickToBottom(dep: unknown, mine: string) {
   const ref = React.useRef<HTMLDivElement | null>(null)
   const stick = React.useRef(true)
+  const lastMine = React.useRef(mine)
   React.useLayoutEffect(() => {
     const el = ref.current
+    if (mine !== lastMine.current) {
+      lastMine.current = mine
+      if (mine) stick.current = true
+    }
     if (el && stick.current) el.scrollTop = el.scrollHeight
-  }, [dep])
+  }, [dep, mine])
   const onScroll = () => {
     const el = ref.current
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
   }
   const pin = () => {
     stick.current = true
   }
-  return { ref, onScroll, pin }
+  return { ref, onScroll, pin, stick }
+}
+
+/** Whether the user is looking at this transcript's newest messages: the
+ *  window focused and visible, the transcript on screen, scrolled to its
+ *  bottom (core/newMarker.js). */
+function lookingAt(el: HTMLElement | null): boolean {
+  const doc = el?.ownerDocument as any
+  if (!el || !doc || !el.isConnected) return false
+  if (doc.visibilityState === 'hidden') return false
+  if (typeof doc.hasFocus === 'function' && !doc.hasFocus()) return false
+  if (!el.clientHeight) return false
+  return el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
+}
+
+/** The NEW line: decided when the chat opens, kept while it is open, and fed
+ *  focus, visibility and scroll changes so messages read on arrival never
+ *  start one. Returns the id of the message it sits above, or null. */
+function useNewLine(key: string, items: any[], ready: boolean, ref: React.RefObject<HTMLDivElement | null>) {
+  const line = useStore(roster2.newLine)
+  const latest = React.useRef({ key, items, ready })
+  latest.current = { key, items, ready }
+  const note = React.useCallback(() => {
+    const { key: k, items: list, ready: ok } = latest.current
+    noteTranscript(k, list, ok, lookingAt(ref.current))
+  }, [ref])
+  React.useEffect(() => {
+    note()
+  }, [key, items, ready, note])
+  React.useEffect(() => {
+    const win = (globalThis as any).window
+    const doc = (globalThis as any).document
+    win?.addEventListener?.('focus', note)
+    doc?.addEventListener?.('visibilitychange', note)
+    return () => {
+      win?.removeEventListener?.('focus', note)
+      doc?.removeEventListener?.('visibilitychange', note)
+    }
+  }, [note])
+  return { id: line.markers[key] ?? null, note }
+}
+
+/** The red NEW rule above the first unread bot message. */
+export function NewLine() {
+  return (
+    <div className="gbo-new-line" role="separator" aria-label="New messages">
+      <span>NEW</span>
+    </div>
+  )
 }
 
 /** Which chat a ChatWorkspace shows: the main tab, or an extra tab opened
@@ -288,14 +386,44 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
   // Thought and tool rows are hidden unless the work-rows preference shows
   // them (core/workRows.js); display only, the chat keeps every item.
   const showWork = useStore(app.showWork)
-  const decorated = React.useMemo(() => groupMessages(withDividers(visibleItems(items, showWork))), [items, showWork])
-  const { ref, onScroll, pin } = useStickToBottom(items)
+  const mine = React.useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === 'user') return String(items[i].id)
+    return ''
+  }, [items])
+  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items, mine)
+  const newLine = useNewLine(rowKey(bot), items, state.phase === 'ready', ref)
+  const onScroll = () => {
+    onStickScroll()
+    newLine.note()
+  }
+  const decorated = React.useMemo(
+    () => groupMessages(withNewMarker(withDividers(visibleItems(items, showWork)), newLine.id)),
+    [items, showWork, newLine.id]
+  )
   const controller = useController()
   const answer = (requestId: string, choice: string) => void controller?.respondApproval(requestId, choice)
   const retry = (clientId: string) => void controller?.retry(clientId)
   const recheck = (clientId: string) => void controller?.recheck(clientId)
   const openStock = () => void openInBotMode(bot, 'Check whether your message arrived before sending anything again.')
   const activity = state.chat.busy ? activityLabel(state.chat, showWork) : ''
+  // Live directives (Cards 7) belong to this open chat only: its bot, its
+  // stored session, its controller. Cards in the last few messages poll.
+  const recentKey = items.slice(-8).map((item: any) => item.id).join('|')
+  const outer = React.useContext(DirectiveContext)
+  const directives = React.useMemo<DirectiveScope | null>(
+    () =>
+      !controller
+        ? outer
+        : state.storedId
+        ? {
+            bot,
+            sessionId: String(state.storedId),
+            sendIntent: (text: string) => controller.sendIntent(text),
+            recent: new Set(recentKey.split('|'))
+          }
+        : null,
+    [bot, state.storedId, controller, recentKey, outer]
+  )
 
   // A block body on purpose: an effect's return value is its cleanup, and
   // `pin()` returns `true`, which React then called as a function when the
@@ -306,6 +434,7 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
   }, [state.storedId])
 
   return (
+    <DirectiveContext.Provider value={directives}>
     <OverlayScroll wrapClassName="transcript-wrap gbo-transcript-scroll" className="transcript gbo-transcript" scrollRef={ref} onScroll={onScroll}>
       <div className="transcript__col gbo-column">
         {state.hasMore ? (
@@ -353,6 +482,7 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
         ) : null}
       </div>
     </OverlayScroll>
+    </DirectiveContext.Provider>
   )
 }
 
@@ -614,6 +744,8 @@ export function ChatWorkspace({ slot = mainSlot }: { slot?: ChatSlot } = {}) {
           onRestored={clientId => controller?.dropFailed(clientId)}
           onDiscard={id => void controller?.discardStaged([id])}
           onStop={() => void controller?.interrupt()}
+          answering={state.chat.waiting?.kind === 'clarify'}
+          onAnswer={text => controller?.answerClarifyText(text) ?? Promise.resolve({ ok: false, error: 'This chat is closed' })}
         />
       </main>
       {extra ? null : narrow ? drawerOpen ? <ProfileDrawer bot={bot} onClose={closeDrawer} backgroundRef={chatRef} /> : null : panelOpen ? (

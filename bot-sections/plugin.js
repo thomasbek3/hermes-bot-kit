@@ -523,7 +523,7 @@ function setOrder(el, n) {
   if (el.style.order !== next) el.style.order = next
 }
 
-// Display names: rename any section (emoji welcome — "🏠 Airbnb Operations").
+// Display names: rename any section (emoji welcome — "🏠 Home Projects").
 // Section IDS stay stable (config keys, cycle commands); only the label
 // shown on the header changes. Persisted per install.
 let sectionNames = {}

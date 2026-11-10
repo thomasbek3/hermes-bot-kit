@@ -137,6 +137,79 @@ function Test-SignedBy {
     return $true
 }
 
+# --- ACL helpers (well-known SIDs: independent of the display language) -----
+$SidAdministrators = 'S-1-5-32-544'
+$SidSystem = 'S-1-5-18'
+$SidTrustedInstaller = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+$TrustedOwnerSids = @($SidAdministrators, $SidSystem, $SidTrustedInstaller)
+
+function Test-IsLink([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    return [bool]($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint))
+}
+
+function Test-TrustedOwner([string]$Path) {
+    $owner = (Get-Acl -LiteralPath $Path).GetOwner([System.Security.Principal.SecurityIdentifier])
+    return ($owner -and ($TrustedOwnerSids -contains $owner.Value))
+}
+
+function Reset-ChildAcls([string]$Dir, [System.Security.Principal.SecurityIdentifier]$Owner) {
+    # Every item below $Dir: owner $Owner, explicit entries removed, only what
+    # it inherits. These trees are the installer's own and hold no links, so a
+    # link found here was planted: it is removed (the link only, never its
+    # target) instead of followed; Set-Acl on a link would change its target.
+    foreach ($child in @(Get-ChildItem -LiteralPath $Dir -Force)) {
+        if ($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            Write-Warning "Removing unexpected link $($child.FullName)"
+            if ($child.PSIsContainer) { [System.IO.Directory]::Delete($child.FullName, $false) }
+            else { [System.IO.File]::Delete($child.FullName) }
+            continue
+        }
+        $childAcl = Get-Acl -LiteralPath $child.FullName
+        foreach ($ace in @($childAcl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
+            [void]$childAcl.RemoveAccessRuleSpecific($ace)
+        }
+        $childAcl.SetAccessRuleProtection($false, $false)
+        $childAcl.SetOwner($Owner)
+        Set-Acl -LiteralPath $child.FullName -AclObject $childAcl
+        if ($child.PSIsContainer) { Reset-ChildAcls -Dir $child.FullName -Owner $Owner }
+    }
+}
+
+function Set-ProtectedAcl {
+    # Replaces the ACL on $Path: inheritance removed, owner Administrators,
+    # Administrators and SYSTEM full control, plus each $Extra grant
+    # (@{ Identity = 'DOMAIN\user'; Rights = 'ReadAndExecute'; Inherit = $true }).
+    # -Recurse resets everything below to inherit only from it.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [object[]]$Extra = @(),
+        [switch]$Recurse
+    )
+    if (Test-IsLink $Path) { throw "$Path is a link; refusing to set its ACL." }
+    $isDir = (Get-Item -LiteralPath $Path -Force).PSIsContainer
+    if ($isDir) { $acl = New-Object System.Security.AccessControl.DirectorySecurity }
+    else { $acl = New-Object System.Security.AccessControl.FileSecurity }
+    $admins = New-Object System.Security.Principal.SecurityIdentifier($SidAdministrators)
+    $system = New-Object System.Security.Principal.SecurityIdentifier($SidSystem)
+    $acl.SetOwner($admins)
+    $acl.SetAccessRuleProtection($true, $false)
+    $grants = @(
+        @{ Identity = $admins; Rights = 'FullControl'; Inherit = $true },
+        @{ Identity = $system; Rights = 'FullControl'; Inherit = $true }
+    ) + @($Extra)
+    foreach ($g in $grants) {
+        $flags = 'None'
+        if ($isDir -and $g.Inherit) { $flags = 'ContainerInherit, ObjectInherit' }
+        $identity = $g.Identity
+        if ($identity -is [string]) { $identity = New-Object System.Security.Principal.NTAccount($identity) }
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, $g.Rights, $flags, 'None', 'Allow')
+        $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+    if ($Recurse -and $isDir) { Reset-ChildAcls -Dir $Path -Owner $admins }
+}
+
 function Write-Step([string]$Message) {
     Write-Host "==> $Message"
 }
@@ -209,6 +282,9 @@ function New-VncPassword8 {
 
 function Get-OrCreateVncPassword {
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+    # The state folder: Administrators and SYSTEM only, whoever created it.
+    # (The hiperf installer protects its own files inside it separately.)
+    Set-ProtectedAcl -Path $StateDir
     if (Test-Path -LiteralPath $PasswordFile) {
         $existing = (Get-Content -LiteralPath $PasswordFile -Raw -ErrorAction SilentlyContinue)
         if ($existing) {
@@ -353,6 +429,27 @@ function Install-UsbmmiddVirtualDisplay {
             Where-Object { $_.FriendlyName -match 'USB Mobile Monitor' })
     } catch {}
 
+    # The SYSTEM startup task runs a program from this folder. A folder that
+    # someone else created (a standard user can create folders in C:\) or a
+    # link is not adopted: stop, and drop any task that points into it.
+    if (Test-Path -LiteralPath $UsbmmiddDir) {
+        if ((Test-IsLink $UsbmmiddDir) -or -not (Test-TrustedOwner $UsbmmiddDir)) {
+            $owner = (Get-Acl -LiteralPath $UsbmmiddDir).Owner
+            Write-Warning "$UsbmmiddDir already exists and is owned by '$owner', not Administrators, SYSTEM or TrustedInstaller (or it is a link)."
+            Write-Warning 'Another account may have created it. Not installing the virtual display and not running anything from it.'
+            Write-Warning "Check the folder, delete it from an Administrator prompt (Remove-Item -Recurse -Force '$UsbmmiddDir'), then re-run."
+            try { Unregister-ScheduledTask -TaskName $UsbmmiddTaskName -Confirm:$false -ErrorAction Stop } catch {}
+            return $false
+        }
+        # Lock it down before anything in it is hashed or run.
+        try {
+            Set-ProtectedAcl -Path $UsbmmiddDir -Recurse -ErrorAction Stop
+        } catch {
+            Write-Warning "Could not lock down $UsbmmiddDir ($_). Not running anything from it."
+            return $false
+        }
+    }
+
     $exe = Join-Path $UsbmmiddDir 'deviceinstaller64.exe'
     $inf = Join-Path $UsbmmiddDir 'usbmmidd.inf'
     if (-not (Test-Path -LiteralPath $inf)) {
@@ -406,7 +503,16 @@ function Install-UsbmmiddVirtualDisplay {
         }
         $srcDir = $installer.Directory.FullName
         New-Item -ItemType Directory -Force -Path $UsbmmiddDir | Out-Null
-        Copy-Item -Path (Join-Path $srcDir '*') -Destination $UsbmmiddDir -Recurse -Force
+        # Protected before the files land and again after: Administrators and
+        # SYSTEM only, inheritance removed, owner Administrators.
+        try {
+            Set-ProtectedAcl -Path $UsbmmiddDir -ErrorAction Stop
+            Copy-Item -Path (Join-Path $srcDir '*') -Destination $UsbmmiddDir -Recurse -Force -ErrorAction Stop
+            Set-ProtectedAcl -Path $UsbmmiddDir -Recurse -ErrorAction Stop
+        } catch {
+            Write-Warning "Could not place or lock down $UsbmmiddDir ($_). Not running anything from it."
+            return $false
+        }
         $exe = Join-Path $UsbmmiddDir 'deviceinstaller64.exe'
         $inf = Join-Path $UsbmmiddDir 'usbmmidd.inf'
         if (-not (Test-Path -LiteralPath $inf)) {

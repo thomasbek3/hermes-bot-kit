@@ -120,6 +120,66 @@ export function applyConnectionUpdate(waiting, payload) {
   }
 }
 
+// ── the choice card (clarify, drawn inline in the transcript) ─────────────
+
+const RECOMMENDED = '(Recommended)'
+
+/** A choice without its "(Recommended)" suffix: the value that is sent. */
+export function bareChoice(choice) {
+  const text = str(choice)
+  return text.endsWith(RECOMMENDED) ? text.slice(0, -RECOMMENDED.length).trim() : text
+}
+
+/** The row badge for choice `index`: A, B, C… then numbers past Z. */
+export function choiceLetter(index) {
+  return index >= 0 && index < 26 ? String.fromCharCode(65 + index) : String(index + 1)
+}
+
+/** True when `value` answers a question (a non-empty string or list). */
+export function clarifyFilled(value) {
+  return Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.length > 0
+}
+
+/** The picks a clarify card shows: what the gateway already locked, then what
+ *  was picked here and not sent yet. */
+export function clarifyPicks(waiting) {
+  return { ...(waiting?.locked || {}), ...(waiting?.picks || {}) }
+}
+
+/** Typed text from the composer as the answer to an open clarify card (the
+ *  free-text "Other" answer). It goes to the first question with no pick yet
+ *  (the last question when all have one); a multi-select question adds it to
+ *  its picks. Returns `{ picks, complete }`: send when `complete`, otherwise
+ *  keep the picks and wait for the remaining questions. */
+export function clarifyTextAnswer(waiting, text) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : []
+  const value = str(text).trim()
+  const picks = clarifyPicks(waiting)
+  if (!questions.length || !value) return { picks, complete: false }
+  const target = questions.find(q => !clarifyFilled(picks[q.qid])) || questions[questions.length - 1]
+  const current = picks[target.qid]
+  picks[target.qid] = target.multiSelect ? [...(Array.isArray(current) ? current.filter(v => v !== value) : []), value] : value
+  return { picks, complete: questions.every(q => clarifyFilled(picks[q.qid])) }
+}
+
+/** The settled card left in the transcript once a clarify request was
+ *  answered here: the questions and what was chosen, never clickable. */
+export function clarifySettledItem(waiting, answer, status, at) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : []
+  const answers = {}
+  for (const q of questions) answers[q.qid] = answer && Object.prototype.hasOwnProperty.call(answer, q.qid) ? answer[q.qid] ?? null : null
+  const skipped = questions.every(q => !clarifyFilled(answers[q.qid]))
+  return {
+    kind: 'clarify',
+    id: `clarify:${String(waiting?.id || '')}`,
+    requestId: String(waiting?.id || ''),
+    questions,
+    answers,
+    status: status === 'expired' ? 'expired' : skipped ? 'skipped' : 'answered',
+    ...(Number.isFinite(at) ? { at } : {})
+  }
+}
+
 /** The value `request.answer` carries for a value prompt. */
 export function valueResult(kind, input) {
   if (kind === 'vault-login') {

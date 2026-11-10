@@ -53,6 +53,17 @@ export const USER_ITEMS = [
   { kind: 'assistant', id: 'p-a4', text: 'Saved. It’s on tonight’s plan with the link.', at: night + 3_700_000 }
 ]
 
+/** A chat opened with two unread bot messages (the NEW line goes above
+ *  `n-a2`, before its time line). Demo text. */
+export const NEW_ITEMS = [
+  { kind: 'assistant', id: 'n-a0', text: 'Morning digest sent: three new articles on your list.', at: night - 86_400_000 },
+  { kind: 'user', id: 'n-u1', text: 'can you check my reading list tonight?', at: night },
+  { kind: 'assistant', id: 'n-a1', text: 'Will do. I’ll send a note when it’s done.', at: night + 20_000 },
+  { kind: 'assistant', id: 'n-a2', text: 'Evening check: your reading list is up to date, and two library holds are ready to pick up.', at: night + 2 * 3_600_000 },
+  { kind: 'assistant', id: 'n-a3', text: 'One thing to look at: your library card renewal is due on Friday.', at: night + 2 * 3_600_000 + 30_000 }
+]
+export const NEW_ITEMS_FIRST_UNREAD = 'n-a2'
+
 const morning = new Date(2026, 10, 9, 12, 46).getTime()
 
 /** A chat shaped like the reference screenshot: a short exchange, then long
@@ -66,3 +77,135 @@ export const MD_ITEMS = [
   { kind: 'user', id: 'm-u3', text: 'nice, can you send this every morning?', at: morning + 3 * 60_000 },
   { kind: 'assistant', id: 'm-a4', text: 'Done: a “Morning reading digest” now runs at 8:00 AM. You can pause it from the profile panel.', at: morning + 3 * 60_000 + 15_000 }
 ]
+
+/** The choice card (Cards 7): a yes/no question waiting at the end of the
+ *  transcript, the same card settled, and a two-question card. Demo text. */
+export const CARD_ITEMS = [
+  { kind: 'assistant', id: 'k-a1', text: 'Your reading list has two new picks.', at: night },
+  { kind: 'user', id: 'k-u1', text: 'can you ask me with a quick yes/no card?', at: night + 60_000 }
+]
+export const CARD_WAITING = {
+  kind: 'clarify',
+  id: 'k-c1',
+  text: 'Does this yes/no card work for you?',
+  questions: [{ qid: 'k-c1', question: 'Does this yes/no card work for you?', choices: ['Yes', 'No'], multiSelect: false }]
+}
+export const CARD_SETTLED_ITEMS = [
+  ...CARD_ITEMS,
+  { kind: 'clarify', id: 'clarify:k-c1', requestId: 'k-c1', questions: CARD_WAITING.questions, answers: { 'k-c1': 'Yes' }, status: 'answered', at: night + 70_000 },
+  { kind: 'assistant', id: 'k-a2', text: 'Great, I’ll use cards like this from now on.', at: night + 80_000 }
+]
+export const CARD_MULTI_WAITING = {
+  kind: 'clarify',
+  id: 'k-c2',
+  text: 'Which evenings work?',
+  questions: [
+    { qid: 'days', question: 'Which evenings work?', choices: ['Monday', 'Wednesday (Recommended)', 'Friday'], multiSelect: true },
+    { qid: 'why', question: 'Anything I should plan around?', choices: null, multiSelect: false }
+  ],
+  picks: { days: ['Wednesday'] }
+}
+
+/** Live directives (Cards 7): an approval card and a small HTML widget, as
+ *  the bot's workspace files would hold them. Demo content. */
+export const DIRECTIVE_ITEMS = [
+  { kind: 'user', id: 'd-u1', text: 'draft the weekly reading note and check with me first', at: night },
+  {
+    kind: 'assistant',
+    id: 'd-a1',
+    text: 'Drafted it. Nothing goes out until you say so.\n\n::card{id="c-7f3a" kind="draft-email" file="cards/c-7f3a.json"}\n\nPages read this week:\n\n::preview{file="charts/pages.html" height="150"}',
+    at: night + 30_000
+  }
+]
+export const DIRECTIVE_FILES: Record<string, any> = {
+  'cards/c-7f3a.json': {
+    text: JSON.stringify({
+      schema: 'card.v1',
+      kind: 'draft-email',
+      title: 'Weekly reading note',
+      status: { state: 'awaiting-approval' },
+      email: { to: 'book-club@example.com', cc: '', subject: 'This week’s reading', bodyText: 'Hi all, two short picks this week: a mystery novel and a birdwatching guide.' },
+      actions: [
+        { label: 'Send it', style: 'primary', send: 'APPROVE c-7f3a send the note' },
+        { label: 'Hold', style: 'default', send: 'HOLD c-7f3a' }
+      ]
+    })
+  },
+  'charts/pages.html': {
+    text: '<html><body><div style="display:flex;gap:8px;align-items:flex-end;height:110px;padding:8px 2px">' +
+      [40, 65, 30, 80, 55, 90, 70].map((h, i) => `<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="width:28px;height:${h}px;border-radius:6px;background:var(--accent)"></div><span style="font-size:11px;color:var(--muted-foreground)">${'MTWTFSS'[i]}</span></div>`).join('') +
+      '</div></body></html>'
+  }
+}
+
+/** Live cards (Cards 8): an approval card waiting and settled, a running
+ *  task card, and a draft-email card, each as the bot's workspace file would
+ *  hold it. Demo content. */
+const liveCardItems = (id: string, ask: string, reply: string, extra: any[] = []) => [
+  { kind: 'user', id: `${id}-u1`, text: ask, at: night },
+  { kind: 'assistant', id: `${id}-a1`, text: `${reply}\n\n::card{id="${id}" file="cards/${id}.json"}`, at: night + 30_000 },
+  ...extra
+]
+const APPROVAL_CARD = {
+  schema: 'card.v1',
+  kind: 'approval',
+  title: 'Quick check',
+  status: { state: 'awaiting-approval', label: 'Your choice' },
+  body: [{ type: 'text', text: 'Can you see this card?' }],
+  actions: [
+    { label: 'Yes', style: 'primary', send: 'APPROVE c-8a yes' },
+    { label: 'No', send: 'DENY c-8a no' }
+  ]
+}
+export const LIVE_APPROVAL_ITEMS = liveCardItems('c-8a', 'can you ask me with a yes/no card?', 'Sure:')
+export const LIVE_APPROVAL_FILES: Record<string, any> = { 'cards/c-8a.json': { text: JSON.stringify(APPROVAL_CARD) } }
+export const LIVE_APPROVAL_SETTLED_ITEMS = liveCardItems('c-8a', 'can you ask me with a yes/no card?', 'Sure:', [
+  { kind: 'assistant', id: 'c-8a-a2', text: 'Great, the card works.', at: night + 60_000 }
+])
+export const LIVE_APPROVAL_SETTLED_FILES: Record<string, any> = {
+  'cards/c-8a.json': { text: JSON.stringify({ ...APPROVAL_CARD, status: { state: 'done' }, resolved: { action: 'Yes', at: '2026-11-09T21:00:00Z' } }) }
+}
+export const LIVE_TASK_ITEMS = liveCardItems('c-8t', 'tidy up my reading list', 'On it. I’ll keep this card up to date.')
+export const LIVE_TASK_FILES: Record<string, any> = {
+  'cards/c-8t.json': {
+    text: JSON.stringify({
+      schema: 'card.v1',
+      kind: 'task',
+      title: 'Tidying the reading list',
+      status: { state: 'running' },
+      body: [
+        { type: 'text', text: 'Merging duplicates and sorting by date added.' },
+        { type: 'kv', rows: [['Checked', '42 of 60'], ['Duplicates', '3 found']] }
+      ],
+      actions: [{ label: 'Stop', style: 'danger', send: 'STOP c-8t' }]
+    })
+  }
+}
+export const LIVE_EMAIL_ITEMS = [
+  DIRECTIVE_ITEMS[0],
+  { kind: 'assistant', id: 'd-a1', text: 'Drafted it. Nothing goes out until you say so.\n\n::card{id="c-7f3a" kind="draft-email" file="cards/c-7f3a.json"}', at: night + 30_000 }
+]
+
+/** The README's cards picture: a question card the bot asked with the
+ *  built-in clarify tool (answered), then a live approval card waiting for
+ *  the go-ahead. Demo content. */
+export const CARDS_DEMO_ITEMS = [
+  { kind: 'user', id: 'q-u1', text: 'can you book the lake cabin for one night?', at: night },
+  { kind: 'clarify', id: 'clarify:q-c1', requestId: 'q-c1', questions: [{ qid: 'night', question: 'Which night works?', choices: ['Thursday', 'Friday', 'Saturday'], multiSelect: false }], answers: { night: 'Friday' }, status: 'answered', at: night + 20_000 },
+  { kind: 'assistant', id: 'q-a1', text: 'Friday it is. Nothing is booked until you say so.\n\n::card{id="c-9b" kind="approval" file="cards/c-9b.json"}', at: night + 40_000 }
+]
+export const CARDS_DEMO_FILES: Record<string, any> = {
+  'cards/c-9b.json': {
+    text: JSON.stringify({
+      schema: 'card.v1',
+      kind: 'approval',
+      title: 'Book the lake cabin',
+      status: { state: 'awaiting-approval' },
+      body: [{ type: 'kv', rows: [['Night', 'Friday'], ['Guests', '2'], ['Total', '$180, free cancellation']] }],
+      actions: [
+        { label: 'Book it', style: 'primary', send: 'APPROVE c-9b book the cabin' },
+        { label: 'Not yet', send: 'HOLD c-9b' }
+      ]
+    })
+  }
+}

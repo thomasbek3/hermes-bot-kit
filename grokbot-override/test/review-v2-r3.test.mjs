@@ -386,7 +386,7 @@ const CLASSIFIERS = [
 // [file, classifier, calls, what the verdict may authorize]
 const CALL_SITES = [
   ['core/session.js', 'classifySubmitFailure', 1, 'restore the draft (a later manual resend) only on not-sent; unknown → delivery check'],
-  ['core/session.js', 'isRuntimeNotFoundRefusal', 2, 'one re-attach + identical re-send (4001, nothing ran)'],
+  ['core/session.js', 'isRuntimeNotFoundRefusal', 3, 'one re-attach + identical re-send (4001, nothing ran): a message, and a hidden card or widget intent'],
   ['core/session.js', 'isIdentityRefusal', 1, 'one identity-less re-send (4094 / 4000 naming submission_id)'],
   ['core/session.js', 'isAdmittedConflict', 1, 'settle as the admitted original; never a new turn'],
   ['core/session.js', 'steerFailure', 1, '/steer queued as the next turn only on refused'],

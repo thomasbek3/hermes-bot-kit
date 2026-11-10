@@ -174,7 +174,7 @@ Port Korgo's `_ComputerRunLock` (flock on `$TMPDIR/hermes-orgo-agent-<computer_i
 1. Plugin-tool approval gating (§4.2) — fallback: `pre_tool_call` hook, else documented trust caveat.
 2. Multiplex profile-scoping of `ctx.get_config`/`set_config` (§4.3) — fallback: `ctx.state` pin storage.
 3. Host-side tool-loop/gateway timeout vs the 900s CUA default (§4.1) — if the host caps earlier, lower `timeout_seconds` default to that cap and document.
-4. The computer-use `/v1/chat/completions` acceptance of `computer_id` on Thomas's plan — 402/403 mapping already covers rejection.
+4. The computer-use `/v1/chat/completions` acceptance of `computer_id` on the account's plan — 402/403 mapping already covers rejection.
 
 ---
 

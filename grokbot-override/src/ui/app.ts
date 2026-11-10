@@ -17,6 +17,7 @@ import {
 import { botRestScope, botRouteProblem, botWorkspaceOwnerKey, createBotRequester, isLocalBot, resolveBotConnectionRoute, retainBotRoute, stockOpenTarget } from '../core/routing.js'
 import { cronListParams, cronToggleParams, jobActive, sortJobs } from '../core/cron.js'
 import { filePath, mediaReadRequest } from '../core/media.js'
+import { workspaceReadRequest } from '../core/directives.js'
 import { transcribeRequest } from '../core/voice.js'
 import { createChatController } from '../core/session.js'
 import { createStockController, OVERRIDE_ROSTER_PANE_ID, STOCK_PANE_ID } from '../core/stock.js'
@@ -25,6 +26,7 @@ import { PINS_KEY, pinsFrom, pinState, togglePin } from '../core/pins.js'
 import { SHOW_WORK_KEY, SHOW_WORK_PLUGIN, showWorkFrom } from '../core/workRows.js'
 import { botCanonicalSessionId, createActivityTracker } from '../core/activity.js'
 import { looksUnsupported } from '../core/outcomes.js'
+import { resetMarker, SEEN_KEY, seenFrom, stepMarker } from '../core/newMarker.js'
 import { createRoom, createRoomController, createRoomRequester, listRooms, ROOM_LIST_MS, roomRoute } from '../core/rooms.js'
 import { CANONICAL_HYDRATION_TIMEOUT_MS, host, queryClient, readPluginStorage, sdk } from './sdk'
 // ── roster-side parity (R6 R9 R11-R13 R15 P3 P4 P6 C21 C25) ──
@@ -102,7 +104,9 @@ export const app = {
   pinnedBots: createStore<string[]>([]),
   // Whether the roster pane is on screen (Hermes's sidebar open): the chat
   // header shows its own sidebar toggle while it is not.
-  rosterShown: createStore<boolean>(true)
+  rosterShown: createStore<boolean>(true),
+  // The sidebar footer's name ('' = unknown: the footer says "You").
+  userName: createStore<string>('')
 }
 
 let requestForBot: any = null
@@ -397,6 +401,16 @@ export function readBotMedia(bot: any, path: string): Promise<string> {
   return read
 }
 
+/** Read a text file of the bot's session workspace from the bot's OWN
+ *  backend (Cards 7: `::card` JSON, `::preview` HTML): `rel` is resolved by
+ *  the gateway against that session's working directory, never against the
+ *  active chat's. Resolves the read-text reply ({ text, binary, truncated }). */
+export async function readBotWorkspaceText(bot: any, rel: string, sessionId: string): Promise<any> {
+  const desktop = (globalThis as any).window?.hermesDesktop
+  if (typeof desktop?.api !== 'function') throw new Error('This Hermes build cannot read files')
+  return desktop.api(workspaceReadRequest(rel, sessionId, botRestScope(bot, activeConnectionId())))
+}
+
 /** Transcribe a recording on the bot's own backend (PARITY C29). */
 export async function transcribeForBot(bot: any, dataUrl: string, mimeType: string): Promise<string> {
   const api = (globalThis as any).window?.hermesDesktop?.api
@@ -469,6 +483,7 @@ export function selectBot(bot: any, { openWorkspace = true } = {}) {
   if (key !== app.selectedKey.get()) app.drawerOpen.set(false)
   app.selectedKey.set(key)
   storageSet('selected', key)
+  resetNewLine(key)
   ackBot(bot)
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot))
   else retitleWorkspace(chatTabTitle(bot))
@@ -1280,6 +1295,84 @@ export function toggleSidebar(): boolean {
   } catch {
     return false
   }
+}
+
+// ── sidebar footer: the person and Hermes settings ───────────────────────
+
+/** Hermes Settings through the plugin door (`ctx.runAction('nav.settings')`,
+ *  the handler the app's ⌘, shortcut, palette entry and titlebar gear use).
+ *  False on a host without the door or without that action: no button. */
+export function canOpenSettings(): boolean {
+  const ctx = app.ctx
+  if (typeof ctx?.runAction !== 'function') return false
+  try {
+    const list = typeof ctx.listActions === 'function' ? ctx.listActions() : null
+    return !Array.isArray(list) || list.some((action: any) => action?.id === 'nav.settings')
+  } catch {
+    return false
+  }
+}
+
+export function openSettings(): boolean {
+  try {
+    return app.ctx?.runAction?.('nav.settings')?.ok !== false
+  } catch {
+    return false
+  }
+}
+
+let userNameAsked = false
+
+/** The person's name for the sidebar footer, read once: the only one the
+ *  running app exposes to a plugin is the OS account name of this computer
+ *  (`window.hermesDesktop.getMachineProfile().username`, the same value
+ *  Hermes's first-run guide starts from). No SDK store holds a user or
+ *  account display name. Nothing available: '' (the footer says "You"). */
+export function loadUserName() {
+  if (userNameAsked) return
+  userNameAsked = true
+  try {
+    const read = (globalThis as any).window?.hermesDesktop?.getMachineProfile
+    if (typeof read !== 'function') return
+    Promise.resolve(read())
+      .then((profile: any) => {
+        const name = String(profile?.username ?? '').trim().slice(0, 80)
+        if (name) app.userName.set(name)
+      })
+      .catch(() => undefined)
+  } catch {
+    /* older desktop */
+  }
+}
+
+// ── the NEW line (core/newMarker.js) ─────────────────────────────────────
+
+let seenLoaded = false
+
+function markerState() {
+  if (!seenLoaded && app.ctx) {
+    seenLoaded = true
+    const seen = seenFrom(storageGet(SEEN_KEY, {}))
+    roster2.newLine.set(s => ({ ...s, seen: { ...seen, ...s.seen } }))
+  }
+  return roster2.newLine.get()
+}
+
+/** One transcript update: decide the open chat's NEW line, raise its seen
+ *  watermark while the user is looking, store the watermark when it moved. */
+export function noteTranscript(key: string, items: any[], ready: boolean, looking: boolean) {
+  const state = markerState()
+  const next = stepMarker(state, { key, items, ready, looking })
+  if (next === state) return
+  roster2.newLine.set(next)
+  if (next.seen !== state.seen) storageSet(SEEN_KEY, next.seen)
+}
+
+/** The chat is opened (again): its NEW line is decided afresh. */
+function resetNewLine(key: string) {
+  const state = roster2.newLine.get()
+  const next = resetMarker(state, key)
+  if (next !== state) roster2.newLine.set(next)
 }
 
 export function setPanelOpen(open: boolean) {

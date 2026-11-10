@@ -15,6 +15,7 @@ import re
 import tempfile
 import threading
 import time
+import unicodedata
 from contextlib import AbstractAsyncContextManager, contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -1333,6 +1334,33 @@ def _cli_set(profile: str, computer_id: str, screen: str = "") -> int:
     return 0
 
 
+APPROVAL_PREVIEW_CHARS = 2000
+_NAMED_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t", "\0": "\\0"}
+
+
+def _approval_preview(value: Any, limit: int = APPROVAL_PREVIEW_CHARS) -> str:
+    """What the approver sees of an argument: control, format and line
+    separator characters escaped (\\r, \\t, \\x1b, \\u202e ...) so nothing can
+    overwrite or hide part of the line, up to `limit` characters of the
+    argument, then an explicit marker with how much more there is."""
+    text = str(value if value is not None else "")
+    shown = []
+    for ch in text[:limit]:
+        if ch in _NAMED_ESCAPES:
+            shown.append(_NAMED_ESCAPES[ch])
+            continue
+        cat = unicodedata.category(ch)
+        if cat[0] == "C" or cat in ("Zl", "Zp"):
+            code = ord(ch)
+            shown.append(f"\\x{code:02x}" if code < 0x100 else (f"\\u{code:04x}" if code < 0x10000 else f"\\U{code:08x}"))
+        else:
+            shown.append(ch)
+    out = "".join(shown)
+    if len(text) > limit:
+        out += f"\u2026 [+{len(text) - limit} more characters, {len(text)} total]"
+    return out
+
+
 def pre_tool_call(tool_name: str, args: dict | None = None, **kwargs: Any) -> dict[str, Any] | None:
     """Approve mutating tools; block click/type/key while a hosted run holds the lock."""
     if tool_name == "orgo_computer_screenshot":
@@ -1344,11 +1372,15 @@ def pre_tool_call(tool_name: str, args: dict | None = None, **kwargs: Any) -> di
         preview = ""
         if isinstance(args, dict):
             if tool_name == "orgo_computer_click":
-                preview = f"{args.get('x')},{args.get('y')}"
+                button = str(args.get("button") or "left").strip().lower()
+                preview = _approval_preview(
+                    f"{args.get('x')},{args.get('y')} button={button}"
+                    + (" double" if args.get("double") else "")
+                )
             elif tool_name == "orgo_computer_type":
-                preview = str(args.get("text") or "").replace("\n", " ")[:80]
+                preview = _approval_preview(str(args.get("text") or ""))
             else:
-                preview = str(args.get("key") or "")
+                preview = _approval_preview(str(args.get("key") or ""))
         return {
             "action": "approve",
             "message": (
@@ -1362,7 +1394,7 @@ def pre_tool_call(tool_name: str, args: dict | None = None, **kwargs: Any) -> di
         task = ""
         if isinstance(args, dict):
             task = str(args.get("task") or "")
-        preview = task.strip().replace("\n", " ")[:200]
+        preview = _approval_preview(task.strip())
         return {
             "action": "approve",
             "message": (
@@ -1376,7 +1408,7 @@ def pre_tool_call(tool_name: str, args: dict | None = None, **kwargs: Any) -> di
         command = ""
         if isinstance(args, dict):
             command = str(args.get("command") or "")
-        preview = command.strip().replace("\n", " ")[:200]
+        preview = _approval_preview(command.strip())
         return {
             "action": "approve",
             "message": (

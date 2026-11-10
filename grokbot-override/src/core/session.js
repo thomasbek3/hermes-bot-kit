@@ -82,7 +82,8 @@ import {
   rewindFailure,
   slashExecFailure,
   steerFailure,
-  submitDelivery
+  submitDelivery,
+  withoutRefusedParams
 } from './outcomes.js'
 import { applyEvent, emptyLive, finishTurn, initialChatState, inputRequestFrom, unshownTurnText } from './reducer.js'
 import { resolveBotConnectionRoute } from './routing.js'
@@ -96,7 +97,7 @@ import {
   survivorRowIdsFrom,
   userTurnFromEnd
 } from './rewind.js'
-import { VALUE_KINDS, valueResult } from './prompts.js'
+import { clarifySettledItem, clarifyTextAnswer, VALUE_KINDS, valueResult } from './prompts.js'
 import { COMPRESS_TIMEOUT_MS, HELP_TEXT, parseCommandDispatch, parseSlash, renderRpcResult, slashSurface } from './slash.js'
 import {
   APPROVAL_RESPOND_TIMEOUT_MS,
@@ -131,7 +132,14 @@ export const RECONNECTING_NOTICE_MS = 10_000
 // session_controls.py:327: 4001 invalid_params, data.fields = the keys).
 // `inline_images` is sidecar-only; sending it left every new bot's chat
 // "paused (invalid_params)".
-export const RESUME_KEYS = Object.freeze(['session_id', 'profile', 'omit_messages'])
+// `source: 'desktop'` is what stock Desktop sends on every resume
+// (use-session-actions/resume-owner.ts primaryResumeParams): the gateway then
+// builds the agent for the desktop chat surface (tui_gateway/agent_factory.py
+// _resolve_session_source; agent/prompt_builder.py platform hints: rendered
+// markdown, MEDIA:, ::preview widgets, cards) instead of the terminal UI it
+// assumes when no source is sent. Both contracts take a free-form `source`.
+export const RESUME_KEYS = Object.freeze(['session_id', 'profile', 'omit_messages', 'source'])
+export const SESSION_SOURCE = 'desktop'
 
 /** A refused session.resume, corrected once: the params without the keys an
  *  `invalid_params` refusal names (never session_id or profile), or, when the
@@ -140,13 +148,7 @@ export const RESUME_KEYS = Object.freeze(['session_id', 'profile', 'omit_message
 export function correctedResumeParams(error, params, canonical) {
   const { code, data, reason } = rpcErrorParts(error)
   if (reason === 'invalid_params' && Array.isArray(data?.fields)) {
-    const drop = data.fields
-      .map(field => String(field).split('.')[0])
-      .filter(field => field !== 'session_id' && field !== 'profile' && Object.prototype.hasOwnProperty.call(params, field))
-    if (!drop.length) return null
-    const next = { ...params }
-    for (const field of drop) delete next[field]
-    return next
+    return withoutRefusedParams(error, params, ['session_id', 'profile'])
   }
   if (code === 4007 || reason === 'not_found' || (code === 4001 && !reason)) {
     const other = canonicalIds(canonical).find(id => id !== params.session_id)
@@ -451,8 +453,9 @@ export function createChatController(bot, deps, options = {}) {
   }
 
   /** Items a history rebuild keeps: anything live while a turn runs; when
-   *  idle only what was never stored (an unsent bubble, a waiting card). */
-  const keepLocal = item => item.failed || item.kind === 'command' || (item.kind === 'approval' && item.status === 'pending')
+   *  idle only what was never stored (an unsent bubble, a waiting card, a
+   *  settled choice card). */
+  const keepLocal = item => item.failed || item.kind === 'command' || item.kind === 'clarify' || (item.kind === 'approval' && item.status === 'pending')
   const keepLive = item => !isPersistedItem(item)
 
   async function open() {
@@ -547,7 +550,8 @@ export function createChatController(bot, deps, options = {}) {
     const params = {
       session_id: state.storedId,
       profile: String(bot?.name || 'default'),
-      omit_messages: !withHistory
+      omit_messages: !withHistory,
+      source: SESSION_SOURCE
     }
     for (const key of resumeDropped) delete params[key]
     return params
@@ -1026,7 +1030,16 @@ export function createChatController(bot, deps, options = {}) {
       } else {
         throw new Error('Unknown question')
       }
-      patchWaiting(waiting, null)
+      if (waiting.kind === 'clarify') {
+        // The card stays where it was, settled: the choice marked, not
+        // clickable. Dropped with this chat (not stored by Hermes).
+        const settled = clarifySettledItem(waiting, answer, status, now())
+        setChat(chat => ({
+          ...chat,
+          items: [...chat.items.filter(item => item.id !== settled.id), settled],
+          waiting: chat.waiting && chat.waiting.kind === waiting.kind && chat.waiting.id === waiting.id ? null : chat.waiting
+        }))
+      } else patchWaiting(waiting, null)
       return { ok: true, status }
     } catch (error) {
       const unsupported = looksUnsupported(error) // UI only: the card says so, nothing is re-sent
@@ -1037,6 +1050,31 @@ export function createChatController(bot, deps, options = {}) {
       })
       return { ok: false, unsupported }
     }
+  }
+
+  /** A pick on a clarify card that does not send yet (a multi-select row, or
+   *  one question of several): kept on the card until Answer. */
+  function pickClarify(qid, value) {
+    const waiting = state.chat.waiting
+    if (!waiting || waiting.kind !== 'clarify' || waiting.answering) return false
+    if (!(waiting.questions || []).some(q => q.qid === qid)) return false
+    patchWaiting(waiting, { picks: { ...(waiting.picks || {}), [qid]: value } })
+    return true
+  }
+
+  /** Composer text while a clarify card waits: the free-text answer to it,
+   *  through the same clarify.lock calls as the card (answerPrompt). With
+   *  more questions still open the text only fills the next one. */
+  async function answerClarifyText(text) {
+    const waiting = state.chat.waiting
+    if (!waiting || waiting.kind !== 'clarify' || waiting.answering) return { ok: false, error: 'No question is waiting for an answer' }
+    const { picks, complete } = clarifyTextAnswer(waiting, text)
+    if (!complete) {
+      patchWaiting(waiting, { picks: { ...(waiting.picks || {}), ...picks } })
+      return { ok: true, status: 'picked' }
+    }
+    const result = await answerPrompt(picks)
+    return result.ok ? result : { ...result, error: state.chat.waiting?.error || 'Your answer was not sent' }
   }
 
   /** Drive the connection card (`connection.respond`); the card follows the
@@ -1876,6 +1914,41 @@ export function createChatController(bot, deps, options = {}) {
     return (await sendDraft(text, attachments)).ok
   }
 
+  /** A card button or a preview widget speaking (Cards 7): a user turn the
+   *  gateway stores as `display_kind: 'hidden'`, so no bubble is drawn and
+   *  the card or widget updating is the visible answer (stock submit.ts).
+   *  Up to 500 characters; never retried by itself. Resolves { ok, error }. */
+  async function sendIntent(text) {
+    const clean = String(text || '').trim()
+    if (!clean) return { ok: false, error: 'Nothing to send' }
+    if (clean.length > 500) return { ok: false, error: 'Too long' }
+    if (!state.storedId || disposed) return { ok: false, error: 'This chat is closed' }
+    const payload = { submissionId: newSubmissionId(), legacy: false, params: null, extra: { display_kind: 'hidden' } }
+    const mark = () => undefined
+    const busyAtSubmit = state.chat.busy
+    try {
+      let runtimeId = await attach()
+      let receipt
+      try {
+        receipt = await submitOnce(runtimeId, clean, [], mark, payload)
+      } catch (error) {
+        if (!isRuntimeNotFoundRefusal(error)) throw error
+        dropRuntime()
+        runtimeId = await attach()
+        receipt = await submitOnce(runtimeId, clean, [], mark, payload)
+      }
+      const status = String(receipt?.status || '')
+      const startsNow = status === 'queued' && !busyAtSubmit && Boolean(receipt?.submission_id || receipt?.admission_id)
+      if (status === 'streaming' || status === 'started' || !status || startsNow) {
+        set(s => ({ chat: { ...s.chat, busy: true } }))
+        onTurnStarted()
+      }
+      return { ok: true, status }
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) }
+    }
+  }
+
   /** A stored user row newer than what was loaded when the message was sent,
    *  with the same text: positive evidence that it arrived. */
   function foundIn(tail, payload) {
@@ -2120,7 +2193,10 @@ export function createChatController(bot, deps, options = {}) {
     react,
     runSlash,
     completeSlash,
+    sendIntent,
     answerPrompt,
+    pickClarify,
+    answerClarifyText,
     respondConnection,
     pollApprovals,
     hasPendingApproval: () => hasPendingApproval(state.chat.items),

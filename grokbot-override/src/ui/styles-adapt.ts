@@ -10,6 +10,26 @@
 import { refCss } from './styles-ref'
 
 const ADAPT_SRC = /* css */ `
+/* ── the override's own tokens ──────────────────────────────────────── */
+/* Bot bubbles are one flat fill; the open bot's row is a rounded neutral
+   highlight (hover a lighter one); a selected pin is fainter still. */
+:root {
+  --color-bubble-agent-flat: #F0F0F0;
+  --color-row-selected: #0000000D;
+  --color-row-hover: #00000008;
+  --color-row-selected-solid: #E9E9E9;
+  --color-row-hover-solid: #EEEEEE;
+  --color-pin-selected: #00000008;
+}
+:root[data-theme='dark'] {
+  --color-bubble-agent-flat: #242424;
+  --color-row-selected: #FFFFFF12;
+  --color-row-hover: #FFFFFF0A;
+  --color-row-selected-solid: #1E1E1E;
+  --color-row-hover-solid: #181818;
+  --color-pin-selected: #FFFFFF0A;
+}
+
 /* ── panes ──────────────────────────────────────────────────────────── */
 /* The roster fills Hermes's sidebar zone (its width is Hermes's); Hermes
    draws the sidebar | workspace hairline itself. */
@@ -55,6 +75,8 @@ const ADAPT_SRC = /* css */ `
 .gbo-section-head.is-rooms .icon-btn--plain { width: 22px; height: 22px; }
 
 .bot-row { color: inherit; text-align: left; }
+.bot-row:hover { background: var(--color-row-hover); }
+.bot-row.is-selected { background: var(--color-row-selected); }
 .bot-row.is-dim { opacity: 0.55; }
 .bot-row.is-hidden { opacity: 0.6; }
 .gbo-row-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -70,7 +92,8 @@ const ADAPT_SRC = /* css */ `
 .pinned__avatar .gbo-row-dot { right: 4px; top: 4px; }
 .gbo-row-face .gbo-row-dot:not(:has([role="status"])) { display: none; }
 .gbo-row-face .gbo-row-dot [role="status"] { width: 8px; height: 8px; border-width: 0; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
-.bot-row.is-selected .gbo-row-dot [role="status"], .bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-bg-active-solid); }
+.bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
+.bot-row.is-selected .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
 .gbo-room-row .bot-row__avatar { width: 36px; justify-content: center; }
 .gbo-row-more {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; opacity: 0;
@@ -81,7 +104,13 @@ const ADAPT_SRC = /* css */ `
 .pinned.gbo-pins { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
 .pinned.gbo-pins.is-1 { display: flex; justify-content: center; }
 .gbo-pin-wrap { min-width: 0; display: flex; justify-content: center; }
-.pinned__tile { color: inherit; max-width: 100%; }
+.pinned__tile { color: inherit; max-width: 100%; border: 0; outline: none; box-shadow: none; }
+.pinned__tile:hover, .pinned__tile.is-selected { background: var(--color-pin-selected); }
+/* Keyboard focus on a pin or row: a soft neutral ring inside the tile, never
+   the blue box; none at all while the roster is being used with the mouse
+   (data-gbo-pointer, set by the roster until the next Tab or arrow key). */
+.pinned__tile:focus-visible, .bot-row:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--color-border-primary); }
+.gbo-roster[data-gbo-pointer] .pinned__tile:focus-visible, .gbo-roster[data-gbo-pointer] .bot-row:focus-visible { box-shadow: none; }
 .pinned:not(.is-1) .pinned__tile { width: 100%; padding: 6px 4px 4px; }
 .pinned:not(.is-1) .pinned__label { width: 100%; }
 .pinned__tile.is-dim { opacity: 0.55; }
@@ -92,6 +121,19 @@ const ADAPT_SRC = /* css */ `
 .gbo-source-retry { margin: 0 12px 8px; border-radius: 12px; font-size: 13px; line-height: 18px; }
 .account__btn { cursor: default; }
 .account__btn:hover { background: none; }
+/* The footer: initials, the person's name (ellipsis when long) and, at the
+   right, the round Hermes settings button in the top row's style. */
+.gbo-roster-foot .account__btn { padding-right: 0; }
+.gbo-roster-foot .account__initials { letter-spacing: 0; }
+.gbo-foot-btn { color: var(--color-text-primary); }
+
+/* The NEW line: a thin red rule with a small red "NEW" in the middle, above
+   the first unread bot message (and above that message's time line). */
+.gbo-new-line {
+  align-self: stretch; display: flex; align-items: center; gap: 12px; padding-top: 6px;
+  color: var(--color-danger); font-size: 11px; font-weight: 600; line-height: 14px; letter-spacing: 0.4px; user-select: none;
+}
+.gbo-new-line::before, .gbo-new-line::after { content: ''; flex: 1 1 0; height: 1px; background: currentColor; opacity: 0.5; }
 
 /* ── chat header ────────────────────────────────────────────────────── */
 .chat__header { -webkit-app-region: drag; }
@@ -111,6 +153,9 @@ const ADAPT_SRC = /* css */ `
 .group.is-right > .gbo-msg, .transcript__col > .gbo-msg.is-user { align-items: flex-end; align-self: flex-end; }
 .group.is-left > .gbo-msg { align-items: flex-start; }
 .gbo-msg:has(> .gbo-edit) { align-self: stretch; }
+/* Bot bubbles: flat, no sheen, ring or shadow. User bubbles keep the
+   reference's look in the bot's colour. */
+.bubble.is-agent { background: var(--color-bubble-agent-flat); box-shadow: none; border: 0; }
 .bubble.is-user { color: var(--gbo-tint-fg, #FFFFFF); }
 .bubble.is-user a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .bubble.is-user code { background: #FFFFFF2E; border-radius: 4px; padding: 1px 4px; font-family: var(--font-mono-stack); font-size: 13px; }
@@ -118,17 +163,25 @@ const ADAPT_SRC = /* css */ `
   content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%;
   background: currentColor; opacity: 0.4; vertical-align: middle; animation: breathe 1s ease-in-out infinite;
 }
-/* Copy, react, edit, rewind, regenerate: a small pill that floats under the
-   message while it is pointed at, taking no room in the transcript. */
+/* Copy, react, edit, rewind, regenerate: a small pill that floats beside the
+   message (right of a bot message, left of yours), level with its last line,
+   while it is pointed at. Out of flow and the same box hovered or not, so it
+   never moves the transcript; beside the message, so it never covers the next
+   bubble's text (it used to float under the message, over the next bubble).
+   When the message is about as wide as the column (a narrow window), the
+   pill is kept on screen (cqw of .transcript__col, plus the transcript's side
+   padding): it then sits over the empty hover-time slot beside the bubble and
+   the bubble's own side padding, not over its text. */
+.transcript__col { container-type: inline-size; }
 .gbo-msg > .gbo-msg-actions {
-  position: absolute; top: calc(100% - 6px); z-index: 3; display: flex; align-items: center; gap: 2px; margin: 0; padding: 2px;
+  position: absolute; top: auto; bottom: 0; z-index: 3; display: flex; flex-wrap: nowrap; width: max-content; align-items: center; gap: 2px; margin: 0; padding: 2px;
   border-radius: var(--radius-full); background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); box-shadow: var(--shadow-pill);
   opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease-out);
 }
 .gbo-msg:hover > .gbo-msg-actions, .gbo-msg:focus-within > .gbo-msg-actions { opacity: 1; pointer-events: auto; }
-.gbo-msg.is-bot > .gbo-msg-actions { left: 8px; }
-.gbo-msg.is-user > .gbo-msg-actions { right: 8px; }
-.gbo-msg-actions .gbo-icon-btn { width: 24px; height: 24px; font-size: 13px; }
+.gbo-msg.is-bot > .gbo-msg-actions { left: min(calc(100% + 4px), calc(100cqw + 12px - 76px)); }
+.gbo-msg.is-user > .gbo-msg-actions { right: min(calc(100% + 4px), calc(100cqw + 12px - 100px)); }
+.gbo-msg-actions .gbo-icon-btn { width: 22px; height: 22px; font-size: 13px; }
 .gbo-msg-actions .gbo-icon-btn svg { width: 14px; height: 14px; }
 .gbo-msg-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; padding: 0 4px; font-size: 12px; line-height: 16px; letter-spacing: 0.12px; color: var(--color-text-tertiary); }
 .gbo-msg-failed { color: var(--color-danger-text); }
@@ -233,6 +286,7 @@ const ADAPT_SRC = /* css */ `
 .gbo-card-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; color: var(--color-text-primary); }
 .gbo-card-desc { font-size: 14px; line-height: 20px; letter-spacing: 0.14px; color: var(--color-text-tertiary); }
 .gbo-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.gbo-connect-url-blocked { flex-basis: 100%; overflow-wrap: anywhere; }
 .gbo-card-error { font-size: 13px; line-height: 18px; color: var(--color-danger-text); }
 .gbo-q legend { font-size: 15px; font-weight: 600; line-height: 22px; }
 .gbo-choice {
@@ -242,6 +296,116 @@ const ADAPT_SRC = /* css */ `
 .gbo-choice:hover { background: var(--color-bg-secondary-hover); }
 .gbo-choice.is-on { background: var(--color-primary); color: var(--color-on-primary); }
 .gbo-command { border: 0; border-radius: 12px; background: var(--color-bg-subtle); }
+/* The choice card (a clarify question): the bot bubble's flat fill, a bold
+   question, lettered rows. Settled: the chosen row marked, the rest faded. */
+.gbo-ask {
+  align-self: flex-start; width: 310px; max-width: 100%; display: flex; flex-direction: column; gap: 6px;
+  padding: 14px 8px 6px; border-radius: 18px; background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
+}
+.gbo-ask-q { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gbo-ask-q + .gbo-ask-q { margin-top: 4px; }
+.gbo-ask-title { padding: 0 8px 4px; font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; }
+.gbo-ask-rows { display: flex; flex-direction: column; gap: 2px; }
+.gbo-ask-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 5px 8px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--color-text-primary); font: inherit; font-size: 15px; line-height: 22px; letter-spacing: 0.15px; text-align: left; cursor: pointer;
+  transition: background-color 120ms var(--ease-out);
+}
+.gbo-ask-row:hover:not(:disabled) { background: var(--color-row-selected); }
+.gbo-ask-row:focus-visible { outline: 0; box-shadow: var(--color-border-secondary) 0 0 0 2px inset; }
+.gbo-ask-row:disabled { cursor: default; }
+.gbo-ask-key {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: 6px;
+  box-shadow: var(--color-border-secondary) 0 0 0 1px inset; color: var(--color-text-tertiary); font-size: 12px; font-weight: 500; line-height: 16px;
+}
+.gbo-ask-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.gbo-ask-tag { flex: none; font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-ask-check { display: inline-flex; flex: none; color: var(--color-text-primary); }
+.gbo-ask-check svg { width: 16px; height: 16px; }
+.gbo-ask-row.is-on .gbo-ask-key { background: var(--color-text-primary); color: var(--color-bubble-agent-flat); box-shadow: none; }
+.gbo-ask.is-settled .gbo-ask-row:not(.is-on) { opacity: 0.45; }
+.gbo-ask.is-busy .gbo-ask-row { cursor: progress; }
+.gbo-ask-row.is-typed { cursor: default; }
+.gbo-ask-hint, .gbo-ask-note { padding: 0 8px; font-size: 13px; line-height: 18px; color: var(--color-text-tertiary); }
+.gbo-ask-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 2px 0 8px; }
+.gbo-ask-actions .gbo-pill-btn.is-primary { margin-right: auto; }
+.gbo-ask-actions .gbo-pill-btn { height: 30px; }
+.gbo-ask-skip {
+  padding: 2px 6px; border: 0; border-radius: 8px; background: transparent; color: var(--color-text-quaternary);
+  font: inherit; font-size: 12px; line-height: 16px; cursor: pointer;
+}
+.gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
+.gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
+.gbo-ask .gbo-card-error { padding: 0 8px 4px; }
+/* Live ::card and ::preview directives in the open chat. A card sits in the
+   choice card's shell (flat fill, radius, padding, type sizes), roomy: at
+   least about 300px, at most a bubble's width. The title is the bold
+   heading, a one-line body the question under it, the actions the same
+   lettered rows; a quiet chip only for running, done and error. */
+.gbo-directive { display: flex; flex-direction: column; align-self: stretch; width: 100%; max-width: 560px; margin: 4px 0; box-sizing: border-box; }
+.gbo-dcard {
+  align-self: flex-start; width: fit-content; min-width: min(300px, calc(100vw - 48px)); max-width: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 6px; padding: 14px 8px 8px; border-radius: 18px;
+  background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
+}
+.gbo-dcard.is-loading { width: 300px; min-height: 84px; opacity: 0.6; }
+.gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 0 8px; }
+.gbo-dcard-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; text-transform: none; }
+.gbo-dcard.is-unavailable .gbo-dcard-title { padding: 0 8px; text-transform: capitalize; }
+.gbo-dcard-status {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; margin-top: 3px;
+  font-size: 12px; line-height: 16px; color: var(--color-text-tertiary);
+}
+.gbo-dcard-status.is-done { color: var(--color-success-text); }
+.gbo-dcard-status.is-error { color: var(--color-danger-text); }
+.gbo-dcard-spin {
+  width: 10px; height: 10px; border-radius: 999px; border: 1.5px solid currentColor; border-right-color: transparent;
+  box-sizing: border-box; animation: gbo-spin 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .gbo-dcard-spin { animation: none; } }
+.gbo-dcard-text {
+  margin: 0; padding: 0 8px; white-space: pre-wrap; font-size: 14px; line-height: 20px; letter-spacing: 0.14px;
+  color: var(--color-text-secondary); overflow-wrap: anywhere;
+}
+.gbo-dcard-text.is-lead { margin-top: -4px; padding-bottom: 4px; font-size: var(--text-message, 15px); line-height: 22px; letter-spacing: 0.15px; color: var(--color-text-primary); }
+.gbo-dcard-text.is-email { color: var(--color-text-primary); }
+.gbo-dcard-kv {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; padding: 0 8px;
+  font-size: 14px; line-height: 20px; letter-spacing: 0.14px;
+}
+.gbo-dcard-kv dt { color: var(--color-text-tertiary); }
+.gbo-dcard-kv dd { margin: 0; overflow-wrap: anywhere; }
+.gbo-dcard-rows { margin-top: 2px; }
+.gbo-dcard-rows.is-settled .gbo-ask-row:not(.is-on) { opacity: 0.45; }
+.gbo-ask-row.is-danger .gbo-ask-label { color: var(--color-danger-text); }
+.gbo-dcard-note { padding: 0 8px 4px; font-size: 13px; line-height: 18px; color: var(--color-text-tertiary); }
+.gbo-dcard .gbo-card-error { padding: 0 8px 4px; }
+.gbo-preview { width: 100%; border-radius: 14px; overflow: hidden; }
+.gbo-preview.is-loading { height: 120px; background: var(--color-bubble-agent-flat); opacity: 0.6; }
+.gbo-preview-frame { display: block; width: 100%; border: 0; background: transparent; }
+.gbo-preview-row {
+  display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; border-radius: 14px;
+  background: var(--color-bubble-agent-flat); font-size: 14px; line-height: 20px;
+}
+.gbo-preview-name { font-weight: 500; overflow-wrap: anywhere; }
+.gbo-preview-why { color: var(--color-text-tertiary); font-size: 13px; }
+/* A page's message waits here until the user sends or dismisses it. */
+.gbo-preview-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.gbo-preview-ask {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 10px 8px 14px;
+  border-radius: 14px; background: var(--color-bubble-agent-flat); font-size: 14px; line-height: 20px;
+}
+.gbo-preview-ask-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 220px; min-width: 0; }
+.gbo-preview-ask-lead { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-preview-ask-prompt { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text-primary); }
+.gbo-preview-ask-actions { display: flex; gap: 8px; flex: none; }
+.gbo-preview-ask-actions .gbo-pill-btn { height: 30px; }
+/* A card row whose message differs from its label shows the message too. */
+.gbo-ask-label.is-stacked { display: flex; flex-direction: column; }
+.gbo-ask-send {
+  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 12px; line-height: 16px; color: var(--color-text-tertiary);
+}
 
 /* Buttons the override keeps: in the reference's .btn--sm idiom. */
 .gbo-pill-btn {
@@ -282,6 +446,8 @@ const ADAPT_SRC = /* css */ `
 .composer__btn.is-recording { color: var(--color-danger); background: var(--color-danger-bg); }
 .composer__btn.is-recording > svg { opacity: 1; }
 .composer__input:disabled { cursor: default; }
+/* A long prompt (the choice card's "Type your answer…") stays on one line. */
+.composer__input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-composer-note {
   max-width: 960px; margin: 8px auto 0; display: flex; align-items: center; justify-content: center; gap: 8px;
   font-size: 13px; line-height: 18px; color: var(--color-text-secondary);
@@ -339,8 +505,13 @@ const ADAPT_SRC = /* css */ `
 .gbo-slack-card.is-status { height: auto; min-height: 48px; }
 .gbo-slack-card .gbo-slack-card-sub.is-error { color: var(--color-danger-text); }
 .gbo-slack-card .gbo-slack-card-sub.is-warn { color: var(--color-warn-text); }
-.gbo-meter { padding: 8px; }
-.gbo-meter-line { font-size: 13px; line-height: 18px; color: var(--color-text-secondary); }
+/* The Model card: one setting row, the model name and a chevron on the right. */
+.gbo-model-row { height: 36px; padding: 6px 8px; gap: 12px; cursor: pointer; }
+.gbo-model-row:hover { background: var(--color-bg-hover); }
+.gbo-model-row > .panel-row__title { flex: none; }
+.gbo-model-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-text-secondary); }
+.gbo-model-name { min-width: 0; font-size: 13px; line-height: 18px; letter-spacing: 0.195px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gbo-model-value > svg { width: 12px; height: 12px; flex: none; opacity: 0.66; }
 .gbo-meter-bar { background: var(--color-bg-tertiary); }
 .gbo-meter-bar > span { background: var(--gbo-action, var(--color-primary)); }
 .gbo-drawer { background: var(--color-bg-chrome); }

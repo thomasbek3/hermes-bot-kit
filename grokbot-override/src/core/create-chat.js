@@ -8,7 +8,9 @@
 //  1. Registry lookup first (findCanonicalChat, fail-closed): an existing
 //     "Bot Chat" row is adopted, never re-created (:459-469).
 //  2. `session.create { profile, title: 'Bot Chat', hidden: true,
-//     follow_profile_config: true }` on the bot's own route, foreground (:473-493).
+//     follow_profile_config: true, source: 'desktop' }` on the bot's own route,
+//     foreground (:473-493). An `invalid_params` refusal naming keys is resent
+//     once without them.
 //  3. Eager `session.title { session_id: <runtime>, title: 'Bot Chat' }` so the
 //     lazy row exists and holds the canonical title at once (:508-516). A
 //     title-uniqueness refusal ("already in use") means another writer took the
@@ -32,10 +34,13 @@
 // machines.
 
 import { CANONICAL_CHAT_TITLE, findCanonicalChat } from './canonical.js'
-import { titleFailure } from './outcomes.js'
+import { titleFailure, withoutRefusedParams } from './outcomes.js'
 import { backendTargetProfile, botConnectionRoute, botRouteKey } from './routing.js'
 
 export const KICKOFF_TEXT = 'Hey, tell me about yourself!'
+// Stock Desktop's create source (use-session-actions/session-create-request.ts):
+// the bot is told it is on the desktop chat surface, not the terminal UI.
+export const CREATE_SOURCE = 'desktop'
 const KICKOFF_DELAY_MS = 400
 
 const creations = new Map()
@@ -65,17 +70,26 @@ export function createCanonicalChat(requestForBot, bot, { kickoff = false, kicko
     if (existing?.id) return { row: existing, runtimeId: '', created: false, adopted: true }
 
     const route = botConnectionRoute(bot)
-    const res = await requestForBot(
-      bot,
-      'session.create',
-      {
-        profile: backendTargetProfile(route, name),
-        title: CANONICAL_CHAT_TITLE,
-        hidden: true,
-        follow_profile_config: true
-      },
-      { spawnPriority: 'foreground' }
-    )
+    const params = {
+      profile: backendTargetProfile(route, name),
+      title: CANONICAL_CHAT_TITLE,
+      hidden: true,
+      follow_profile_config: true,
+      source: CREATE_SOURCE
+    }
+    const create = body => requestForBot(bot, 'session.create', body, { spawnPriority: 'foreground' })
+    let res
+    try {
+      res = await create(params)
+    } catch (error) {
+      // A gateway whose create contract refuses a key we sent (the session
+      // authority's closed set takes no 'desktop' source): its dispatcher
+      // refused before the handler ran, nothing was minted, so resend once
+      // without the named keys (never the profile).
+      const corrected = withoutRefusedParams(error, params, ['profile'])
+      if (!corrected) throw error
+      res = await create(corrected)
+    }
     const sid = String(res?.stored_session_id || '')
     const runtime = String(res?.session_id || '')
 

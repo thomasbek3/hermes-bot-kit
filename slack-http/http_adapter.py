@@ -1,4 +1,5 @@
 """Use the bundled Slack adapter with a signed HTTP transport."""
+import ipaddress
 import logging
 import sys
 
@@ -13,6 +14,21 @@ _REQUIRED = (
 )
 _MODULE_REQUIRED = ('_get_scoped_secret', '_resolve_slack_proxy_url', '_load_slack_bot_tokens',
                     '_slack_per_request_proxy_middleware', '_apply_slack_proxy', 'AsyncApp')
+
+
+def listen_host_allowed(host, allow_nonloopback):
+    """Whether the HTTP Events listener may bind `host`. Loopback only (the
+    relay in front of it is the public ingress), unless the operator set
+    SLACK_HTTP_ALLOW_NONLOOPBACK=1."""
+    if str(allow_nonloopback or '').strip() == '1':
+        return True
+    value = str(host or '').strip()
+    if value.lower() == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(value.strip('[]').split('%', 1)[0]).is_loopback
+    except ValueError:
+        return False
 
 
 def make_http_capable(base):
@@ -39,6 +55,13 @@ def make_http_capable(base):
                 if not value:
                     self._fatal_missing_env(name)
                     return False
+            host = scoped_secret('SLACK_HTTP_HOST') or '127.0.0.1'
+            if not listen_host_allowed(host, scoped_secret('SLACK_HTTP_ALLOW_NONLOOPBACK')):
+                logger.error('[Slack] SLACK_HTTP_HOST %r is not a loopback address; refusing to listen on it. '
+                             'Use 127.0.0.1 behind the relay, or set SLACK_HTTP_ALLOW_NONLOOPBACK=1 to allow it.', host)
+                self._set_fatal_error('slack_http_nonloopback', 'SLACK_HTTP_HOST is not a loopback address '
+                                      '(set SLACK_HTTP_ALLOW_NONLOOPBACK=1 to allow it)', retryable=False)
+                return False
             from aiohttp import web
             from gateway.platforms.shared_ingress import bind_listener
             from slack_bolt.adapter.aiohttp import to_bolt_request, to_aiohttp_response
@@ -86,7 +109,6 @@ def make_http_capable(base):
                 runner = getattr(self, 'gateway_runner', None)
                 if profile and profile != 'default' and runner and runner._multiplex_on():
                     self._shared_listener_profile = profile
-                host = scoped_secret('SLACK_HTTP_HOST') or '127.0.0.1'
                 port = int(scoped_secret('SLACK_HTTP_PORT') or '8656')
                 self._http_runner = await bind_listener(self, app, host, port, '/slack/events', access_log=None)
                 self._running = True

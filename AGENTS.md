@@ -84,6 +84,27 @@ it. Then:
   in [computer-viewer/README.md](computer-viewer/README.md); host-machine
   one-liners are printed by the plugin itself.
 
+## Optional: the agent-cards skill (cards in the Grokbot Override chat)
+
+Off by default. It teaches bots to show approval, task and email-draft cards
+in the Grokbot Override chat (question cards need no skill: they come from
+Hermes's built-in `clarify` tool). From a clone, or from a release newer than
+v2026.11.09 (older release manifests do not list the skill; the installer says
+so and skips it):
+
+```bash
+KIT_CARDS_SKILL=1 bash install.sh                               # default profile + every profile
+KIT_CARDS_SKILL=1 KIT_CARDS_PROFILES=default,helper bash install.sh
+KIT_CARDS_SKILL=remove bash install.sh                          # remove it again; installs nothing
+```
+
+It lands at `<profile-home>/skills/agent-cards/SKILL.md` (the root home is
+`default`). An `agent-cards` skill that is not this kit's copy is left alone,
+on install and on remove. Bots also need the `file` and `clarify` toolsets
+for Desktop chat. A chat started before the install keeps its old mode until
+its session restarts. Details:
+[grokbot-override/README.md](grokbot-override/README.md#cards).
+
 ## Optional: texting-style (agent plugin, per profile)
 
 Makes bots reply in a short SMS register. Installs into Hermes profile homes
@@ -123,6 +144,8 @@ the user's say-so.
 ```bash
 rm -rf ~/.hermes/desktop-plugins/bubble-mode ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/bot-sections ~/.hermes/desktop-plugins/task-dock ~/.hermes/desktop-plugins/grokbot-override
 ```
+
+The agent-cards skill, if you installed it: `KIT_CARDS_SKILL=remove bash install.sh`.
 
 Then reload plugins (same as above). Plugin settings live in Hermes plugin
 storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` /

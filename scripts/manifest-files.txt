@@ -18,3 +18,4 @@ computer-viewer/agent-plugin/orgo-computer/plugin.yaml
 computer-viewer/agent-plugin/orgo-computer/schemas.py
 computer-viewer/agent-plugin/orgo-computer/tools.py
 computer-viewer/agent-plugin/orgo-computer/skills/computer-basics/SKILL.md
+grokbot-override/skills/agent-cards/SKILL.md

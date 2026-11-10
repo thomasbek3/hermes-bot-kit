@@ -54,20 +54,3 @@ export function costLabel(usage) {
   if (!Number.isFinite(cost) || usage?.cost_usd == null) return ''
   return `${usage?.cost_status === 'estimated' ? '~' : ''}$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`
 }
-
-export function usageDetailRows(usage) {
-  if (!usage) return []
-  return [
-    ['Context', usageContextLabel(usage)],
-    ['Used', usage.context_max ? `${contextPercent(usage)}%` : ''],
-    ['Model', usage.model || ''],
-    ['Input tokens', usage.input ? compactNumber(usage.input) : ''],
-    ['Output tokens', usage.output ? compactNumber(usage.output) : ''],
-    ['API calls', usage.calls ? String(usage.calls) : ''],
-    ['Compressions', usage.compressions ? String(usage.compressions) : ''],
-    ['Cache hits', typeof usage.cache_hit_pct === 'number' ? `${Math.round(usage.cache_hit_pct)}%` : ''],
-    ['Cost', costLabel(usage)]
-  ]
-    .filter(([, v]) => v)
-    .map(([label, value]) => ({ label, value }))
-}

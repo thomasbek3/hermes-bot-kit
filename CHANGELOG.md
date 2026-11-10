@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Ready for a new user**: every tracked file and picture now uses demo content (bot names, sections,
+  workspaces, desktops); `tests/privacy-guard.test.mjs` (run in CI) keeps private host names, addresses,
+  home folders, workspace ids, business and bot names and real email addresses out of every tracked text
+  file. The Bot Sections and Computer pictures are new renders with invented content (old versions stay
+  in git history).
+- **Grokbot Override cards for everyone**: a generic agent-cards skill
+  (`grokbot-override/skills/agent-cards/SKILL.md`: the `card.v1` file, the `::card` line, approval and task
+  flows, when to show a card). `install.sh` installs it only with `KIT_CARDS_SKILL=1` (all profiles, or
+  `KIT_CARDS_PROFILES`), leaves a user's own `agent-cards` skill alone, and `KIT_CARDS_SKILL=remove` takes
+  the kit's copies out again. Question cards need no skill (Hermes's `clarify` tool).
+- **Grokbot Override chat**: flat bot bubbles; a **Model** row in the profile panel; Bot Chats are desktop
+  sessions (`source: 'desktop'`), so bots know markdown, files and cards render; clarify questions as inline
+  choice cards; live `::card` (approval, task, draft-email) and `::preview` widgets drawn from the bot's own
+  session, in the choice card's shell; a sidebar footer with your name and a Hermes Settings button; a
+  **NEW** line above the first unseen message; no transcript jumps while scrolling past a live card, and
+  message actions float beside the message.
+- **Pictures and READMEs**: a new hero, cards, NEW line, footer and a three-step **Add to Slack** strip
+  (`grokbot-override/screenshots/`), all from the preview harness with demo data; the root README leads
+  the Grokbot Override part with one-click Add to Slack and its requirements.
 - **Grokbot Override in the installer**: `install.sh` now installs it **switched off**
   (`grokbot-override/plugin.default-off.js`, verified against `MANIFEST.sha256`, installed as
   `desktop-plugins/grokbot-override/plugin.js`); **Grokbot Override: toggle** turns it on.

@@ -14,5 +14,10 @@ else:
     allowed = {'SLACK_BOT_TOKEN', 'SLACK_TEAM_ID', 'SLACK_TEAM_NAME', 'SLACK_ALLOWED_USERS'}
     if not isinstance(values, dict) or not set(values).issubset(allowed) or not all(isinstance(v, str) for v in values.values()):
         raise SystemExit(2)
+    # A value is one .env line: refuse control characters (CR, LF, NUL, ...),
+    # line separators and anything longer than a Slack value can be.
+    if any(len(v) > 512 or any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 or c in '\u2028\u2029' for c in v)
+           for v in values.values()):
+        raise SystemExit(2)
     for key, value in values.items():
         save_env_value(key, value)

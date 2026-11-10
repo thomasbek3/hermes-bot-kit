@@ -62,7 +62,7 @@ const row = (
     )}
 ```
 
-Expected live string: `Pricing · @pricing · This device · Available`.
+Expected live string: `Planner · @planner · This device · Available`.
 
 Handle matcher: `/·\s*@[A-Za-z0-9]/`. Group rows use `"${group}, ${n} bots, …"` — no `· @handle`. Native `RosterSectionHeader` is a `RowButton` without the context-menu trigger.
 

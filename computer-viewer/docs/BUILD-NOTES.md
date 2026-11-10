@@ -20,14 +20,14 @@ Built from `SPEC.md` (resolved). Korgo sources in `references/korgo/` were studi
 5. Wrong password → `vnc-auth-failed`; empty password against a password-requiring server → `password-required` — **needs live Hermes + a VNC target**. (`authLock` is in place so a following unclean `disconnect` cannot rewrite these as `unreachable`.)
 6. Iframe mode against `http://127.0.0.1:6080/vnc.html`, reload, expand/collapse without losing the iframe node — **needs live Hermes + a noVNC page**.
 7. Settings persist across restart/hot reload; per-bot override switches the connection — **needs live Hermes with two profiles**.
-8. Simulated CSP failure (`NOVNC_URL` pointed at garbage) → `cdn-blocked`, iframe still works — **needs live Hermes**. (Loader tries jsDelivr then `esm.sh`, then `cdn-blocked`; iframe `connect()` never calls `loadRFB()`.)
+8. Vendored noVNC missing → `novnc-missing` ("re-run the kit installer"), iframe still works — **needs live Hermes**. (The CDN fallback was removed in the 2026-11-09 security pass: the loader imports only the hash-checked vendored copy; iframe `connect()` never calls `loadRFB()`.)
 9. Theme variables on pane chrome, no hardcoded hex in chrome (letterbox black exempt) — **needs live Hermes across themes**. Statically: pane chrome uses `--ui-text-*`, `--ui-stroke-secondary`, `--ui-accent`, `--ui-editor-surface-background`, `--ui-surface-hover`. Overlay chrome is light-on-dark (see deviations).
 
 ## VERIFY AT RUNTIME (spec fallbacks honoured)
 
 - **`createPortal`:** `@hermes/plugin-sdk` does not export it (confirmed against `apps/desktop/src/sdk/index.ts`). The plugin feature-detects `HermesSdk.createPortal` at runtime. If present, the overlay is portaled to `document.body`. If not, the overlay node is moved onto `document.body` and the live RFB/iframe node is moved between the pane slot (collapsed) and that overlay (expanded). Moving the node does not reconnect.
 - **`host.paneVisibility`:** treated as read-only unless the atom exposes `.set`. Status-bar / palette “toggle pane” writes visibility when possible; otherwise it expands/collapses the overlay.
-- **Dynamic `import()` of the noVNC CDN:** wrapped in try/catch with a second URL (`esm.sh`). Failure → `cdn-blocked`. Iframe mode does not load noVNC.
+- **noVNC import:** only the vendored file, hash-checked, imported from a blob URL. No CDN (removed 2026-11-09). Missing or unreadable → `novnc-missing`; tampered or unimportable → `vendored-tampered`. Iframe mode does not load noVNC.
 
 ## Deviations (and why)
 

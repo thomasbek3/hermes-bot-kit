@@ -128,6 +128,8 @@ export function ComposerNote({
 }
 
 const COMPOSER_MAX_H = 223
+/** The composer's prompt while a choice card waits for an answer. */
+export const ANSWER_PLACEHOLDER = 'Type your answer, or talk about something…'
 
 export function Composer({
   bot,
@@ -143,7 +145,9 @@ export function Composer({
   onRestored,
   onDiscard,
   onStop,
-  draftRef
+  draftRef,
+  answering = false,
+  onAnswer
 }: {
   bot: any
   name: string
@@ -160,6 +164,10 @@ export function Composer({
   onStop: () => void
   /** Lets the transcript put text into this composer (edit, /undo). */
   draftRef?: React.MutableRefObject<null | ((text: string, owner?: string) => void)>
+  /** A choice card is waiting: what is typed answers it (onAnswer), it is
+   *  not sent as a message. */
+  answering?: boolean
+  onAnswer?: (text: string) => Promise<{ ok: boolean; error?: string }>
 }) {
   const [text, setText] = React.useState('')
   const [files, setFiles] = React.useState<DraftAttachment[]>([])
@@ -298,6 +306,25 @@ export function Composer({
       setNote('A command can’t carry attachments: remove them, or send the text without the leading /.')
       return
     }
+    if (answering && onAnswer) {
+      // The open question takes the text as its answer (the card's free-text
+      // "Other"), through the card's own call; it is never a new message.
+      if (files.length) {
+        setNote('An answer can’t carry attachments: remove them, or answer first and send them after.')
+        return
+      }
+      setText('')
+      setNote('')
+      setOptions([])
+      const result = await onAnswer(sending)
+      if (ownerRef.current !== sentOwner) return
+      if (!result?.ok) {
+        if (!textRef.current.trim()) setText(sending)
+        setNote(`Your answer was not sent${result?.error ? `: ${result.error}` : ''}.`)
+      }
+      inputRef.current?.focus()
+      return
+    }
     const attachments = files.filter(file => file.owner === ownerRef.current)
     const apiText = mentionNote(mentions)
     setText('')
@@ -430,8 +457,8 @@ export function Composer({
           rows={1}
           value={text}
           disabled={disabled}
-          placeholder={`Message ${name}`}
-          aria-label={`Message ${name}`}
+          placeholder={answering ? ANSWER_PLACEHOLDER : `Message ${name}`}
+          aria-label={answering ? `Answer ${name}` : `Message ${name}`}
           aria-autocomplete="list"
           onChange={event => {
             setText(event.target.value)

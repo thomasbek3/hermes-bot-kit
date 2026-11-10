@@ -6,6 +6,15 @@ Slack's Allow page, and when you click Allow the bot is in Slack. It answers
 DMs and @mentions with the same plugins, context and memories it uses in
 Hermes. **Remove from Slack** deletes the app again.
 
+<p align="center">
+  <img src="../grokbot-override/screenshots/slack-strip.png" alt="Add to Slack in three steps: the Add to Slack window with the Acme Team workspace and Connect, the Connected to Acme Team Slack window, and the Slack card reading Connected" width="860">
+</p>
+<p align="center"><em>Connect, then you click Allow in your browser, then Connected. Demo workspace; Slack's own page is not shown.</em></p>
+
+In the [Grokbot Override](../grokbot-override/README.md) the same window opens from **Add to Slack** in the
+bot's profile panel, and the panel's Slack card reads **Connected** afterwards. Every app it creates gets the
+full set of permissions the bot needs (the scopes in `common/core.py`).
+
 Without this add-on, Hermes's Slack window falls back to the regular
 "paste two tokens" dialog (Socket Mode). That dialog keeps working either way.
 
@@ -131,7 +140,17 @@ next reloads them.
   last 10 minutes.
 - OAuth callbacks need a single-use, signed, 10 minute `state`; the workspace
   in Slack's answer must match the one the app was created in.
-- The relay rate-limits per client and logs only the method, a sanitized path,
+- The relay rate-limits unauthenticated requests per client (60 at once, then 1
+  per second). Behind the loopback proxy the client is the right-most
+  `X-Forwarded-For` address. Only outcomes that do not authenticate are charged
+  (unknown key or path, bad signature or state, malformed body, health checks);
+  a validly signed Slack request or an OAuth callback with a valid state is
+  always processed, so other traffic cannot lock Slack out.
+- Slack's team name is reduced to printable text (no control characters,
+  quotes, backslash, backtick or `$`, at most 100 characters) and the
+  installer's user id must be a plain Slack id before either is written to the
+  bot's `.env`.
+- The relay logs only the method, a sanitized path,
   the status and whether the request was a URL check. It never logs bodies,
   query strings or tokens. Log: `~/Library/Logs/hermes-slack-ingress.log`
   (macOS) or `~/.local/state/hermes-slack-ingress.log` (Linux).
