@@ -1,5 +1,5 @@
 // A fenced code block in a bot's message (core/fences.js): the bubble's grey
-// block in monospace, a Copy pill top-right that copies the block's raw text
+// block in monospace with long lines wrapped, a header strip with a Copy pill that copies the block's raw text
 // exactly ("Copied" for 1.5 s), shown in full up to CODE_FOLD_LINES lines and
 // folded to CODE_FOLDED_LINES behind a "Show more" / "Show less" text button
 // beyond that.
@@ -28,9 +28,12 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
   const folded = folds && !open
   return (
     <div className="gbo-code" data-lang={lang || undefined}>
-      <button type="button" className="gbo-code-copy" aria-label={copied ? 'Copied' : 'Copy code'} onClick={copy}>
-        {copied ? 'Copied' : 'Copy'}
-      </button>
+      <div className="gbo-code-head">
+        <span className="gbo-code-lang">{lang && lang !== 'text' ? lang : ''}</span>
+        <button type="button" className="gbo-code-copy" aria-label={copied ? 'Copied' : 'Copy code'} onClick={copy}>
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
       <pre className={folded ? 'is-folded' : undefined} style={folded ? ({ '--gbo-code-lines': CODE_FOLDED_LINES } as any) : undefined}>
         <code>{code}</code>
       </pre>
