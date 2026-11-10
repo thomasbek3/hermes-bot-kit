@@ -13,7 +13,9 @@ The look follows Hermes's light and dark themes. Each bot wears a simple shape (
 heart, hexagon, house, sparkle, square, star, teardrop or pebble) in its own colour, chosen from its exact
 route key; a bot with a photo shows the photo. Your bubbles, the send button and switches take the open
 bot's colour. Thinking and tool rows are hidden in the chat unless Bubble Mode's "toggle work rows"
-preference shows them.
+preference shows them. A thin red **NEW** line marks the first bot message you have not seen when you open a
+chat. The sidebar footer shows your initials and name (this computer's account name, the only one Hermes
+gives plugins; "You" without it) and a round button that opens Hermes Settings.
 
 Hermes Bot Mode is never removed or disabled. The override hides the stock **Bots** tab while it is on and
 does the chat itself: creating a Bot Chat, answering questions and password prompts, slash commands and

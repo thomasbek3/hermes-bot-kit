@@ -121,6 +121,19 @@ const ADAPT_SRC = /* css */ `
 .gbo-source-retry { margin: 0 12px 8px; border-radius: 12px; font-size: 13px; line-height: 18px; }
 .account__btn { cursor: default; }
 .account__btn:hover { background: none; }
+/* The footer: initials, the person's name (ellipsis when long) and, at the
+   right, the round Hermes settings button in the top row's style. */
+.gbo-roster-foot .account__btn { padding-right: 0; }
+.gbo-roster-foot .account__initials { letter-spacing: 0; }
+.gbo-foot-btn { color: var(--color-text-primary); }
+
+/* The NEW line: a thin red rule with a small red "NEW" in the middle, above
+   the first unread bot message (and above that message's time line). */
+.gbo-new-line {
+  align-self: stretch; display: flex; align-items: center; gap: 12px; padding-top: 6px;
+  color: var(--color-danger); font-size: 11px; font-weight: 600; line-height: 14px; letter-spacing: 0.4px; user-select: none;
+}
+.gbo-new-line::before, .gbo-new-line::after { content: ''; flex: 1 1 0; height: 1px; background: currentColor; opacity: 0.5; }
 
 /* ── chat header ────────────────────────────────────────────────────── */
 .chat__header { -webkit-app-region: drag; }

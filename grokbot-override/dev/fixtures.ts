@@ -53,6 +53,17 @@ export const USER_ITEMS = [
   { kind: 'assistant', id: 'p-a4', text: 'Saved. It’s on tonight’s plan with the link.', at: night + 3_700_000 }
 ]
 
+/** A chat opened with two unread bot messages (the NEW line goes above
+ *  `n-a2`, before its time line). Demo text. */
+export const NEW_ITEMS = [
+  { kind: 'assistant', id: 'n-a0', text: 'Morning digest sent: three new articles on your list.', at: night - 86_400_000 },
+  { kind: 'user', id: 'n-u1', text: 'can you check my reading list tonight?', at: night },
+  { kind: 'assistant', id: 'n-a1', text: 'Will do. I’ll send a note when it’s done.', at: night + 20_000 },
+  { kind: 'assistant', id: 'n-a2', text: 'Evening check: your reading list is up to date, and two library holds are ready to pick up.', at: night + 2 * 3_600_000 },
+  { kind: 'assistant', id: 'n-a3', text: 'One thing to look at: your library card renewal is due on Friday.', at: night + 2 * 3_600_000 + 30_000 }
+]
+export const NEW_ITEMS_FIRST_UNREAD = 'n-a2'
+
 const morning = new Date(2026, 10, 9, 12, 46).getTime()
 
 /** A chat shaped like the reference screenshot: a short exchange, then long

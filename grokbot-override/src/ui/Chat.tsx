@@ -13,8 +13,10 @@ import { drawerKeyDown, trapFocus } from '../core/focus.js'
 import { displayName, rowKey } from '../core/roster.js'
 import { cornerClass, groupMessages } from '../core/groups.js'
 import { clock, withDividers } from '../core/time.js'
+import { withNewMarker } from '../core/newMarker.js'
 import { activityLabel, visibleItems } from '../core/workRows.js'
-import { app, canToggleSidebar, type ChatSlot, findBot, freshBot, mainSlot, metaFor, openBotInNewTab, openInBotMode, resetPanelWidth, selectBot, setPanelOpen, startPanelResize, stockHandoffProblem, toggleSidebar } from './app'
+import { app, canToggleSidebar, type ChatSlot, findBot, freshBot, mainSlot, metaFor, noteTranscript, openBotInNewTab, openInBotMode, resetPanelWidth, selectBot, setPanelOpen, startPanelResize, stockHandoffProblem, toggleSidebar } from './app'
+import { roster2 } from './rosterStores'
 import { BotAvatar, botColor } from './Avatar'
 import { Composer } from './Composer'
 import { IconChevron, IconOpen, IconPanel, IconSidebar, IconX } from './icons'
@@ -237,6 +239,8 @@ function Item({
   switch (item.kind) {
     case 'divider':
       return <div className="divider gbo-divider">{item.label}</div>
+    case 'new':
+      return <NewLine />
     case 'user':
       return (
         <div className="gbo-msg is-user">
@@ -293,6 +297,10 @@ function Item({
   }
 }
 
+/** How close to the bottom counts as "at the bottom" for the NEW line's
+ *  "the user is looking" (CSS px). */
+const LOOK_PX = 16
+
 function useStickToBottom(dep: unknown) {
   const ref = React.useRef<HTMLDivElement | null>(null)
   const stick = React.useRef(true)
@@ -310,6 +318,54 @@ function useStickToBottom(dep: unknown) {
   return { ref, onScroll, pin }
 }
 
+/** Whether the user is looking at this transcript's newest messages: the
+ *  window focused and visible, the transcript on screen, scrolled to its
+ *  bottom (core/newMarker.js). */
+function lookingAt(el: HTMLElement | null): boolean {
+  const doc = el?.ownerDocument as any
+  if (!el || !doc || !el.isConnected) return false
+  if (doc.visibilityState === 'hidden') return false
+  if (typeof doc.hasFocus === 'function' && !doc.hasFocus()) return false
+  if (!el.clientHeight) return false
+  return el.scrollHeight - el.scrollTop - el.clientHeight < LOOK_PX
+}
+
+/** The NEW line: decided when the chat opens, kept while it is open, and fed
+ *  focus, visibility and scroll changes so messages read on arrival never
+ *  start one. Returns the id of the message it sits above, or null. */
+function useNewLine(key: string, items: any[], ready: boolean, ref: React.RefObject<HTMLDivElement | null>) {
+  const line = useStore(roster2.newLine)
+  const latest = React.useRef({ key, items, ready })
+  latest.current = { key, items, ready }
+  const note = React.useCallback(() => {
+    const { key: k, items: list, ready: ok } = latest.current
+    noteTranscript(k, list, ok, lookingAt(ref.current))
+  }, [ref])
+  React.useEffect(() => {
+    note()
+  }, [key, items, ready, note])
+  React.useEffect(() => {
+    const win = (globalThis as any).window
+    const doc = (globalThis as any).document
+    win?.addEventListener?.('focus', note)
+    doc?.addEventListener?.('visibilitychange', note)
+    return () => {
+      win?.removeEventListener?.('focus', note)
+      doc?.removeEventListener?.('visibilitychange', note)
+    }
+  }, [note])
+  return { id: line.markers[key] ?? null, note }
+}
+
+/** The red NEW rule above the first unread bot message. */
+export function NewLine() {
+  return (
+    <div className="gbo-new-line" role="separator" aria-label="New messages">
+      <span>NEW</span>
+    </div>
+  )
+}
+
 /** Which chat a ChatWorkspace shows: the main tab, or an extra tab opened
  *  beside it (PARITY C26). */
 const SlotContext = React.createContext<ChatSlot>(mainSlot)
@@ -320,8 +376,16 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
   // Thought and tool rows are hidden unless the work-rows preference shows
   // them (core/workRows.js); display only, the chat keeps every item.
   const showWork = useStore(app.showWork)
-  const decorated = React.useMemo(() => groupMessages(withDividers(visibleItems(items, showWork))), [items, showWork])
-  const { ref, onScroll, pin } = useStickToBottom(items)
+  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items)
+  const newLine = useNewLine(rowKey(bot), items, state.phase === 'ready', ref)
+  const onScroll = () => {
+    onStickScroll()
+    newLine.note()
+  }
+  const decorated = React.useMemo(
+    () => groupMessages(withNewMarker(withDividers(visibleItems(items, showWork)), newLine.id)),
+    [items, showWork, newLine.id]
+  )
   const controller = useController()
   const answer = (requestId: string, choice: string) => void controller?.respondApproval(requestId, choice)
   const retry = (clientId: string) => void controller?.retry(clientId)

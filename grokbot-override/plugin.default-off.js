@@ -18336,6 +18336,78 @@ function createActivityTracker(deps) {
   return { track, reseed };
 }
 
+// src/core/newMarker.js
+var SEEN_KEY = "seenAt";
+var MAX_SEEN = 200;
+function seenFrom(value) {
+  const out = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [key, at] of Object.entries(value)) {
+    if (typeof key === "string" && key && typeof at === "number" && Number.isFinite(at) && at > 0) out[key] = at;
+  }
+  return out;
+}
+function raiseSeen(seen, key, at) {
+  if (!key || !(at > 0) || (seen[key] || 0) >= at) return seen;
+  const next = { ...seen, [key]: at };
+  const keys = Object.keys(next);
+  if (keys.length > MAX_SEEN) {
+    keys.sort((a2, b2) => next[a2] - next[b2]);
+    for (const drop of keys.slice(0, keys.length - MAX_SEEN)) if (drop !== key) delete next[drop];
+  }
+  return next;
+}
+function newestAt(items) {
+  let max = 0;
+  for (const item of items || []) {
+    const at = Number(item?.at || 0);
+    if (at > max) max = at;
+  }
+  return max;
+}
+function firstUnreadId(items, seenAt) {
+  if (!(typeof seenAt === "number" && Number.isFinite(seenAt))) return null;
+  const list = Array.isArray(items) ? items : [];
+  let start2 = 0;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i]?.kind === "user") {
+      start2 = i + 1;
+      break;
+    }
+  }
+  for (let i = start2; i < list.length; i += 1) {
+    const item = list[i];
+    if (item?.kind === "assistant" && !item.streaming && Number(item.at || 0) > seenAt) return String(item.id);
+  }
+  return null;
+}
+function withNewMarker(rows, id) {
+  if (!id) return rows;
+  const at = rows.findIndex((row) => row?.kind !== "divider" && String(row?.id) === String(id));
+  if (at < 0) return rows;
+  const before = at > 0 && rows[at - 1]?.kind === "divider" ? at - 1 : at;
+  return [...rows.slice(0, before), { kind: "new", id: `new:${id}` }, ...rows.slice(before)];
+}
+function stepMarker(state, { key, items, ready, looking }) {
+  if (!key || !ready) return state;
+  let { markers, seen } = state;
+  const known = Object.prototype.hasOwnProperty.call(seen, key);
+  const current = markers[key];
+  if (current === void 0 || current === null && !looking) {
+    const id = known ? firstUnreadId(items, seen[key]) : null;
+    if (id !== current) markers = { ...markers, [key]: id };
+  }
+  const newest = newestAt(items);
+  if (!known || looking) seen = raiseSeen(seen, key, newest || (known ? 0 : 1));
+  return markers === state.markers && seen === state.seen ? state : { markers, seen };
+}
+function resetMarker(state, key) {
+  if (!key || !Object.prototype.hasOwnProperty.call(state.markers, key)) return state;
+  const markers = { ...state.markers };
+  delete markers[key];
+  return { ...state, markers };
+}
+
 // src/core/rooms.js
 var uuid = () => {
   const c2 = globalThis.crypto;
@@ -19679,7 +19751,11 @@ var roster2 = {
   /** P3: job ids with a run (trigger) in flight. */
   running: createStore({}),
   /** The panel's Model row: roster key -> the bot's configured model. */
-  models: createStore({})
+  models: createStore({}),
+  /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
+   *  the first unread bot message (null: none; absent: not decided), and the
+   *  per-bot seen watermark (ms; plugin storage `seenAt`). */
+  newLine: createStore({ markers: {}, seen: {} })
 };
 function openDialog(state) {
   roster2.dialog.set(state);
@@ -21077,6 +21153,19 @@ var ADAPT_SRC = (
 .gbo-source-retry { margin: 0 12px 8px; border-radius: 12px; font-size: 13px; line-height: 18px; }
 .account__btn { cursor: default; }
 .account__btn:hover { background: none; }
+/* The footer: initials, the person's name (ellipsis when long) and, at the
+   right, the round Hermes settings button in the top row's style. */
+.gbo-roster-foot .account__btn { padding-right: 0; }
+.gbo-roster-foot .account__initials { letter-spacing: 0; }
+.gbo-foot-btn { color: var(--color-text-primary); }
+
+/* The NEW line: a thin red rule with a small red "NEW" in the middle, above
+   the first unread bot message (and above that message's time line). */
+.gbo-new-line {
+  align-self: stretch; display: flex; align-items: center; gap: 12px; padding-top: 6px;
+  color: var(--color-danger); font-size: 11px; font-weight: 600; line-height: 14px; letter-spacing: 0.4px; user-select: none;
+}
+.gbo-new-line::before, .gbo-new-line::after { content: ''; flex: 1 1 0; height: 1px; background: currentColor; opacity: 0.5; }
 
 /* ── chat header ────────────────────────────────────────────────────── */
 .chat__header { -webkit-app-region: drag; }
@@ -22064,7 +22153,9 @@ var app = {
   pinnedBots: createStore([]),
   // Whether the roster pane is on screen (Hermes's sidebar open): the chat
   // header shows its own sidebar toggle while it is not.
-  rosterShown: createStore(true)
+  rosterShown: createStore(true),
+  // The sidebar footer's name ('' = unknown: the footer says "You").
+  userName: createStore("")
 };
 var requestForBot = null;
 var controller = null;
@@ -22355,6 +22446,7 @@ function selectBot(bot, { openWorkspace = true } = {}) {
   if (key !== app.selectedKey.get()) app.drawerOpen.set(false);
   app.selectedKey.set(key);
   storageSet2("selected", key);
+  resetNewLine(key);
   ackBot(bot);
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot));
   else retitleWorkspace(chatTabTitle(bot));
@@ -22985,6 +23077,58 @@ function toggleSidebar() {
   } catch {
     return false;
   }
+}
+function canOpenSettings() {
+  const ctx = app.ctx;
+  if (typeof ctx?.runAction !== "function") return false;
+  try {
+    const list = typeof ctx.listActions === "function" ? ctx.listActions() : null;
+    return !Array.isArray(list) || list.some((action) => action?.id === "nav.settings");
+  } catch {
+    return false;
+  }
+}
+function openSettings() {
+  try {
+    return app.ctx?.runAction?.("nav.settings")?.ok !== false;
+  } catch {
+    return false;
+  }
+}
+var userNameAsked = false;
+function loadUserName() {
+  if (userNameAsked) return;
+  userNameAsked = true;
+  try {
+    const read = globalThis.window?.hermesDesktop?.getMachineProfile;
+    if (typeof read !== "function") return;
+    Promise.resolve(read()).then((profile) => {
+      const name = String(profile?.username ?? "").trim().slice(0, 80);
+      if (name) app.userName.set(name);
+    }).catch(() => void 0);
+  } catch {
+  }
+}
+var seenLoaded = false;
+function markerState() {
+  if (!seenLoaded && app.ctx) {
+    seenLoaded = true;
+    const seen = seenFrom(storageGet(SEEN_KEY, {}));
+    roster2.newLine.set((s) => ({ ...s, seen: { ...seen, ...s.seen } }));
+  }
+  return roster2.newLine.get();
+}
+function noteTranscript(key, items, ready, looking) {
+  const state = markerState();
+  const next = stepMarker(state, { key, items, ready, looking });
+  if (next === state) return;
+  roster2.newLine.set(next);
+  if (next.seen !== state.seen) storageSet2(SEEN_KEY, next.seen);
+}
+function resetNewLine(key) {
+  const state = roster2.newLine.get();
+  const next = resetMarker(state, key);
+  if (next !== state) roster2.newLine.set(next);
 }
 function setPanelOpen(open) {
   app.panelOpen.set(open);
@@ -29058,6 +29202,8 @@ function Item({
   switch (item.kind) {
     case "divider":
       return /* @__PURE__ */ jsx23("div", { className: "divider gbo-divider", children: item.label });
+    case "new":
+      return /* @__PURE__ */ jsx23(NewLine, {});
     case "user":
       return /* @__PURE__ */ jsxs21("div", { className: "gbo-msg is-user", children: [
         item.attachments?.length ? /* @__PURE__ */ jsx23("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx23("span", { className: "gbo-chip", children: a2.name || a2.kind }, i)) }) : null,
@@ -29095,6 +29241,7 @@ function Item({
       return null;
   }
 }
+var LOOK_PX = 16;
 function useStickToBottom(dep) {
   const ref = React21.useRef(null);
   const stick = React21.useRef(true);
@@ -29111,13 +29258,55 @@ function useStickToBottom(dep) {
   };
   return { ref, onScroll, pin };
 }
+function lookingAt(el) {
+  const doc = el?.ownerDocument;
+  if (!el || !doc || !el.isConnected) return false;
+  if (doc.visibilityState === "hidden") return false;
+  if (typeof doc.hasFocus === "function" && !doc.hasFocus()) return false;
+  if (!el.clientHeight) return false;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < LOOK_PX;
+}
+function useNewLine(key, items, ready, ref) {
+  const line = useStore(roster2.newLine);
+  const latest = React21.useRef({ key, items, ready });
+  latest.current = { key, items, ready };
+  const note = React21.useCallback(() => {
+    const { key: k, items: list, ready: ok } = latest.current;
+    noteTranscript(k, list, ok, lookingAt(ref.current));
+  }, [ref]);
+  React21.useEffect(() => {
+    note();
+  }, [key, items, ready, note]);
+  React21.useEffect(() => {
+    const win = globalThis.window;
+    const doc = globalThis.document;
+    win?.addEventListener?.("focus", note);
+    doc?.addEventListener?.("visibilitychange", note);
+    return () => {
+      win?.removeEventListener?.("focus", note);
+      doc?.removeEventListener?.("visibilitychange", note);
+    };
+  }, [note]);
+  return { id: line.markers[key] ?? null, note };
+}
+function NewLine() {
+  return /* @__PURE__ */ jsx23("div", { className: "gbo-new-line", role: "separator", "aria-label": "New messages", children: /* @__PURE__ */ jsx23("span", { children: "NEW" }) });
+}
 var SlotContext = React21.createContext(mainSlot);
 var useController = () => React21.useContext(SlotContext).controller();
 function Transcript({ state, bot, meta, onPrefill }) {
   const items = state.chat.items;
   const showWork = useStore(app.showWork);
-  const decorated = React21.useMemo(() => groupMessages(withDividers(visibleItems(items, showWork))), [items, showWork]);
-  const { ref, onScroll, pin } = useStickToBottom(items);
+  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items);
+  const newLine = useNewLine(rowKey(bot), items, state.phase === "ready", ref);
+  const onScroll = () => {
+    onStickScroll();
+    newLine.note();
+  };
+  const decorated = React21.useMemo(
+    () => groupMessages(withNewMarker(withDividers(visibleItems(items, showWork)), newLine.id)),
+    [items, showWork, newLine.id]
+  );
   const controller2 = useController();
   const answer = (requestId, choice) => void controller2?.respondApproval(requestId, choice);
   const retry = (clientId) => void controller2?.retry(clientId);
@@ -29390,6 +29579,20 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
 // src/ui/Roster.tsx
 import * as React23 from "react";
 
+// src/core/person.js
+function initialsOf(name) {
+  const words = String(name || "").split(/[\s._-]+/).map((word) => word.match(/\p{L}/u)?.[0] || "").filter(Boolean);
+  if (!words.length) return "";
+  const picked = words.length > 1 ? [words[0], words[words.length - 1]] : [words[0]];
+  return picked.join("").toLocaleUpperCase();
+}
+function footerPerson(name) {
+  const clean = String(name || "").trim();
+  const initials = initialsOf(clean);
+  if (!clean || !initials) return { initials: "You", name: "", known: false };
+  return { initials, name: clean, known: true };
+}
+
 // src/ui/Unread.tsx
 import * as React22 from "react";
 import { jsx as jsx24 } from "react/jsx-runtime";
@@ -29519,6 +29722,8 @@ function RosterPane() {
   useStore(roster2.metaWrites);
   useStore(roster2.attention);
   const pins = useStore(app.pinnedBots);
+  const person = footerPerson(useStore(app.userName));
+  React23.useEffect(() => loadUserName(), []);
   const [searching, setSearching] = React23.useState(false);
   const now = useNow();
   const rootRef = React23.useRef(null);
@@ -29670,12 +29875,13 @@ function RosterPane() {
       ] }),
       showGroups ? /* @__PURE__ */ jsx25(RoomsSection, { query }) : null
     ] }),
-    /* @__PURE__ */ jsxs22("div", { className: "sidebar__footer gbo-roster-foot", children: [
+    /* @__PURE__ */ jsxs22("div", { className: "sidebar__footer gbo-roster-foot", title: roster.rows.length ? `${roster.rows.length} bots` : void 0, children: [
       /* @__PURE__ */ jsx25("div", { className: "sidebar__fade" }),
       /* @__PURE__ */ jsx25("div", { className: "account", children: /* @__PURE__ */ jsxs22("span", { className: "account__btn", children: [
-        /* @__PURE__ */ jsx25("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: "You" }),
-        /* @__PURE__ */ jsx25("span", { className: "account__name gbo-user-name", children: roster.rows.length ? `${roster.rows.length} bots` : "Bots" })
-      ] }) })
+        /* @__PURE__ */ jsx25("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: person.initials }),
+        person.known ? /* @__PURE__ */ jsx25("span", { className: "account__name gbo-user-name", children: person.name }) : null
+      ] }) }),
+      canOpenSettings() ? /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn gbo-foot-btn", title: "Hermes settings", "aria-label": "Open Hermes settings", onClick: () => void openSettings(), children: /* @__PURE__ */ jsx25(IconSettings, {}) }) : null
     ] }),
     /* @__PURE__ */ jsx25(RosterDialogs, {})
   ] });

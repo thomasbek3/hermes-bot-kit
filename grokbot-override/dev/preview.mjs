@@ -84,7 +84,7 @@ function slackPages() {
 
 mkdirSync(outDir, { recursive: true })
 const file = await bundlePreview()
-const { render, renderAvatarSheet, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
+const { render, renderAvatarSheet, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
 const host = live ? hostCss() : ''
 if (live && !host) console.warn('no Hermes stylesheet found: rendering without the host cascade')
 // ROSTER indexes: 0 travel, 1 scholar, 4 recipes (pink), 5 sunny (yellow).
@@ -96,12 +96,19 @@ const pages = live ? {
   'light-markdown.html': { theme: 'light', botIndex: 1, items: MD_ITEMS, busy: false, panelOpen: false, hasMore: false, pins: ['scholar'] },
   'light-markdown-panel.html': { theme: 'light', botIndex: 1, items: MD_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
   'dark-markdown.html': { theme: 'dark', botIndex: 1, items: MD_ITEMS, busy: false, panelOpen: false, hasMore: false, pins: ['scholar'] },
-  'dark-short.html': { theme: 'dark', botIndex: 1, items: SHORT_ITEMS, busy: false, pins: ['scholar', 'travel'] },
+  'dark-short.html': { theme: 'dark', botIndex: 1, items: SHORT_ITEMS, busy: false, pins: ['scholar', 'travel'], userName: 'Alex Rivera' },
+  // Look 9: the footer (demo name, settings button) and the NEW line above
+  // the first unread bot message; the "You" fallback with no settings door;
+  // a long name truncating.
+  'light-new-line.html': { theme: 'light', botIndex: 1, items: NEW_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alex Rivera', newLine: NEW_ITEMS_FIRST_UNREAD },
+  'dark-new-line.html': { theme: 'dark', botIndex: 1, items: NEW_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alex Rivera', newLine: NEW_ITEMS_FIRST_UNREAD },
+  'light-footer-fallback.html': { theme: 'light', botIndex: 1, items: NEW_ITEMS, busy: false, hasMore: false, pins: ['scholar'], settings: false },
+  'dark-footer-long.html': { theme: 'dark', botIndex: 1, items: NEW_ITEMS, busy: false, hasMore: false, pins: ['scholar'], userName: 'Alexandra Maximiliana Rivera-Castellanos' },
   'light-chat.html': { theme: 'light' },
   'light-chat-work-shown.html': { theme: 'light', showWork: true },
   'light-empty.html': { theme: 'light', items: [], busy: false },
   // The README screenshots: light-pink.html (light.png), dark-short.html (dark.png).
-  'light-pink.html': { theme: 'light', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'] },
+  'light-pink.html': { theme: 'light', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'], userName: 'Alex Rivera' },
   'dark-pink.html': { theme: 'dark', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar'] },
   'light-yellow.html': { theme: 'light', botIndex: 5, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'] },
   'dark-yellow.html': { theme: 'dark', botIndex: 5, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny', 'travel'] },

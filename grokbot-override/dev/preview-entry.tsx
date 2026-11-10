@@ -11,7 +11,7 @@ import { RosterPane } from '../src/ui/Roster'
 import { CSS } from '../src/ui/styles'
 import { rowKey } from '../src/core/roster.js'
 import { overrideChromeCss } from '../src/core/stock.js'
-import { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CHAT_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, MD_ITEMS, ROSTER, SHORT_ITEMS, USER_ITEMS } from './fixtures'
+import { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CHAT_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, ROSTER, SHORT_ITEMS, USER_ITEMS } from './fixtures'
 import { BOT_SWATCHES } from '../src/core/colors.js'
 import { ShapeFace } from '../src/ui/Avatar'
 import { AVATAR_SHAPES, avatarShapeFor } from '../src/ui/avatarShapes'
@@ -118,6 +118,12 @@ export interface RenderOptions {
   hasMore?: boolean
   /** Live ::card / ::preview directives drawn from these workspace files. */
   directiveFiles?: Record<string, any> | null
+  /** The sidebar footer's name (demo only; '' = the "You" fallback). */
+  userName?: string
+  /** The open chat's NEW line: the id of the first unread message. */
+  newLine?: null | string
+  /** Hermes Settings reachable through ctx.runAction (default yes). */
+  settings?: boolean
 }
 
 export function render({
@@ -140,10 +146,16 @@ export function render({
   connectPreview,
   panelOpen = true,
   hasMore,
-  directiveFiles = null
+  directiveFiles = null,
+  userName = '',
+  newLine = null,
+  settings = true
 }: RenderOptions = {}) {
-  // A host with the app-action door, so the sidebar toggle draws.
+  // A host with the app-action door, so the sidebar toggle and the footer's
+  // settings button draw.
   if (!app.ctx) app.ctx = { runAction: () => ({ ok: true }) }
+  app.ctx.listActions = () => (settings ? [{ id: 'view.toggleSidebar' }, { id: 'nav.settings' }] : [{ id: 'view.toggleSidebar' }])
+  app.userName.set(userName)
   app.showWork.set(showWork)
   app.pinnedBots.set(pins.map(name => ROSTER.find(bot => bot.name === name)).filter(Boolean).map(bot => rowKey(bot)))
   app.narrow.set(narrow)
@@ -160,6 +172,7 @@ export function render({
   // The panel's Model row and its picker: an invented demo model.
   primeBotModel(bot, { provider: 'example', model: 'atlas-large' })
   primeModelOptions(bot, { providers: [{ slug: 'example', name: 'Example', models: ['atlas-large', 'atlas-small'], authenticated: true }] })
+  roster2.newLine.set({ markers: newLine ? { [rowKey(bot)]: newLine } : {}, seen: {} })
   app.selectedKey.set(selected ? rowKey(bot) : '')
   app.panelOpen.set(panelOpen)
   app.chat.set(
@@ -235,7 +248,7 @@ export function render({
   const chrome = frame?.lights ? `\n${overrideChromeCss()}` : ''
   return `<!doctype html><html class="${theme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8">${host}<style>${CSS}\n${PAGE_CSS}${chrome}</style></head><body>${body}${connectSheet}</body></html>`
 }
-export { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CSS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, MD_ITEMS, SHORT_ITEMS, USER_ITEMS }
+export { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CSS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS }
 
 // Test seams (review r2): the real app module and UI pieces, on the fake SDK.
 export * as appApi from '../src/ui/app'
@@ -243,6 +256,8 @@ export * as fakeSdk from '@hermes/plugin-sdk'
 export { ComposerNote } from '../src/ui/Composer'
 export { ProfilePanel } from '../src/ui/Profile'
 export { UserMeta } from '../src/ui/Chat'
+export * as newMarkerApi from '../src/core/newMarker.js'
+export * as personApi from '../src/core/person.js'
 export function renderElement(component: any, props: any) {
   return renderToStaticMarkup(React.createElement(component, props))
 }

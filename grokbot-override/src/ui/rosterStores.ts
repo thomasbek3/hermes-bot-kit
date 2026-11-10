@@ -46,7 +46,11 @@ export const roster2 = {
   /** P3: job ids with a run (trigger) in flight. */
   running: createStore<Record<string, boolean>>({}),
   /** The panel's Model row: roster key -> the bot's configured model. */
-  models: createStore<Record<string, BotModel>>({})
+  models: createStore<Record<string, BotModel>>({}),
+  /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
+   *  the first unread bot message (null: none; absent: not decided), and the
+   *  per-bot seen watermark (ms; plugin storage `seenAt`). */
+  newLine: createStore<{ markers: Record<string, null | string>; seen: Record<string, number> }>({ markers: {}, seen: {} })
 }
 
 export function openDialog(state: DialogState) {

@@ -30,6 +30,19 @@ a details toggle while the panel is closed, and one Share pill whose menu holds 
 Bubbles group by sender within five minutes (`src/core/groups.js`) with tail corners and hover times; message actions
 float under the message on hover. Tests: `test/look-pass5.test.mjs`.
 
+Look 9: the sidebar footer is a round initials avatar and the person's name, with a round **Hermes settings** button
+at its right. The name is the only one the running app exposes to a plugin, the computer's OS account name
+(`window.hermesDesktop.getMachineProfile().username`; no SDK store holds a user or account display name); without it
+the footer says "You". The button runs Hermes's own `nav.settings` action through `ctx.runAction` (the handler of ⌘,,
+the palette entry and the titlebar gear) and is drawn only when the host lists that action; no other footer buttons,
+because no other action is real there. The bot count is the footer's tooltip. In the open chat a thin red **NEW** line
+sits above the first bot message the user has not seen (and above that message's time line): the override keeps, per
+bot, the time of the newest message that was on screen while the user was looking (window focused, chat open, at the
+bottom; plugin storage `seenAt`), decides the line when the chat opens and keeps it while the chat stays open; it never
+goes above the user's own messages and never appears for messages read on arrival (`src/core/newMarker.js`, test
+`test/look9-footer-newline.test.mjs`). Core's unread store (the row dot, R16) keeps no message position, so the
+position is kept here; both are cleared by the same open.
+
 The chat | profile panel hairline is the override's own resizer: drag (panel 260-480 px, chat at least 360 px),
 stored as `panelWidth` in the override's plugin storage, double-click resets to 360 px (`src/core/panelWidth.js`,
 `test/panel-width.test.mjs`). Display and layout only; no behaviour, routing or data changes.
