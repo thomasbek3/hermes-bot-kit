@@ -17,7 +17,8 @@ bot's colour; the bot's bubbles are one flat grey. Thinking and tool rows, and "
 palette's **Grokbot Override: show work rows** turns them on (the same command hides them again; a background line never prints the command's path, which is in its tooltip). A thin red **NEW** line marks the first bot message you have not
 seen when you open a chat. The sidebar footer shows your initials and name (this computer's account name, the only
 one Hermes gives plugins; "You" without it) and a round button that opens Hermes Settings. The transcript stays put
-while you scroll past live cards, and message actions float beside the message on hover. When a bot chooses not to reply
+while you scroll past live cards, and message actions float beside the message on hover. Code blocks in a bot's reply show in full (a
+long one folds behind **Show more**) with a **Copy** button. When a bot chooses not to reply
 (it answers with `[SILENT]` or `NO_REPLY`), nothing is shown: no bubble, no preview line, no unread dot.
 
 <p align="center">

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Grokbot Override: code blocks you can copy (2026-11-10)**: a code block in a bot's reply was clipped to a
+  few lines behind a small chevron, with no way to copy it. Every code block now has a **Copy** button
+  (top-right; "Copied" for a moment) that copies exactly the block's text, shows in full up to 60 lines (a
+  normal handoff fits), and longer blocks fold behind **Show more** / **Show less**. Light and dark themes.
 - **Grokbot Override: "[SILENT]" is not a reply (2026-11-10)**: a bot that chose not to answer showed a
   "[SILENT]" bubble. A reply that is only Hermes's silence sentinel (`[SILENT]`, `NO_REPLY` and the other
   spellings Hermes uses) now draws nothing: no bubble, no roster preview, no unread dot or toast, no NEW line.

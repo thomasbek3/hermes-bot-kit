@@ -20,6 +20,7 @@ const ADAPT_SRC = /* css */ `
   --color-row-selected-solid: #E9E9E9;
   --color-row-hover-solid: #EEEEEE;
   --color-pin-selected: #00000008;
+  --color-code-block: #FAFAFA;
 }
 :root[data-theme='dark'] {
   --color-bubble-agent-flat: #242424;
@@ -28,6 +29,7 @@ const ADAPT_SRC = /* css */ `
   --color-row-selected-solid: #1E1E1E;
   --color-row-hover-solid: #181818;
   --color-pin-selected: #FFFFFF0A;
+  --color-code-block: #1A1A1A;
 }
 
 /* ── panes ──────────────────────────────────────────────────────────── */
@@ -243,6 +245,22 @@ const ADAPT_SRC = /* css */ `
 /* Small images and emoji inside a line of text sit on the text. */
 .md .aui-md :is(p, li) > img { display: inline-block; height: 1.15em; width: auto; vertical-align: -0.2em; border-radius: 3px; }
 .gbo-media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+/* Fenced code blocks (ui/CodeBlock.tsx): the bubble's grey block, a Copy
+   pill top-right, full height up to 60 lines, longer ones folded to 40 with
+   a "Show more" text button. */
+.md > * + .gbo-code, .md > .gbo-code + * { margin-top: 10px; }
+.gbo-code { position: relative; min-width: 0; }
+.md .gbo-code pre { margin: 0; padding: 8px 12px; padding-right: 64px; background: var(--color-code-block); color: var(--color-text-primary); white-space: pre; overflow-x: auto; }
+.md .gbo-code pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; }
+.md .gbo-code pre.is-folded { max-height: calc(var(--gbo-code-lines) * 20px + 16px); overflow-y: hidden; }
+.gbo-code-copy {
+  position: absolute; top: 6px; right: 6px; height: 22px; padding: 0 10px; border: 0; border-radius: var(--radius-full);
+  background: var(--color-bubble-agent-flat); box-shadow: var(--color-border-secondary) 0 0 0 0.5px inset; color: var(--color-text-secondary);
+  font-family: inherit; font-size: 12px; line-height: 22px; letter-spacing: 0.12px; cursor: pointer;
+}
+.gbo-code-copy:hover { color: var(--color-text-primary); background: var(--color-bg-secondary-hover); }
+.gbo-code-more { display: block; margin: 4px 0 0; padding: 2px 0; border: 0; background: none; color: var(--color-text-secondary); font: inherit; font-size: 13px; line-height: 18px; cursor: pointer; }
+.gbo-code-more:hover { color: var(--color-text-primary); text-decoration: underline; }
 
 /* Thought and tool rows (when shown): the reference's collapsed steps. */
 .gbo-think, .gbo-tools-wrap { margin: -4px 0 0; }

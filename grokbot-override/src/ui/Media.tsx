@@ -8,8 +8,10 @@
 
 import * as React from 'react'
 
+import { splitFences } from '../core/fences.js'
 import { extractMedia, remoteImageHost } from '../core/media.js'
 import { readBotMedia } from './app'
+import { CodeBlock } from './CodeBlock'
 import { Markdown } from './sdk'
 
 function saveDataUrl(dataUrl: string, name: string) {
@@ -103,12 +105,16 @@ export function MediaStrip({ bot, media }: { bot: any; media: any[] }) {
   )
 }
 
-/** A finished assistant message: inert markdown + owner-read media. */
+/** A finished assistant message: inert markdown + owner-read media, with
+ *  its fenced code blocks drawn by the override (Copy, no clipped box). */
 export function BotText({ bot, text }: { bot: any; text: string }) {
   const { text: clean, media } = React.useMemo(() => extractMedia(text), [text])
+  const parts = React.useMemo(() => (clean ? splitFences(clean) : []), [clean])
   return (
     <>
-      {clean ? <Markdown text={clean} /> : null}
+      {parts.map((part: any, index: number) =>
+        part.kind === 'code' ? <CodeBlock key={index} code={part.code} lang={part.lang} /> : <Markdown key={index} text={part.text} />
+      )}
       <MediaStrip bot={bot} media={media} />
     </>
   )
