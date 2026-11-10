@@ -98,31 +98,40 @@ class Service:
             marker.unlink()
             return {'team_id': team}
 
-    def _turn_slack_on(self, apps_path, key):
+    def _was_off_marker(self):
+        # Kept outside apps.json so a failed restore survives the record's
+        # removal; deleted only once Slack is really switched back off.
+        return self.data / 'slack-was-off' / self.profile
+
+    def _turn_slack_on(self):
         # Hermes honours an explicit `enabled: false` left by an older setup,
         # which keeps the new credentials from ever starting the adapter.
-        if self.slack_switch is None or not self.slack_switch.is_off():
+        if self.slack_switch is None:
             return
-        with LockedFile(self.data / 'apps.lock'):
-            apps = _read_json(apps_path, {})
-            apps[key]['prior_slack_enabled'] = False
-            _atomic_json(apps_path, apps)
+        marker = self._was_off_marker()
+        if not marker.is_file() and not self.slack_switch.is_off():
+            return
+        marker.parent.mkdir(mode=0o700, exist_ok=True)
+        marker.write_text('off\n')
         self.slack_switch.set(True)
 
-    def _restore_slack_switch(self, item, strict=False):
-        if item.get('prior_slack_enabled') is not False or self.slack_switch is None:
+    def _restore_slack_switch(self, strict=False):
+        marker = self._was_off_marker()
+        if self.slack_switch is None or not marker.is_file():
             return
         try:
             self.slack_switch.set(False)
         except Exception:
             if strict:
                 raise
-            LOG.warning('Could not turn Slack back off for this bot')
+            LOG.warning('Could not turn Slack back off for this bot; Remove or the next Connect will retry')
+            return
+        marker.unlink(missing_ok=True)
 
     def _rollback_record(self, apps_path, key, pending_path):
         with LockedFile(self.data / 'apps.lock'):
             apps = _read_json(apps_path, {})
-            self._restore_slack_switch(apps.get(key) or {})
+            self._restore_slack_switch()
             apps.pop(key, None)
             _atomic_json(apps_path, apps)
             pending_path.unlink(missing_ok=True)
@@ -153,7 +162,7 @@ class Service:
         try:
             if self.lifecycle is None:
                 raise RuntimeError('Slack platform lifecycle unavailable')
-            self._turn_slack_on(apps_path, key)
+            self._turn_slack_on()
             self.lifecycle.install()
         except Exception:
             self._rollback_record(apps_path, key, pending_path)
@@ -261,6 +270,8 @@ class Service:
             apps = _read_json(path, {})
             found = [(key, item) for key, item in apps.items() if isinstance(item, dict) and item.get('profile') == self.profile]
             if not found:
+                # A rollback that could not switch Slack back off left its marker.
+                self._restore_slack_switch(strict=True)
                 if self.lifecycle is not None:
                     self.lifecycle.remove()
                 return {'ok':True}
@@ -287,7 +298,7 @@ class Service:
             else:
                 self.save_env({'SLACK_ALLOWED_USERS': prior})
             # Strict: a failed restore keeps the record so Remove can be retried.
-            self._restore_slack_switch(item, strict=True)
+            self._restore_slack_switch(strict=True)
             if self.lifecycle is None:
                 raise RuntimeError('Slack platform lifecycle unavailable')
             self.lifecycle.remove()

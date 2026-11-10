@@ -397,6 +397,10 @@ def with_switch(value):
     return switch
 
 
+def was_off(data):
+    return any((data / 'slack-was-off').glob('*'))
+
+
 def apps_entry(data):
     return next(iter(json.loads((data / 'apps.json').read_text()).values()))
 
@@ -408,7 +412,7 @@ def test_connect_turns_explicitly_disabled_slack_on_and_records_it(context):
     api.make_service().lifecycle.install = lambda: order.append(switch.value)
     assert client.post('/connect', json={'team_id':'T1'}).status_code == 200
     assert switch.value is True and order == [True]
-    assert apps_entry(data)['prior_slack_enabled'] is False
+    assert was_off(data)
 
 
 @pytest.mark.parametrize('value', [None, True])
@@ -417,7 +421,7 @@ def test_connect_leaves_absent_or_enabled_slack_alone(context, value):
     switch = with_switch(value)
     assert client.post('/connect', json={'team_id':'T1'}).status_code == 200
     assert switch.calls == ['get'] and switch.value is value
-    assert 'prior_slack_enabled' not in apps_entry(data)
+    assert not was_off(data)
     assert client.delete('/connect').status_code == 200
     assert switch.calls == ['get']
 
@@ -467,10 +471,45 @@ def test_remove_keeps_record_when_restore_fails(context):
         raise api.platform_module.GatewayReloadError("Could not change this bot's Slack setting.")
     switch.set = broken
     assert client.delete('/connect').status_code == 503
-    assert apps_entry(data)['prior_slack_enabled'] is False
+    assert was_off(data)
     switch.set = Switch.set.__get__(switch)
     assert client.delete('/connect').status_code == 200
-    assert switch.value is False
+    assert switch.value is False and not was_off(data)
+
+
+def test_failed_rollback_restore_keeps_the_off_record_for_remove_and_reconnect(context):
+    client, _, _, _, data, _ = context
+    service = api.make_service()
+    switch = with_switch(False)
+    def refused():
+        raise api.platform_module.GatewayReloadError('Gateway refused or did not answer the plugin reload')
+    service.lifecycle.install = refused
+    def broken(enabled):
+        if enabled is False:
+            raise OSError('config write failed')
+        switch.value = enabled
+    switch.set = broken
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 503
+    # The app record is gone, Slack is still on, but the off record survives.
+    assert json.loads((data / 'apps.json').read_text()) == {}
+    assert switch.value is True and was_off(data)
+    # A later Connect still knows Slack was off originally, even though it now reads on.
+    service.lifecycle.install = lambda: None
+    switch.set = Switch.set.__get__(switch)
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 200
+    assert was_off(data)
+    assert client.delete('/connect').status_code == 200
+    assert switch.value is False and not was_off(data)
+
+
+def test_remove_without_an_app_retries_a_failed_rollback_restore(context):
+    client, _, _, _, data, _ = context
+    switch = with_switch(True)
+    marker = data / 'slack-was-off' / 'test-profile'
+    marker.parent.mkdir()
+    marker.write_text('off\n')
+    assert client.delete('/connect').status_code == 200
+    assert switch.value is False and not marker.exists()
 
 
 def test_slack_switch_runs_hermes_python_isolated_without_values_in_output(tmp_path, monkeypatch):
