@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Install the Hermes Bot Kit desktop plugins: Bubble Mode + Computer viewer
-# + Bot Sections + Task Dock + Grokbot Override (installed switched off; turn
-# it on from the command palette). Safe for agents to run unattended:
+# Install the Hermes Bot Kit desktop plugins: Grokbot Override (installed
+# switched off; turn it on from the command palette) + the Computer viewer.
+# Safe for agents to run unattended:
 # idempotent, no prompts, no sudo, backs up any existing copy before overwriting.
 #
 #   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh | bash
@@ -13,10 +13,7 @@
 #   KIT_REF                git ref to fetch (default v2026.11.09.1)
 #   KIT_SOURCE_DIR         local checkout to copy from (auto-detected from a clone)
 #   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
-#   KIT_SKIP_BUBBLES=1     skip Bubble Mode
 #   KIT_SKIP_COMPUTER=1    skip the Computer viewer
-#   KIT_SKIP_SECTIONS=1    skip Bot Sections
-#   KIT_SKIP_TASK_DOCK=1   skip Task Dock
 #   KIT_SKIP_GROKBOT=1     skip Grokbot Override
 #   KIT_CARDS_SKILL=1      also install the agent-cards skill (off by default)
 #   KIT_CARDS_SKILL=remove remove the agent-cards skill this kit installed, then stop
@@ -46,10 +43,7 @@ Env knobs:
   KIT_REF                git ref to fetch (default v2026.11.09.1)
   KIT_SOURCE_DIR         local checkout to copy from
   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
-  KIT_SKIP_BUBBLES=1     skip Bubble Mode
   KIT_SKIP_COMPUTER=1    skip the Computer viewer
-  KIT_SKIP_SECTIONS=1    skip Bot Sections
-  KIT_SKIP_TASK_DOCK=1   skip Task Dock
   KIT_SKIP_GROKBOT=1     skip Grokbot Override (installed switched off)
   KIT_CARDS_SKILL=1      also install the agent-cards skill (cards in the
                          Grokbot Override chat) into the skills folder of the
@@ -141,7 +135,7 @@ fi
 SOURCE_DIR=""
 if [ -n "${KIT_SOURCE_DIR:-}" ]; then
   SOURCE_DIR=$(CDPATH= cd -- "${KIT_SOURCE_DIR}" && pwd)
-elif [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/bubble-mode/plugin.js" ]; then
+elif [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/computer-viewer/plugin.js" ]; then
   SOURCE_DIR="${SCRIPT_DIR}"
 fi
 
@@ -202,20 +196,14 @@ stage_file() {
 
 js_marker() {
   case "$1" in
-    bubble-mode/plugin.js) printf '%s\n' "hermes-bubble-mode-style" ;;
     computer-viewer/plugin.js) printf '%s\n' "computer-viewer" ;;
-    bot-sections/plugin.js) printf '%s\n' "hermes-bot-sections-style" ;;
-    task-dock/plugin.js) printf '%s\n' "hermes-task-dock-style" ;;
     "${GROKBOT_REL}") printf '%s\n' "grokbot-override-style" ;;
   esac
 }
 
 js_label() {
   case "$1" in
-    bubble-mode/plugin.js) printf '%s\n' "Bubble Mode" ;;
     computer-viewer/plugin.js) printf '%s\n' "Computer viewer" ;;
-    bot-sections/plugin.js) printf '%s\n' "Bot Sections" ;;
-    task-dock/plugin.js) printf '%s\n' "Task Dock" ;;
     "${GROKBOT_REL}") printf '%s\n' "Grokbot Override" ;;
     *) printf '%s\n' "$1" ;;
   esac
@@ -260,9 +248,6 @@ rollback_this_run() {
       rm -f "${dest}"
     done < "${CREATED_FILE}"
   fi
-  rmdir "${PLUGIN_ROOT}/bubble-mode" 2>/dev/null || true
-  rmdir "${PLUGIN_ROOT}/bot-sections" 2>/dev/null || true
-  rmdir "${PLUGIN_ROOT}/task-dock" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/grokbot-override" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/computer-viewer/vendor" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/computer-viewer" 2>/dev/null || true
@@ -289,9 +274,6 @@ install_file() {
   cp "${src}" "${dest}"
 }
 
-if [ "${KIT_SKIP_BUBBLES:-0}" != "1" ]; then
-  need "bubble-mode/plugin.js"
-fi
 if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
   need "computer-viewer/plugin.js"
   need "computer-viewer/connect-mac.sh"
@@ -301,12 +283,6 @@ if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
   need "computer-viewer/connect-windows.ps1"
   need "computer-viewer/hiperf-windows.ps1"
   need "computer-viewer/hiperf-agent.py"
-fi
-if [ "${KIT_SKIP_SECTIONS:-0}" != "1" ]; then
-  need "bot-sections/plugin.js"
-fi
-if [ "${KIT_SKIP_TASK_DOCK:-0}" != "1" ]; then
-  need "task-dock/plugin.js"
 fi
 if [ "${KIT_SKIP_GROKBOT:-0}" != "1" ]; then
   need "${GROKBOT_REL}"
@@ -458,17 +434,8 @@ else
   install_all
   INSTALL_OK=1
 
-  if [ "${KIT_SKIP_BUBBLES:-0}" != "1" ]; then
-    echo "Bubble Mode      -> ${PLUGIN_ROOT}/bubble-mode/plugin.js"
-  fi
   if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
     echo "Computer viewer  -> ${PLUGIN_ROOT}/computer-viewer/plugin.js (+ helper scripts)"
-  fi
-  if [ "${KIT_SKIP_SECTIONS:-0}" != "1" ]; then
-    echo "Bot Sections     -> ${PLUGIN_ROOT}/bot-sections/plugin.js"
-  fi
-  if [ "${KIT_SKIP_TASK_DOCK:-0}" != "1" ]; then
-    echo "Task Dock        -> ${PLUGIN_ROOT}/task-dock/plugin.js"
   fi
   if [ "${GROKBOT_INSTALLED}" = "1" ]; then
     echo "Grokbot Override -> ${PLUGIN_ROOT}/grokbot-override/plugin.js (installed switched off)"
@@ -480,9 +447,6 @@ fi
 
 echo
 echo "Finish: in Hermes Desktop press Cmd+Shift+P -> 'Reload plugins' (or restart the app)."
-echo "Bubble Mode toggle: Cmd+Shift+P -> 'Bubble Mode: toggle'."
-echo "Bot Sections toggle: Cmd+Shift+P -> 'Bot Sections: toggle'."
-echo "Task Dock toggle: Cmd+Shift+P -> 'Task Dock: toggle'."
 echo "Grokbot Override (starts off): Cmd+Shift+P -> 'Grokbot Override: toggle'; run it again for stock Bot Mode."
 echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."
 if [ "${CARDS_INSTALLED:-0}" = "1" ]; then

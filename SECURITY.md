@@ -76,10 +76,9 @@ saved, the Slack HTTP listener stays on loopback unless allowed, noVNC loads
 only from the verified vendored copy, `C:\ffmpeg` is used only when safe, and
 the CI workflows have read-only permissions and actions pinned to commits.
 
-**Not covered** (this pass does not claim these are safe): the Bot Sections,
-Task Dock and Bubble Mode desktop plugins; the Orgo agent-plugin installer;
-the Orgo CLI helpers `orgo-hands` and `orgo-term`; the computer-viewer noVNC
-loader; the root-level legacy installer shims and per-plugin install scripts;
+**Not covered** (this pass does not claim these are safe): the Orgo
+agent-plugin installer; the Orgo CLI helpers `orgo-hands` and `orgo-term`; the
+computer-viewer noVNC loader; the per-plugin install scripts;
 the gateway tool-approval cards in the Grokbot Override desktop UI; Grokbot
 Override scheduled routines (cron); the relay service installer and Tailscale
 Funnel exposure; the texting-style backend plugin hooks.

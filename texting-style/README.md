@@ -1,7 +1,7 @@
 # texting-style — bots that text like people
 
-> Part of [**Hermes Bot Kit**](../README.md). Bubble Mode makes chats *look*
-> like texting; this makes your bots *talk* like texting.
+> Part of [**Hermes Bot Kit**](../README.md). Grokbot Override makes chats
+> *look* like texting; this makes your bots *talk* like texting.
 
 A tiny Hermes **agent plugin** (not a desktop plugin) that applies an SMS
 doctrine to each bot's canonical **Bot Chat only**: reply short by default

@@ -13,14 +13,9 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.
 Install just one:
 
 ```bash
-KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh)"   # Bubble Mode only
-KIT_SKIP_BUBBLES=1  KIT_SKIP_SECTIONS=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh)"   # Computer viewer only
-KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_TASK_DOCK=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh)"   # Bot Sections only
-KIT_SKIP_BUBBLES=1  KIT_SKIP_COMPUTER=1 KIT_SKIP_SECTIONS=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh)"   # Task Dock only
+KIT_SKIP_COMPUTER=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh)"   # Grokbot Override only
+KIT_SKIP_GROKBOT=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh)"   # Computer viewer only
 ```
-
-Every line above also installs Grokbot Override (switched off); add
-`KIT_SKIP_GROKBOT=1` to leave it out.
 
 Into a non-default Hermes home (a separate `~/.hermes`-shaped tree, e.g. a
 second install):
@@ -44,16 +39,17 @@ its sanity check (`node --check` + content marker).
 ## Verify the install
 
 ```bash
-test -f ~/.hermes/desktop-plugins/bubble-mode/plugin.js && echo bubble-mode OK
 test -f ~/.hermes/desktop-plugins/computer-viewer/plugin.js && echo computer-viewer OK
-test -f ~/.hermes/desktop-plugins/bot-sections/plugin.js && echo bot-sections OK
-test -f ~/.hermes/desktop-plugins/task-dock/plugin.js && echo task-dock OK
 test -f ~/.hermes/desktop-plugins/grokbot-override/plugin.js && echo grokbot-override OK
 ```
 
-Folder names must be exactly `bubble-mode`, `computer-viewer`,
-`bot-sections`, `task-dock` and `grokbot-override` (they must match the plugin ids). Do not
-rename them.
+Folder names must be exactly `computer-viewer` and `grokbot-override` (they
+must match the plugin ids). Do not rename them.
+
+Bubble Mode, Bot Sections and Task Dock were retired from the kit on
+2026-11-10 (Grokbot Override now owns roster sections and the work-rows
+setting). An older install may still have their folders; the installer names
+them and leaves them alone unless `KIT_REMOVE_RETIRED=1` is set.
 
 ## After installing — needs the human or a running app
 
@@ -66,14 +62,6 @@ Hermes Desktop loads disk plugins at startup and on plugin reload. One of:
 An agent without GUI control cannot complete this step; tell the user to do
 it. Then:
 
-- **Bubble Mode** is active immediately in Bot Mode chats. Toggle:
-  palette → "Bubble Mode: toggle".
-- **Bot Sections** is active immediately in the Bots roster. Toggle:
-  palette → "Bot Sections: toggle". Cycle a bot:
-  palette → "Bot Sections: cycle <bot>". The Sessions tab is hidden by
-  default (Bots only); show it: palette → "Bot Sections: Sessions tab toggle".
-- **Task Dock** is active immediately in Bot Mode chats. Toggle:
-  palette → "Task Dock: toggle".
 - **Grokbot Override** is installed switched **off**; stock Bot Mode is
   unchanged until the user turns it on: palette → "Grokbot Override: toggle"
   (the same command switches back). It is a preview; do not turn it on for
@@ -142,14 +130,13 @@ the user's say-so.
 ## Uninstall
 
 ```bash
-rm -rf ~/.hermes/desktop-plugins/bubble-mode ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/bot-sections ~/.hermes/desktop-plugins/task-dock ~/.hermes/desktop-plugins/grokbot-override
+rm -rf ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/grokbot-override
 ```
 
 The agent-cards skill, if you installed it: `KIT_CARDS_SKILL=remove bash install.sh`.
 
 Then reload plugins (same as above). Plugin settings live in Hermes plugin
-storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` /
-`hermes.plugin.bot-sections.*` / `hermes.plugin.task-dock.*` / `hermes.plugin.grokbot-override.*`.
+storage under `hermes.plugin.computer-viewer.*` / `hermes.plugin.grokbot-override.*`.
 
 ## Facts that prevent wasted debugging
 
@@ -161,22 +148,22 @@ storage under `hermes.plugin.bubble-mode.*` / `hermes.plugin.computer-viewer.*` 
   restart only that process (it respawns on demand)
   — do not keep redeploying files.
 - "Bot Chat" is the desktop's canonical per-bot conversation (session
-  literally titled `Bot Chat`, user-locked). Both bubble-mode's visuals and
-  texting-style's doctrine gate on it; every other session renders stock by
-  design.
+  literally titled `Bot Chat`, user-locked). Grokbot Override opens that same
+  session, and texting-style's doctrine gates on it; every other session
+  renders stock by design.
 - A serve restart under an open Bot Chat tab can scramble the tab's caption
-  (stock Hermes bug; data unaffected). bubble-mode 1.4.0+ styling survives
-  it; the caption itself is restored by: close tab → quit app → relaunch →
-  click the bot.
+  (stock Hermes bug; data unaffected); the caption is restored by: close tab
+  → quit app → relaunch → click the bot.
 - CLI probes cannot reach a canonical Bot Chat: `-z --continue "Bot Chat"`
   and `--resume <id>` both fork new sessions. Only the desktop UI talks to
   the real one.
 - Desktop plugins fail safe: if a Hermes update renames internal hooks, chats
   render stock / the pane stays empty / the roster stays stock — nothing
   crashes.
-- The repo was formerly `hermes-computer-viewer`; old raw URLs still work
-  via root shim scripts. Canonical paths are `bubble-mode/`,
-  `computer-viewer/`, `bot-sections/`, and `task-dock/`.
+- The repo was formerly `hermes-computer-viewer`. The host scripts live in
+  `computer-viewer/` (`computer-viewer/connect-mac.sh` and so on); the old
+  root shims were removed on 2026-11-10, so use the `computer-viewer/` path
+  (one-liners pinned to an older release tag keep working).
 - Do not curl-pipe `connect-*.sh` / `hiperf-*.sh` on the machine running
   Hermes Desktop unless the user asked to view **that** machine — they are
   host-side setup scripts for the computer being viewed, and they install

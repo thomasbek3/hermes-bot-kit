@@ -66,9 +66,6 @@ assert_exec() {
 # Happy path
 home=$(new_home)
 HERMES_HOME="${home}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}" >/dev/null
-assert_plugin "${home}" "bubble-mode/plugin.js"
-assert_plugin "${home}" "bot-sections/plugin.js"
-assert_plugin "${home}" "task-dock/plugin.js"
 assert_plugin "${home}" "computer-viewer/plugin.js"
 assert_plugin "${home}" "computer-viewer/connect-mac.sh"
 assert_plugin "${home}" "computer-viewer/connect-linux.sh"
@@ -147,7 +144,7 @@ if not b:
     raise SystemExit("empty plugin")
 b[0] ^= 0x01
 p.write_bytes(b)
-' "${tampered}/task-dock/plugin.js"
+' "${tampered}/computer-viewer/plugin.js"
 bad_home=$(new_home)
 set +e
 HERMES_HOME="${bad_home}" KIT_SOURCE_DIR="${tampered}" bash "${INSTALLER}" >/dev/null 2>&1
@@ -159,21 +156,19 @@ if [ -e "${bad_home}/desktop-plugins" ]; then
 fi
 echo "OK  tamper"
 
-# KIT_SKIP_TASK_DOCK=1 skips exactly that plugin
+# KIT_SKIP_COMPUTER=1 skips exactly that plugin
 skip_home=$(new_home)
-HERMES_HOME="${skip_home}" KIT_SOURCE_DIR="${ROOT}" KIT_SKIP_TASK_DOCK=1 bash "${INSTALLER}" >/dev/null
-[ -f "${skip_home}/desktop-plugins/bubble-mode/plugin.js" ] || fail "skip: bubble-mode missing"
-[ -f "${skip_home}/desktop-plugins/bot-sections/plugin.js" ] || fail "skip: bot-sections missing"
-[ -f "${skip_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "skip: computer-viewer missing"
-if [ -e "${skip_home}/desktop-plugins/task-dock" ]; then
-  fail "skip: task-dock was installed"
+HERMES_HOME="${skip_home}" KIT_SOURCE_DIR="${ROOT}" KIT_SKIP_COMPUTER=1 bash "${INSTALLER}" >/dev/null
+[ -f "${skip_home}/desktop-plugins/grokbot-override/plugin.js" ] || fail "skip: grokbot-override missing"
+if [ -e "${skip_home}/desktop-plugins/computer-viewer" ]; then
+  fail "skip: computer-viewer was installed"
 fi
-echo "OK  KIT_SKIP_TASK_DOCK"
+echo "OK  KIT_SKIP_COMPUTER"
 
 # KIT_SKIP_GROKBOT=1 skips exactly that plugin
 skip_home=$(new_home)
 HERMES_HOME="${skip_home}" KIT_SOURCE_DIR="${ROOT}" KIT_SKIP_GROKBOT=1 bash "${INSTALLER}" >/dev/null
-[ -f "${skip_home}/desktop-plugins/task-dock/plugin.js" ] || fail "skip: task-dock missing"
+[ -f "${skip_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "skip: computer-viewer missing"
 if [ -e "${skip_home}/desktop-plugins/grokbot-override" ]; then
   fail "skip: grokbot-override was installed"
 fi
@@ -187,7 +182,7 @@ grep -v ' grokbot-override/' "${old}/MANIFEST.sha256" > "${old}/MANIFEST.next"
 mv "${old}/MANIFEST.next" "${old}/MANIFEST.sha256"
 old_home=$(new_home)
 HERMES_HOME="${old_home}" KIT_SOURCE_DIR="${old}" bash "${INSTALLER}" >/dev/null 2>&1 || fail "install from an older manifest failed"
-[ -f "${old_home}/desktop-plugins/task-dock/plugin.js" ] || fail "older manifest: task-dock missing"
+[ -f "${old_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "older manifest: computer-viewer missing"
 if [ -e "${old_home}/desktop-plugins/grokbot-override" ]; then
   fail "older manifest: grokbot-override was installed"
 fi
@@ -225,7 +220,7 @@ assert_skill "${cards_home}/profiles/alpha"
 grep -qx 'mine' "${cards_home}/profiles/beta/skills/agent-cards/SKILL.md" || fail "the user's own agent-cards skill was replaced"
 printf '%s\n' "${out}" | grep -q 'is your own agent-cards skill; left alone' || fail "no note about the user's own skill"
 printf '%s\n' "${out}" | grep -q 'keeps its old mode until its session restarts' || fail "no note about running chats"
-[ -f "${cards_home}/desktop-plugins/bubble-mode/plugin.js" ] || fail "cards install skipped the plugins"
+[ -f "${cards_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "cards install skipped the plugins"
 echo "OK  KIT_CARDS_SKILL=1 (root home, profiles, user's own skill kept)"
 
 bak_before=$(find "${cards_home}" -name '*.bak.*' | wc -l | tr -d ' ')
@@ -268,7 +263,7 @@ grep -v " ${CARDS_REL}\$" "${old_cards}/MANIFEST.sha256" > "${old_cards}/MANIFES
 mv "${old_cards}/MANIFEST.next" "${old_cards}/MANIFEST.sha256"
 old_cards_home=$(new_home)
 HERMES_HOME="${old_cards_home}" KIT_SOURCE_DIR="${old_cards}" KIT_CARDS_SKILL=1 bash "${INSTALLER}" >/dev/null 2>&1 || fail "cards install from an older manifest failed"
-[ -f "${old_cards_home}/desktop-plugins/task-dock/plugin.js" ] || fail "older manifest: task-dock missing"
+[ -f "${old_cards_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "older manifest: computer-viewer missing"
 [ ! -e "${old_cards_home}/skills" ] || fail "older manifest: the skill was installed"
 echo "OK  older manifest without the cards skill"
 

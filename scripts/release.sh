@@ -41,12 +41,6 @@ OLD_ESC=$(printf '%s' "${OLD}" | sed 's/\./\\./g')
 PINNED_FILES="
 install.sh
 texting-style/install.sh
-connect-linux.sh
-connect-mac.sh
-hiperf-mac.sh
-hiperf-linux.sh
-connect-windows.ps1
-hiperf-windows.ps1
 README.md
 AGENTS.md
 texting-style/README.md
@@ -54,10 +48,6 @@ computer-viewer/README.md
 computer-viewer/hiperf-mac.sh
 computer-viewer/hiperf-linux.sh
 computer-viewer/hiperf-windows.ps1
-bubble-mode/install.sh
-bubble-mode/README.md
-bot-sections/README.md
-task-dock/README.md
 "
 
 rewrite() {
@@ -86,13 +76,10 @@ rm -f "${plugin_tmp}"
 bash scripts/make-manifest.sh
 
 run_ci_tests() {
-  node --check bubble-mode/plugin.js
-  node --check bot-sections/plugin.js
-  node --check task-dock/plugin.js
   node --check computer-viewer/plugin.js
   node --check grokbot-override/plugin.js
   node --check grokbot-override/plugin.default-off.js
-  node --test bubble-mode/plugin.test.mjs bot-sections/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs
+  node --test computer-viewer/plugin.test.mjs
   python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
   python3 -m unittest discover -s texting-style/tests -p 'test_*.py'
   # -n 1: without it xargs passes every later path as an ARGUMENT to the
