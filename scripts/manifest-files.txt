@@ -1,4 +1,4 @@
-grokbot-override/plugin.default-off.js
+grokbot-override/plugin.js
 computer-viewer/plugin.js
 computer-viewer/connect-mac.sh
 computer-viewer/connect-linux.sh

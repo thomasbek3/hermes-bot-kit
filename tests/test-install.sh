@@ -83,17 +83,13 @@ if awk '$2 == "computer-viewer/vendor/novnc-rfb.mjs" { found=1 } END { exit foun
 fi
 echo "OK  happy path"
 
-# Grokbot Override: the default-off build lands under the plugin's own name,
-# so the override stays off until it is toggled on from the palette.
-grokbot_dest="${home}/desktop-plugins/grokbot-override/plugin.js"
-[ -f "${grokbot_dest}" ] || fail "missing ${grokbot_dest}"
-expected=$(manifest_hash "grokbot-override/plugin.default-off.js") || fail "grokbot default-off build not in MANIFEST.sha256"
-[ "${expected}" = "$(file_sha256 "${grokbot_dest}")" ] || fail "grokbot-override/plugin.js is not the default-off build"
-grep -q 'var DEFAULT_ON = true ? false : true;' "${grokbot_dest}" || fail "installed Grokbot Override does not start off"
-if [ -e "${home}/desktop-plugins/grokbot-override/plugin.default-off.js" ]; then
-  fail "the build's source name was installed too"
+# Grokbot Override: the committed plugin.js, switched on by default.
+assert_plugin "${home}" "grokbot-override/plugin.js"
+grep -qx 'var DEFAULT_ON = true;' "${home}/desktop-plugins/grokbot-override/plugin.js" || fail "installed Grokbot Override does not start on"
+if grep -q 'default-off' "${MANIFEST}"; then
+  fail "the manifest still lists a default-off build"
 fi
-echo "OK  Grokbot Override installed switched off"
+echo "OK  Grokbot Override installed switched on"
 
 # The helper scripts' offline digest check needs a manifest next to them.
 manifest_dest="${home}/desktop-plugins/MANIFEST.sha256"
@@ -187,6 +183,51 @@ if [ -e "${old_home}/desktop-plugins/grokbot-override" ]; then
   fail "older manifest: grokbot-override was installed"
 fi
 echo "OK  older manifest without Grokbot Override"
+
+# Retired plugins (Bubble Mode, Task Dock, Bot Sections): an upgrade names
+# this kit's copies and leaves them alone; a folder without the kit's marker
+# is never mentioned or moved.
+seed_retired() {
+  mkdir -p "$1/desktop-plugins/bubble-mode" "$1/desktop-plugins/task-dock" "$1/desktop-plugins/bot-sections"
+  printf 'const STYLE_ID = "hermes-bubble-mode-style"\n' > "$1/desktop-plugins/bubble-mode/plugin.js"
+  printf 'const STYLE_ID = "hermes-task-dock-style"\n' > "$1/desktop-plugins/task-dock/plugin.js"
+  printf '// my own sections plugin\n' > "$1/desktop-plugins/bot-sections/plugin.js"
+}
+retired_home=$(new_home)
+seed_retired "${retired_home}"
+out=$(HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}")
+printf '%s\n' "${out}" | grep -q 'Retired plugins still installed: bubble-mode task-dock\.' || fail "no note naming the kit's retired plugins: ${out}"
+printf '%s\n' "${out}" | grep -q 'KIT_REMOVE_RETIRED=1' || fail "the note does not say how to remove them"
+if printf '%s\n' "${out}" | grep -q 'installed:.*bot-sections'; then
+  fail "an unmarked folder was named"
+fi
+for name in bubble-mode task-dock bot-sections; do
+  [ -f "${retired_home}/desktop-plugins/${name}/plugin.js" ] || fail "the note path moved ${name}"
+done
+if ls -d "${retired_home}"/desktop-plugins-retired-* >/dev/null 2>&1; then
+  fail "the note path created a retired folder"
+fi
+echo "OK  retired plugins: note only"
+
+# KIT_REMOVE_RETIRED=1 moves exactly the kit-marked folders, never deletes.
+HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" KIT_REMOVE_RETIRED=1 bash "${INSTALLER}" >/dev/null
+moved="${retired_home}/desktop-plugins-retired-$(date +%Y%m%d)"
+grep -q 'hermes-bubble-mode-style' "${moved}/bubble-mode/plugin.js" || fail "bubble-mode was not moved intact"
+grep -q 'hermes-task-dock-style' "${moved}/task-dock/plugin.js" || fail "task-dock was not moved intact"
+[ ! -e "${retired_home}/desktop-plugins/bubble-mode" ] || fail "bubble-mode is still in desktop-plugins"
+[ ! -e "${retired_home}/desktop-plugins/task-dock" ] || fail "task-dock is still in desktop-plugins"
+grep -qx '// my own sections plugin' "${retired_home}/desktop-plugins/bot-sections/plugin.js" || fail "an unmarked folder was touched"
+[ ! -e "${moved}/bot-sections" ] || fail "an unmarked folder was moved"
+[ -f "${retired_home}/desktop-plugins/grokbot-override/plugin.js" ] || fail "the kit's plugins went with them"
+out=$(HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" KIT_REMOVE_RETIRED=1 bash "${INSTALLER}")
+if printf '%s\n' "${out}" | grep -q 'Retired'; then
+  fail "a rerun after the move still reports retired plugins"
+fi
+# A second batch the same day never overwrites the first.
+seed_retired "${retired_home}"
+HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" KIT_REMOVE_RETIRED=1 bash "${INSTALLER}" >/dev/null
+[ "$(ls -d "${moved}"/bubble-mode* | wc -l | tr -d ' ')" = "2" ] || fail "a same-day second move overwrote the first"
+echo "OK  KIT_REMOVE_RETIRED=1"
 
 # Rerun is idempotent (no new .bak.* when nothing changed)
 bak_before=$(find "${home}" -name '*.bak.*' | wc -l | tr -d ' ')

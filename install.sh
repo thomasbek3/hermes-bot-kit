@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Install the Hermes Bot Kit desktop plugins: Grokbot Override (installed
-# switched off; turn it on from the command palette) + the Computer viewer.
+# Install the Hermes Bot Kit desktop plugins: Grokbot Override (switched on;
+# the command palette switches back to stock Bot Mode) + the Computer viewer.
 # Safe for agents to run unattended:
 # idempotent, no prompts, no sudo, backs up any existing copy before overwriting.
 #
@@ -15,6 +15,8 @@
 #   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
 #   KIT_SKIP_COMPUTER=1    skip the Computer viewer
 #   KIT_SKIP_GROKBOT=1     skip Grokbot Override
+#   KIT_REMOVE_RETIRED=1   move this kit's retired plugin folders (Bubble Mode,
+#                          Task Dock, Bot Sections) out of desktop-plugins/
 #   KIT_CARDS_SKILL=1      also install the agent-cards skill (off by default)
 #   KIT_CARDS_SKILL=remove remove the agent-cards skill this kit installed, then stop
 #   KIT_CARDS_PROFILES     comma-separated profiles for the skill (default: all)
@@ -23,7 +25,7 @@ set -euo pipefail
 KIT_REF="${KIT_REF:-v2026.11.09.1}"
 RAW_BASE="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
 PLUGIN_ROOT="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"
-GROKBOT_REL="grokbot-override/plugin.default-off.js"
+GROKBOT_REL="grokbot-override/plugin.js"
 HERMES_ROOT="${HERMES_HOME:-$HOME/.hermes}"
 CARDS_REL="grokbot-override/skills/agent-cards/SKILL.md"
 # The kit's copy says so in its front matter; any other agent-cards skill is
@@ -44,7 +46,11 @@ Env knobs:
   KIT_SOURCE_DIR         local checkout to copy from
   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
   KIT_SKIP_COMPUTER=1    skip the Computer viewer
-  KIT_SKIP_GROKBOT=1     skip Grokbot Override (installed switched off)
+  KIT_SKIP_GROKBOT=1     skip Grokbot Override (installed switched on)
+  KIT_REMOVE_RETIRED=1   move this kit's retired plugin folders (bubble-mode,
+                         task-dock, bot-sections; only copies carrying this
+                         kit's marker) to desktop-plugins-retired-<YYYYMMDD>/
+                         next to desktop-plugins/ (nothing is deleted)
   KIT_CARDS_SKILL=1      also install the agent-cards skill (cards in the
                          Grokbot Override chat) into the skills folder of the
                          default profile and every profile (off by default)
@@ -209,13 +215,46 @@ js_label() {
   esac
 }
 
-# Where a staged file lands under desktop-plugins/. Grokbot Override ships a
-# build whose toggle starts off; it is installed under the plugin's own name.
+# Where a staged file lands under desktop-plugins/: the same path.
 dest_rel() {
-  case "$1" in
-    "${GROKBOT_REL}") printf '%s\n' "grokbot-override/plugin.js" ;;
-    *) printf '%s\n' "$1" ;;
-  esac
+  printf '%s\n' "$1"
+}
+
+# Plugins this kit used to install, with the marker their plugin.js carried.
+# A folder without that marker is someone else's and is never touched.
+RETIRED_PLUGINS="bubble-mode:hermes-bubble-mode-style task-dock:hermes-task-dock-style bot-sections:hermes-bot-sections-style"
+
+retired_report() {
+  local entry name marker file dest n found="" moved_to=""
+  for entry in ${RETIRED_PLUGINS}; do
+    name="${entry%%:*}"
+    marker="${entry#*:}"
+    file="${PLUGIN_ROOT}/${name}/plugin.js"
+    [ -f "${file}" ] || continue
+    grep -qF "${marker}" "${file}" || continue
+    found="${found} ${name}"
+  done
+  [ -n "${found}" ] || return 0
+  if [ "${KIT_REMOVE_RETIRED:-0}" = "1" ]; then
+    moved_to="$(dirname -- "${PLUGIN_ROOT}")/desktop-plugins-retired-$(date +%Y%m%d)"
+    mkdir -p "${moved_to}"
+    for name in ${found}; do
+      # Never into or over an earlier move from the same day.
+      dest="${moved_to}/${name}"
+      n=1
+      while [ -e "${dest}" ]; do
+        n=$((n + 1))
+        dest="${moved_to}/${name}.${n}"
+      done
+      mv "${PLUGIN_ROOT}/${name}" "${dest}"
+      echo "Retired          -- moved ${name} to ${dest}"
+    done
+  else
+    echo
+    echo "Retired plugins still installed:${found}. Bubble Mode, Task Dock and Bot Sections are no longer"
+    echo "part of the kit (Grokbot Override has its own sections and work-rows setting)."
+    echo "To move them out: KIT_REMOVE_RETIRED=1 bash install.sh (to desktop-plugins-retired-<date>/; nothing is deleted)."
+  fi
 }
 
 check_js() {
@@ -438,16 +477,21 @@ else
     echo "Computer viewer  -> ${PLUGIN_ROOT}/computer-viewer/plugin.js (+ helper scripts)"
   fi
   if [ "${GROKBOT_INSTALLED}" = "1" ]; then
-    echo "Grokbot Override -> ${PLUGIN_ROOT}/grokbot-override/plugin.js (installed switched off)"
+    echo "Grokbot Override -> ${PLUGIN_ROOT}/grokbot-override/plugin.js (switched on unless you turned it off before)"
   fi
   if [ "${CARDS_INSTALLED}" = "1" ]; then
     cat "${TMP_DIR}/.cards-report"
   fi
 fi
 
+retired_report
+
 echo
 echo "Finish: in Hermes Desktop press Cmd+Shift+P -> 'Reload plugins' (or restart the app)."
-echo "Grokbot Override (starts off): Cmd+Shift+P -> 'Grokbot Override: toggle'; run it again for stock Bot Mode."
+if [ "${GROKBOT_INSTALLED:-0}" = "1" ]; then
+  echo "Grokbot Override is on: Cmd+Shift+P -> 'Grokbot Override: toggle' switches back to stock Bot Mode (and on again)."
+  echo "Sections: Bots roster + -> 'New section'. Work rows: Cmd+Shift+P -> 'Grokbot Override: show work rows'."
+fi
 echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."
 if [ "${CARDS_INSTALLED:-0}" = "1" ]; then
   echo "Cards skill: new chats load it; a chat started before keeps its old mode until its session restarts."

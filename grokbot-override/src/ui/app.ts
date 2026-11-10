@@ -50,7 +50,6 @@ import { roster2 } from './rosterStores'
 import { createStore, type Store } from './store'
 import { CSS, STYLE_ID } from './styles'
 
-declare const __GBO_DEFAULT_ON__: boolean
 declare const __GBO_PROBE__: boolean
 
 export const PLUGIN_ID = 'grokbot-override'
@@ -61,7 +60,9 @@ const OWN_FETCH_MIN_MS = 15_000
 // bots deleted on a machine leave the roster (dropDeadRows).
 const OWN_VERIFY_MS = 60_000
 
-export const DEFAULT_ON: boolean = typeof __GBO_DEFAULT_ON__ === 'boolean' ? __GBO_DEFAULT_ON__ : true
+// The override starts on (it is the kit's main plugin); the palette toggle
+// switches back to stock Bot Mode and that choice is remembered.
+export const DEFAULT_ON = true
 
 export interface RosterState {
   rows: any[]

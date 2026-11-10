@@ -32,7 +32,7 @@ Desktop plugins plus an optional agent plugin, one install:
 
 | Plugin | What it does |
 |---|---|
-| 🤖 **[Grokbot Override](grokbot-override/)** *(preview, installed switched off)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots and **your own named sections**, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘⇧P → Grokbot Override: toggle** turns the override on and switches back instantly. See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
+| 🤖 **[Grokbot Override](grokbot-override/)** *(preview, the kit's main plugin, installed switched on)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots and **your own named sections**, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘⇧P → Grokbot Override: toggle** switches back to stock instantly (and on again). See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
 | 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Auto-connects the moment your bot starts using its computer**, so you watch it work. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin (**orgo-computer**) that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 | 💼 **[Slack](slack-connect/)** | Optional add-ons for the override's Slack card: **one-click Add to Slack** ([slack-connect](slack-connect/README.md), with [slack-relay](slack-relay/README.md) and [slack-http](slack-http/README.md)) and **Test connection** ([slack-check](slack-check/README.md)). |
@@ -53,8 +53,9 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.
 
 Then in Hermes Desktop: **⌘K → Reload plugins** (or restart the app).
 
-- Grokbot Override is installed **switched off**, so stock Bot Mode is unchanged.
-  Turn it on (and back off) with **⌘⇧P → Grokbot Override: toggle**.
+- Grokbot Override is installed **switched on**: its Bots tab replaces the
+  stock one. **⌘⇧P → Grokbot Override: toggle** switches back to stock Bot
+  Mode (and on again); a choice you made before is kept on upgrade.
 - The Computer pane: enable **Computer** in **Settings → Plugins**, then add a
   computer — see the [computer-viewer README](computer-viewer/README.md) for
   connecting cloud boxes, spare Macs/PCs, HD mode, and giving bots hands.

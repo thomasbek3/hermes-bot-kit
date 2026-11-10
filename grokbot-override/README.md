@@ -175,15 +175,15 @@ the override off disposes every chat at once.
 
 ## Install
 
-The kit's root `install.sh` installs it with the other desktop plugins (skip it with `KIT_SKIP_GROKBOT=1`).
-It installs `plugin.default-off.js` as `~/.hermes/desktop-plugins/grokbot-override/plugin.js`: the same
-bundle with the toggle starting **off**, so stock Bot Mode is unchanged until you run **Grokbot Override:
-toggle** (the choice is remembered in the override's plugin storage). Reload plugins or restart Hermes
-Desktop after installing.
+The kit's root `install.sh` installs it with the other desktop plugins (skip it with `KIT_SKIP_GROKBOT=1`)
+as `~/.hermes/desktop-plugins/grokbot-override/plugin.js`, switched **on**: it is the kit's main plugin.
+**Grokbot Override: toggle** switches back to stock Bot Mode and the choice is remembered in the
+override's plugin storage, so a toggle you have already set wins over the default (an install from before
+2026-11-10, which started off, stays off if you switched it off; one never toggled starts on). Reload
+plugins or restart Hermes Desktop after installing.
 
-By hand: copy `plugin.js` (toggle starts on) or `plugin.default-off.js` (starts off) to
-`~/.hermes/desktop-plugins/grokbot-override/plugin.js`. The folder name must stay `grokbot-override` (it
-is the plugin id). Either way, a toggle you have already set wins over the file's default.
+By hand: copy `plugin.js` to `~/.hermes/desktop-plugins/grokbot-override/plugin.js`. The folder name must
+stay `grokbot-override` (it is the plugin id).
 
 `plugin.js` is self-contained for licensing too: its leading `/*!` comment carries the full MIT texts (this
 kit, Hermes Agent and the layout CSS in `src/ui/styles-ref.ts`), the full Apache License 2.0 text and the
@@ -196,8 +196,8 @@ owed. The same texts sit beside it in this folder (`LICENSE-APACHE-2.0`, `LICENS
 ```bash
 cd grokbot-override
 npm ci                 # esbuild, react and react-dom (dev only)
-npm run build          # src/ -> plugin.js and plugin.default-off.js (commit both)
-npm run check          # fails if either is stale
+npm run build          # src/ -> plugin.js (commit it)
+npm run check          # fails if it is stale
 npm test               # node:test; the render, app-layer and loader smoke tests need `npm ci`
 node dev/preview.mjs out/   # fixture-data preview pages (HTML + SVG)
 node dev/preview.mjs out/ --live   # framed like the live window, plus avatars-sheet.html
@@ -208,9 +208,8 @@ The pictures in `screenshots/` are screenshots of `--live` pages with demo data:
 `light-new-line.html` and `dark-new-line.html` (the NEW line and footer), and `light-slack-connect-new.html`,
 `light-slack-connect-connected.html` and `light-slack-connected.html` (the Add to Slack strip).
 
-`node build.mjs --default-off --out <file>` writes a single copy whose toggle starts off (that is what
-`plugin.default-off.js` is). `--probe` additionally runs the read-only self-check once,
-six seconds after load.
+`node build.mjs --out <file>` writes the bundle to another file. `--probe` additionally runs the
+read-only self-check once, six seconds after load.
 
 ## Licences
 

@@ -62,10 +62,12 @@ Hermes Desktop loads disk plugins at startup and on plugin reload. One of:
 An agent without GUI control cannot complete this step; tell the user to do
 it. Then:
 
-- **Grokbot Override** is installed switched **off**; stock Bot Mode is
-  unchanged until the user turns it on: palette → "Grokbot Override: toggle"
-  (the same command switches back). It is a preview; do not turn it on for
-  the user unless they ask.
+- **Grokbot Override** is installed switched **on** (it is the kit's main
+  plugin): its Bots tab replaces the stock one. palette → "Grokbot Override:
+  toggle" switches back to stock Bot Mode (the same command turns it on
+  again); a user who switched it off before keeps it off. Work rows:
+  palette → "Grokbot Override: show work rows". It is a preview: if Bot Mode
+  misbehaves, switch it off rather than editing files.
 - **Computer viewer** must be enabled once in Settings → Plugins
   (inventory name: **Computer**), then a computer added in the pane. Endpoint
   setup (cloud boxes, spare machines, HD mode) is interactive and documented

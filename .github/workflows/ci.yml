@@ -30,7 +30,6 @@ jobs:
         run: |
           node --check computer-viewer/plugin.js
           node --check grokbot-override/plugin.js
-          node --check grokbot-override/plugin.default-off.js
 
       # Whole-repo privacy guard: no private hosts, addresses, home folders,
       # workspace ids, business or bot names in any tracked text file.

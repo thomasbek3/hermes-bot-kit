@@ -78,7 +78,6 @@ bash scripts/make-manifest.sh
 run_ci_tests() {
   node --check computer-viewer/plugin.js
   node --check grokbot-override/plugin.js
-  node --check grokbot-override/plugin.default-off.js
   node --test computer-viewer/plugin.test.mjs
   python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
   python3 -m unittest discover -s texting-style/tests -p 'test_*.py'

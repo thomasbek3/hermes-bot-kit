@@ -47,11 +47,10 @@ test('plugin.js embeds the full Apache-2.0 text and every attribution it owes (r
   assert.equal(head.split('Permission is hereby granted, free of charge').length - 1, 3)
 })
 
-test('plugin.default-off.js (what the root install.sh installs) is plugin.js with the toggle starting off', () => {
-  const off = readFileSync(resolve(pluginDir, 'plugin.default-off.js'), 'utf8').split('\n')
-  const on = BUNDLE.split('\n')
-  assert.equal(off.length, on.length)
-  const differ = off.flatMap((line, i) => (line === on[i] ? [] : [[on[i], line]]))
-  assert.deepEqual(differ, [['var DEFAULT_ON = true ? true : true;', 'var DEFAULT_ON = true ? false : true;']])
-  assert.match(readFileSync(resolve(repoRoot, 'scripts/manifest-files.txt'), 'utf8'), /^grokbot-override\/plugin\.default-off\.js$/m)
+test('plugin.js (what the root install.sh installs) starts on; there is no default-off copy any more', () => {
+  assert.match(BUNDLE, /^var DEFAULT_ON = true;$/m)
+  assert.equal(existsSync(resolve(pluginDir, 'plugin.default-off.js')), false)
+  const listed = readFileSync(resolve(repoRoot, 'scripts/manifest-files.txt'), 'utf8')
+  assert.match(listed, /^grokbot-override\/plugin\.js$/m)
+  assert.doesNotMatch(listed, /default-off/)
 })

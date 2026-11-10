@@ -22296,7 +22296,7 @@ var WORKSPACE_ID = "grokbot-override";
 var ROSTER_TICK_MS = 3e3;
 var OWN_FETCH_MIN_MS = 15e3;
 var OWN_VERIFY_MS = 6e4;
-var DEFAULT_ON = true ? true : true;
+var DEFAULT_ON = true;
 var app = {
   ctx: null,
   enabled: createStore(false),
