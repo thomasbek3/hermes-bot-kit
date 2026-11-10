@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch, rfbSourceOrder, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint }\n'
+        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -339,8 +339,6 @@ test('authFetch sends the bearer with redirect: manual on an allowed call', asyn
 
 const VENDOR_RFB_PATH = new URL('./vendor/novnc-rfb.mjs', import.meta.url)
 const VENDOR_RFB_SOURCE = fs.readFileSync(VENDOR_RFB_PATH, 'utf8')
-const JSDELIVR = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.7.0/+esm'
-const ESM_SH = 'https://esm.sh/@novnc/novnc@1.7.0'
 
 // Drift guard: the first path the plugin tries must be exactly where the
 // installer puts the file, i.e. the manifest's relative path.
@@ -376,17 +374,19 @@ function fakeBridge({ text, missing, truncated, throws, only, seen } = {}) {
   }
 }
 
+// Records every import; anything that is not the vendored blob would be a
+// network module, which the loader must never request.
 function cdnCtorHook(seen) {
   return async url => {
     seen.push(url)
-    if (url === JSDELIVR || url === ESM_SH) return { default: function RFB() {} }
-    throw new Error('unexpected import ' + url)
+    return { default: function RFB() {} }
   }
 }
 
-test('rfbSourceOrder is CDN-only', () => {
-  const { t } = loadPlugin()
-  assert.deepEqual([...t.rfbSourceOrder()], [JSDELIVR, ESM_SH])
+test('plugin.js names no CDN or network module source for noVNC', () => {
+  const plugin = fs.readFileSync(pluginPath, 'utf8')
+  assert.ok(!/jsdelivr|esm\.sh|unpkg|skypack/i.test(plugin), 'no CDN URL left in the loader')
+  assert.ok(!/rfbSourceOrder|NOVNC_FALLBACK_URL|NOVNC_URL\b/.test(plugin))
 })
 
 test('loadRFB loads the real vendored source from the desktop bridge and skips the CDN', async () => {
@@ -447,18 +447,21 @@ test('loadRFB fails closed when the vendored file cannot be imported', async () 
   assert.equal(t.rfbStatusDetail(), 'vendored import failed')
 })
 
-test('loadRFB falls back to the CDN when the vendored file is missing', async () => {
+test('loadRFB fails closed when the vendored file is missing: no CDN import', async () => {
   const seen = []
-  const { t } = loadPlugin({
+  const { t, fetches } = loadPlugin({
     hermesDesktop: fakeBridge({ missing: true }),
     importHook: cdnCtorHook(seen)
   })
-  const ctor = await t.loadRFB()
-  assert.equal(typeof ctor, 'function')
-  assert.deepEqual(seen, [JSDELIVR])
-  assert.equal(t.engine.rfbLoad.source, 'cdn-jsdelivr')
+  await assert.rejects(
+    () => t.loadRFB(),
+    err => err && err.code === 'novnc-missing'
+  )
+  assert.deepEqual(seen, [], 'nothing imported')
+  assert.equal(fetches.length, 0)
+  assert.equal(t.engine.rfbLoad.source, null)
   assert.equal(t.engine.rfbLoad.reason, 'missing')
-  assert.equal(t.rfbStatusDetail(), 'noVNC from CDN (unverified); vendored file missing')
+  assert.equal(t.rfbStatusDetail(), 'vendored file missing')
 })
 
 test('loadRFB tells a truncated read apart from a missing file', async () => {
@@ -467,9 +470,10 @@ test('loadRFB tells a truncated read apart from a missing file', async () => {
     hermesDesktop: fakeBridge({ truncated: true }),
     importHook: cdnCtorHook(seen)
   })
-  await t.loadRFB()
+  await assert.rejects(() => t.loadRFB(), err => err && err.code === 'novnc-missing')
+  assert.deepEqual(seen, [])
   assert.equal(t.engine.rfbLoad.reason, 'truncated')
-  assert.equal(t.rfbStatusDetail(), 'noVNC from CDN (unverified); vendored file truncated')
+  assert.equal(t.rfbStatusDetail(), 'vendored file truncated')
 })
 
 test('loadRFB reports a non-ENOENT read failure as read-failed', async () => {
@@ -478,19 +482,20 @@ test('loadRFB reports a non-ENOENT read failure as read-failed', async () => {
     hermesDesktop: fakeBridge({ throws: new Error('EACCES: permission denied') }),
     importHook: cdnCtorHook(seen)
   })
-  await t.loadRFB()
+  await assert.rejects(() => t.loadRFB(), err => err && err.code === 'novnc-missing')
+  assert.deepEqual(seen, [])
   assert.equal(t.engine.rfbLoad.reason, 'read-failed')
-  assert.equal(t.rfbStatusDetail(), 'noVNC from CDN (unverified); vendored read failed')
+  assert.equal(t.rfbStatusDetail(), 'vendored read failed')
 })
 
-test('loadRFB retries the desktop bridge after a CDN load', async () => {
+test('loadRFB retries the desktop bridge after a failed load', async () => {
   const seen = []
   let reads = 0
   const bridge = {
     desktopPluginsRoot: async () => '/tmp/hermes-home/desktop-plugins',
     readPluginSource: async () => {
       reads += 1
-      // Both candidate paths miss on the first loadRFB pass, so it reaches the CDN.
+      // Both candidate paths miss on the first loadRFB pass, so it fails.
       if (reads <= 2) throw new Error('ENOENT')
       return {
         binary: false,
@@ -505,29 +510,27 @@ test('loadRFB retries the desktop bridge after a CDN load', async () => {
     importHook: async url => {
       seen.push(url)
       if (typeof url === 'string' && url.startsWith('blob:')) return { default: function RFB() {} }
-      if (url === JSDELIVR || url === ESM_SH) return { default: function RFB() {} }
       throw new Error('unexpected import ' + url)
     }
   })
-  await t.loadRFB()
-  assert.equal(t.engine.rfbLoad.source, 'cdn-jsdelivr')
+  await assert.rejects(() => t.loadRFB(), err => err && err.code === 'novnc-missing')
+  assert.deepEqual(seen, [])
   await t.loadRFB()
   assert.equal(reads, 3)
   assert.equal(t.engine.rfbLoad.source, 'vendored')
   assert.equal(t.engine.rfbLoad.reason, null)
 })
 
-test('loadRFB falls back to CDN when window.hermesDesktop is missing', async () => {
+test('loadRFB fails closed when window.hermesDesktop is missing', async () => {
   const seen = []
   const { t } = loadPlugin({
     importHook: cdnCtorHook(seen)
   })
-  const ctor = await t.loadRFB()
-  assert.equal(typeof ctor, 'function')
-  assert.deepEqual(seen, [JSDELIVR])
-  assert.equal(t.engine.rfbLoad.source, 'cdn-jsdelivr')
+  await assert.rejects(() => t.loadRFB(), err => err && err.code === 'novnc-missing')
+  assert.deepEqual(seen, [])
+  assert.equal(t.engine.rfbLoad.source, null)
   assert.equal(t.engine.rfbLoad.reason, 'no-bridge')
-  assert.equal(t.rfbStatusDetail(), 'noVNC from CDN (unverified); no desktop bridge')
+  assert.equal(t.rfbStatusDetail(), 'no desktop bridge')
 })
 
 test('VENDORED_RFB_SHA256 matches sha256(computer-viewer/vendor/novnc-rfb.mjs)', () => {
@@ -695,6 +698,7 @@ async function connectedRfb({ allowClipboard }) {
   const written = []
   const instances = []
   const { t, context } = loadPlugin({
+    hermesDesktop: fakeBridge(),
     importHook: async () => ({ default: fakeRfbCtorWithListeners(instances) })
   })
   const ctx = makeCtx()
@@ -773,7 +777,8 @@ function wsEndpoint(t, extra = {}) {
 async function attached({ endpoint, importHook, hermesDesktop, timers }) {
   const instances = []
   const { t } = loadPlugin({
-    hermesDesktop,
+    // The viewer loads only the vendored, hash-checked copy (no CDN).
+    hermesDesktop: hermesDesktop === undefined ? fakeBridge() : hermesDesktop,
     timers,
     importHook: importHook || (async () => ({ default: fakeRfbCtorWithListeners(instances) }))
   })
@@ -798,7 +803,8 @@ const KEY_B = new Uint8Array([9, 8, 7, 6])
 /** Fire serververification and let the async digest settle. */
 async function presentKey(rfb, publickey) {
   rfb.listeners.get('serververification')({ detail: publickey ? { publickey } : {} })
-  await new Promise(resolve => setTimeout(resolve, 0))
+  // The digest runs off the main thread; give it a few turns under load.
+  for (let i = 0; i < 10; i += 1) await new Promise(resolve => setTimeout(resolve, 1))
 }
 
 function storedPin(ctx, id) {
@@ -845,7 +851,8 @@ test('an auto-reconnect presenting a different key is rejected, not re-pinned', 
   const backoff = timers.find(entry => entry.ms === 1000)
   assert.ok(backoff, 'reconnect backoff should be scheduled')
   backoff.fn()
-  await new Promise(resolve => setTimeout(resolve, 0))
+  // The reconnect re-verifies the vendored noVNC (async); wait for it.
+  for (let i = 0; i < 100 && instances.length < 2; i += 1) await new Promise(resolve => setTimeout(resolve, 5))
   assert.equal(instances.length, 2, 'the reconnect should build a second RFB')
 
   await presentKey(instances[1], KEY_B)
@@ -903,16 +910,19 @@ test('connect() reports why the vendored viewer lost, not a generic body', async
   assert.equal(unloadable.t.engine.state.get().code, 'vendored-tampered')
   assert.equal(unloadable.t.engine.state.get().detail, NOVNC_BODIES.load)
 
-  // Missing vendored copy and a blocked CDN: the pane names both.
+  // Missing vendored copy: a clear "re-run the installer", nothing imported.
+  const imported = []
   const blocked = await attached({
     endpoint: t => wsEndpoint(t),
     hermesDesktop: fakeBridge({ missing: true }),
-    importHook: async () => {
-      throw new Error('CDN blocked')
+    importHook: async url => {
+      imported.push(url)
+      return { default: function RFB() {} }
     }
   })
   const state = blocked.t.engine.state.get()
-  assert.equal(state.code, 'cdn-blocked')
-  assert.match(state.detail, /noVNC couldn't be fetched from the CDN/)
+  assert.equal(state.code, 'novnc-missing')
+  assert.match(state.detail, /Re-run the kit installer/)
   assert.match(state.detail, /vendored file missing/)
+  assert.deepEqual(imported, [])
 })

@@ -44,13 +44,10 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 
 const PLUGIN_ID = 'computer-viewer'
 const PANE_CONTRIB_ID = 'computer-viewer:pane'
-const NOVNC_URL = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.7.0/+esm'
-const NOVNC_FALLBACK_URL = 'https://esm.sh/@novnc/novnc@1.7.0'
+// noVNC is loaded only from the installer's vendored copy, after this hash
+// check. There is no CDN fallback: an unverified module would run in the
+// desktop renderer, so a missing or unreadable copy fails closed.
 const VENDORED_RFB_SHA256 = '08b527c943eb410ffa1a35d7d14c018d9eba22363150c3dc35a70327f1e88a28'
-
-function rfbSourceOrder() {
-  return [NOVNC_URL, NOVNC_FALLBACK_URL]
-}
 
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000]
 const CHROME_IDLE_MS = 2000
@@ -96,9 +93,9 @@ const ERRORS = {
     title: 'No computer endpoint',
     body: 'Add a VNC endpoint to see a live desktop here.'
   },
-  'cdn-blocked': {
+  'novnc-missing': {
     title: "Couldn't load the viewer",
-    body: "noVNC couldn't be fetched from the CDN (network or CSP). Switch this endpoint to iframe mode, or check your connection."
+    body: 'The noVNC viewer file is missing or could not be read. Re-run the kit installer, or switch this endpoint to iframe mode.'
   },
   'vendored-tampered': {
     title: 'Viewer file failed verification',
@@ -1373,11 +1370,6 @@ function rfbConstructor(mod) {
   return ctor
 }
 
-function rfbSourceLabel(url) {
-  if (url === NOVNC_FALLBACK_URL) return 'cdn-esm'
-  return 'cdn-jsdelivr'
-}
-
 const VENDORED_REASON_TEXT = {
   missing: 'vendored file missing',
   truncated: 'vendored file truncated',
@@ -1387,16 +1379,11 @@ const VENDORED_REASON_TEXT = {
   'no-bridge': 'no desktop bridge'
 }
 
-// Two facts, always both surfaced: which source is live, and (when the
-// vendored copy lost) why it lost.
+// When the vendored copy did not load, why (null once it is live).
 function rfbStatusDetail() {
   const { source, reason } = engine.rfbLoad
-  const why = VENDORED_REASON_TEXT[reason] || null
   if (source === 'vendored') return null
-  if (source === 'cdn-jsdelivr' || source === 'cdn-esm') {
-    return why ? `noVNC from CDN (unverified); ${why}` : 'noVNC from CDN (unverified)'
-  }
-  return why
+  return VENDORED_REASON_TEXT[reason] || null
 }
 
 // A load failure already recorded *why* it failed; that reason is the
@@ -1413,8 +1400,7 @@ function novncErrorBody(code) {
     const body = 'The installed noVNC bundle could not be loaded. Re-run the kit installer.'
     return why ? `${body} (${why})` : body
   }
-  // Missing vendored copy *and* a blocked CDN: say both, not just the CDN.
-  return why ? `${ERRORS['cdn-blocked'].body} (${why})` : ERRORS['cdn-blocked'].body
+  return why ? `${ERRORS['novnc-missing'].body} (${why})` : ERRORS['novnc-missing'].body
 }
 
 function hexSha256(digest) {
@@ -1453,8 +1439,8 @@ function vendoredFailed(reason) {
   return null
 }
 
-// A vendored file that is present but wrong is an attack signal, not a
-// network hiccup: fail closed instead of silently reaching for the CDN.
+// A vendored file that is present but wrong is an attack signal, reported as
+// such; a missing or unreadable one asks for the installer. Both fail closed.
 const VENDORED_TAMPERED_REASONS = { integrity: true, 'import-failed': true }
 
 async function loadVendoredRFB() {
@@ -1538,29 +1524,12 @@ async function loadRFB() {
   const vendored = await loadVendoredRFB()
   if (vendored) return vendored
   const reason = engine.rfbLoad.reason
+  RFB = null
   if (VENDORED_TAMPERED_REASONS[reason]) {
-    RFB = null
     throw Object.assign(new Error('vendored-tampered'), { code: 'vendored-tampered' })
   }
-  const urls = rfbSourceOrder()
-  let lastError = null
-  for (const url of urls) {
-    try {
-      const mod = await importRfbModule(url)
-      const ctor = rfbConstructor(mod)
-      if (typeof ctor !== 'function') throw new Error('RFB constructor missing')
-      RFB = ctor
-      engine.rfbLoad = { source: rfbSourceLabel(url), reason }
-      console.info(
-        `[computer-viewer] noVNC source: ${engine.rfbLoad.source} (unverified; reason: ${reason})`
-      )
-      return RFB
-    } catch (error) {
-      lastError = error
-    }
-  }
-  RFB = null
-  throw lastError || new Error('cdn-blocked')
+  console.warn(`[computer-viewer] noVNC not loaded: ${VENDORED_REASON_TEXT[reason] || reason}; re-run the kit installer`)
+  throw Object.assign(new Error('novnc-missing'), { code: 'novnc-missing' })
 }
 
 function ensureSurfaceEl() {
@@ -2163,7 +2132,7 @@ async function connect(endpoint) {
     RfbCtor = await loadRFB()
   } catch (error) {
     if (!still(gen)) return
-    const code = error && error.code === 'vendored-tampered' ? 'vendored-tampered' : 'cdn-blocked'
+    const code = error && error.code === 'vendored-tampered' ? 'vendored-tampered' : 'novnc-missing'
     setError(code, novncErrorBody(code))
     return
   }
