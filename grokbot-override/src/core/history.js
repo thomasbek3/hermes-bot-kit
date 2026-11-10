@@ -293,6 +293,47 @@ export function rowIdentity(row, index = 0) {
   return `t:${row?.timestamp ?? ''}:${row?.role ?? ''}:${index}`
 }
 
+/** Which sent (optimistic) user bubbles the stored rows now hold, so the
+ *  local bubble can give way to the stored copy without a duplicate, and
+ *  never earlier (a transcript read before the gateway stored the turn shows
+ *  no copy yet: the bubble stays).
+ *
+ *  `sends`, oldest first: { id, text, submitted, known, byOrder }
+ *    text      what the bubble shows
+ *    submitted what prompt.submit carried ('' before the submit)
+ *    known     row identities loaded when it was sent (never its copy)
+ *    byOrder   it may also claim a new user row whose text differs (the
+ *              gateway stores an expanded skill or an @mention note); only
+ *              when the send was accepted and the turn has ended.
+ *  Each stored user row is claimed once, so two identical sends need two
+ *  stored rows. Returns the Set of confirmed send ids. */
+export function confirmedSends(sends, rows) {
+  const users = []
+  ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    if (row?.role !== 'user' || row.display_kind === 'hidden') return
+    users.push({ key: rowIdentity(row, index), text: rowText(row).trim() })
+  })
+  const claimed = new Set()
+  const done = new Set()
+  const fresh = send => users.filter(user => !claimed.has(user.key) && !(send.known && send.known.has(user.key)))
+  const claim = (send, user) => {
+    claimed.add(user.key)
+    done.add(send.id)
+  }
+  const list = Array.isArray(sends) ? sends : []
+  for (const send of list) {
+    const texts = [send.text, send.submitted].map(t => String(t || '').trim()).filter(Boolean)
+    const hit = texts.length ? fresh(send).find(user => texts.includes(user.text)) : undefined
+    if (hit) claim(send, hit)
+  }
+  for (const send of list) {
+    if (done.has(send.id) || !send.byOrder) continue
+    const hit = fresh(send)[0]
+    if (hit) claim(send, hit)
+  }
+  return done
+}
+
 /** Fold a fresh newest page into the loaded rows. Rows older than the page
  *  are kept; rows the page covers are replaced by it. When the page does not
  *  reach back to anything loaded (more new rows than one page), the older

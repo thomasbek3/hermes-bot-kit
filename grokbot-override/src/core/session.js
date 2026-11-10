@@ -60,6 +60,7 @@ import { canonicalIds, findCanonicalChat, openedSessionId } from './canonical.js
 import { createCanonicalChat } from './create-chat.js'
 import { draftOwnerKey } from './drafts.js'
 import {
+  confirmedSends,
   historyToItems,
   isPersistedItem,
   mergeOlderRows,
@@ -263,6 +264,12 @@ export function createChatController(bot, deps, options = {}) {
   // Failed sends keep what is needed to retry them: text, attachments and the
   // stored rows known when they were sent (for the delivery check).
   const payloads = new Map()
+  // Every user bubble this chat sent and the transcript does not hold yet:
+  // clientId -> { known, submitted, accepted }. A transcript read before the
+  // gateway stored the turn (an idle or roster refresh during a slow submit,
+  // a re-read after a quick turn) must not drop the bubble; the stored copy
+  // replaces it once a read shows it (history.js confirmedSends).
+  const sends = new Map()
   // Attachments already staged on a runtime: `${runtimeId}|${id}` ->
   // { kind: 'file', ref } or { kind: 'image', path, mime }. Kept until the
   // send carrying them is accepted, Hermes says it removed them, or they are
@@ -458,6 +465,32 @@ export function createChatController(bot, deps, options = {}) {
   const keepLocal = item => item.failed || item.kind === 'command' || item.kind === 'clarify' || (item.kind === 'approval' && item.status === 'pending')
   const keepLive = item => !isPersistedItem(item)
 
+  /** A sent (pending or accepted) user bubble whose stored copy is not in
+   *  the transcript yet. A failed one follows its own failed/retry rules. */
+  const isOpenSend = item => item?.kind === 'user' && !item.failed && sends.has(item.id)
+
+  /** `keep`, plus the open sends `rows` does not hold yet. The ones it does
+   *  hold are forgotten: their stored copy replaces the bubble, once. */
+  function keepingSends(items, rows, keep) {
+    const open = (Array.isArray(items) ? items : []).filter(isOpenSend)
+    if (!open.length) return keep
+    const done = confirmedSends(
+      open.map(item => {
+        const entry = sends.get(item.id)
+        return { id: item.id, text: item.text, submitted: entry.submitted, known: entry.known, byOrder: entry.accepted }
+      }),
+      rows
+    )
+    for (const id of done) sends.delete(id)
+    return item => (isOpenSend(item) ? !done.has(item.id) : keep(item))
+  }
+
+  /** The open sends of `items` that `rows` does not hold, in order. */
+  function openSendsMissingFrom(items, rows) {
+    const keep = keepingSends(items, rows, () => false)
+    return (Array.isArray(items) ? items : []).filter(item => isOpenSend(item) && keep(item))
+  }
+
   async function open() {
     const mine = ++generation
     set({ phase: 'resolving', error: null })
@@ -519,7 +552,7 @@ export function createChatController(bot, deps, options = {}) {
         rows,
         loadedCount: rows.length,
         hasMore: rows.length >= HISTORY_PAGE,
-        chat: { ...initialChatState(rowsToItems(rows)) }
+        chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
       })
       loaded = true
     } catch (error) {
@@ -671,7 +704,9 @@ export function createChatController(bot, deps, options = {}) {
   function absorbSnapshot(snapshot, { withHistory = false, initial = false, replaceText = true } = {}) {
     setChat(chat => {
       let items = chat.items
-      if (withHistory && Array.isArray(snapshot?.messages)) items = historyToItems(snapshot.messages, { idPrefix: 'r:' })
+      if (withHistory && Array.isArray(snapshot?.messages)) {
+        items = [...historyToItems(snapshot.messages, { idPrefix: 'r:' }), ...openSendsMissingFrom(items, snapshot.messages)]
+      }
       const running = Boolean(snapshot?.running || snapshot?.info?.running)
       const inflight = snapshot?.inflight && typeof snapshot.inflight === 'object' ? snapshot.inflight : null
       // The resumed partial reply is the bubble later deltas extend. Its id is
@@ -889,7 +924,7 @@ export function createChatController(bot, deps, options = {}) {
         rows,
         loadedCount: rows.length,
         hasMore: joined ? s.hasMore : tail.length >= HISTORY_PAGE,
-        chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(rows), keep) }
+        chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(rows), keepingSends(s.chat.items, rows, keep)) }
       }
     })
   }
@@ -1139,7 +1174,7 @@ export function createChatController(bot, deps, options = {}) {
         rows: tail,
         loadedCount: tail.length,
         hasMore: tail.length >= HISTORY_PAGE,
-        chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(tail), keepLocal) }
+        chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(tail), keepingSends(s.chat.items, tail, keepLocal)) }
       }))
     } catch {
       /* the idle refresh catches up */
@@ -1771,6 +1806,7 @@ export function createChatController(bot, deps, options = {}) {
       return { ok: false, delivery: 'not-sent', error: 'These files were picked for another bot' }
     }
     const clientId = `local:${now()}:${Math.random().toString(36).slice(2, 8)}`
+    sends.set(clientId, { known: new Set(state.rows.map(rowIdentity)), submitted: '', accepted: false })
     setChat(chat => ({
       ...chat,
       items: [
@@ -1825,6 +1861,8 @@ export function createChatController(bot, deps, options = {}) {
         payload.body = body
         turnBefore = turnSeq
         submittedOn = state.runtimeId
+        const entry = sends.get(clientId)
+        if (entry) entry.submitted = String(body || '')
       }
     }
     try {
@@ -1852,6 +1890,8 @@ export function createChatController(bot, deps, options = {}) {
       // A completion (or any turn transition) that arrived while prompt.submit
       // was in flight is newer than this receipt: it decides busy.
       const fresh = turnSeq === turnBefore
+      const entry = sends.get(clientId)
+      if (entry) entry.accepted = true
       set(s => ({
         receipt: label && label !== 'streaming' && label !== 'started' ? label : null,
         chat: {
@@ -1897,6 +1937,10 @@ export function createChatController(bot, deps, options = {}) {
    *  lost by its owner; it will not run). Stock submit.ts:1251-1281. */
   function settleReceipt(clientId, payload, status, files) {
     payloads.delete(clientId)
+    // `terminal`: the turn was admitted and stored, so its row replaces the
+    // bubble. `unknown`: it will not run and nothing will be stored.
+    if (status === 'terminal' && sends.has(clientId)) sends.get(clientId).accepted = true
+    else sends.delete(clientId)
     forgetStaged(files)
     setChat(chat => ({
       ...chat,
@@ -1958,6 +2002,7 @@ export function createChatController(bot, deps, options = {}) {
   function markDelivered(clientId, tail) {
     const payload = payloads.get(clientId)
     payloads.delete(clientId)
+    sends.delete(clientId)
     if (payload) forgetStaged(payload.attachments)
     deliveryChecks.get(clientId)?.()
     deliveryChecks.delete(clientId)
@@ -2051,6 +2096,7 @@ export function createChatController(bot, deps, options = {}) {
     const item = state.chat.items.find(entry => entry.id === clientId)
     if (!item || !item.failed || item.delivery !== 'not-sent') return false
     payloads.delete(clientId)
+    sends.delete(clientId)
     deliveryChecks.get(clientId)?.()
     deliveryChecks.delete(clientId)
     setChat(chat => ({ ...chat, items: chat.items.filter(entry => entry.id !== clientId) }))
@@ -2135,6 +2181,7 @@ export function createChatController(bot, deps, options = {}) {
     for (const cancel of deliveryChecks.values()) cancel()
     deliveryChecks.clear()
     payloads.clear()
+    sends.clear()
     // Images still staged on the runtime (a refused send nobody resent, an
     // unknown one) must not ride along with a later send from another
     // surface: take them back, best effort, then let the route go.
