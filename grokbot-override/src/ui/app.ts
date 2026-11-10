@@ -10,6 +10,7 @@ import {
   buildSections,
   displayName,
   mergeRoster,
+  ownSectionOf,
   readStockRoster,
   rowKey,
   sourceUnreachable
@@ -23,6 +24,18 @@ import { createChatController } from '../core/session.js'
 import { createStockController, OVERRIDE_ROSTER_PANE_ID, STOCK_PANE_ID } from '../core/stock.js'
 import { dragPanelWidth, PANEL_WIDTH, PANEL_WIDTH_KEY, storedPanelWidth } from '../core/panelWidth.js'
 import { PINS_KEY, pinsFrom, pinState, togglePin } from '../core/pins.js'
+import {
+  addSection,
+  assignBot,
+  deleteSection,
+  emptySections,
+  LEGACY_SECTIONS_PLUGIN,
+  loadSections,
+  moveSection,
+  renameSection,
+  SECTIONS_KEY,
+  toggleSectionCollapsed
+} from '../core/sections.js'
 import { SHOW_WORK_KEY, SHOW_WORK_PLUGIN, showWorkFrom } from '../core/workRows.js'
 import { botCanonicalSessionId, createActivityTracker } from '../core/activity.js'
 import { looksUnsupported } from '../core/outcomes.js'
@@ -59,7 +72,13 @@ export interface RosterState {
   localMeta: Record<string, any>
   /** The active gateway's bot_mode_protocol flag (data.ts:885). */
   protocolInjected?: boolean
-  kitSections: null | { custom: string[]; overrides: Record<string, string> }
+}
+
+/** The roster's own sections (core/sections.js). */
+export interface SectionsState {
+  version: number
+  sections: Array<{ id: string; name: string; collapsed: boolean }>
+  assign: Record<string, string>
 }
 
 export const app = {
@@ -71,11 +90,13 @@ export const app = {
     origin: 'none',
     error: null,
     updatedAt: 0,
-    localMeta: {},
-    kitSections: null
+    localMeta: {}
   }),
   query: createStore(''),
+  // Collapsed default sections (by name); the own sections keep theirs.
   collapsed: createStore<string[]>([]),
+  // The roster's own sections, in the override's plugin storage.
+  sections: createStore<SectionsState>(emptySections()),
   selectedKey: createStore(''),
   panelOpen: createStore(true),
   // The profile panel's width (core/panelWidth.js), dragged from its hairline.
@@ -190,13 +211,7 @@ function activeConnectionId(): null | string {
 
 function readSideData() {
   const localMeta = readPluginStorage<Record<string, any>>('hermes-bots', 'bot-meta-v2', {}) || {}
-  const kitEnabled = readPluginStorage<boolean>('bot-sections', 'enabled', true) !== false
-  const custom = readPluginStorage<string[]>('bot-sections', 'customSections', [])
-  const overrides = readPluginStorage<Record<string, string>>('bot-sections', 'sectionOverrides', {})
-  const kitSections = kitEnabled && (Array.isArray(custom) || (overrides && typeof overrides === 'object'))
-    ? { custom: Array.isArray(custom) ? custom : [], overrides: overrides && typeof overrides === 'object' ? overrides : {} }
-    : null
-  return { localMeta: localMeta && typeof localMeta === 'object' ? localMeta : {}, kitSections }
+  return { localMeta: localMeta && typeof localMeta === 'object' ? localMeta : {} }
 }
 
 async function fetchOwnRoster() {
@@ -319,7 +334,7 @@ export function reloadRoster() {
 
 export function sections() {
   const r = app.roster.get()
-  return buildSections(r.rows, { metaFor, kitSections: r.kitSections, query: app.query.get() })
+  return buildSections(r.rows, { metaFor, sections: app.sections.get(), query: app.query.get() })
 }
 
 export function findBot(key: string) {
@@ -1264,6 +1279,7 @@ export function toggleTopPin(bot: any): boolean {
 export function start(ctx: any) {
   app.ctx = ctx
   app.pinnedBots.set(pinsFrom(storageGet(PINS_KEY, [])))
+  startSections()
   refreshShowWork()
   requestForBot = createBotRequester(host, { activeConnectionId })
   app.selectedKey.set(String(storageGet('selected', '') || ''))
@@ -1402,6 +1418,86 @@ export function startPanelResize(startX: number, workspaceWidth: number) {
 export function resetPanelWidth() {
   app.panelWidth.set(PANEL_WIDTH.default)
   storageSet(PANEL_WIDTH_KEY, PANEL_WIDTH.default)
+}
+
+// ── the roster's own sections (core/sections.js) ─────────────────────────
+
+function applySections(stored: unknown) {
+  const { state, write } = loadSections({
+    stored,
+    readLegacy: (key: string, fallback: unknown) => readPluginStorage<unknown>(LEGACY_SECTIONS_PLUGIN, key, fallback),
+    collapsedHere: storageGet<unknown>('collapsed', [])
+  })
+  app.sections.set(state)
+  if (write) storageSet(SECTIONS_KEY, state)
+}
+
+/** Load the own sections; on the first run, copy the Bot Sections layout in
+ *  once (its storage is only read). A storage that answers with a promise
+ *  is waited for, so a slow read never looks like a first run. */
+function startSections() {
+  try {
+    const stored = app.ctx?.storage?.get?.(SECTIONS_KEY, undefined)
+    if (stored && typeof (stored as any).then === 'function') {
+      ;(stored as Promise<unknown>).then(applySections, () => undefined)
+      return
+    }
+    applySections(stored)
+  } catch {
+    /* holds the empty state for this window */
+  }
+}
+
+function updateSections(fn: (state: SectionsState) => SectionsState) {
+  const current = app.sections.get()
+  const next = fn(current)
+  if (next === current) return
+  app.sections.set(next)
+  storageSet(SECTIONS_KEY, next)
+}
+
+/** New section at the end; returns its id ('' for an empty name). */
+export function createSection(name: string): string {
+  let id = ''
+  updateSections(state => {
+    const result = addSection(state, name)
+    id = result.id
+    return result.state
+  })
+  return id
+}
+
+export function renameOwnSection(id: string, name: string) {
+  updateSections(state => renameSection(state, id, name))
+}
+
+export function deleteOwnSection(id: string) {
+  updateSections(state => deleteSection(state, id))
+}
+
+export function moveOwnSection(id: string, delta: number) {
+  updateSections(state => moveSection(state, id, delta))
+}
+
+export function toggleOwnSection(id: string) {
+  updateSections(state => toggleSectionCollapsed(state, id))
+}
+
+/** Move a bot to one of the own sections, or '' for Default. */
+export function moveBotToSection(bot: any, id: string) {
+  if (!bot) return
+  updateSections(state => assignBot(state, rowKey(bot), id))
+}
+
+/** The own section a bot is in ('' = Default). */
+export function botSectionId(bot: any): string {
+  return ownSectionOf(bot, app.sections.get(), metaFor)
+}
+
+/** How many roster bots (hidden ones too) are in an own section. */
+export function botsInSection(id: string): number {
+  const state = app.sections.get()
+  return app.roster.get().rows.filter((bot: any) => !bot?.ghost && ownSectionOf(bot, state, metaFor) === id).length
 }
 
 export function toggleSection(name: string) {

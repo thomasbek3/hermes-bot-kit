@@ -166,7 +166,7 @@ test("reads Bot Mode's own roster cache, preferring the active connection's fres
   assert.equal(readStockRoster(null, null), null)
 })
 
-test('sections: kit Bot Sections first, then Bot Mode user sections, then connections; hidden bots stay out', () => {
+test('sections: the roster\'s own sections first, then Bot Mode user sections, then connections; hidden bots stay out', () => {
   const rows = [
     { name: 'helper' },
     { name: 'budget' },
@@ -176,14 +176,16 @@ test('sections: kit Bot Sections first, then Bot Mode user sections, then connec
   const meta = { helper: { sectionName: 'Ops' }, secret: { hidden: true }, budget: { pinned: true } }
   const metaFor = bot => meta[bot.name] || {}
 
-  const kit = buildSections(rows, { metaFor, kitSections: { custom: ['Money'], overrides: { budget: 'Money' } } })
-  assert.deepEqual(kit.map(s => [s.name, s.bots.map(b => b.name)]), [['Money', ['budget']], ['Unassigned', ['helper', 'scholar']]])
+  const own = { version: 1, sections: [{ id: 'm', name: 'Money', collapsed: false }], assign: { budget: 'm' } }
+  const kit = buildSections(rows, { metaFor, sections: own })
+  assert.deepEqual(kit.map(s => [s.name, s.bots.map(b => b.name)]), [['Money', ['budget']], ['Ops', ['helper']], ['Unassigned', ['scholar']]])
+  assert.equal(kit[0].own, true)
 
-  const user = buildSections(rows, { metaFor, kitSections: null })
+  const user = buildSections(rows, { metaFor, sections: null })
   assert.deepEqual(user.map(s => s.name), ['Ops', 'Unassigned'])
   assert.deepEqual(user[1].bots.map(b => b.name), ['budget', 'scholar'], 'pinned first')
 
-  const plain = buildSections(rows, { metaFor: () => ({}), kitSections: null, query: 'schol' })
+  const plain = buildSections(rows, { metaFor: () => ({}), sections: null, query: 'schol' })
   assert.deepEqual(plain.map(s => [s.name, s.bots.length]), [['HOME-SERVER', 1]])
 })
 

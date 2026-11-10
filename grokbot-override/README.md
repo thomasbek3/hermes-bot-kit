@@ -46,6 +46,13 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
   Bot Mode; only a source Bot Mode marks unavailable or removed is dimmed.
 - **Pin to top** (row menu) puts up to four bots as big avatars above the roster; the pins live in the
   override's own plugin storage and never touch Bot Mode's data.
+- **Sections.** **+ → New section…** adds a named section (an emoji in the name is just text). Right-click a
+  section header to **Rename…**, **Move up / Move down** or **Delete section…** (its bots go back to their
+  default section; you are asked first only when it has bots); click it to collapse. Right-click a bot →
+  **Move to section →** a section or **Default**. Bots in no section of yours are grouped as before (Bot
+  Mode's sections, else by connection). Sections live in the override's own plugin storage; a layout made
+  with the retired Bot Sections plugin is copied in once on the first run and its own data is left as it
+  was.
 - The profile panel's **Slack** card shows whether the bot is in Slack. **Test connection** asks Slack
   itself (`auth.test`) through the optional [slack-check](../slack-check/README.md) backend plugin;
   when the backend does not have it, the card shows a short hint in place of the button.
@@ -137,8 +144,8 @@ show the `::card` line as plain text.
 ## Supported Hermes version
 
 Built and checked against **Hermes Agent `2bd378ed1b`** (Desktop plugin SDK, gateway contract and Bot
-Mode source at that commit). It reads private Bot Mode details (its roster cache key, the Bot Sections
-plugin's storage, the stock tab's DOM attribute and pane id) and classifies gateway errors (`prompt.submit`, steer, slash
+Mode source at that commit). It reads private Bot Mode details (its roster cache key, the stock tab's DOM attribute and pane id; once,
+the retired Bot Sections plugin's storage to copy a layout in) and classifies gateway errors (`prompt.submit`, steer, slash
 commands, rewind, title) from that commit's gateway source, all in one module (`src/core/outcomes.js`):
 only a documented refusal raised before anything ran authorizes a fallback or a second write. There is no pinned upstream contract suite yet, so
 on any other Hermes version treat it as unverified: turn it off (palette toggle) if Bot Mode misbehaves.

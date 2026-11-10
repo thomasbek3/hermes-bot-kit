@@ -1,6 +1,6 @@
 // Hiding (never removing) Bot Mode's stock Bots tab while the override is on.
 //
-// Display only, like bot-sections' "Bots only" does for SESSIONS: one
+// Display only, like the retired bot-sections' "Bots only" did for SESSIONS: one
 // <style> hides `hermes-bots:pane`'s tab on every tab surface, and a stock
 // tab that is selected gets switched to the override's roster tab once per
 // selection change. Bot Mode stays registered and keeps running.

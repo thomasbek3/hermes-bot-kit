@@ -50,7 +50,11 @@ export const roster2 = {
   /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
    *  the first unread bot message (null: none; absent: not decided), and the
    *  per-bot seen watermark (ms; plugin storage `seenAt`). */
-  newLine: createStore<{ markers: Record<string, null | string>; seen: Record<string, number> }>({ markers: {}, seen: {} })
+  newLine: createStore<{ markers: Record<string, null | string>; seen: Record<string, number> }>({ markers: {}, seen: {} }),
+  /** The roster's own sections: the inline name field that is open (a new
+   *  section, or renaming one), and the delete waiting for a confirm. */
+  sectionEdit: createStore<null | { kind: 'new' } | { kind: 'rename'; id: string }>(null),
+  sectionDelete: createStore<null | { id: string; name: string; count: number }>(null)
 }
 
 export function openDialog(state: DialogState) {

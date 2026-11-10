@@ -120,3 +120,9 @@ export const IconBolt = () => (
     <path d="M13 3 5 13.5h6L10 21l8-10.5h-6L13 3Z" />
   </svg>
 )
+
+export const IconFolder = () => (
+  <svg {...base}>
+    <path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+  </svg>
+)
