@@ -21606,16 +21606,19 @@ var ADAPT_SRC = (
 /* Small images and emoji inside a line of text sit on the text. */
 .md .aui-md :is(p, li) > img { display: inline-block; height: 1.15em; width: auto; vertical-align: -0.2em; border-radius: 3px; }
 .gbo-media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-/* Fenced code blocks (ui/CodeBlock.tsx): the bubble's grey block, a Copy
-   pill top-right, full height up to 60 lines, longer ones folded to 40 with
-   a "Show more" text button. */
+/* Fenced code blocks (ui/CodeBlock.tsx): the bubble's grey block with a
+   header strip (language left, Copy pill right) so the pill never covers
+   text; long lines wrap instead of running off the bubble; full height up
+   to 60 lines, longer ones folded to 40 with a "Show more" text button. */
 .md > * + .gbo-code, .md > .gbo-code + * { margin-top: 10px; }
-.gbo-code { position: relative; min-width: 0; }
-.md .gbo-code pre { margin: 0; padding: 8px 12px; padding-right: 64px; background: var(--color-code-block); color: var(--color-text-primary); white-space: pre; overflow-x: auto; }
-.md .gbo-code pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; }
+.gbo-code { position: relative; min-width: 0; background: var(--color-code-block); border-radius: 10px; overflow: hidden; }
+.gbo-code-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 6px 0 12px; min-height: 28px; }
+.gbo-code-lang { color: var(--color-text-secondary); font-size: 12px; line-height: 22px; text-transform: lowercase; }
+.md .gbo-code pre { margin: 0; padding: 4px 12px 10px; background: var(--color-code-block); color: var(--color-text-primary); white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; overflow-x: hidden; }
+.md .gbo-code pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; white-space: inherit; }
 .md .gbo-code pre.is-folded { max-height: calc(var(--gbo-code-lines) * 20px + 16px); overflow-y: hidden; }
 .gbo-code-copy {
-  position: absolute; top: 6px; right: 6px; height: 22px; padding: 0 10px; border: 0; border-radius: var(--radius-full);
+  flex: none; height: 22px; padding: 0 10px; border: 0; border-radius: var(--radius-full);
   background: var(--color-bubble-agent-flat); box-shadow: var(--color-border-secondary) 0 0 0 0.5px inset; color: var(--color-text-secondary);
   font-family: inherit; font-size: 12px; line-height: 22px; letter-spacing: 0.12px; cursor: pointer;
 }
@@ -25754,7 +25757,10 @@ function CodeBlock({ code, lang }) {
   };
   const folded = folds && !open;
   return /* @__PURE__ */ jsxs9("div", { className: "gbo-code", "data-lang": lang || void 0, children: [
-    /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-code-copy", "aria-label": copied ? "Copied" : "Copy code", onClick: copy, children: copied ? "Copied" : "Copy" }),
+    /* @__PURE__ */ jsxs9("div", { className: "gbo-code-head", children: [
+      /* @__PURE__ */ jsx10("span", { className: "gbo-code-lang", children: lang && lang !== "text" ? lang : "" }),
+      /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-code-copy", "aria-label": copied ? "Copied" : "Copy code", onClick: copy, children: copied ? "Copied" : "Copy" })
+    ] }),
     /* @__PURE__ */ jsx10("pre", { className: folded ? "is-folded" : void 0, style: folded ? { "--gbo-code-lines": CODE_FOLDED_LINES } : void 0, children: /* @__PURE__ */ jsx10("code", { children: code }) }),
     folds ? /* @__PURE__ */ jsx10("button", { type: "button", className: "gbo-code-more", "aria-expanded": open, onClick: () => setOpen((value) => !value), children: open ? "Show less" : "Show more" }) : null
   ] });

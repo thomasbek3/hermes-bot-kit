@@ -64,6 +64,10 @@ test('CSS: block, pill and fold rules; the block colour is set for light and dar
     assert.ok(lineHeight, 'the bubble pre line height')
     assert.ok(CSS.includes(`.gbo-code pre.is-folded { max-height: calc(var(--gbo-code-lines) * ${lineHeight}px + 17.86px); overflow-y: hidden; }`))
     assert.match(CSS, /\.gbo-code pre \{[^}]*background: var\(--g-color-code-block\)/)
+    // Long lines wrap inside the bubble; Copy sits in a header strip, never over the text.
+    assert.match(CSS, /\.gbo-code pre \{[^}]*white-space: pre-wrap;[^}]*overflow-wrap: anywhere;/)
+    assert.match(CSS, /\.gbo-code-head[^{]*\{[^}]*display: flex;/)
+    assert.doesNotMatch(CSS, /\.gbo-code-copy[^{]*\{[^}]*position: absolute/)
   } finally {
     rmSync(dirname(file), { recursive: true, force: true })
   }
