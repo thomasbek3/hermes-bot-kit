@@ -92,7 +92,9 @@ Actions:
 
 - `label` is the button text; `send` is the message the chat sends back to you, hidden from the
   transcript, when the button is clicked. Keep `send` under 500 characters and start it with a word and
-  the card id (`APPROVE c-9b`, `HOLD c-9b`, `STOP c-8t`) so you can match it.
+  the card id (`APPROVE c-9b`, `HOLD c-9b`, `STOP c-8t`) so you can match it. When `send` differs
+  from `label`, the row shows the `send` text as a smaller second line, so the user sees what a click
+  sends.
 - `style` is `"primary"` or `"danger"`; leave it out for a plain button.
 - After one click, or once the file has `resolved`, the buttons stop working and the chosen one is ticked.
 
@@ -124,6 +126,16 @@ While the chat is open, a card in one of the chat's last eight messages re-reads
 seconds, for up to 30 minutes, and stops as soon as the file is final (`resolved` set, or `status.state`
 `done` or `error`). To update a card, **rewrite the same file**. Never post a second `::card` line for the
 same card: the attributes of a line already sent cannot change.
+
+### Previews
+
+`::preview{file="page.html"}` on its own line shows a workspace HTML file in a sandboxed frame. The
+frame has **no network**: no requests, no remote scripts, styles, fonts or images (its policy is
+`default-src 'none'`, with inline script and style, and `data:` / `blob:` images, fonts and media). Write
+a self-contained page: inline `<style>` and `<script>`, images as `data:` URLs. A page can call
+`window.hermes.send("...")` (or use `data-hermes-send="..."` on a button); it is sent at once only when the
+user has just clicked into the frame. Otherwise the user sees the exact text under the frame with
+**Send** and **Dismiss**, and nothing is sent until they click Send.
 
 ## Approval flow
 

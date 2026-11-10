@@ -20,7 +20,11 @@
 //    (`sandbox="allow-scripts"`, no same-origin), with a size report and the
 //    `window.hermes.send` / `data-hermes-send` voice, as stock's
 //    inline-preview-directive.tsx does: token-gated, 500 chars, one per
-//    second, every intent acked.
+//    second, every intent acked. Stricter than stock in two ways: the frame
+//    gets a Content-Security-Policy with no network at all (PREVIEW_CSP), and
+//    an intent goes out at once only when the parent saw the user step into
+//    that frame in the last 3 s (previewIntentRoute); otherwise the parent
+//    shows the exact text with Send / Dismiss and waits for the user.
 //
 // Files are read from the bot's machine by REST relative to its session
 // (`/api/fs/read-text?path=<rel>&session_id=<stored id>`, which resolves
@@ -222,6 +226,12 @@ export const PREVIEW_MIN_HEIGHT = 120
 export const PREVIEW_MAX_HEIGHT = 1200
 export const PREVIEW_DEFAULT_HEIGHT = 280
 export const INTENT_THROTTLE_MS = 1000
+/** How recent the user's own step into a frame must be for its intent to go
+ *  out without asking (the parent saw its window blur onto that frame). */
+export const PREVIEW_GESTURE_MS = 3000
+/** No network from a preview: inline script and style, data:/blob: images,
+ *  fonts and media only. Previews must be self-contained pages. */
+export const PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:"
 const SIZE_TYPE = 'hermes-inline-preview-size'
 const INTENT_TYPE = 'hermes-inline-preview-intent'
 const ACK_TYPE = 'hermes-inline-preview-intent-ack'
@@ -234,9 +244,10 @@ export function previewStartHeight(raw) {
   return Number.isInteger(n) ? Math.min(PREVIEW_MAX_HEIGHT, Math.max(PREVIEW_MIN_HEIGHT, n)) : PREVIEW_DEFAULT_HEIGHT
 }
 
-/** The theme prelude: friendly tokens (--foreground, --muted-foreground,
- *  --accent, --border, --card), the color scheme, the app font, no margins
- *  and a transparent background; the page's own styles win. */
+/** The prelude: the no-network CSP first, then the theme: friendly tokens
+ *  (--foreground, --muted-foreground, --accent, --border, --card), the color
+ *  scheme, the app font, no margins and a transparent background; the page's
+ *  own styles win (a page can add CSP rules, never loosen these). */
 export function previewPrelude(vars, font, colorScheme) {
   const tokens = Object.entries(vars || {})
     .filter(([name, value]) => /^--[a-z-]+$/.test(name) && typeof value === 'string' && value && !/[<>{};]/.test(value))
@@ -244,7 +255,7 @@ export function previewPrelude(vars, font, colorScheme) {
     .join(';')
   const safeFont = typeof font === 'string' && font && !/[<>{};]/.test(font) ? `font-family:${font};` : ''
   const scheme = colorScheme === 'dark' ? 'dark' : 'light'
-  return `<style>:root{color-scheme:${scheme};${tokens}}html,body{margin:0;padding:0;background:transparent;color:var(--foreground,inherit);${safeFont}}</style>`
+  return `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}"><style>:root{color-scheme:${scheme};${tokens}}html,body{margin:0;padding:0;background:transparent;color:var(--foreground,inherit);${safeFont}}</style>`
 }
 
 /** The script that reports the document's height to the parent and gives the
@@ -293,6 +304,14 @@ export function previewIntentFrom(data, token, now, lastAcceptedAt) {
   const elapsed = now - lastAcceptedAt
   if (lastAcceptedAt > 0 && elapsed < INTENT_THROTTLE_MS) return { kind: 'reject', id, ack: { ok: false, error: 'throttled', retryAfterMs: INTENT_THROTTLE_MS - elapsed } }
   return { kind: 'accept', id, prompt }
+}
+
+/** Where an accepted intent goes: 'send' at once only when the parent itself
+ *  saw the user step into this frame (its window blurred onto the frame) in
+ *  the last PREVIEW_GESTURE_MS; 'ask' otherwise (the user sees the text and
+ *  clicks Send). Nothing the page reports counts. */
+export function previewIntentRoute(now, lastUserAt) {
+  return lastUserAt > 0 && now >= lastUserAt && now - lastUserAt <= PREVIEW_GESTURE_MS ? 'send' : 'ask'
 }
 
 export function previewAck(token, id, ack) {

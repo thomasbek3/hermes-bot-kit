@@ -111,6 +111,16 @@ export function extractMedia(text) {
   return { text: out.replace(/\n{3,}/g, '\n\n').trim(), media }
 }
 
+/** The host a remote image would be fetched from, as the user should see it
+ *  before choosing to load it ('' when the URL does not parse). */
+export function remoteImageHost(url) {
+  try {
+    return new URL(String(url)).host
+  } catch {
+    return ''
+  }
+}
+
 /** The REST request that reads `path` from the bot's own backend
  *  (resolveMediaDisplaySrc's owner-pinned branch). `scope` = botRestScope. */
 export function mediaReadRequest(path, scope) {

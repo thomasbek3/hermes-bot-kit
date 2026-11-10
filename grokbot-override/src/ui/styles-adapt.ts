@@ -286,6 +286,7 @@ const ADAPT_SRC = /* css */ `
 .gbo-card-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; color: var(--color-text-primary); }
 .gbo-card-desc { font-size: 14px; line-height: 20px; letter-spacing: 0.14px; color: var(--color-text-tertiary); }
 .gbo-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.gbo-connect-url-blocked { flex-basis: 100%; overflow-wrap: anywhere; }
 .gbo-card-error { font-size: 13px; line-height: 18px; color: var(--color-danger-text); }
 .gbo-q legend { font-size: 15px; font-weight: 600; line-height: 22px; }
 .gbo-choice {
@@ -388,6 +389,23 @@ const ADAPT_SRC = /* css */ `
 }
 .gbo-preview-name { font-weight: 500; overflow-wrap: anywhere; }
 .gbo-preview-why { color: var(--color-text-tertiary); font-size: 13px; }
+/* A page's message waits here until the user sends or dismisses it. */
+.gbo-preview-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.gbo-preview-ask {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 10px 8px 14px;
+  border-radius: 14px; background: var(--color-bubble-agent-flat); font-size: 14px; line-height: 20px;
+}
+.gbo-preview-ask-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 220px; min-width: 0; }
+.gbo-preview-ask-lead { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-preview-ask-prompt { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text-primary); }
+.gbo-preview-ask-actions { display: flex; gap: 8px; flex: none; }
+.gbo-preview-ask-actions .gbo-pill-btn { height: 30px; }
+/* A card row whose message differs from its label shows the message too. */
+.gbo-ask-label.is-stacked { display: flex; flex-direction: column; }
+.gbo-ask-send {
+  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 12px; line-height: 16px; color: var(--color-text-tertiary);
+}
 
 /* Buttons the override keeps: in the reference's .btn--sm idiom. */
 .gbo-pill-btn {

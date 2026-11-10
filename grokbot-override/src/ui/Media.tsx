@@ -2,11 +2,13 @@
 // renderer in its inert mode (sdk.ts Markdown), and the media it names are
 // drawn here from the bot's OWN backend (app.ts readBotMedia, core/media.js):
 // images inline, audio and video players, other files as a chip that saves
-// the file. Public http(s) images the text links load directly.
+// the file. An http(s) image the text links is NOT fetched on its own (a
+// message could name any host and carry data in the URL): it shows as
+// "Image from <host> · Load" and loads only when the user clicks it.
 
 import * as React from 'react'
 
-import { extractMedia } from '../core/media.js'
+import { extractMedia, remoteImageHost } from '../core/media.js'
 import { readBotMedia } from './app'
 import { Markdown } from './sdk'
 
@@ -26,7 +28,7 @@ function saveDataUrl(dataUrl: string, name: string) {
 }
 
 export function OwnerMedia({ bot, item }: { bot: any; item: { path: string; kind: string; name: string; remote?: boolean } }) {
-  const [src, setSrc] = React.useState<string>(item.remote ? item.path : '')
+  const [src, setSrc] = React.useState<string>('')
   const [error, setError] = React.useState('')
   const wantsRead = !item.remote && item.kind !== 'file'
   React.useEffect(() => {
@@ -45,6 +47,16 @@ export function OwnerMedia({ bot, item }: { bot: any; item: { path: string; kind
     }
   }, [bot, item.path, wantsRead])
 
+  if (item.kind === 'image' && item.remote && !src) {
+    const host = remoteImageHost(item.path)
+    return (
+      <button type="button" className="gbo-media-remote" title={item.path} onClick={() => setSrc(item.path)}>
+        <span className="gbo-media-remote-host">Image from {host}</span>
+        <span aria-hidden="true"> · </span>
+        <span className="gbo-media-remote-load">Load</span>
+      </button>
+    )
+  }
   if (item.kind === 'image') {
     if (error) return <span className="gbo-media-file is-error" title={error}>{item.name}: not available</span>
     return src ? (

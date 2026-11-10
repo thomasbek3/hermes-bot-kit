@@ -8,8 +8,13 @@
 // (app.ts readBotWorkspaceText). A card polls its JSON every 3 s until it is
 // final (30 minutes at most; older messages read once). Buttons and widget
 // intents go back to this chat as hidden turns (controller.sendIntent). The
-// preview frame is sandboxed with scripts only (no same-origin): it cannot
-// reach the app, its storage or the bridge.
+// preview frame is sandboxed with scripts only (no same-origin) and has no
+// network (core/directives.js PREVIEW_CSP): it cannot reach the app, its
+// storage or the bridge. A page's intent is sent at once only right after
+// the user stepped into that frame (seen by this window, never reported by
+// the page); otherwise a row under the frame shows the exact text with Send
+// and Dismiss. A card row shows what it sends when that differs from its
+// label.
 
 import * as React from 'react'
 
@@ -23,6 +28,7 @@ import {
   previewDocument,
   previewHeightFrom,
   previewIntentFrom,
+  previewIntentRoute,
   previewPrelude,
   previewStartHeight,
   splitDirectives,
@@ -195,7 +201,16 @@ function Actions({ card, scope, labelledBy }: { card: any; scope: DirectiveScope
                 <span className="gbo-ask-key" aria-hidden="true">
                   {choiceLetter(i)}
                 </span>
-                <span className="gbo-ask-label">{action.label}</span>
+                {action.send !== action.label ? (
+                  <span className="gbo-ask-label is-stacked">
+                    <span className="gbo-ask-label-main">{action.label}</span>
+                    <span className="gbo-ask-send" title={action.send}>
+                      {action.send}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="gbo-ask-label">{action.label}</span>
+                )}
                 {on ? (
                   <span className="gbo-ask-check" aria-hidden="true">
                     <IconCheck />
@@ -309,6 +324,47 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
   })
   const [height, setHeight] = React.useState(startHeight)
   const lastIntent = React.useRef(0)
+  // When this window last saw the user step into THIS frame (its blur while
+  // the frame is the focused element). The page cannot set it.
+  const lastUser = React.useRef(0)
+  // The one intent waiting for the user (a newer one replaces it).
+  const [pending, setPending] = React.useState<{ id: number | null; prompt: string } | null>(null)
+  const pendingRef = React.useRef<typeof pending>(null)
+  const sendFromFrame = React.useCallback(
+    (prompt: string, reply: (ack: any) => void) => {
+      void scope.sendIntent(prompt).then(
+        result => reply(result.ok ? { ok: true } : { ok: false, error: 'undelivered' }),
+        () => reply({ ok: false, error: 'undelivered' })
+      )
+    },
+    [scope]
+  )
+  const replyTo = React.useCallback(
+    (id: number | null, ack: any) => {
+      const source = frame.current?.contentWindow
+      if (source && id !== null) source.postMessage(previewAck(token, id, ack), '*')
+    },
+    [token]
+  )
+  const hold = (next: { id: number | null; prompt: string } | null) => {
+    pendingRef.current = next
+    setPending(next)
+  }
+  React.useEffect(() => {
+    const win = (globalThis as any).window
+    if (!win?.addEventListener) return undefined
+    const seen = () => {
+      const el = frame.current
+      if (el && win.document?.activeElement === el) lastUser.current = Date.now()
+    }
+    const onBlur = () => {
+      seen()
+      // Some engines move focus onto the frame just after the blur.
+      timers().setTimeout(seen, 0)
+    }
+    win.addEventListener('blur', onBlur)
+    return () => win.removeEventListener('blur', onBlur)
+  }, [])
   React.useLayoutEffect(() => {
     const theme = themeFor(wrap.current, scope.theme)
     setDoc(previewDocument(html, token, previewPrelude(theme.vars, theme.font, theme.scheme)))
@@ -330,18 +386,49 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
         if (decision.id !== null) source.postMessage(previewAck(token, decision.id, ack), '*')
       }
       if (decision.kind === 'reject') return reply(decision.ack)
-      lastIntent.current = Date.now()
-      void scope.sendIntent(decision.prompt).then(
-        result => reply(result.ok ? { ok: true } : { ok: false, error: 'undelivered' }),
-        () => reply({ ok: false, error: 'undelivered' })
-      )
+      const now = Date.now()
+      lastIntent.current = now
+      if (previewIntentRoute(now, lastUser.current) === 'send') return sendFromFrame(decision.prompt, reply)
+      const older = pendingRef.current
+      if (older) replyTo(older.id, { ok: false, error: 'replaced' })
+      hold({ id: decision.id, prompt: decision.prompt })
     }
     win.addEventListener('message', onMessage)
     return () => win.removeEventListener('message', onMessage)
-  }, [token, scope])
+  }, [token, sendFromFrame, replyTo])
+  const send = () => {
+    const ask = pendingRef.current
+    if (!ask) return
+    hold(null)
+    sendFromFrame(ask.prompt, ack => replyTo(ask.id, ack))
+  }
+  const dismiss = () => {
+    const ask = pendingRef.current
+    if (!ask) return
+    hold(null)
+    replyTo(ask.id, { ok: false, error: 'dismissed' })
+  }
   return (
-    <div className="gbo-preview" ref={wrap}>
-      {doc ? <iframe ref={frame} className="gbo-preview-frame" title={name} sandbox="allow-scripts" srcDoc={doc} style={{ height }} /> : null}
+    <div className="gbo-preview-wrap">
+      <div className="gbo-preview" ref={wrap}>
+        {doc ? <iframe ref={frame} className="gbo-preview-frame" title={name} sandbox="allow-scripts" srcDoc={doc} style={{ height }} /> : null}
+      </div>
+      {pending ? (
+        <div className="gbo-preview-ask" role="group" aria-label={`${name} wants to send a message`}>
+          <div className="gbo-preview-ask-text">
+            <span className="gbo-preview-ask-lead">This page wants to send:</span>
+            <span className="gbo-preview-ask-prompt">{pending.prompt}</span>
+          </div>
+          <div className="gbo-preview-ask-actions">
+            <button type="button" className="gbo-pill-btn is-primary" onClick={send}>
+              Send
+            </button>
+            <button type="button" className="gbo-pill-btn" onClick={dismiss}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

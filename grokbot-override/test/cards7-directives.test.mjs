@@ -12,7 +12,9 @@ import {
   previewDocument,
   previewHeightFrom,
   previewIntentFrom,
+  previewIntentRoute,
   previewPrelude,
+  PREVIEW_CSP,
   previewStartHeight,
   splitDirectives,
   validateCard,
@@ -83,7 +85,8 @@ test('preview frame: prelude first, script before </body>, token-gated size and 
   const prelude = previewPrelude({ '--foreground': '#fff', '--bad': 'x}</style><script>' }, 'Inter', 'dark')
   assert.ok(prelude.includes('color-scheme:dark') && prelude.includes('--foreground:#fff') && !prelude.includes('<script>'))
   const doc = previewDocument('<html><body><p>hi</p></body></html>', 'tok', prelude)
-  assert.ok(doc.startsWith('<style>'))
+  assert.ok(doc.startsWith('<meta http-equiv="Content-Security-Policy"'), 'the CSP comes before anything the page says')
+  assert.ok(doc.indexOf('<style>') < doc.indexOf('<p>hi</p>'))
   assert.ok(doc.indexOf('<script>') < doc.indexOf('</body>'))
   assert.ok(doc.includes('"tok"') && doc.includes('window.hermes'))
   assert.equal(previewHeightFrom({ type: 'hermes-inline-preview-size', token: 'tok', height: 50 }, 'tok'), 120)
@@ -200,4 +203,19 @@ test('loader-faithful: the open chat draws the card and the preview from the bot
     assert.ok(!props.text.includes('::card{') && !props.text.includes('::preview{'))
   }
   assert.deepEqual(errors, [])
+})
+
+test('preview CSP: no network at all; inline script and style, data/blob media only', () => {
+  assert.equal(PREVIEW_CSP, "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:")
+  const prelude = previewPrelude({}, 'Inter', 'light')
+  assert.ok(prelude.startsWith(`<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`))
+  assert.ok(!/https?:|connect-src|\*/.test(PREVIEW_CSP), 'no host, no wildcard, no connect-src grant')
+})
+
+test('preview intent route: sent at once only within 3 s of the user stepping into the frame', () => {
+  assert.equal(previewIntentRoute(10_000, 0), 'ask', 'never seen: ask')
+  assert.equal(previewIntentRoute(10_000, 9_000), 'send')
+  assert.equal(previewIntentRoute(10_000, 7_000), 'send', 'exactly 3 s')
+  assert.equal(previewIntentRoute(10_001, 7_000), 'ask', 'older than 3 s: ask')
+  assert.equal(previewIntentRoute(10_000, 11_000), 'ask', 'a time in the future does not count')
 })

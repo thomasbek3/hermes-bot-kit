@@ -14583,8 +14583,8 @@ function parseMetadata(value) {
   if (!value) return null;
   if (typeof value === "object") return value;
   try {
-    const parsed = JSON.parse(String(value));
-    return parsed && typeof parsed === "object" ? parsed : null;
+    const parsed2 = JSON.parse(String(value));
+    return parsed2 && typeof parsed2 === "object" ? parsed2 : null;
   } catch {
     return null;
   }
@@ -15126,6 +15126,13 @@ function extractMedia(text2) {
   });
   return { text: out.replace(/\n{3,}/g, "\n\n").trim(), media };
 }
+function remoteImageHost(url) {
+  try {
+    return new URL(String(url)).host;
+  } catch {
+    return "";
+  }
+}
 function mediaReadRequest(path, scope) {
   return {
     path: `/api/fs/read-data-url?path=${encodeURIComponent(filePath(path))}`,
@@ -15262,13 +15269,13 @@ function validateCard(value) {
 function cardFromRead(result) {
   if (!result || result.binary || typeof result.text !== "string" || !result.text) return { ok: false, reason: "unreadable" };
   if (result.truncated || result.text.length > MAX_CARD_CHARS) return { ok: false, reason: "too-large" };
-  let parsed;
+  let parsed2;
   try {
-    parsed = JSON.parse(result.text);
+    parsed2 = JSON.parse(result.text);
   } catch {
     return { ok: false, reason: "json" };
   }
-  const card = validateCard(parsed);
+  const card = validateCard(parsed2);
   return card ? { ok: true, card } : { ok: false, reason: "schema" };
 }
 function isFinalCard(card) {
@@ -15293,6 +15300,8 @@ var PREVIEW_MIN_HEIGHT = 120;
 var PREVIEW_MAX_HEIGHT = 1200;
 var PREVIEW_DEFAULT_HEIGHT = 280;
 var INTENT_THROTTLE_MS = 1e3;
+var PREVIEW_GESTURE_MS = 3e3;
+var PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:";
 var SIZE_TYPE = "hermes-inline-preview-size";
 var INTENT_TYPE = "hermes-inline-preview-intent";
 var ACK_TYPE = "hermes-inline-preview-intent-ack";
@@ -15305,7 +15314,7 @@ function previewPrelude(vars, font, colorScheme) {
   const tokens = Object.entries(vars || {}).filter(([name, value]) => /^--[a-z-]+$/.test(name) && typeof value === "string" && value && !/[<>{};]/.test(value)).map(([name, value]) => `${name}:${value}`).join(";");
   const safeFont = typeof font === "string" && font && !/[<>{};]/.test(font) ? `font-family:${font};` : "";
   const scheme = colorScheme === "dark" ? "dark" : "light";
-  return `<style>:root{color-scheme:${scheme};${tokens}}html,body{margin:0;padding:0;background:transparent;color:var(--foreground,inherit);${safeFont}}</style>`;
+  return `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}"><style>:root{color-scheme:${scheme};${tokens}}html,body{margin:0;padding:0;background:transparent;color:var(--foreground,inherit);${safeFont}}</style>`;
 }
 function previewScript(token) {
   const t = JSON.stringify(String(token));
@@ -15332,6 +15341,9 @@ function previewIntentFrom(data, token, now, lastAcceptedAt) {
   const elapsed = now - lastAcceptedAt;
   if (lastAcceptedAt > 0 && elapsed < INTENT_THROTTLE_MS) return { kind: "reject", id, ack: { ok: false, error: "throttled", retryAfterMs: INTENT_THROTTLE_MS - elapsed } };
   return { kind: "accept", id, prompt };
+}
+function previewIntentRoute(now, lastUserAt) {
+  return lastUserAt > 0 && now >= lastUserAt && now - lastUserAt <= PREVIEW_GESTURE_MS ? "send" : "ask";
 }
 function previewAck(token, id, ack) {
   return { type: ACK_TYPE, token, id, ack };
@@ -16180,14 +16192,14 @@ function cutRewoundRows(rows, rowId2) {
 function survivorRowIdsFrom(result) {
   const rawMap = result?.survivor_row_id_map;
   if (rawMap && typeof rawMap === "object" && !Array.isArray(rawMap)) {
-    const parsed = /* @__PURE__ */ new Map();
+    const parsed2 = /* @__PURE__ */ new Map();
     for (const [oldId, newId] of Object.entries(rawMap)) {
       const previous = Number(oldId);
       if (!Number.isInteger(previous)) continue;
-      if (newId === null) parsed.set(previous, null);
-      else if (typeof newId === "number" && Number.isInteger(newId)) parsed.set(previous, newId);
+      if (newId === null) parsed2.set(previous, null);
+      else if (typeof newId === "number" && Number.isInteger(newId)) parsed2.set(previous, newId);
     }
-    return parsed;
+    return parsed2;
   }
   const raw = result?.survivor_user_row_ids;
   if (!Array.isArray(raw)) return void 0;
@@ -16287,11 +16299,11 @@ function parseSlash(text2) {
   const arg = (match[2] || "").trim();
   return { name, raw, arg, command: `${match[1]}${arg ? ` ${arg}` : ""}` };
 }
-function slashSurface(parsed) {
-  if (!parsed) return "none";
-  if (parsed.name === "new") return parsed.arg ? "exec" : "new-guard";
-  if (["compress", "status", "help", "title", "steer", "queue", "model", "undo", "retry"].includes(parsed.name)) return parsed.name;
-  if (DESKTOP_ONLY.has(parsed.raw) || DESKTOP_ONLY.has(parsed.name)) return "desktop";
+function slashSurface(parsed2) {
+  if (!parsed2) return "none";
+  if (parsed2.name === "new") return parsed2.arg ? "exec" : "new-guard";
+  if (["compress", "status", "help", "title", "steer", "queue", "model", "undo", "retry"].includes(parsed2.name)) return parsed2.name;
+  if (DESKTOP_ONLY.has(parsed2.raw) || DESKTOP_ONLY.has(parsed2.name)) return "desktop";
   return "exec";
 }
 var str2 = (value) => typeof value === "string" ? value : "";
@@ -17166,17 +17178,17 @@ function createChatController(bot, deps, options = {}) {
     }
   }
   async function runSlash(text2, depth = 0) {
-    const parsed = parseSlash(text2);
-    if (!parsed) return { ok: false };
-    const surface = slashSurface(parsed);
+    const parsed2 = parseSlash(text2);
+    if (!parsed2) return { ok: false };
+    const surface = slashSurface(parsed2);
     const id = `cmd:${now()}:${Math.random().toString(36).slice(2, 7)}`;
-    const show = (output, extra = {}) => commandItem(id, { command: `/${parsed.command}`, output, running: false, ...extra });
-    commandItem(id, { command: `/${parsed.command}`, output: "", running: true });
+    const show = (output, extra = {}) => commandItem(id, { command: `/${parsed2.command}`, output, running: false, ...extra });
+    commandItem(id, { command: `/${parsed2.command}`, output: "", running: true });
     try {
       switch (surface) {
         case "new-guard":
         case "compress": {
-          const focus = surface === "compress" ? parsed.arg : "";
+          const focus = surface === "compress" ? parsed2.arg : "";
           const lead = surface === "new-guard" ? "This Bot Chat never resets: compacting instead (same conversation, fresh working context).\n" : "";
           const res = await withRuntime(
             (runtimeId) => deps.requestForBot(bot, "session.compress", { session_id: runtimeId, ...focus ? { focus_topic: focus } : {} }, { timeoutMs: COMPRESS_TIMEOUT_MS })
@@ -17201,10 +17213,10 @@ function createChatController(bot, deps, options = {}) {
           show("Pick this bot’s model in the profile panel (Model).");
           return { ok: true };
         case "desktop":
-          show(`/${parsed.raw} is a command for the Hermes window itself (not this chat). Run it from any Hermes composer.`);
+          show(`/${parsed2.raw} is a command for the Hermes window itself (not this chat). Run it from any Hermes composer.`);
           return { ok: true };
         case "steer": {
-          if (!parsed.arg) {
+          if (!parsed2.arg) {
             show("Usage: /steer <what to change>");
             return { ok: true };
           }
@@ -17212,19 +17224,19 @@ function createChatController(bot, deps, options = {}) {
             let outcome = "uncertain";
             let detail = "";
             try {
-              const res = await withRuntime((runtimeId) => deps.requestForBot(bot, "session.steer", { session_id: runtimeId, text: parsed.arg }));
+              const res = await withRuntime((runtimeId) => deps.requestForBot(bot, "session.steer", { session_id: runtimeId, text: parsed2.arg }));
               outcome = res?.status === "queued" ? "accepted" : res?.status === "rejected" ? "refused" : "uncertain";
             } catch (error) {
               outcome = steerFailure(error);
               detail = String(error?.message || error);
             }
             if (outcome === "accepted") {
-              show(`Steered: “${parsed.arg}” reaches the reply after its next tool call.`);
+              show(`Steered: “${parsed2.arg}” reaches the reply after its next tool call.`);
               return { ok: true };
             }
             if (outcome === "uncertain") {
               show(
-                `Steer not confirmed${detail ? ` (${detail})` : ""}: “${parsed.arg}” may already have reached the reply, so it was not queued as well. The chat is re-read; send it again yourself only if it is missing.`,
+                `Steer not confirmed${detail ? ` (${detail})` : ""}: “${parsed2.arg}” may already have reached the reply, so it was not queued as well. The chat is re-read; send it again yourself only if it is missing.`,
                 { error: true }
               );
               void refresh();
@@ -17232,23 +17244,23 @@ function createChatController(bot, deps, options = {}) {
             }
           }
           removeItem(id);
-          const sent = await sendDraft(parsed.arg, [], { extra: { queued: true } });
+          const sent = await sendDraft(parsed2.arg, [], { extra: { queued: true } });
           return { ok: sent.ok };
         }
         case "undo":
         case "retry":
-          return await runRewindCommand(parsed, id, show, depth);
+          return await runRewindCommand(parsed2, id, show, depth);
         case "queue": {
-          if (!parsed.arg) {
+          if (!parsed2.arg) {
             show("Usage: /queue <message to send after the current reply>");
             return { ok: true };
           }
           removeItem(id);
-          const sent = await sendDraft(parsed.arg, [], { extra: { queued: true } });
+          const sent = await sendDraft(parsed2.arg, [], { extra: { queued: true } });
           return { ok: sent.ok };
         }
         default:
-          return await execSlash(parsed, id, show, depth);
+          return await execSlash(parsed2, id, show, depth);
       }
     } catch (error) {
       show(`error: ${String(error?.message || error)}`, { error: true });
@@ -17258,14 +17270,14 @@ function createChatController(bot, deps, options = {}) {
   function removeItem(id) {
     setChat((chat) => ({ ...chat, items: chat.items.filter((item) => item.id !== id) }));
   }
-  async function execSlash(parsed, id, show, depth) {
+  async function execSlash(parsed2, id, show, depth) {
     let dispatch = null;
     let execError = null;
     try {
-      const res = await withRuntime((runtimeId) => deps.requestForBot(bot, "slash.exec", { session_id: runtimeId, command: parsed.command }));
+      const res = await withRuntime((runtimeId) => deps.requestForBot(bot, "slash.exec", { session_id: runtimeId, command: parsed2.command }));
       dispatch = parseCommandDispatch(res);
       if (!dispatch) {
-        const body = typeof res?.output === "string" && res.output || `/${parsed.raw}: no output`;
+        const body = typeof res?.output === "string" && res.output || `/${parsed2.raw}: no output`;
         show(res?.warning ? `warning: ${res.warning}
 ${body}` : body);
         return { ok: true };
@@ -17274,7 +17286,7 @@ ${body}` : body);
       execError = error;
       if (slashExecFailure(error) === "uncertain") {
         show(
-          `error: /${parsed.raw} not confirmed (${String(error?.message || error)}). It may have run, so it was not run again; the chat is re-read, check it before repeating the command.`,
+          `error: /${parsed2.raw} not confirmed (${String(error?.message || error)}). It may have run, so it was not run again; the chat is re-read, check it before repeating the command.`,
           { error: true }
         );
         void refresh();
@@ -17284,12 +17296,12 @@ ${body}` : body);
     if (!dispatch) {
       try {
         dispatch = parseCommandDispatch(
-          await withRuntime((runtimeId) => deps.requestForBot(bot, "command.dispatch", { session_id: runtimeId, name: parsed.raw, arg: parsed.arg }))
+          await withRuntime((runtimeId) => deps.requestForBot(bot, "command.dispatch", { session_id: runtimeId, name: parsed2.raw, arg: parsed2.arg }))
         );
       } catch (error) {
         const message2 = String(error?.message || error);
         if (execError && /not a quick\/plugin\/(?:bundle\/)?skill command/i.test(message2)) {
-          show(`error: /${parsed.raw} failed: ${String(execError?.message || execError)}`, { error: true });
+          show(`error: /${parsed2.raw} failed: ${String(execError?.message || execError)}`, { error: true });
         } else show(`error: ${message2}`, { error: true });
         return { ok: false };
       }
@@ -17305,17 +17317,17 @@ ${body}` : body);
     if (dispatch.type === "alias") {
       removeItem(id);
       if (depth > 3) return { ok: false };
-      return runSlash(`/${dispatch.target}${parsed.arg ? ` ${parsed.arg}` : ""}`, depth + 1);
+      return runSlash(`/${dispatch.target}${parsed2.arg ? ` ${parsed2.arg}` : ""}`, depth + 1);
     }
     if ((dispatch.type === "send" || dispatch.type === "prefill") && dispatch.notice) show(dispatch.notice);
     else removeItem(id);
     const message = (dispatch.message || "").trim();
     if (dispatch.type === "prefill") return { ok: true, prefill: message };
     if (!message) {
-      show(`/${parsed.raw}: ${dispatch.type === "skill" ? "skill payload missing message" : "empty message"}`, { error: true });
+      show(`/${parsed2.raw}: ${dispatch.type === "skill" ? "skill payload missing message" : "empty message"}`, { error: true });
       return { ok: false };
     }
-    const display = (dispatch.display || "").trim() || `/${parsed.command}`;
+    const display = (dispatch.display || "").trim() || `/${parsed2.command}`;
     const sent = await sendDraft(display, [], { submitText: message, ...state.chat.busy ? { extra: { queued: true } } : {} });
     return { ok: sent.ok };
   }
@@ -17430,14 +17442,14 @@ ${body}` : body);
     return { served: true, ok: true, count, content: receipt?.target_message?.content };
   }
   const rewoundText = (content) => typeof content === "string" ? content : retryText(content) ?? "";
-  async function runRewindCommand(parsed, id, show, depth) {
-    const intent = parsed.name;
-    if (intent === "undo" && parsed.arg && !/^[1-9]\d*$/.test(parsed.arg)) {
+  async function runRewindCommand(parsed2, id, show, depth) {
+    const intent = parsed2.name;
+    if (intent === "undo" && parsed2.arg && !/^[1-9]\d*$/.test(parsed2.arg)) {
       show("Usage: /undo [N] (back up N user turns, default 1)");
       return { ok: true };
     }
-    const res = await canonicalRewind({ turnsBack: intent === "undo" && parsed.arg ? Number(parsed.arg) : 1, intent });
-    if (!res.served) return execSlash(parsed, id, show, depth);
+    const res = await canonicalRewind({ turnsBack: intent === "undo" && parsed2.arg ? Number(parsed2.arg) : 1, intent });
+    if (!res.served) return execSlash(parsed2, id, show, depth);
     void refresh();
     if (!res.ok) {
       if (res.nothing) show(intent === "retry" ? "Nothing to retry." : "Nothing to undo.");
@@ -21318,6 +21330,7 @@ var ADAPT_SRC = (
 .gbo-card-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; color: var(--color-text-primary); }
 .gbo-card-desc { font-size: 14px; line-height: 20px; letter-spacing: 0.14px; color: var(--color-text-tertiary); }
 .gbo-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.gbo-connect-url-blocked { flex-basis: 100%; overflow-wrap: anywhere; }
 .gbo-card-error { font-size: 13px; line-height: 18px; color: var(--color-danger-text); }
 .gbo-q legend { font-size: 15px; font-weight: 600; line-height: 22px; }
 .gbo-choice {
@@ -21420,6 +21433,23 @@ var ADAPT_SRC = (
 }
 .gbo-preview-name { font-weight: 500; overflow-wrap: anywhere; }
 .gbo-preview-why { color: var(--color-text-tertiary); font-size: 13px; }
+/* A page's message waits here until the user sends or dismisses it. */
+.gbo-preview-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.gbo-preview-ask {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 10px 8px 14px;
+  border-radius: 14px; background: var(--color-bubble-agent-flat); font-size: 14px; line-height: 20px;
+}
+.gbo-preview-ask-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 220px; min-width: 0; }
+.gbo-preview-ask-lead { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-preview-ask-prompt { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text-primary); }
+.gbo-preview-ask-actions { display: flex; gap: 8px; flex: none; }
+.gbo-preview-ask-actions .gbo-pill-btn { height: 30px; }
+/* A card row whose message differs from its label shows the message too. */
+.gbo-ask-label.is-stacked { display: flex; flex-direction: column; }
+.gbo-ask-send {
+  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 12px; line-height: 16px; color: var(--color-text-tertiary);
+}
 
 /* Buttons the override keeps: in the reference's .btn--sm idiom. */
 .gbo-pill-btn {
@@ -21591,6 +21621,12 @@ var CHAT_CSS = (
   border: 1px solid var(--gbo-border); background: var(--gbo-bg); font: var(--gbo-text-body-sm); cursor: pointer;
 }
 .gbo-media-file.is-error { color: var(--gbo-destructive); cursor: default; }
+.gbo-media-remote {
+  display: inline-flex; align-items: center; gap: 2px; max-width: min(100%, 360px); height: 30px; padding: 0 12px; border-radius: 999px;
+  border: 1px dashed var(--gbo-border); background: var(--gbo-bg); color: inherit; font: var(--gbo-text-body-sm); cursor: pointer;
+}
+.gbo-media-remote-host { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.gbo-media-remote-load { flex: none; font-weight: 500; }
 
 /* ── C19 / C20 composer popover, command cards, C29 mic ─────────────── */
 .gbo-composer-wrap { position: relative; }
@@ -24824,7 +24860,10 @@ function Actions({ card, scope, labelledBy }) {
           onClick: () => void click(action),
           children: [
             /* @__PURE__ */ jsx8("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
-            /* @__PURE__ */ jsx8("span", { className: "gbo-ask-label", children: action.label }),
+            action.send !== action.label ? /* @__PURE__ */ jsxs7("span", { className: "gbo-ask-label is-stacked", children: [
+              /* @__PURE__ */ jsx8("span", { className: "gbo-ask-label-main", children: action.label }),
+              /* @__PURE__ */ jsx8("span", { className: "gbo-ask-send", title: action.send, children: action.send })
+            ] }) : /* @__PURE__ */ jsx8("span", { className: "gbo-ask-label", children: action.label }),
             on ? /* @__PURE__ */ jsx8("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx8(IconCheck, {}) }) : null
           ]
         },
@@ -24913,6 +24952,43 @@ function PreviewFrame({ html, name, startHeight, scope }) {
   });
   const [height, setHeight] = React7.useState(startHeight);
   const lastIntent = React7.useRef(0);
+  const lastUser = React7.useRef(0);
+  const [pending, setPending] = React7.useState(null);
+  const pendingRef = React7.useRef(null);
+  const sendFromFrame = React7.useCallback(
+    (prompt, reply) => {
+      void scope.sendIntent(prompt).then(
+        (result) => reply(result.ok ? { ok: true } : { ok: false, error: "undelivered" }),
+        () => reply({ ok: false, error: "undelivered" })
+      );
+    },
+    [scope]
+  );
+  const replyTo = React7.useCallback(
+    (id, ack) => {
+      const source = frame.current?.contentWindow;
+      if (source && id !== null) source.postMessage(previewAck(token, id, ack), "*");
+    },
+    [token]
+  );
+  const hold = (next) => {
+    pendingRef.current = next;
+    setPending(next);
+  };
+  React7.useEffect(() => {
+    const win = globalThis.window;
+    if (!win?.addEventListener) return void 0;
+    const seen = () => {
+      const el = frame.current;
+      if (el && win.document?.activeElement === el) lastUser.current = Date.now();
+    };
+    const onBlur = () => {
+      seen();
+      timers().setTimeout(seen, 0);
+    };
+    win.addEventListener("blur", onBlur);
+    return () => win.removeEventListener("blur", onBlur);
+  }, []);
   React7.useLayoutEffect(() => {
     const theme = themeFor(wrap.current, scope.theme);
     setDoc(previewDocument(html, token, previewPrelude(theme.vars, theme.font, theme.scheme)));
@@ -24934,16 +25010,41 @@ function PreviewFrame({ html, name, startHeight, scope }) {
         if (decision.id !== null) source.postMessage(previewAck(token, decision.id, ack), "*");
       };
       if (decision.kind === "reject") return reply(decision.ack);
-      lastIntent.current = Date.now();
-      void scope.sendIntent(decision.prompt).then(
-        (result) => reply(result.ok ? { ok: true } : { ok: false, error: "undelivered" }),
-        () => reply({ ok: false, error: "undelivered" })
-      );
+      const now = Date.now();
+      lastIntent.current = now;
+      if (previewIntentRoute(now, lastUser.current) === "send") return sendFromFrame(decision.prompt, reply);
+      const older = pendingRef.current;
+      if (older) replyTo(older.id, { ok: false, error: "replaced" });
+      hold({ id: decision.id, prompt: decision.prompt });
     };
     win.addEventListener("message", onMessage);
     return () => win.removeEventListener("message", onMessage);
-  }, [token, scope]);
-  return /* @__PURE__ */ jsx8("div", { className: "gbo-preview", ref: wrap, children: doc ? /* @__PURE__ */ jsx8("iframe", { ref: frame, className: "gbo-preview-frame", title: name, sandbox: "allow-scripts", srcDoc: doc, style: { height } }) : null });
+  }, [token, sendFromFrame, replyTo]);
+  const send = () => {
+    const ask = pendingRef.current;
+    if (!ask) return;
+    hold(null);
+    sendFromFrame(ask.prompt, (ack) => replyTo(ask.id, ack));
+  };
+  const dismiss = () => {
+    const ask = pendingRef.current;
+    if (!ask) return;
+    hold(null);
+    replyTo(ask.id, { ok: false, error: "dismissed" });
+  };
+  return /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-wrap", children: [
+    /* @__PURE__ */ jsx8("div", { className: "gbo-preview", ref: wrap, children: doc ? /* @__PURE__ */ jsx8("iframe", { ref: frame, className: "gbo-preview-frame", title: name, sandbox: "allow-scripts", srcDoc: doc, style: { height } }) : null }),
+    pending ? /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-ask", role: "group", "aria-label": `${name} wants to send a message`, children: [
+      /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-ask-text", children: [
+        /* @__PURE__ */ jsx8("span", { className: "gbo-preview-ask-lead", children: "This page wants to send:" }),
+        /* @__PURE__ */ jsx8("span", { className: "gbo-preview-ask-prompt", children: pending.prompt })
+      ] }),
+      /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-ask-actions", children: [
+        /* @__PURE__ */ jsx8("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: send, children: "Send" }),
+        /* @__PURE__ */ jsx8("button", { type: "button", className: "gbo-pill-btn", onClick: dismiss, children: "Dismiss" })
+      ] })
+    ] }) : null
+  ] });
 }
 function PreviewDirective({ attrs, source, scope }) {
   const rel = workspaceRelPath(attrs.file);
@@ -25007,7 +25108,7 @@ function saveDataUrl(dataUrl, name) {
   }
 }
 function OwnerMedia({ bot, item }) {
-  const [src, setSrc] = React8.useState(item.remote ? item.path : "");
+  const [src, setSrc] = React8.useState("");
   const [error, setError] = React8.useState("");
   const wantsRead = !item.remote && item.kind !== "file";
   React8.useEffect(() => {
@@ -25025,6 +25126,17 @@ function OwnerMedia({ bot, item }) {
       live = false;
     };
   }, [bot, item.path, wantsRead]);
+  if (item.kind === "image" && item.remote && !src) {
+    const host3 = remoteImageHost(item.path);
+    return /* @__PURE__ */ jsxs8("button", { type: "button", className: "gbo-media-remote", title: item.path, onClick: () => setSrc(item.path), children: [
+      /* @__PURE__ */ jsxs8("span", { className: "gbo-media-remote-host", children: [
+        "Image from ",
+        host3
+      ] }),
+      /* @__PURE__ */ jsx9("span", { "aria-hidden": "true", children: " · " }),
+      /* @__PURE__ */ jsx9("span", { className: "gbo-media-remote-load", children: "Load" })
+    ] });
+  }
   if (item.kind === "image") {
     if (error) return /* @__PURE__ */ jsxs8("span", { className: "gbo-media-file is-error", title: error, children: [
       item.name,
@@ -26015,9 +26127,9 @@ function restFailure(error) {
   let detail = m ? m[2].trim() : message.trim();
   if (m) {
     try {
-      const parsed = JSON.parse(detail);
-      if (typeof parsed?.detail === "string") detail = parsed.detail;
-      else if (Array.isArray(parsed?.detail)) detail = parsed.detail.map((d2) => String(d2?.msg || d2)).join("; ");
+      const parsed2 = JSON.parse(detail);
+      if (typeof parsed2?.detail === "string") detail = parsed2.detail;
+      else if (Array.isArray(parsed2?.detail)) detail = parsed2.detail.map((d2) => String(d2?.msg || d2)).join("; ");
     } catch {
     }
   }
@@ -26191,6 +26303,26 @@ function slackCheckedLabel(at) {
   return `Connected · checked ${when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
+// src/core/urls.js
+function parsed(value) {
+  try {
+    return new URL(String(value));
+  } catch {
+    return null;
+  }
+}
+var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]"]);
+function isSlackAuthorizationUrl(value) {
+  const url = parsed(value);
+  return Boolean(url && url.protocol === "https:" && url.hostname === "slack.com" && url.pathname === "/oauth/v2/authorize");
+}
+function isOpenableConnectUrl(value) {
+  const url = parsed(value);
+  if (!url) return false;
+  if (url.protocol === "https:") return Boolean(url.hostname);
+  return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+}
+
 // src/core/slackConnect.js
 var base3 = "/api/plugins/slack-connect";
 function connectRequest(scope, route, method = "GET", body) {
@@ -26253,14 +26385,6 @@ function refreshTokenError(value) {
   if (!s) return "Paste the refresh token";
   if (!s.startsWith("xoxe-") || /\s/.test(s) || s.length <= 13) return "Paste the complete refresh token starting with xoxe-";
   return null;
-}
-function isSlackAuthorizationUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "slack.com" && url.pathname === "/oauth/v2/authorize";
-  } catch {
-    return false;
-  }
 }
 
 // src/ui/slackActions.ts
@@ -28951,6 +29075,7 @@ var TARGET_STATE = {
   not_connected: "Not connected"
 };
 function openExternal(url) {
+  if (!isOpenableConnectUrl(url)) return;
   try {
     ;
     globalThis.window?.open?.(url, "_blank", "noopener,noreferrer");
@@ -29008,7 +29133,10 @@ function ConnectionCard({ waiting, onRespond }) {
               field.name
             )) : null,
             open ? /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-              target?.connect_url ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => openExternal(String(target.connect_url)), children: "Sign in" }) : /* @__PURE__ */ jsx21("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: "Approve" }),
+              target?.connect_url && !isOpenableConnectUrl(String(target.connect_url)) ? /* @__PURE__ */ jsxs19("div", { className: "gbo-card-desc gbo-connect-url-blocked", children: [
+                "This sign-in link was not opened because it is not an https address: ",
+                /* @__PURE__ */ jsx21("code", { children: String(target.connect_url) })
+              ] }) : target?.connect_url ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => openExternal(String(target.connect_url)), children: "Sign in" }) : /* @__PURE__ */ jsx21("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: "Approve" }),
               /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ targets: [{ name, status: "skipped" }] }), children: "Not now" })
             ] }) : null
           ]

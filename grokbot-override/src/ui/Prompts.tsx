@@ -15,6 +15,7 @@
 import * as React from 'react'
 
 import { bareChoice, choiceLetter, clarifyFilled, clarifyPicks } from '../core/prompts.js'
+import { isOpenableConnectUrl } from '../core/urls.js'
 import { openInBotMode } from './app'
 import { IconCheck } from './iconsRoster'
 
@@ -245,7 +246,9 @@ const TARGET_STATE: Record<string, string> = {
   not_connected: 'Not connected'
 }
 
+/** Opens only an allowed sign-in link (core/urls.js isOpenableConnectUrl). */
 function openExternal(url: string) {
+  if (!isOpenableConnectUrl(url)) return
   try {
     ;(globalThis as any).window?.open?.(url, '_blank', 'noopener,noreferrer')
   } catch {
@@ -310,7 +313,11 @@ function ConnectionCard({ waiting, onRespond }: { waiting: any; onRespond: (resu
               : null}
             {open ? (
               <div className="gbo-card-actions">
-                {target?.connect_url ? (
+                {target?.connect_url && !isOpenableConnectUrl(String(target.connect_url)) ? (
+                  <div className="gbo-card-desc gbo-connect-url-blocked">
+                    This sign-in link was not opened because it is not an https address: <code>{String(target.connect_url)}</code>
+                  </div>
+                ) : target?.connect_url ? (
                   <button type="button" className="gbo-pill-btn is-primary" onClick={() => openExternal(String(target.connect_url))}>
                     Sign in
                   </button>

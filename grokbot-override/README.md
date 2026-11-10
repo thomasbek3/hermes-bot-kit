@@ -105,7 +105,16 @@ In the override's chat a bot can show cards instead of describing things in pros
 
   It goes to `<profile-home>/skills/agent-cards/SKILL.md`. An `agent-cards` skill you wrote yourself is
   left alone. The `::preview{file="page.html"}` line (a small HTML page in a sandboxed frame) works the same
-  way and needs no skill beyond a bot that writes the file.
+  way and needs no skill beyond a bot that writes the file. A preview has **no network** (its frame carries
+  the policy `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
+  font-src data:; media-src data: blob:`), so a page must be self-contained: inline styles and scripts,
+  images as `data:` URLs. A page's `window.hermes.send` / `data-hermes-send` message goes out at once only
+  right after you clicked into that frame; otherwise the exact text waits under the frame with **Send** and
+  **Dismiss**.
+- **What bot output can do on its own.** A card row shows the message it sends under its label when the two
+  differ. A web image in a reply (`![…](https://…)`) is not fetched until you click **Load** on its
+  "Image from <host>" placeholder; files from the bot's own machine show at once. A connection's
+  **Sign in** opens only `https:` links (and `http:` to this machine); any other link is shown as text.
 - **Toolsets.** For Desktop chat a bot needs the **`file`** toolset (to write card files) and the
   **`clarify`** toolset (to ask question cards). Check them under **Skills, tools and model** in the
   profile panel.

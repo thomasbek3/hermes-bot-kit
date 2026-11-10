@@ -57,6 +57,12 @@ export const CHAT_CSS = /* css */ `
   border: 1px solid var(--gbo-border); background: var(--gbo-bg); font: var(--gbo-text-body-sm); cursor: pointer;
 }
 .gbo-media-file.is-error { color: var(--gbo-destructive); cursor: default; }
+.gbo-media-remote {
+  display: inline-flex; align-items: center; gap: 2px; max-width: min(100%, 360px); height: 30px; padding: 0 12px; border-radius: 999px;
+  border: 1px dashed var(--gbo-border); background: var(--gbo-bg); color: inherit; font: var(--gbo-text-body-sm); cursor: pointer;
+}
+.gbo-media-remote-host { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.gbo-media-remote-load { flex: none; font-weight: 500; }
 
 /* ── C19 / C20 composer popover, command cards, C29 mic ─────────────── */
 .gbo-composer-wrap { position: relative; }

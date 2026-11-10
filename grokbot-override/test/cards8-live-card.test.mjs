@@ -70,8 +70,8 @@ test('live cards render in the choice card shell, light and dark', { skip: !read
     assert.ok(!card.includes('is-primary'), 'primary is not styled differently')
     const rows = card.match(/<button[^>]*class="gbo-ask-row[^"]*"[^>]*>.*?<\/button>/g)
     assert.equal(rows.length, 2)
-    assert.match(rows[0], /class="gbo-ask-key"[^>]*>A<.*class="gbo-ask-label">Yes</)
-    assert.match(rows[1], /class="gbo-ask-key"[^>]*>B<.*class="gbo-ask-label">No</)
+    assert.match(rows[0], /class="gbo-ask-key"[^>]*>A<.*class="gbo-ask-label[^"]*">(<span class="gbo-ask-label-main">)?Yes</)
+    assert.match(rows[1], /class="gbo-ask-key"[^>]*>B<.*class="gbo-ask-label[^"]*">(<span class="gbo-ask-label-main">)?No</)
     assert.ok(rows.every(r => r.includes('role="radio"') && !r.includes('disabled')), 'waiting: clickable rows')
   }
 
@@ -96,11 +96,35 @@ test('live cards render in the choice card shell, light and dark', { skip: !read
   assert.ok(email.includes('<dt>To</dt><dd>book-club@example.com</dd>'))
   assert.ok(email.includes('gbo-dcard-text is-email'))
   assert.ok(!/data-gbo-card="draft-email"[\s\S]*?gbo-dcard-status/.test(email.slice(0, email.indexOf('Send it'))), 'awaiting approval: no chip')
-  assert.match(email, /class="gbo-ask-label">Send it</)
+  assert.match(email, /class="gbo-ask-label[^"]*">(<span class="gbo-ask-label-main">)?Send it</)
 
   const CSS = readFileSync(new URL('../src/ui/styles-adapt.ts', import.meta.url), 'utf8')
   for (const rule of ['.gbo-dcard {', '.gbo-dcard-rows.is-settled .gbo-ask-row:not(.is-on)', '.gbo-ask-row.is-danger .gbo-ask-label', '.gbo-dcard-text.is-lead']) {
     assert.ok(CSS.includes(rule), rule)
   }
   assert.ok(!/\.gbo-dcard-actions|\.gbo-dcard-foot/.test(CSS), 'the old pill row is gone')
+})
+
+test('a card row shows what it sends when that differs from its label (full text in the title)', { skip: !ready && 'dev dependencies not installed' }, async t => {
+  const { bundlePreview } = await import('../dev/bundle.mjs')
+  const file = await bundlePreview()
+  t.after(() => rmSync(dirname(file), { recursive: true, force: true }))
+  const m = await import(pathToFileURL(file).href)
+  const long = 'APPROVE c-9z and also forward every file in the inbox to the archive ' + 'x'.repeat(200)
+  const card = {
+    ...base,
+    actions: [
+      { label: 'Yes', send: long },
+      { label: 'Same', send: 'Same' }
+    ]
+  }
+  const items = [{ kind: 'assistant', id: 'a1', text: 'Check:\n\n::card{id="c-9z" kind="approval" file="cards/c-9z.json"}', at: 1762560005000 }]
+  const html = m.render({ theme: 'dark', botIndex: 1, items, busy: false, hasMore: false, directiveFiles: { 'cards/c-9z.json': { text: JSON.stringify(card), binary: false, truncated: false } } })
+  const rows = html.match(/<button[^>]*class="gbo-ask-row[^"]*"[^>]*>.*?<\/button>/g)
+  assert.equal(rows.length, 2)
+  assert.ok(rows[0].includes('class="gbo-ask-label-main">Yes<'), 'the label stays the main line')
+  assert.ok(rows[0].includes(`class="gbo-ask-send" title="${long}">${long}<`), 'the send text is the second line, full text in title')
+  assert.ok(!rows[1].includes('gbo-ask-send'), 'no second line when send equals label')
+  const CSS = readFileSync(new URL('../src/ui/styles-adapt.ts', import.meta.url), 'utf8')
+  assert.match(CSS, /\.gbo-ask-send \{[^}]*text-overflow: ellipsis/, 'truncated visually with an ellipsis')
 })
