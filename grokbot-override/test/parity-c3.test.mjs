@@ -46,7 +46,7 @@ test('C3 create: hidden, follows profile config, eager title, no kickoff on the 
   assert.equal(result.created, true)
   assert.equal(result.row.id, 'st-new')
   const create = gw.calls.find(c => c.method === 'session.create')
-  assert.deepEqual(create.params, { profile: 'scholar', title: 'Bot Chat', hidden: true, follow_profile_config: true })
+  assert.deepEqual(create.params, { profile: 'scholar', title: 'Bot Chat', hidden: true, follow_profile_config: true, source: 'desktop' })
   assert.deepEqual(create.options, { spawnPriority: 'foreground' })
   assert.deepEqual(gw.calls.find(c => c.method === 'session.title').params, { session_id: 'rt-new', title: 'Bot Chat' })
   assert.ok(!gw.methods().includes('prompt.submit'), 'no intro turn on an ordinary open')

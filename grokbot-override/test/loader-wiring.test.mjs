@@ -66,7 +66,7 @@ test('loader-faithful R13 → C3: a new bot is created and its Bot Chat is born 
   const of = method => calls.filter(c => c.method === method)
   assert.equal(of('profiles.create').length, 1)
   assert.equal(of('session.create').length, 1, 'one Bot Chat: the click path did not mint a second one')
-  assert.deepEqual(of('session.create')[0].params, { profile: 'newbie', title: 'Bot Chat', hidden: true, follow_profile_config: true })
+  assert.deepEqual(of('session.create')[0].params, { profile: 'newbie', title: 'Bot Chat', hidden: true, follow_profile_config: true, source: 'desktop' })
   assert.deepEqual(of('session.title')[0].params, { session_id: 'rt-newbie', title: 'Bot Chat' })
   const intro = of('prompt.submit')
   assert.equal(intro.length, 1, 'the intro is sent exactly once')

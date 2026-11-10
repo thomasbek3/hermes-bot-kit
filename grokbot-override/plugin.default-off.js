@@ -15175,6 +15175,15 @@ function rpcErrorParts(error) {
   const reason = typeof data?.reason === "string" ? data.reason : "";
   return { code, data, reason, message };
 }
+function withoutRefusedParams(error, params, keep = []) {
+  const { data, reason } = rpcErrorParts(error);
+  if (reason !== "invalid_params" || !Array.isArray(data?.fields) || !params || typeof params !== "object") return null;
+  const drop = [...new Set(data.fields.map((field) => String(field).split(".")[0]))].filter((field) => !keep.includes(field) && Object.prototype.hasOwnProperty.call(params, field));
+  if (!drop.length) return null;
+  const next = { ...params };
+  for (const field of drop) delete next[field];
+  return next;
+}
 var HOST_PRE_SEND = /\bnot connected\b|execution identity unavailable|^Session revision unavailable|^No retained rewind to replay|is not available on the shared gateway yet/i;
 var DISPATCH_REFUSED_CODES = /* @__PURE__ */ new Set([-32600, -32602, -32601, 4e3, 5035]);
 function isDispatchRefusal(parts) {
@@ -15300,6 +15309,7 @@ function roomPostFailure(error) {
 
 // src/core/create-chat.js
 var KICKOFF_TEXT = "Hey, tell me about yourself!";
+var CREATE_SOURCE = "desktop";
 var KICKOFF_DELAY_MS = 400;
 var creations = /* @__PURE__ */ new Map();
 function creationKey(bot) {
@@ -15316,17 +15326,22 @@ function createCanonicalChat(requestForBot2, bot, { kickoff = false, kickoffText
     const existing = await findCanonicalChat(requestForBot2, bot);
     if (existing?.id) return { row: existing, runtimeId: "", created: false, adopted: true };
     const route = botConnectionRoute(bot);
-    const res = await requestForBot2(
-      bot,
-      "session.create",
-      {
-        profile: backendTargetProfile(route, name),
-        title: CANONICAL_CHAT_TITLE,
-        hidden: true,
-        follow_profile_config: true
-      },
-      { spawnPriority: "foreground" }
-    );
+    const params = {
+      profile: backendTargetProfile(route, name),
+      title: CANONICAL_CHAT_TITLE,
+      hidden: true,
+      follow_profile_config: true,
+      source: CREATE_SOURCE
+    };
+    const create = (body) => requestForBot2(bot, "session.create", body, { spawnPriority: "foreground" });
+    let res;
+    try {
+      res = await create(params);
+    } catch (error) {
+      const corrected = withoutRefusedParams(error, params, ["profile"]);
+      if (!corrected) throw error;
+      res = await create(corrected);
+    }
     const sid = String(res?.stored_session_id || "");
     const runtime = String(res?.session_id || "");
     let titled = false;
@@ -16086,15 +16101,12 @@ var WATCH_FIRST_MS = 1e4;
 var WATCH_MAX_MS = 6e4;
 var REATTACH_DELAYS_MS = [1e3, 5e3, 3e4];
 var RECONNECTING_NOTICE_MS = 1e4;
-var RESUME_KEYS = Object.freeze(["session_id", "profile", "omit_messages"]);
+var RESUME_KEYS = Object.freeze(["session_id", "profile", "omit_messages", "source"]);
+var SESSION_SOURCE = "desktop";
 function correctedResumeParams(error, params, canonical) {
   const { code, data, reason } = rpcErrorParts(error);
   if (reason === "invalid_params" && Array.isArray(data?.fields)) {
-    const drop = data.fields.map((field) => String(field).split(".")[0]).filter((field) => field !== "session_id" && field !== "profile" && Object.prototype.hasOwnProperty.call(params, field));
-    if (!drop.length) return null;
-    const next = { ...params };
-    for (const field of drop) delete next[field];
-    return next;
+    return withoutRefusedParams(error, params, ["session_id", "profile"]);
   }
   if (code === 4007 || reason === "not_found" || code === 4001 && !reason) {
     const other = canonicalIds(canonical).find((id) => id !== params.session_id);
@@ -16428,7 +16440,8 @@ function createChatController(bot, deps, options = {}) {
     const params = {
       session_id: state.storedId,
       profile: String(bot?.name || "default"),
-      omit_messages: !withHistory
+      omit_messages: !withHistory,
+      source: SESSION_SOURCE
     };
     for (const key of resumeDropped) delete params[key];
     return params;

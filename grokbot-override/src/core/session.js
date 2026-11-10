@@ -82,7 +82,8 @@ import {
   rewindFailure,
   slashExecFailure,
   steerFailure,
-  submitDelivery
+  submitDelivery,
+  withoutRefusedParams
 } from './outcomes.js'
 import { applyEvent, emptyLive, finishTurn, initialChatState, inputRequestFrom, unshownTurnText } from './reducer.js'
 import { resolveBotConnectionRoute } from './routing.js'
@@ -131,7 +132,14 @@ export const RECONNECTING_NOTICE_MS = 10_000
 // session_controls.py:327: 4001 invalid_params, data.fields = the keys).
 // `inline_images` is sidecar-only; sending it left every new bot's chat
 // "paused (invalid_params)".
-export const RESUME_KEYS = Object.freeze(['session_id', 'profile', 'omit_messages'])
+// `source: 'desktop'` is what stock Desktop sends on every resume
+// (use-session-actions/resume-owner.ts primaryResumeParams): the gateway then
+// builds the agent for the desktop chat surface (tui_gateway/agent_factory.py
+// _resolve_session_source; agent/prompt_builder.py platform hints: rendered
+// markdown, MEDIA:, ::preview widgets, cards) instead of the terminal UI it
+// assumes when no source is sent. Both contracts take a free-form `source`.
+export const RESUME_KEYS = Object.freeze(['session_id', 'profile', 'omit_messages', 'source'])
+export const SESSION_SOURCE = 'desktop'
 
 /** A refused session.resume, corrected once: the params without the keys an
  *  `invalid_params` refusal names (never session_id or profile), or, when the
@@ -140,13 +148,7 @@ export const RESUME_KEYS = Object.freeze(['session_id', 'profile', 'omit_message
 export function correctedResumeParams(error, params, canonical) {
   const { code, data, reason } = rpcErrorParts(error)
   if (reason === 'invalid_params' && Array.isArray(data?.fields)) {
-    const drop = data.fields
-      .map(field => String(field).split('.')[0])
-      .filter(field => field !== 'session_id' && field !== 'profile' && Object.prototype.hasOwnProperty.call(params, field))
-    if (!drop.length) return null
-    const next = { ...params }
-    for (const field of drop) delete next[field]
-    return next
+    return withoutRefusedParams(error, params, ['session_id', 'profile'])
   }
   if (code === 4007 || reason === 'not_found' || (code === 4001 && !reason)) {
     const other = canonicalIds(canonical).find(id => id !== params.session_id)
@@ -547,7 +549,8 @@ export function createChatController(bot, deps, options = {}) {
     const params = {
       session_id: state.storedId,
       profile: String(bot?.name || 'default'),
-      omit_messages: !withHistory
+      omit_messages: !withHistory,
+      source: SESSION_SOURCE
     }
     for (const key of resumeDropped) delete params[key]
     return params

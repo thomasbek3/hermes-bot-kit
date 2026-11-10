@@ -72,7 +72,7 @@ test('a new bot’s Bot Chat attaches live on the first session.resume (the auth
   assert.equal(state.reconnecting, false)
   const resumes = gw.calls.filter(c => c.method === 'session.resume')
   assert.equal(resumes.length, 1, 'one resume, no retry needed')
-  assert.deepEqual(resumes[0].params, { session_id: STORED, profile: 'welcome', omit_messages: true })
+  assert.deepEqual(resumes[0].params, { session_id: STORED, profile: 'welcome', omit_messages: true, source: 'desktop' })
   for (const key of Object.keys(resumes[0].params)) assert.ok(CANONICAL_RESUME_KEYS.has(key), `${key} is in CanonicalResumeParams`)
   assert.ok(!gw.methods().includes('session.create'), 'no new chat')
 })
@@ -91,7 +91,7 @@ test('a refusal naming a key is corrected once (the key dropped for good); the c
   assert.equal(chat.get().runtimeId, 'rt-welcome')
   const resumes = gw.calls.filter(c => c.method === 'session.resume').map(c => c.params)
   assert.equal(resumes.length, 2)
-  assert.deepEqual(resumes[1], { session_id: STORED, profile: 'welcome' })
+  assert.deepEqual(resumes[1], { session_id: STORED, profile: 'welcome', source: 'desktop' })
   assert.equal(chat.get().attachError, null)
 })
 

@@ -22,7 +22,7 @@ test('open resolves the registry, reads the tail by REST, then attaches without 
   const rest = gw.calls[1].params
   assert.deepEqual(rest, { sessionId: 'tip', limit: 120, offset: 0 })
   const resume = gw.calls[2].params
-  assert.deepEqual(resume, { session_id: 'tip', profile: 'scholar', omit_messages: true })
+  assert.deepEqual(resume, { session_id: 'tip', profile: 'scholar', omit_messages: true, source: 'desktop' })
   assert.ok(!gw.methods().includes('session.create'))
 })
 

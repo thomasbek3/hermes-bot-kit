@@ -85,6 +85,23 @@ export function rpcErrorParts(error) {
   return { code, data, reason, message }
 }
 
+/** An `invalid_params` refusal (4001, data.fields = the refused key paths:
+ *  gateway/session_controls.py, the session authority's closed contracts)
+ *  corrected once: `params` without the top-level keys it names. Keys in
+ *  `keep` are never dropped. Null when it is not such a refusal or names
+ *  nothing we can drop. The dispatcher refuses before any handler runs, so
+ *  nothing was created or changed and resending is safe. */
+export function withoutRefusedParams(error, params, keep = []) {
+  const { data, reason } = rpcErrorParts(error)
+  if (reason !== 'invalid_params' || !Array.isArray(data?.fields) || !params || typeof params !== 'object') return null
+  const drop = [...new Set(data.fields.map(field => String(field).split('.')[0]))]
+    .filter(field => !keep.includes(field) && Object.prototype.hasOwnProperty.call(params, field))
+  if (!drop.length) return null
+  const next = { ...params }
+  for (const field of drop) delete next[field]
+  return next
+}
+
 const HOST_PRE_SEND = /\bnot connected\b|execution identity unavailable|^Session revision unavailable|^No retained rewind to replay|is not available on the shared gateway yet/i
 
 /** Thrown by the host (or this plugin's own routing) before any frame was
