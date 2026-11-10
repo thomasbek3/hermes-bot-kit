@@ -18,12 +18,20 @@
 #   KIT_SKIP_SECTIONS=1    skip Bot Sections
 #   KIT_SKIP_TASK_DOCK=1   skip Task Dock
 #   KIT_SKIP_GROKBOT=1     skip Grokbot Override
+#   KIT_CARDS_SKILL=1      also install the agent-cards skill (off by default)
+#   KIT_CARDS_SKILL=remove remove the agent-cards skill this kit installed, then stop
+#   KIT_CARDS_PROFILES     comma-separated profiles for the skill (default: all)
 set -euo pipefail
 
 KIT_REF="${KIT_REF:-v2026.11.09}"
 RAW_BASE="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
 PLUGIN_ROOT="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"
 GROKBOT_REL="grokbot-override/plugin.default-off.js"
+HERMES_ROOT="${HERMES_HOME:-$HOME/.hermes}"
+CARDS_REL="grokbot-override/skills/agent-cards/SKILL.md"
+# The kit's copy says so in its front matter; any other agent-cards skill is
+# the user's own and is never replaced or removed.
+CARDS_MARKER="hermes-bot-kit:"
 
 usage() {
   cat <<'EOF'
@@ -43,6 +51,13 @@ Env knobs:
   KIT_SKIP_SECTIONS=1    skip Bot Sections
   KIT_SKIP_TASK_DOCK=1   skip Task Dock
   KIT_SKIP_GROKBOT=1     skip Grokbot Override (installed switched off)
+  KIT_CARDS_SKILL=1      also install the agent-cards skill (cards in the
+                         Grokbot Override chat) into the skills folder of the
+                         default profile and every profile (off by default)
+  KIT_CARDS_SKILL=remove remove the agent-cards skill this kit installed from
+                         those folders, then stop (installs nothing)
+  KIT_CARDS_PROFILES     comma-separated profiles for the skill, e.g.
+                         default,helper ("default" is the root Hermes home)
 EOF
 }
 
@@ -57,6 +72,66 @@ case "${KIT_REF}" in
     echo "WARNING: installing from mutable ref '${KIT_REF}'; no release manifest guarantees apply." >&2
     ;;
 esac
+
+case "${KIT_CARDS_SKILL:-0}" in
+  0|1|remove) ;;
+  *)
+    echo "install.sh: KIT_CARDS_SKILL must be 1 or remove (got '${KIT_CARDS_SKILL}')" >&2
+    exit 2
+    ;;
+esac
+
+# Hermes homes that get the agent-cards skill: the root home ("default") and
+# each profile home under profiles/, or just KIT_CARDS_PROFILES.
+cards_homes() {
+  local name dir
+  if [ -n "${KIT_CARDS_PROFILES:-}" ]; then
+    printf '%s\n' "${KIT_CARDS_PROFILES}" | tr ',' '\n' | while IFS= read -r name; do
+      name=$(printf '%s' "${name}" | tr -d '[:space:]')
+      [ -n "${name}" ] || continue
+      case "${name}" in
+        default) printf '%s\n' "${HERMES_ROOT}" ;;
+        *[!A-Za-z0-9._-]*|.|..)
+          echo "install.sh: skipping profile name '${name}' (letters, digits, . _ - only)" >&2
+          ;;
+        *)
+          if [ -d "${HERMES_ROOT}/profiles/${name}" ]; then
+            printf '%s\n' "${HERMES_ROOT}/profiles/${name}"
+          else
+            echo "install.sh: no profile '${name}' under ${HERMES_ROOT}/profiles; skipping it" >&2
+          fi
+          ;;
+      esac
+    done
+    return 0
+  fi
+  printf '%s\n' "${HERMES_ROOT}"
+  if [ -d "${HERMES_ROOT}/profiles" ]; then
+    for dir in "${HERMES_ROOT}/profiles"/*/; do
+      [ -d "${dir}" ] || continue
+      printf '%s\n' "${dir%/}"
+    done
+  fi
+}
+
+if [ "${KIT_CARDS_SKILL:-0}" = "remove" ]; then
+  cards_homes | while IFS= read -r home; do
+    [ -n "${home}" ] || continue
+    dest="${home}/skills/agent-cards/SKILL.md"
+    if [ ! -f "${dest}" ]; then
+      echo "Cards skill      -- not installed in ${home}"
+    elif grep -qF "${CARDS_MARKER}" "${dest}"; then
+      rm -f "${dest}"
+      rmdir "${home}/skills/agent-cards" 2>/dev/null || true
+      echo "Cards skill      -- removed from ${home}"
+    else
+      echo "Cards skill      -- ${dest} is not this kit's copy; left alone"
+    fi
+  done
+  echo
+  echo "Done. Chats started before this keep the skill until their session restarts."
+  exit 0
+fi
 
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE:-}" ] && [ -f "${BASH_SOURCE[0]:-}" ]; then
@@ -192,6 +267,11 @@ rollback_this_run() {
   rmdir "${PLUGIN_ROOT}/computer-viewer/vendor" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/computer-viewer" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}" 2>/dev/null || true
+  if [ "${CARDS_INSTALLED:-0}" = "1" ]; then
+    cards_homes 2>/dev/null | while IFS= read -r home; do
+      [ -n "${home}" ] && rmdir "${home}/skills/agent-cards" 2>/dev/null || true
+    done
+  fi
 }
 
 install_file() {
@@ -231,6 +311,9 @@ fi
 if [ "${KIT_SKIP_GROKBOT:-0}" != "1" ]; then
   need "${GROKBOT_REL}"
 fi
+if [ "${KIT_CARDS_SKILL:-0}" = "1" ]; then
+  need "${CARDS_REL}"
+fi
 
 if [ ! -s "${NEEDED_FILE}" ]; then
   echo "install.sh: nothing to install (all plugins skipped)"
@@ -258,6 +341,18 @@ else
     else
       echo "install.sh: ${KIT_REF} has no Grokbot Override in its manifest; skipping it." >&2
       grep -vxF "${GROKBOT_REL}" "${NEEDED_FILE}" > "${NEEDED_FILE}.next" || true
+      mv "${NEEDED_FILE}.next" "${NEEDED_FILE}"
+    fi
+  fi
+
+  # Releases before the cards skill joined the installer do not list it.
+  CARDS_INSTALLED=0
+  if grep -qxF "${CARDS_REL}" "${NEEDED_FILE}"; then
+    if manifest_has "${CARDS_REL}"; then
+      CARDS_INSTALLED=1
+    else
+      echo "install.sh: ${KIT_REF} has no agent-cards skill in its manifest; skipping it." >&2
+      grep -vxF "${CARDS_REL}" "${NEEDED_FILE}" > "${NEEDED_FILE}.next" || true
       mv "${NEEDED_FILE}.next" "${NEEDED_FILE}"
     fi
   fi
@@ -310,6 +405,12 @@ else
           exit 1
         }
         ;;
+      "${CARDS_REL}")
+        if [ "$(head -n 1 "${staged}")" != "---" ] || ! grep -qx 'name: agent-cards' "${staged}" || ! grep -qF "${CARDS_MARKER}" "${staged}"; then
+          echo "install.sh: downloaded agent-cards skill does not look right; aborting" >&2
+          exit 1
+        fi
+        ;;
       *.py)
         if command -v python3 >/dev/null 2>&1; then
           PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile "${staged}" || {
@@ -326,8 +427,23 @@ else
     local rel
     while IFS= read -r rel; do
       [ -n "${rel}" ] || continue
+      [ "${rel}" = "${CARDS_REL}" ] && continue
       install_file "${TMP_DIR}/${rel}" "${PLUGIN_ROOT}/$(dest_rel "${rel}")"
     done < "${NEEDED_FILE}"
+    if [ "${CARDS_INSTALLED}" = "1" ]; then
+      cards_homes > "${TMP_DIR}/.cards-homes"
+      : > "${TMP_DIR}/.cards-report"
+      while IFS= read -r home; do
+        [ -n "${home}" ] || continue
+        dest="${home}/skills/agent-cards/SKILL.md"
+        if [ -f "${dest}" ] && ! grep -qF "${CARDS_MARKER}" "${dest}"; then
+          printf 'Cards skill      -- %s is your own agent-cards skill; left alone\n' "${dest}" >> "${TMP_DIR}/.cards-report"
+          continue
+        fi
+        install_file "${TMP_DIR}/${CARDS_REL}" "${dest}"
+        printf 'Cards skill      -> %s\n' "${dest}" >> "${TMP_DIR}/.cards-report"
+      done < "${TMP_DIR}/.cards-homes"
+    fi
     if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
       # The hiperf helper scripts verify hiperf-agent.py against
       # MANIFEST.sha256, and fall back to a local copy when the network is
@@ -357,6 +473,9 @@ else
   if [ "${GROKBOT_INSTALLED}" = "1" ]; then
     echo "Grokbot Override -> ${PLUGIN_ROOT}/grokbot-override/plugin.js (installed switched off)"
   fi
+  if [ "${CARDS_INSTALLED}" = "1" ]; then
+    cat "${TMP_DIR}/.cards-report"
+  fi
 fi
 
 echo
@@ -366,3 +485,6 @@ echo "Bot Sections toggle: Cmd+Shift+P -> 'Bot Sections: toggle'."
 echo "Task Dock toggle: Cmd+Shift+P -> 'Task Dock: toggle'."
 echo "Grokbot Override (starts off): Cmd+Shift+P -> 'Grokbot Override: toggle'; run it again for stock Bot Mode."
 echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."
+if [ "${CARDS_INSTALLED:-0}" = "1" ]; then
+  echo "Cards skill: new chats load it; a chat started before keeps its old mode until its session restarts."
+fi
