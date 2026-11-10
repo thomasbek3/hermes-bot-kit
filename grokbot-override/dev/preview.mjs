@@ -84,7 +84,7 @@ function slackPages() {
 
 mkdirSync(outDir, { recursive: true })
 const file = await bundlePreview()
-const { render, renderAvatarSheet, DIRECTIVE_FILES, DIRECTIVE_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
+const { render, renderAvatarSheet, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
 const host = live ? hostCss() : ''
 if (live && !host) console.warn('no Hermes stylesheet found: rendering without the host cascade')
 // ROSTER indexes: 0 travel, 1 scholar, 4 recipes (pink), 5 sunny (yellow).
@@ -116,7 +116,15 @@ const pages = live ? {
   'dark-card-multi.html': { theme: 'dark', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
   // Live ::card and ::preview directives in the open chat.
   'light-card-directives.html': { theme: 'light', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES },
-  'dark-card-directives.html': { theme: 'dark', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES }
+  'dark-card-directives.html': { theme: 'dark', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES },
+  // Cards 8: live cards in the choice card's shell (an approval card waiting
+  // and settled, a running task card, a draft-email card).
+  ...Object.fromEntries(['light', 'dark'].flatMap(theme => [
+    [`${theme}-live-approval.html`, { theme, botIndex: 1, items: LIVE_APPROVAL_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: LIVE_APPROVAL_FILES }],
+    [`${theme}-live-approval-settled.html`, { theme, botIndex: 1, items: LIVE_APPROVAL_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: LIVE_APPROVAL_SETTLED_FILES }],
+    [`${theme}-live-task.html`, { theme, botIndex: 1, items: LIVE_TASK_ITEMS, busy: true, hasMore: false, pins: ['scholar'], directiveFiles: LIVE_TASK_FILES }],
+    [`${theme}-live-email.html`, { theme, botIndex: 1, items: LIVE_EMAIL_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES }]
+  ]))
 } : {
   'dark-chat.html': { theme: 'dark' },
   'light-chat.html': { theme: 'light' },

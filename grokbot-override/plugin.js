@@ -15219,6 +15219,7 @@ var CARD_STATES = ["pending", "running", "done", "error", "awaiting-approval"];
 var MAX_SEND_CHARS = 500;
 var MAX_CARD_CHARS = 32768;
 var MAX_ACTIONS = 3;
+var ACTION_STYLES = ["primary", "danger"];
 var isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 var filled = (value) => typeof value === "string" && value.trim().length > 0;
 var text = (value) => typeof value === "string" ? value : "";
@@ -15245,7 +15246,7 @@ function validateCard(value) {
     if (actions.length >= MAX_ACTIONS) break;
     if (!isObject(action) || !filled(action.label) || typeof action.send !== "string") continue;
     const send = action.send.trim().slice(0, MAX_SEND_CHARS);
-    if (send) actions.push({ label: action.label.trim(), style: action.style === "primary" ? "primary" : "default", send });
+    if (send) actions.push({ label: action.label.trim(), style: ACTION_STYLES.includes(action.style) ? action.style : "default", send });
   }
   return {
     schema: "card.v1",
@@ -15276,6 +15277,17 @@ function isFinalCard(card) {
 function statusLabel(status) {
   if (status?.label) return status.label;
   return { pending: "Pending", running: "Running", done: "Done", error: "Error", "awaiting-approval": "Awaiting approval" }[status?.state] || String(status?.state || "");
+}
+function cardChip(card) {
+  const state = card?.status?.state;
+  if (!card || card.kind === "approval" || !["running", "done", "error"].includes(state)) return null;
+  return { state, label: statusLabel(card.status) };
+}
+var LEAD_MAX_CHARS = 200;
+function cardLead(card) {
+  if (!card || !filled(card.title) || card.body?.length !== 1 || card.body[0].type !== "text") return null;
+  const line = card.body[0].text.trim();
+  return line && !line.includes("\n") && line.length <= LEAD_MAX_CHARS ? line : null;
 }
 var PREVIEW_MIN_HEIGHT = 120;
 var PREVIEW_MAX_HEIGHT = 1200;
@@ -21259,32 +21271,49 @@ var ADAPT_SRC = (
 .gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
 .gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
 .gbo-ask .gbo-card-error { padding: 0 8px 4px; }
-/* Live ::card and ::preview directives in the open chat: the same flat fill
-   as the bot's bubbles; a status chip; pill actions. */
-.gbo-directive { display: flex; flex-direction: column; align-self: stretch; max-width: 560px; margin: 4px 0; }
+/* Live ::card and ::preview directives in the open chat. A card sits in the
+   choice card's shell (flat fill, radius, padding, type sizes), roomy: at
+   least about 300px, at most a bubble's width. The title is the bold
+   heading, a one-line body the question under it, the actions the same
+   lettered rows; a quiet chip only for running, done and error. */
+.gbo-directive { display: flex; flex-direction: column; align-self: stretch; width: 100%; max-width: 560px; margin: 4px 0; box-sizing: border-box; }
 .gbo-dcard {
-  display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 18px;
-  background: var(--color-bubble-agent-flat); color: var(--color-text-primary); min-width: 0;
+  align-self: flex-start; width: fit-content; min-width: min(300px, calc(100vw - 48px)); max-width: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 6px; padding: 14px 8px 8px; border-radius: 18px;
+  background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
 }
-.gbo-dcard.is-loading { min-height: 84px; opacity: 0.6; }
-.gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.gbo-dcard.is-loading { width: 300px; min-height: 84px; opacity: 0.6; }
+.gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 0 8px; }
 .gbo-dcard-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; text-transform: none; }
-.gbo-dcard.is-unavailable .gbo-dcard-title { text-transform: capitalize; }
+.gbo-dcard.is-unavailable .gbo-dcard-title { padding: 0 8px; text-transform: capitalize; }
 .gbo-dcard-status {
-  flex: none; padding: 2px 8px; border-radius: var(--radius-full); font-size: 12px; line-height: 16px;
-  color: var(--color-text-secondary); box-shadow: var(--color-border-secondary) 0 0 0 1px inset;
+  flex: none; display: inline-flex; align-items: center; gap: 5px; margin-top: 3px;
+  font-size: 12px; line-height: 16px; color: var(--color-text-tertiary);
 }
 .gbo-dcard-status.is-done { color: var(--color-success-text); }
 .gbo-dcard-status.is-error { color: var(--color-danger-text); }
-.gbo-dcard-text { margin: 0; white-space: pre-wrap; font-size: 14px; line-height: 20px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.gbo-dcard-spin {
+  width: 10px; height: 10px; border-radius: 999px; border: 1.5px solid currentColor; border-right-color: transparent;
+  box-sizing: border-box; animation: gbo-spin 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .gbo-dcard-spin { animation: none; } }
+.gbo-dcard-text {
+  margin: 0; padding: 0 8px; white-space: pre-wrap; font-size: 14px; line-height: 20px; letter-spacing: 0.14px;
+  color: var(--color-text-secondary); overflow-wrap: anywhere;
+}
+.gbo-dcard-text.is-lead { margin-top: -4px; padding-bottom: 4px; font-size: var(--text-message, 15px); line-height: 22px; letter-spacing: 0.15px; color: var(--color-text-primary); }
 .gbo-dcard-text.is-email { color: var(--color-text-primary); }
-.gbo-dcard-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; font-size: 13px; line-height: 18px; }
+.gbo-dcard-kv {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; padding: 0 8px;
+  font-size: 14px; line-height: 20px; letter-spacing: 0.14px;
+}
 .gbo-dcard-kv dt { color: var(--color-text-tertiary); }
 .gbo-dcard-kv dd { margin: 0; overflow-wrap: anywhere; }
-.gbo-dcard-foot { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
-.gbo-dcard-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.gbo-dcard-actions .gbo-pill-btn svg { width: 14px; height: 14px; }
-.gbo-dcard-note { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-dcard-rows { margin-top: 2px; }
+.gbo-dcard-rows.is-settled .gbo-ask-row:not(.is-on) { opacity: 0.45; }
+.gbo-ask-row.is-danger .gbo-ask-label { color: var(--color-danger-text); }
+.gbo-dcard-note { padding: 0 8px 4px; font-size: 13px; line-height: 18px; color: var(--color-text-tertiary); }
+.gbo-dcard .gbo-card-error { padding: 0 8px 4px; }
 .gbo-preview { width: 100%; border-radius: 14px; overflow: hidden; }
 .gbo-preview.is-loading { height: 120px; background: var(--color-bubble-agent-flat); opacity: 0.6; }
 .gbo-preview-frame { display: block; width: 100%; border: 0; background: transparent; }
@@ -24590,12 +24619,11 @@ function Body({ body }) {
     (block, i) => block.type === "text" ? /* @__PURE__ */ jsx8("p", { className: "gbo-dcard-text", children: block.text }, i) : block.type === "kv" ? /* @__PURE__ */ jsx8(Rows, { rows: block.rows }, i) : /* @__PURE__ */ jsx8(Rows, { rows: block.items.map((f2) => [f2.label, f2.value]) }, i)
   ) });
 }
-function Actions({ card, scope }) {
+function Actions({ card, scope, labelledBy }) {
   const [sent, setSent] = React7.useState("");
   const [error, setError] = React7.useState("");
   const last = React7.useRef(0);
-  const frozen = Boolean(card.resolved);
-  if (!card.actions.length && !card.resolved) return null;
+  const frozen = Boolean(card.resolved || sent);
   const click = async (action) => {
     const at = Date.now();
     if (frozen || at - last.current < CLICK_THROTTLE_MS) return;
@@ -24608,41 +24636,63 @@ function Actions({ card, scope }) {
       setError(result.error || "Not sent");
     }
   };
-  return /* @__PURE__ */ jsxs7("div", { className: "gbo-dcard-foot", children: [
-    card.actions.length ? /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-actions", children: card.actions.map((action) => {
-      const chosen = card.resolved ? card.resolved.action === action.label : sent === action.label;
+  const picked = card.resolved ? card.resolved.action : sent;
+  const matched = card.actions.some((action) => action.label === picked);
+  if (!card.actions.length && !card.resolved && !error) return null;
+  return /* @__PURE__ */ jsxs7(Fragment4, { children: [
+    card.actions.length ? /* @__PURE__ */ jsx8("div", { className: `gbo-ask-rows gbo-dcard-rows${frozen ? " is-settled" : ""}`, role: "radiogroup", "aria-labelledby": labelledBy, children: card.actions.map((action, i) => {
+      const on = action.label === picked;
       return /* @__PURE__ */ jsxs7(
         "button",
         {
           type: "button",
-          className: `gbo-pill-btn${action.style === "primary" ? " is-primary" : ""}${chosen ? " is-chosen" : ""}`,
-          disabled: frozen || Boolean(sent),
-          "aria-pressed": chosen || void 0,
+          role: "radio",
+          "aria-checked": on,
+          disabled: frozen,
+          className: `gbo-ask-row${on ? " is-on" : ""}${action.style === "danger" ? " is-danger" : ""}`,
           onClick: () => void click(action),
           children: [
-            chosen ? /* @__PURE__ */ jsx8(IconCheck, {}) : null,
-            action.label
+            /* @__PURE__ */ jsx8("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
+            /* @__PURE__ */ jsx8("span", { className: "gbo-ask-label", children: action.label }),
+            on ? /* @__PURE__ */ jsx8("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx8(IconCheck, {}) }) : null
           ]
         },
         action.label
       );
     }) }) : null,
-    card.resolved ? /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-note", children: card.resolved.action }) : sent ? /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-note", children: "Sent" }) : null,
+    card.resolved && !matched ? /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-note", children: card.resolved.action }) : null,
     error ? /* @__PURE__ */ jsx8("div", { className: "gbo-card-error", role: "alert", children: error }) : null
   ] });
 }
 function CardView({ card, scope }) {
   const email = card.kind === "draft-email" ? card.email || { to: "", cc: "", subject: "", bodyText: "" } : null;
-  return /* @__PURE__ */ jsxs7("div", { className: `gbo-dcard is-${card.kind} is-${card.status.state}`, "data-gbo-card": card.kind, children: [
-    /* @__PURE__ */ jsxs7("div", { className: "gbo-dcard-head", children: [
-      /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-title", children: email?.subject || card.title }),
-      /* @__PURE__ */ jsx8("span", { className: `gbo-dcard-status is-${card.status.state}`, role: "status", children: statusLabel(card.status) })
-    ] }),
-    email ? /* @__PURE__ */ jsx8(Rows, { rows: [["To", email.to || "—"], ...email.cc.trim() ? [["Cc", email.cc]] : []] }) : null,
-    email?.bodyText ? /* @__PURE__ */ jsx8("p", { className: "gbo-dcard-text is-email", children: email.bodyText }) : null,
-    /* @__PURE__ */ jsx8(Body, { body: card.body }),
-    /* @__PURE__ */ jsx8(Actions, { card, scope })
-  ] });
+  const chip = cardChip(card);
+  const lead = email ? null : cardLead(card);
+  const titleId = React7.useId();
+  const settled = Boolean(card.resolved);
+  return /* @__PURE__ */ jsxs7(
+    "div",
+    {
+      className: `gbo-dcard is-${card.kind} is-${card.status.state}${settled ? " is-settled" : ""}`,
+      "data-gbo-card": card.kind,
+      role: "group",
+      "aria-labelledby": titleId,
+      children: [
+        /* @__PURE__ */ jsxs7("div", { className: "gbo-dcard-head", children: [
+          /* @__PURE__ */ jsx8("div", { className: "gbo-dcard-title", id: titleId, children: email?.subject || card.title }),
+          chip ? /* @__PURE__ */ jsxs7("span", { className: `gbo-dcard-status is-${chip.state}`, role: "status", children: [
+            chip.state === "running" ? /* @__PURE__ */ jsx8("span", { className: "gbo-dcard-spin", "aria-hidden": "true" }) : null,
+            chip.label
+          ] }) : null
+        ] }),
+        lead ? /* @__PURE__ */ jsx8("p", { className: "gbo-dcard-text is-lead", children: lead }) : null,
+        email ? /* @__PURE__ */ jsx8(Rows, { rows: [["To", email.to || "—"], ...email.cc.trim() ? [["Cc", email.cc]] : []] }) : null,
+        email?.bodyText ? /* @__PURE__ */ jsx8("p", { className: "gbo-dcard-text is-email", children: email.bodyText }) : null,
+        lead ? null : /* @__PURE__ */ jsx8(Body, { body: card.body }),
+        /* @__PURE__ */ jsx8(Actions, { card, scope, labelledBy: titleId })
+      ]
+    }
+  );
 }
 function CardDirective({ attrs, source, poll, scope }) {
   const rel = workspaceRelPath(attrs.file);

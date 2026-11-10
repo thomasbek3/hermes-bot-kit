@@ -128,6 +128,7 @@ const CARD_STATES = ['pending', 'running', 'done', 'error', 'awaiting-approval']
 export const MAX_SEND_CHARS = 500
 export const MAX_CARD_CHARS = 32768
 const MAX_ACTIONS = 3
+const ACTION_STYLES = ['primary', 'danger']
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const filled = value => typeof value === 'string' && value.trim().length > 0
@@ -158,7 +159,7 @@ export function validateCard(value) {
     if (actions.length >= MAX_ACTIONS) break
     if (!isObject(action) || !filled(action.label) || typeof action.send !== 'string') continue
     const send = action.send.trim().slice(0, MAX_SEND_CHARS)
-    if (send) actions.push({ label: action.label.trim(), style: action.style === 'primary' ? 'primary' : 'default', send })
+    if (send) actions.push({ label: action.label.trim(), style: ACTION_STYLES.includes(action.style) ? action.style : 'default', send })
   }
   return {
     schema: 'card.v1',
@@ -194,6 +195,25 @@ export function isFinalCard(card) {
 export function statusLabel(status) {
   if (status?.label) return status.label
   return { pending: 'Pending', running: 'Running', done: 'Done', error: 'Error', 'awaiting-approval': 'Awaiting approval' }[status?.state] || String(status?.state || '')
+}
+
+/** The chip a card shows, or null: only states that say something (running,
+ *  done, error). Approval cards and waiting states (pending,
+ *  awaiting-approval) show none; the rows are the question. */
+export function cardChip(card) {
+  const state = card?.status?.state
+  if (!card || card.kind === 'approval' || !['running', 'done', 'error'].includes(state)) return null
+  return { state, label: statusLabel(card.status) }
+}
+
+export const LEAD_MAX_CHARS = 200
+
+/** The card's question line: its body when that is one short text line under
+ *  a title (drawn at body size, not as small grey text); null otherwise. */
+export function cardLead(card) {
+  if (!card || !filled(card.title) || card.body?.length !== 1 || card.body[0].type !== 'text') return null
+  const line = card.body[0].text.trim()
+  return line && !line.includes('\n') && line.length <= LEAD_MAX_CHARS ? line : null
 }
 
 // ── preview frames ────────────────────────────────────────────────────────

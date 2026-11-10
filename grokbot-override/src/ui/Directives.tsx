@@ -14,7 +14,9 @@
 import * as React from 'react'
 
 import {
+  cardChip,
   cardFromRead,
+  cardLead,
   isFinalCard,
   isHtmlFile,
   previewAck,
@@ -24,9 +26,9 @@ import {
   previewPrelude,
   previewStartHeight,
   splitDirectives,
-  statusLabel,
   workspaceRelPath
 } from '../core/directives.js'
+import { choiceLetter } from '../core/prompts.js'
 import { readBotWorkspaceText } from './app'
 import { IconCheck } from './iconsRoster'
 
@@ -116,12 +118,15 @@ function Body({ body }: { body: any[] }) {
   )
 }
 
-function Actions({ card, scope }: { card: any; scope: DirectiveScope }) {
+/** The actions as the clarify card's lettered rows (A, B, C…), stacked. A
+ *  click sends at once; after it, or once the file says resolved, the rows
+ *  stop being clickable and the chosen one is marked as a settled clarify
+ *  card marks it. */
+function Actions({ card, scope, labelledBy }: { card: any; scope: DirectiveScope; labelledBy: string }) {
   const [sent, setSent] = React.useState('')
   const [error, setError] = React.useState('')
   const last = React.useRef(0)
-  const frozen = Boolean(card.resolved)
-  if (!card.actions.length && !card.resolved) return null
+  const frozen = Boolean(card.resolved || sent)
   const click = async (action: any) => {
     const at = Date.now()
     if (frozen || at - last.current < CLICK_THROTTLE_MS) return
@@ -134,52 +139,81 @@ function Actions({ card, scope }: { card: any; scope: DirectiveScope }) {
       setError(result.error || 'Not sent')
     }
   }
+  const picked = card.resolved ? card.resolved.action : sent
+  const matched = card.actions.some((action: any) => action.label === picked)
+  if (!card.actions.length && !card.resolved && !error) return null
   return (
-    <div className="gbo-dcard-foot">
+    <>
       {card.actions.length ? (
-        <div className="gbo-dcard-actions">
-          {card.actions.map((action: any) => {
-            const chosen = card.resolved ? card.resolved.action === action.label : sent === action.label
+        <div className={`gbo-ask-rows gbo-dcard-rows${frozen ? ' is-settled' : ''}`} role="radiogroup" aria-labelledby={labelledBy}>
+          {card.actions.map((action: any, i: number) => {
+            const on = action.label === picked
             return (
               <button
                 key={action.label}
                 type="button"
-                className={`gbo-pill-btn${action.style === 'primary' ? ' is-primary' : ''}${chosen ? ' is-chosen' : ''}`}
-                disabled={frozen || Boolean(sent)}
-                aria-pressed={chosen || undefined}
+                role="radio"
+                aria-checked={on}
+                disabled={frozen}
+                className={`gbo-ask-row${on ? ' is-on' : ''}${action.style === 'danger' ? ' is-danger' : ''}`}
                 onClick={() => void click(action)}
               >
-                {chosen ? <IconCheck /> : null}
-                {action.label}
+                <span className="gbo-ask-key" aria-hidden="true">
+                  {choiceLetter(i)}
+                </span>
+                <span className="gbo-ask-label">{action.label}</span>
+                {on ? (
+                  <span className="gbo-ask-check" aria-hidden="true">
+                    <IconCheck />
+                  </span>
+                ) : null}
               </button>
             )
           })}
         </div>
       ) : null}
-      {card.resolved ? <div className="gbo-dcard-note">{card.resolved.action}</div> : sent ? <div className="gbo-dcard-note">Sent</div> : null}
+      {card.resolved && !matched ? <div className="gbo-dcard-note">{card.resolved.action}</div> : null}
       {error ? (
         <div className="gbo-card-error" role="alert">
           {error}
         </div>
       ) : null}
-    </div>
+    </>
   )
 }
 
+/** A live card in the clarify card's shell: the title as the bold heading,
+ *  a one-line body as the question under it, a quiet chip only for running,
+ *  done and error, then the body blocks and the lettered action rows. */
 export function CardView({ card, scope }: { card: any; scope: DirectiveScope }) {
   const email = card.kind === 'draft-email' ? card.email || { to: '', cc: '', subject: '', bodyText: '' } : null
+  const chip = cardChip(card)
+  const lead = email ? null : cardLead(card)
+  const titleId = React.useId()
+  const settled = Boolean(card.resolved)
   return (
-    <div className={`gbo-dcard is-${card.kind} is-${card.status.state}`} data-gbo-card={card.kind}>
+    <div
+      className={`gbo-dcard is-${card.kind} is-${card.status.state}${settled ? ' is-settled' : ''}`}
+      data-gbo-card={card.kind}
+      role="group"
+      aria-labelledby={titleId}
+    >
       <div className="gbo-dcard-head">
-        <div className="gbo-dcard-title">{email?.subject || card.title}</div>
-        <span className={`gbo-dcard-status is-${card.status.state}`} role="status">
-          {statusLabel(card.status)}
-        </span>
+        <div className="gbo-dcard-title" id={titleId}>
+          {email?.subject || card.title}
+        </div>
+        {chip ? (
+          <span className={`gbo-dcard-status is-${chip.state}`} role="status">
+            {chip.state === 'running' ? <span className="gbo-dcard-spin" aria-hidden="true" /> : null}
+            {chip.label}
+          </span>
+        ) : null}
       </div>
+      {lead ? <p className="gbo-dcard-text is-lead">{lead}</p> : null}
       {email ? <Rows rows={[['To', email.to || '—'], ...(email.cc.trim() ? ([['Cc', email.cc]] as [string, string][]) : [])]} /> : null}
       {email?.bodyText ? <p className="gbo-dcard-text is-email">{email.bodyText}</p> : null}
-      <Body body={card.body} />
-      <Actions card={card} scope={scope} />
+      {lead ? null : <Body body={card.body} />}
+      <Actions card={card} scope={scope} labelledBy={titleId} />
     </div>
   )
 }

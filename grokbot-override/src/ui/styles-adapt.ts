@@ -315,32 +315,49 @@ const ADAPT_SRC = /* css */ `
 .gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
 .gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
 .gbo-ask .gbo-card-error { padding: 0 8px 4px; }
-/* Live ::card and ::preview directives in the open chat: the same flat fill
-   as the bot's bubbles; a status chip; pill actions. */
-.gbo-directive { display: flex; flex-direction: column; align-self: stretch; max-width: 560px; margin: 4px 0; }
+/* Live ::card and ::preview directives in the open chat. A card sits in the
+   choice card's shell (flat fill, radius, padding, type sizes), roomy: at
+   least about 300px, at most a bubble's width. The title is the bold
+   heading, a one-line body the question under it, the actions the same
+   lettered rows; a quiet chip only for running, done and error. */
+.gbo-directive { display: flex; flex-direction: column; align-self: stretch; width: 100%; max-width: 560px; margin: 4px 0; box-sizing: border-box; }
 .gbo-dcard {
-  display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 18px;
-  background: var(--color-bubble-agent-flat); color: var(--color-text-primary); min-width: 0;
+  align-self: flex-start; width: fit-content; min-width: min(300px, calc(100vw - 48px)); max-width: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 6px; padding: 14px 8px 8px; border-radius: 18px;
+  background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
 }
-.gbo-dcard.is-loading { min-height: 84px; opacity: 0.6; }
-.gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.gbo-dcard.is-loading { width: 300px; min-height: 84px; opacity: 0.6; }
+.gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 0 8px; }
 .gbo-dcard-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; text-transform: none; }
-.gbo-dcard.is-unavailable .gbo-dcard-title { text-transform: capitalize; }
+.gbo-dcard.is-unavailable .gbo-dcard-title { padding: 0 8px; text-transform: capitalize; }
 .gbo-dcard-status {
-  flex: none; padding: 2px 8px; border-radius: var(--radius-full); font-size: 12px; line-height: 16px;
-  color: var(--color-text-secondary); box-shadow: var(--color-border-secondary) 0 0 0 1px inset;
+  flex: none; display: inline-flex; align-items: center; gap: 5px; margin-top: 3px;
+  font-size: 12px; line-height: 16px; color: var(--color-text-tertiary);
 }
 .gbo-dcard-status.is-done { color: var(--color-success-text); }
 .gbo-dcard-status.is-error { color: var(--color-danger-text); }
-.gbo-dcard-text { margin: 0; white-space: pre-wrap; font-size: 14px; line-height: 20px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.gbo-dcard-spin {
+  width: 10px; height: 10px; border-radius: 999px; border: 1.5px solid currentColor; border-right-color: transparent;
+  box-sizing: border-box; animation: gbo-spin 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .gbo-dcard-spin { animation: none; } }
+.gbo-dcard-text {
+  margin: 0; padding: 0 8px; white-space: pre-wrap; font-size: 14px; line-height: 20px; letter-spacing: 0.14px;
+  color: var(--color-text-secondary); overflow-wrap: anywhere;
+}
+.gbo-dcard-text.is-lead { margin-top: -4px; padding-bottom: 4px; font-size: var(--text-message, 15px); line-height: 22px; letter-spacing: 0.15px; color: var(--color-text-primary); }
 .gbo-dcard-text.is-email { color: var(--color-text-primary); }
-.gbo-dcard-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; font-size: 13px; line-height: 18px; }
+.gbo-dcard-kv {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; padding: 0 8px;
+  font-size: 14px; line-height: 20px; letter-spacing: 0.14px;
+}
 .gbo-dcard-kv dt { color: var(--color-text-tertiary); }
 .gbo-dcard-kv dd { margin: 0; overflow-wrap: anywhere; }
-.gbo-dcard-foot { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
-.gbo-dcard-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.gbo-dcard-actions .gbo-pill-btn svg { width: 14px; height: 14px; }
-.gbo-dcard-note { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-dcard-rows { margin-top: 2px; }
+.gbo-dcard-rows.is-settled .gbo-ask-row:not(.is-on) { opacity: 0.45; }
+.gbo-ask-row.is-danger .gbo-ask-label { color: var(--color-danger-text); }
+.gbo-dcard-note { padding: 0 8px 4px; font-size: 13px; line-height: 18px; color: var(--color-text-tertiary); }
+.gbo-dcard .gbo-card-error { padding: 0 8px 4px; }
 .gbo-preview { width: 100%; border-radius: 14px; overflow: hidden; }
 .gbo-preview.is-loading { height: 120px; background: var(--color-bubble-agent-flat); opacity: 0.6; }
 .gbo-preview-frame { display: block; width: 100%; border: 0; background: transparent; }

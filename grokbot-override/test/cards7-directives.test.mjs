@@ -155,7 +155,8 @@ test('loader-faithful: the open chat draws the card and the preview from the bot
   assert.ok(!chatEl.textContent.includes('::card{'), 'no raw directive text')
   assert.ok(chatEl.textContent.includes('Drafted it.'))
   assert.equal(cardEl.querySelector('.gbo-dcard-title').textContent, 'Send the weekly note?')
-  assert.equal(cardEl.querySelector('.gbo-dcard-status').textContent, 'Awaiting approval')
+  assert.equal(cardEl.querySelector('.gbo-dcard-status'), null, 'a waiting approval card has no chip (Cards 8)')
+  assert.equal(cardEl.querySelectorAll('.gbo-ask-row').length, 2, 'actions are lettered rows')
   const cardRead = reads.find(r => r.path.includes('cards%2Fc-1a2b.json'))
   assert.equal(cardRead.connectionId, 'home-server', 'read on the bot’s own machine')
   assert.equal(cardRead.profile, 'scholar')
@@ -182,8 +183,11 @@ test('loader-faithful: the open chat draws the card and the preview from the bot
 
   // The bot rewrites the file: the next poll shows it settled.
   card = { ...CARD, status: { state: 'done' }, resolved: { action: 'Send it', at: '2026-11-09T10:00:00Z' } }
-  await waitFor(() => chatEl.querySelector('.gbo-dcard-status')?.textContent === 'Done', 'the polled update', 6000)
+  assert.ok([...cardEl.querySelectorAll('.gbo-ask-row')].every(b => b.disabled), 'clicked: rows frozen at once')
+  assert.ok(send.classList.contains('is-on'), 'clicked: the chosen row is marked')
+  await waitFor(() => chatEl.querySelector('.gbo-dcard.is-settled'), 'the polled update', 6000)
   assert.ok([...chatEl.querySelectorAll('.gbo-dcard button')].every(b => b.disabled), 'resolved: buttons frozen')
+  assert.ok(chatEl.querySelector('.gbo-dcard .gbo-ask-row.is-on')?.textContent.includes('Send it'), 'resolved: the chosen row stays marked')
   const settledReads = reads.filter(r => r.path.includes('cards%2Fc-1a2b.json')).length
   await new Promise(resolve => setTimeout(resolve, 3300))
   assert.equal(reads.filter(r => r.path.includes('cards%2Fc-1a2b.json')).length, settledReads, 'polling stops once final')

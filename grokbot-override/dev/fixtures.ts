@@ -126,3 +126,51 @@ export const DIRECTIVE_FILES: Record<string, any> = {
       '</div></body></html>'
   }
 }
+
+/** Live cards (Cards 8): an approval card waiting and settled, a running
+ *  task card, and a draft-email card, each as the bot's workspace file would
+ *  hold it. Demo content. */
+const liveCardItems = (id: string, ask: string, reply: string, extra: any[] = []) => [
+  { kind: 'user', id: `${id}-u1`, text: ask, at: night },
+  { kind: 'assistant', id: `${id}-a1`, text: `${reply}\n\n::card{id="${id}" file="cards/${id}.json"}`, at: night + 30_000 },
+  ...extra
+]
+const APPROVAL_CARD = {
+  schema: 'card.v1',
+  kind: 'approval',
+  title: 'Quick check',
+  status: { state: 'awaiting-approval', label: 'Your choice' },
+  body: [{ type: 'text', text: 'Can you see this card?' }],
+  actions: [
+    { label: 'Yes', style: 'primary', send: 'APPROVE c-8a yes' },
+    { label: 'No', send: 'DENY c-8a no' }
+  ]
+}
+export const LIVE_APPROVAL_ITEMS = liveCardItems('c-8a', 'can you ask me with a yes/no card?', 'Sure:')
+export const LIVE_APPROVAL_FILES: Record<string, any> = { 'cards/c-8a.json': { text: JSON.stringify(APPROVAL_CARD) } }
+export const LIVE_APPROVAL_SETTLED_ITEMS = liveCardItems('c-8a', 'can you ask me with a yes/no card?', 'Sure:', [
+  { kind: 'assistant', id: 'c-8a-a2', text: 'Great, the card works.', at: night + 60_000 }
+])
+export const LIVE_APPROVAL_SETTLED_FILES: Record<string, any> = {
+  'cards/c-8a.json': { text: JSON.stringify({ ...APPROVAL_CARD, status: { state: 'done' }, resolved: { action: 'Yes', at: '2026-11-09T21:00:00Z' } }) }
+}
+export const LIVE_TASK_ITEMS = liveCardItems('c-8t', 'tidy up my reading list', 'On it. I’ll keep this card up to date.')
+export const LIVE_TASK_FILES: Record<string, any> = {
+  'cards/c-8t.json': {
+    text: JSON.stringify({
+      schema: 'card.v1',
+      kind: 'task',
+      title: 'Tidying the reading list',
+      status: { state: 'running' },
+      body: [
+        { type: 'text', text: 'Merging duplicates and sorting by date added.' },
+        { type: 'kv', rows: [['Checked', '42 of 60'], ['Duplicates', '3 found']] }
+      ],
+      actions: [{ label: 'Stop', style: 'danger', send: 'STOP c-8t' }]
+    })
+  }
+}
+export const LIVE_EMAIL_ITEMS = [
+  DIRECTIVE_ITEMS[0],
+  { kind: 'assistant', id: 'd-a1', text: 'Drafted it. Nothing goes out until you say so.\n\n::card{id="c-7f3a" kind="draft-email" file="cards/c-7f3a.json"}', at: night + 30_000 }
+]
