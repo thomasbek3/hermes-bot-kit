@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Grokbot Override: the first message no longer vanishes (2026-11-10)**: in a new Bot Chat the bubble you
+  just sent disappeared (empty state plus "Thinking…") until the reply came, because a transcript re-read
+  that ran before the gateway stored the turn rebuilt the chat without it. A sent bubble now stays until
+  its stored row arrives and is then replaced by it, with no duplicate.
 - **The kit is slimmer (2026-11-10)**: it keeps Grokbot Override, the Computer pane (computer-viewer +
   orgo-computer), texting-style and the Slack pieces. **Bubble Mode, Task Dock and Bot Sections are
   retired** (their folders, tests and pictures are removed; history stays in git), and so are the six

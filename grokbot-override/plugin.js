@@ -14747,6 +14747,32 @@ function rowIdentity(row, index = 0) {
   if (durable !== void 0 && durable !== null && durable !== "") return `id:${durable}`;
   return `t:${row?.timestamp ?? ""}:${row?.role ?? ""}:${index}`;
 }
+function confirmedSends(sends, rows) {
+  const users = [];
+  (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    if (row?.role !== "user" || row.display_kind === "hidden") return;
+    users.push({ key: rowIdentity(row, index), text: rowText(row).trim() });
+  });
+  const claimed = /* @__PURE__ */ new Set();
+  const done = /* @__PURE__ */ new Set();
+  const fresh = (send) => users.filter((user) => !claimed.has(user.key) && !(send.known && send.known.has(user.key)));
+  const claim = (send, user) => {
+    claimed.add(user.key);
+    done.add(send.id);
+  };
+  const list = Array.isArray(sends) ? sends : [];
+  for (const send of list) {
+    const texts = [send.text, send.submitted].map((t) => String(t || "").trim()).filter(Boolean);
+    const hit = texts.length ? fresh(send).find((user) => texts.includes(user.text)) : void 0;
+    if (hit) claim(send, hit);
+  }
+  for (const send of list) {
+    if (done.has(send.id) || !send.byOrder) continue;
+    const hit = fresh(send)[0];
+    if (hit) claim(send, hit);
+  }
+  return done;
+}
 function mergeTailRows(loaded, tail) {
   const page = Array.isArray(tail) ? tail : [];
   const rows = Array.isArray(loaded) ? loaded : [];
@@ -16582,6 +16608,7 @@ function createChatController(bot, deps, options = {}) {
   let retireCancel = null;
   const deliveryChecks = /* @__PURE__ */ new Map();
   const payloads = /* @__PURE__ */ new Map();
+  const sends = /* @__PURE__ */ new Map();
   const staged = /* @__PURE__ */ new Map();
   const inFlightFiles = /* @__PURE__ */ new Map();
   const emit = () => {
@@ -16742,6 +16769,24 @@ function createChatController(bot, deps, options = {}) {
   }
   const keepLocal = (item) => item.failed || item.kind === "command" || item.kind === "clarify" || item.kind === "approval" && item.status === "pending";
   const keepLive = (item) => !isPersistedItem(item);
+  const isOpenSend = (item) => item?.kind === "user" && !item.failed && sends.has(item.id);
+  function keepingSends(items, rows, keep) {
+    const open2 = (Array.isArray(items) ? items : []).filter(isOpenSend);
+    if (!open2.length) return keep;
+    const done = confirmedSends(
+      open2.map((item) => {
+        const entry = sends.get(item.id);
+        return { id: item.id, text: item.text, submitted: entry.submitted, known: entry.known, byOrder: entry.accepted };
+      }),
+      rows
+    );
+    for (const id of done) sends.delete(id);
+    return (item) => isOpenSend(item) ? !done.has(item.id) : keep(item);
+  }
+  function openSendsMissingFrom(items, rows) {
+    const keep = keepingSends(items, rows, () => false);
+    return (Array.isArray(items) ? items : []).filter((item) => isOpenSend(item) && keep(item));
+  }
   async function open() {
     const mine = ++generation2;
     set({ phase: "resolving", error: null });
@@ -16794,7 +16839,7 @@ function createChatController(bot, deps, options = {}) {
         rows,
         loadedCount: rows.length,
         hasMore: rows.length >= HISTORY_PAGE,
-        chat: { ...initialChatState(rowsToItems(rows)) }
+        chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
       });
       loaded = true;
     } catch (error) {
@@ -16916,7 +16961,9 @@ function createChatController(bot, deps, options = {}) {
   function absorbSnapshot(snapshot, { withHistory = false, initial = false, replaceText = true } = {}) {
     setChat((chat) => {
       let items = chat.items;
-      if (withHistory && Array.isArray(snapshot?.messages)) items = historyToItems(snapshot.messages, { idPrefix: "r:" });
+      if (withHistory && Array.isArray(snapshot?.messages)) {
+        items = [...historyToItems(snapshot.messages, { idPrefix: "r:" }), ...openSendsMissingFrom(items, snapshot.messages)];
+      }
       const running = Boolean(snapshot?.running || snapshot?.info?.running);
       const inflight = snapshot?.inflight && typeof snapshot.inflight === "object" ? snapshot.inflight : null;
       let bubbleId = !initial && chat.live.bubbleId && items.some((item) => item.id === chat.live.bubbleId) ? chat.live.bubbleId : null;
@@ -17104,7 +17151,7 @@ function createChatController(bot, deps, options = {}) {
         rows,
         loadedCount: rows.length,
         hasMore: joined ? s.hasMore : tail.length >= HISTORY_PAGE,
-        chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(rows), keep) }
+        chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(rows), keepingSends(s.chat.items, rows, keep)) }
       };
     });
   }
@@ -17299,7 +17346,7 @@ function createChatController(bot, deps, options = {}) {
         rows: tail,
         loadedCount: tail.length,
         hasMore: tail.length >= HISTORY_PAGE,
-        chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(tail), keepLocal) }
+        chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(tail), keepingSends(s.chat.items, tail, keepLocal)) }
       }));
     } catch {
     }
@@ -17799,6 +17846,7 @@ ${body}` : body);
       return { ok: false, delivery: "not-sent", error: "These files were picked for another bot" };
     }
     const clientId = `local:${now()}:${Math.random().toString(36).slice(2, 8)}`;
+    sends.set(clientId, { known: new Set(state.rows.map(rowIdentity)), submitted: "", accepted: false });
     setChat((chat) => ({
       ...chat,
       items: [
@@ -17848,6 +17896,8 @@ ${body}` : body);
         payload.body = body;
         turnBefore = turnSeq;
         submittedOn = state.runtimeId;
+        const entry = sends.get(clientId);
+        if (entry) entry.submitted = String(body || "");
       }
     };
     try {
@@ -17869,6 +17919,8 @@ ${body}` : body);
       const accepted = status === "streaming" || status === "started" || !status || startsNow;
       const label = startsNow ? "" : status;
       const fresh = turnSeq === turnBefore;
+      const entry = sends.get(clientId);
+      if (entry) entry.accepted = true;
       set((s) => ({
         receipt: label && label !== "streaming" && label !== "started" ? label : null,
         chat: {
@@ -17906,6 +17958,8 @@ ${body}` : body);
   }
   function settleReceipt(clientId, payload, status, files) {
     payloads.delete(clientId);
+    if (status === "terminal" && sends.has(clientId)) sends.get(clientId).accepted = true;
+    else sends.delete(clientId);
     forgetStaged(files);
     setChat((chat) => ({
       ...chat,
@@ -17955,6 +18009,7 @@ ${body}` : body);
   function markDelivered(clientId, tail) {
     const payload = payloads.get(clientId);
     payloads.delete(clientId);
+    sends.delete(clientId);
     if (payload) forgetStaged(payload.attachments);
     deliveryChecks.get(clientId)?.();
     deliveryChecks.delete(clientId);
@@ -18024,6 +18079,7 @@ ${body}` : body);
     const item = state.chat.items.find((entry) => entry.id === clientId);
     if (!item || !item.failed || item.delivery !== "not-sent") return false;
     payloads.delete(clientId);
+    sends.delete(clientId);
     deliveryChecks.get(clientId)?.();
     deliveryChecks.delete(clientId);
     setChat((chat) => ({ ...chat, items: chat.items.filter((entry) => entry.id !== clientId) }));
@@ -18094,6 +18150,7 @@ ${body}` : body);
     for (const cancel of deliveryChecks.values()) cancel();
     deliveryChecks.clear();
     payloads.clear();
+    sends.clear();
     const runtimeId = state.runtimeId;
     const strays = runtimeId ? [...staged.entries()].filter(([key, entry]) => key.startsWith(`${runtimeId}|`) && entry.kind === "image" && !entry.mime && entry.path) : [];
     staged.clear();
