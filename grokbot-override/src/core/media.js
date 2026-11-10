@@ -210,3 +210,61 @@ export function dataUrlText(url) {
     return ''
   }
 }
+
+// ── the file viewer (ui/FileViewer.tsx: a file card opens it) ──
+
+/** Files above this many bytes are not previewed: Download only. */
+export const VIEWER_MAX_BYTES = 25_000_000
+
+const SHEET_EXT = new Set(['xlsx', 'xlsm', 'xlsb', 'xls', 'ods', 'csv', 'tsv'])
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico'])
+const DOC_EXT = new Set(['doc', 'docx', 'odt', 'rtf', 'pages', 'ppt', 'pptx', 'odp', 'key'])
+
+function extension(name) {
+  const value = String(name || '').split(/[?#]/, 1)[0]
+  const dot = value.lastIndexOf('.')
+  return dot > 0 ? value.slice(dot + 1).toLowerCase() : ''
+}
+
+/** How the viewer shows a file: 'sheet' (grid), 'pdf' (the platform's PDF
+ *  viewer), 'image', 'markdown' or 'text' (#38's text preview), or 'none'
+ *  (a "No preview" panel with Download). */
+export function viewerKind(name) {
+  const ext = extension(name)
+  if (SHEET_EXT.has(ext)) return 'sheet'
+  if (ext === 'pdf') return 'pdf'
+  if (IMAGE_EXT.has(ext)) return 'image'
+  return previewKind(name) || 'none'
+}
+
+/** The card's tile: 'sheet' (green sheet glyph), 'pdf', 'image', 'doc',
+ *  'text' (a page with lines) or 'file' (a plain page). */
+export function fileIconKind(name) {
+  const ext = extension(name)
+  if (SHEET_EXT.has(ext)) return 'sheet'
+  if (ext === 'pdf') return 'pdf'
+  if (IMAGE_EXT.has(ext)) return 'image'
+  if (DOC_EXT.has(ext)) return 'doc'
+  return previewKind(name) ? 'text' : 'file'
+}
+
+/** A data: URL's payload as bytes (null when it is not one). */
+export function dataUrlToBytes(url) {
+  const parts = dataUrlParts(url)
+  if (!parts) return null
+  try {
+    if (!parts.base64) return new TextEncoder().encode(decodeURIComponent(parts.body))
+    const binary = atob(parts.body.replace(/\s+/g, ''))
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+    return bytes
+  } catch {
+    return null
+  }
+}
+
+/** True when the bytes start with a PDF header ("%PDF-"). */
+export function looksLikePdf(bytes) {
+  if (!bytes || bytes.length < 5) return false
+  return String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]) === '%PDF-'
+}

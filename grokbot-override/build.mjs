@@ -59,6 +59,10 @@ const banner = `/*!
  *    It includes pako (MIT; Copyright (C) 1995-2013 Jean-loup Gailly and
  *    Mark Adler, (C) 2014-2017 Vitaly Puzrin and Andrey Tupitsin), whose
  *    permission notice is the MIT text reproduced below.
+ *  - The file viewer bundles SheetJS Community Edition 0.20.3 (the module
+ *    headed "xlsx.js (C) 2013-present SheetJS"), unmodified, Copyright (C)
+ *    2012-present SheetJS LLC, Apache License 2.0 (text below);
+ *    https://sheetjs.com, https://git.sheetjs.com/sheetjs/sheetjs.
  *
  * ─── MIT License (Grokbot Override / Hermes bot kit) ───────────────────────
  *
@@ -72,7 +76,7 @@ ${indent(licence('LICENSE-HERMES-AGENT-MIT'))}
  *
 ${indent(licence('LICENSE-THIRD-PARTY-MIT'))}
  *
- * ─── Apache License 2.0 (Rakazo) ───────────────────────────────────────────
+ * ─── Apache License 2.0 (Rakazo, SheetJS) ──────────────────────────────────
  *
 ${indent(licence('LICENSE-APACHE-2.0'))}
  */`

@@ -59,6 +59,18 @@ its Source Code Form is carried unminified inside `plugin.js`, and upstream live
 https://github.com/novnc/noVNC. The bundle includes pako (MIT, Copyright (C) 1995-2013 Jean-loup Gailly
 and Mark Adler, (C) 2014-2017 Vitaly Puzrin and Andrey Tupitsin).
 
+## SheetJS Community Edition (Apache License 2.0)
+
+The file viewer (`src/ui/FileViewer.tsx`) reads spreadsheets in the renderer with SheetJS Community Edition
+**0.20.3** (`src/core/sheetRead.js`), bundled unmodified into `plugin.js` (its module is the one headed
+`/*! xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */`). Copyright (C) 2012-present SheetJS LLC,
+Apache License 2.0; licence text: `LICENSE-APACHE-2.0` in this folder (the same text). SheetJS ships no NOTICE
+file. Installed from SheetJS's official tarball (`https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, pinned
+with its sha512 integrity in `package-lock.json`): the `xlsx` package on the npm registry stopped at 0.18.5,
+which has CVE-2023-30533 (prototype pollution, fixed in 0.19.3) and CVE-2024-22363 (ReDoS, fixed in 0.20.2).
+0.20.3 has no known CVEs. It is a dev dependency: only the bundled copy ships. It makes no network requests and
+uses no `eval` or `new Function`; the viewer loads it on first use (a lazy module inside `plugin.js`).
+
 ## Layout CSS (MIT)
 
 `src/ui/styles-ref.ts` adapts the layout stylesheets (tokens, base, shell, chat, details, cards) of an
@@ -73,4 +85,4 @@ The avatar silhouettes in `src/ui/avatarShapes.ts` are original to this kit (MIT
 
 `plugin.js` is installed and shared as a single file, so `build.mjs` copies the full text of the kit's MIT
 `LICENSE`, `LICENSE-HERMES-AGENT-MIT`, `LICENSE-THIRD-PARTY-MIT` and `LICENSE-APACHE-2.0`, plus the Rakazo attribution and modification
-note above, into its leading `/*!` comment. `test/build.test.mjs` fails the build if any of them is missing.
+note and the SheetJS attribution above, into its leading `/*!` comment. `test/build.test.mjs` fails the build if any of them is missing.

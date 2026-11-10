@@ -1,8 +1,8 @@
 // File cards (17): a non-media file a bot sends with a `MEDIA:` line is a
 // card of its own under the bubble (ui/Media.tsx FileCard): a document tile,
 // the name cut in the middle (full name in the title), the size read lazily
-// from the bot's own backend on first hover, a download button on hover, a
-// preview of text files with Copy all, "Not available" when the bot's machine
+// from the bot's own backend on first hover, a download button, a click
+// opening the file viewer (text files: the preview with Copy all), "Not available" when the bot's machine
 // cannot read it. Images, audio and video are unchanged. Demo content only.
 
 import assert from 'node:assert/strict'
@@ -74,7 +74,7 @@ test('extractMedia still lists files as kind "file" and lifts their lines', () =
   assert.deepEqual(media.map(m => m.kind), ['file', 'file', 'file', 'file', 'image'])
 })
 
-test('CSS: the card, its hover download button and the preview; tokens exist for light and dark', { skip }, async () => {
+test('CSS: the card, its download button and the preview; tokens exist for light and dark', { skip }, async () => {
   const { bundlePreview } = await import('../dev/bundle.mjs')
   const file = await bundlePreview()
   try {
@@ -88,8 +88,10 @@ test('CSS: the card, its hover download button and the preview; tokens exist for
     }
     assert.match(rule('.gbo-files'), /flex-direction: column;.*gap: 8\.93px;/)
     assert.match(block('.gbo-file-card'), /width: 245\.54px;[\s\S]*border-radius: 17\.86px;[\s\S]*background: var\(--g-color-bg-elevated\);[\s\S]*box-shadow: var\(--g-shadow-card\);/)
-    assert.match(block('.gbo-file-card-save'), /border-radius: var\(--g-radius-full\);[\s\S]*opacity: 0;/)
-    assert.ok(CSS.includes(`.gbo-file-card:hover${scope} .gbo-file-card-save, .gbo-file-card:focus-within${scope} .gbo-file-card-save { opacity: 1; }`))
+    // The download button is always shown (Grok Bot's card), quieter at rest.
+    assert.match(block('.gbo-file-card-save'), /border-radius: var\(--g-radius-full\);[\s\S]*color: var\(--g-color-text-tertiary\);/)
+    assert.doesNotMatch(block('.gbo-file-card-save'), /opacity: 0/)
+    assert.ok(CSS.includes(`.gbo-file-card:hover${scope} .gbo-file-card-save, .gbo-file-card:focus-within${scope} .gbo-file-card-save { color: var(--g-color-text-secondary); }`))
     assert.match(rule('.gbo-file-card-name'), /font-weight: 500;.*text-overflow: ellipsis;/)
     assert.match(rule('.gbo-file-card-size'), /color: var\(--g-color-text-tertiary\);/)
     // Light and dark both define the card's surface and ring.
@@ -173,17 +175,24 @@ test('loader: files are cards under the bubble; hover reads the size; download, 
   assert.equal(read.params.connectionId, 'home-server')
   assert.equal(read.params.profile, 'scholar')
 
-  // The hover download button saves through the owner read, name kept.
+  // The download button saves through the owner read, name kept.
   const save = pdf.querySelector('button.gbo-file-card-save')
   assert.equal(save.getAttribute('aria-label'), 'Download plan.pdf')
   save.click()
   await waitFor(() => saved.length === 1, 'saved')
   assert.deepEqual(saved[0], { href: FILES['/workspace/demo/plan.pdf'], download: 'plan.pdf' })
 
-  // Clicking a non-text file's body downloads it too.
+  // Clicking a file's body opens the viewer (ui/FileViewer.tsx); bytes that
+  // are not a PDF get a panel with Download instead of the PDF viewer.
   main(pdf).click()
-  await waitFor(() => saved.length === 2, 'saved by click')
-  assert.equal(chatEl.querySelector('.gbo-file-preview'), null, 'no preview for a pdf')
+  const pdfViewer = await waitFor(() => document.querySelector('[aria-label="Preview of plan.pdf"]'), 'pdf viewer')
+  await waitFor(() => pdfViewer.querySelector('.gbo-viewer-panel'), 'pdf panel')
+  assert.ok(pdfViewer.textContent.includes('does not start like a PDF'))
+  assert.equal(pdfViewer.querySelector('iframe'), null)
+  pdfViewer.querySelector('button.gbo-viewer-panel-save').click()
+  await waitFor(() => saved.length === 2, 'saved from the panel')
+  pdfViewer.querySelector('button.gbo-viewer-close').click()
+  await waitFor(() => !document.querySelector('[aria-label="Preview of plan.pdf"]'), 'pdf viewer closed')
 
   // Clicking a markdown file opens the preview; Copy all copies the exact text.
   main(md).click()
@@ -195,10 +204,10 @@ test('loader: files are cards under the bubble; hover reads the size; download, 
   copy.click()
   await waitFor(() => copy.textContent === 'Copied', 'Copied')
   assert.deepEqual(written, [MD], 'exactly the file text')
-  dialog.querySelector('button.gbo-file-preview-save').click()
+  dialog.querySelector('button.gbo-viewer-save').click()
   await waitFor(() => saved.length === 3, 'Download from the preview')
   assert.equal(saved[2].download, 'demo-handoff-notes.md')
-  ;[...dialog.querySelectorAll('button')].find(b => b.textContent === 'Close').click()
+  dialog.querySelector('button.gbo-viewer-close').click()
   await waitFor(() => !document.querySelector('[aria-label="Preview of demo-handoff-notes.md"]'), 'closed')
 
   // Other text types preview in monospace.
@@ -206,7 +215,7 @@ test('loader: files are cards under the bubble; hover reads the size; download, 
   const jsonDialog = await waitFor(() => document.querySelector('[aria-label="Preview of data.json"]'), 'json preview')
   const pre = jsonDialog.querySelector('pre.gbo-file-preview.is-mono')
   assert.equal(pre.textContent, '{\n  "demo": true\n}\n')
-  ;[...jsonDialog.querySelectorAll('button')].find(b => b.textContent === 'Close').click()
+  jsonDialog.querySelector('button.gbo-viewer-close').click()
   await waitFor(() => !document.querySelector('[aria-label="Preview of data.json"]'), 'json closed')
 
   // A file the bot's machine cannot read: "Not available", no download button.
