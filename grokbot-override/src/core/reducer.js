@@ -15,7 +15,7 @@
 import { admitSegmentDelta, admitSegmentSeal, segmentStamp } from './segments.js'
 import { toolLabel } from './history.js'
 import { approvalFromPayload, upsertApproval, cancelApprovals, settleApprovals } from './approvals.js'
-import { applyConnectionUpdate, inputRequestFrom } from './prompts.js'
+import { applyConnectionUpdate, inputRequestFrom, keepCardProgress } from './prompts.js'
 import { completeDetail, startDetail } from './tools.js'
 
 export function emptyLive() {
@@ -286,7 +286,7 @@ export function applyEvent(state, event, now = Date.now()) {
     }
 
     case 'clarify.request': {
-      const waiting = inputRequestFrom('clarify', payload)
+      const waiting = keepCardProgress(state.waiting, inputRequestFrom('clarify', payload))
       return waiting ? { ...state, busy: true, waiting } : state
     }
 

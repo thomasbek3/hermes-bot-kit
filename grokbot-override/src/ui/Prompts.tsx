@@ -14,7 +14,7 @@
 
 import * as React from 'react'
 
-import { bareChoice, choiceLetter, clarifyFilled, clarifyPicks } from '../core/prompts.js'
+import { bareChoice, choiceLetter, clarifyFilled, clarifyOpenPages, clarifyPage, clarifyPicks } from '../core/prompts.js'
 import { isOpenableConnectUrl } from '../core/urls.js'
 import { openInBotMode } from './app'
 import { IconCheck } from './iconsRoster'
@@ -49,17 +49,26 @@ const SETTLED_NOTE: Record<string, string> = {
 
 /** A clarify request as a card in the transcript: the question in bold, one
  *  row per choice with a letter badge (A, B, C…). One question with single
- *  choices answers on click; multi-select rows and several questions collect
- *  picks (kept on the controller) and send with Answer. A typed answer comes
- *  from the composer (Chat.tsx). Settled (`settled`): the same card, the
- *  chosen rows marked, nothing clickable. */
+ *  choices answers on click; one multi-select question collects picks (kept
+ *  on the controller) and sends with Answer. Several questions page, one
+ *  question at a time like Grok Bot: a click picks the row (the letter badge
+ *  turns blue), Next moves on, Back goes back with the picks kept, Skip
+ *  skips the question on screen, Done on the last page sends every answer
+ *  (a skipped or unpicked question as null). Page dots sit on the left; the
+ *  page lives on the controller (`page`, `pages`: the open question indexes,
+ *  locked ones left out). A typed answer comes from the composer (Chat.tsx).
+ *  Settled (`settled`): every question, the chosen rows marked, nothing
+ *  clickable. */
 export function ChoiceCard({
   questions,
   picks,
   settled = null,
   busy = false,
   name = '',
+  page,
+  pages,
   onPick,
+  onPage,
   onAnswer,
   footer = null
 }: {
@@ -68,87 +77,152 @@ export function ChoiceCard({
   settled?: null | { status: string }
   busy?: boolean
   name?: string
-  onPick?: (qid: string, value: any) => void
+  page?: number
+  pages?: number[]
+  onPick?: (qid: string, value: any, page?: number) => void
+  onPage?: (page: number) => void
   onAnswer?: (answer: Record<string, any>) => void
   footer?: React.ReactNode
 }) {
   const live = !settled
   const single = questions.length === 1 && !questions[0].multiSelect && Boolean(questions[0].choices)
+  const paged = live && questions.length > 1
+  const open = pages && pages.length ? pages : questions.map((_, i) => i)
+  const current = paged ? (page !== undefined && open.includes(page) ? page : open[0]) : -1
+  const step = open.indexOf(current)
+  const nextPage = step >= 0 && step < open.length - 1 ? open[step + 1] : undefined
+  const prevPage = step > 0 ? open[step - 1] : undefined
   const complete = questions.every(q => clarifyFilled(picks[q.qid]))
   const answerWith = (overrides: Record<string, any> = {}) =>
     onAnswer?.(Object.fromEntries(questions.map(q => [q.qid, q.qid in overrides ? overrides[q.qid] : picks[q.qid] ?? null])))
+  // Next / Done (and Skip, which first clears the question on screen).
+  const forward = (overrides: Record<string, any> = {}) => {
+    if (nextPage === undefined) return answerWith(overrides)
+    const qid = questions[current]?.qid
+    if (qid && qid in overrides) return onPick?.(qid, overrides[qid], nextPage)
+    onPage?.(nextPage)
+  }
   const baseId = React.useId()
+  const shown = paged ? [current, ...questions.map((_, i) => i).filter(i => i !== current)] : questions.map((_, i) => i)
+  const block = (qi: number) => {
+    const q = questions[qi]
+    const ghost = paged && qi !== current
+    const value = picks[q.qid]
+    const chosen: string[] = Array.isArray(value) ? value : typeof value === 'string' && value ? [value] : []
+    const labels = (q.choices || []).map((choice: string) => bareChoice(choice))
+    const typed = chosen.filter(v => !labels.includes(v))
+    const titleId = `${baseId}-q${qi}`
+    return (
+      <div
+        key={q.qid}
+        className={`gbo-ask-q${ghost ? ' is-ghost' : ''}`}
+        aria-hidden={ghost || undefined}
+        inert={ghost || undefined}
+      >
+        <div className="gbo-ask-title" id={ghost ? undefined : titleId}>
+          {q.question}
+        </div>
+        {q.choices ? (
+          <div className="gbo-ask-rows" role={q.multiSelect ? 'group' : 'radiogroup'} aria-labelledby={ghost ? undefined : titleId}>
+            {q.choices.map((choice: string, i: number) => {
+              const label = labels[i]
+              const on = chosen.includes(label)
+              return (
+                <button
+                  key={choice}
+                  type="button"
+                  role={q.multiSelect ? 'checkbox' : 'radio'}
+                  aria-checked={on}
+                  disabled={!live || busy || ghost}
+                  tabIndex={ghost ? -1 : undefined}
+                  className={`gbo-ask-row${on ? ' is-on' : ''}`}
+                  onClick={() => {
+                    if (single) return answerWith({ [q.qid]: label })
+                    if (!q.multiSelect) return onPick?.(q.qid, label)
+                    onPick?.(q.qid, on ? chosen.filter(v => v !== label) : [...chosen, label])
+                  }}
+                >
+                  <span className="gbo-ask-key" aria-hidden="true">
+                    {choiceLetter(i)}
+                  </span>
+                  <span className="gbo-ask-label">{label}</span>
+                  {choice !== label ? <span className="gbo-ask-tag">Recommended</span> : null}
+                  {on && !paged ? (
+                    <span className="gbo-ask-check" aria-hidden="true">
+                      <IconCheck />
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+        {typed.map((text, j) => (
+          <div key={text} className="gbo-ask-row is-on is-typed" role="note" aria-label={`Your answer: ${text}`}>
+            <span className="gbo-ask-key" aria-hidden="true">
+              {choiceLetter(labels.length + j)}
+            </span>
+            <span className="gbo-ask-label">{text}</span>
+            {!paged ? (
+              <span className="gbo-ask-check" aria-hidden="true">
+                <IconCheck />
+              </span>
+            ) : null}
+          </div>
+        ))}
+        {live && !q.choices && !typed.length ? <div className="gbo-ask-hint">Type your answer below.</div> : null}
+      </div>
+    )
+  }
   return (
     <div
-      className={`gbo-ask${live ? '' : ' is-settled'}${busy ? ' is-busy' : ''}`}
+      className={`gbo-ask${live ? '' : ' is-settled'}${busy ? ' is-busy' : ''}${paged ? ' is-paged' : ''}`}
       role="group"
       aria-label={name ? `Question from ${name}` : 'Question'}
       aria-busy={busy || undefined}
     >
-      {questions.map((q, qi) => {
-        const value = picks[q.qid]
-        const chosen: string[] = Array.isArray(value) ? value : typeof value === 'string' && value ? [value] : []
-        const labels = (q.choices || []).map((choice: string) => bareChoice(choice))
-        const typed = chosen.filter(v => !labels.includes(v))
-        const titleId = `${baseId}-q${qi}`
-        return (
-          <div key={q.qid} className="gbo-ask-q">
-            <div className="gbo-ask-title" id={titleId}>
-              {q.question}
-            </div>
-            {q.choices ? (
-              <div className="gbo-ask-rows" role={q.multiSelect ? 'group' : 'radiogroup'} aria-labelledby={titleId}>
-                {q.choices.map((choice: string, i: number) => {
-                  const label = labels[i]
-                  const on = chosen.includes(label)
-                  return (
-                    <button
-                      key={choice}
-                      type="button"
-                      role={q.multiSelect ? 'checkbox' : 'radio'}
-                      aria-checked={on}
-                      disabled={!live || busy}
-                      className={`gbo-ask-row${on ? ' is-on' : ''}`}
-                      onClick={() => {
-                        if (single) return answerWith({ [q.qid]: label })
-                        if (!q.multiSelect) return onPick?.(q.qid, label)
-                        onPick?.(q.qid, on ? chosen.filter(v => v !== label) : [...chosen, label])
-                      }}
-                    >
-                      <span className="gbo-ask-key" aria-hidden="true">
-                        {choiceLetter(i)}
-                      </span>
-                      <span className="gbo-ask-label">{label}</span>
-                      {choice !== label ? <span className="gbo-ask-tag">Recommended</span> : null}
-                      {on ? (
-                        <span className="gbo-ask-check" aria-hidden="true">
-                          <IconCheck />
-                        </span>
-                      ) : null}
-                    </button>
-                  )
-                })}
-              </div>
-            ) : null}
-            {typed.map((text, j) => (
-              <div key={text} className="gbo-ask-row is-on is-typed" role="note" aria-label={`Your answer: ${text}`}>
-                <span className="gbo-ask-key" aria-hidden="true">
-                  {choiceLetter(labels.length + j)}
-                </span>
-                <span className="gbo-ask-label">{text}</span>
-                <span className="gbo-ask-check" aria-hidden="true">
-                  <IconCheck />
-                </span>
-              </div>
+      {paged ? <div className="gbo-ask-pages">{shown.map(block)}</div> : shown.map(block)}
+      {paged ? (
+        <div className="gbo-ask-actions is-paged">
+          <div className="gbo-ask-dots" role="img" aria-label={`Question ${step + 1} of ${open.length}`}>
+            {open.map(i => (
+              <span key={i} className={`gbo-ask-dot${i === current ? ' is-current' : ''}`} />
             ))}
-            {live && !q.choices && !typed.length ? <div className="gbo-ask-hint">Type your answer below.</div> : null}
           </div>
-        )
-      })}
-      {live ? (
+          {prevPage !== undefined ? (
+            <button type="button" className="gbo-pill-btn" disabled={busy} title={busy ? 'Sending your answers…' : undefined} onClick={() => onPage?.(prevPage)}>
+              Back
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="gbo-pill-btn"
+            disabled={busy}
+            title={busy ? 'Sending your answers…' : 'Skip this question'}
+            onClick={() => forward({ [questions[current].qid]: null })}
+          >
+            Skip
+          </button>
+          <button
+            type="button"
+            className="gbo-pill-btn is-primary is-next"
+            disabled={busy}
+            title={busy ? 'Sending your answers…' : undefined}
+            onClick={() => forward()}
+          >
+            {busy ? 'Sending…' : nextPage === undefined ? 'Done' : 'Next'}
+          </button>
+        </div>
+      ) : live ? (
         <div className="gbo-ask-actions">
           {!single ? (
-            <button type="button" className="gbo-pill-btn is-primary" disabled={busy || !complete} onClick={() => answerWith()}>
+            <button
+              type="button"
+              className="gbo-pill-btn is-primary"
+              disabled={busy || !complete}
+              title={busy ? 'Sending your answer…' : !complete ? 'Pick at least one choice first' : undefined}
+              onClick={() => answerWith()}
+            >
               {busy ? 'Sending…' : 'Answer'}
             </button>
           ) : null}
@@ -354,7 +428,10 @@ export function WaitingCard({ waiting, bot, name, controller }: { waiting: any; 
         picks={clarifyPicks(waiting)}
         busy={Boolean(waiting.answering)}
         name={name}
-        onPick={(qid, value) => void controller?.pickClarify(qid, value)}
+        page={clarifyPage(waiting)}
+        pages={clarifyOpenPages(waiting)}
+        onPick={(qid, value, page) => void controller?.pickClarify(qid, value, page)}
+        onPage={page => void controller?.pageClarify(page)}
         onAnswer={answer}
         footer={<Footer waiting={waiting} bot={bot} />}
       />

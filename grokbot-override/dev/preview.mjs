@@ -134,6 +134,9 @@ const pages = live ? {
   'dark-card-settled.html': { theme: 'dark', botIndex: 1, items: CARD_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
   'light-card-multi.html': { theme: 'light', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
   'dark-card-multi.html': { theme: 'dark', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
+  // Pass 15: several questions page one at a time (page 1 with a pick, page 2).
+  'light-card-paged-1.html': { theme: 'light', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
+  'light-card-paged-2.html': { theme: 'light', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: { ...CARD_MULTI_WAITING, page: 1 }, hasMore: false, pins: ['scholar'] },
   // Live ::card and ::preview directives in the open chat.
   'light-card-directives.html': { theme: 'light', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES },
   'dark-card-directives.html': { theme: 'dark', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES },

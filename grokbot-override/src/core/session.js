@@ -98,7 +98,7 @@ import {
   survivorRowIdsFrom,
   userTurnFromEnd
 } from './rewind.js'
-import { clarifySettledItem, clarifyTextAnswer, VALUE_KINDS, valueResult } from './prompts.js'
+import { clarifyOpenPages, clarifySettledItem, keepCardProgress, clarifyTextAnswer, VALUE_KINDS, valueResult } from './prompts.js'
 import { COMPRESS_TIMEOUT_MS, HELP_TEXT, parseCommandDispatch, parseSlash, renderRpcResult, slashSurface } from './slash.js'
 import {
   APPROVAL_RESPOND_TIMEOUT_MS,
@@ -740,6 +740,7 @@ export function createChatController(bot, deps, options = {}) {
           if (waiting) break
         }
         if (!waiting && snapshot?.pending_connection) waiting = inputRequestFrom('connection', snapshot.pending_connection)
+        waiting = keepCardProgress(chat.waiting, waiting)
       }
       const live = initial ? (bubbleId ? { ...emptyLive(), bubbleId } : emptyLive()) : { ...chat.live, bubbleId }
       return { ...chat, items, busy: running, live, waiting }
@@ -1088,24 +1089,38 @@ export function createChatController(bot, deps, options = {}) {
   }
 
   /** A pick on a clarify card that does not send yet (a multi-select row, or
-   *  one question of several): kept on the card until Answer. */
-  function pickClarify(qid, value) {
+   *  one question of several): kept on the card until Answer / Done. `page`
+   *  (optional): the page the card shows with it, in the same update. */
+  function pickClarify(qid, value, page) {
     const waiting = state.chat.waiting
     if (!waiting || waiting.kind !== 'clarify' || waiting.answering) return false
     if (!(waiting.questions || []).some(q => q.qid === qid)) return false
-    patchWaiting(waiting, { picks: { ...(waiting.picks || {}), [qid]: value } })
+    const paging = page !== undefined && clarifyOpenPages(waiting).includes(page) ? { page } : {}
+    patchWaiting(waiting, { picks: { ...(waiting.picks || {}), [qid]: value }, ...paging })
+    return true
+  }
+
+  /** The page a clarify card with several questions shows (its question
+   *  index; locked questions are not pages). Kept on the waiting card so a
+   *  re-render or a snapshot repair does not go back to page 1. */
+  function pageClarify(page) {
+    const waiting = state.chat.waiting
+    if (!waiting || waiting.kind !== 'clarify' || waiting.answering) return false
+    if (!clarifyOpenPages(waiting).includes(page)) return false
+    patchWaiting(waiting, { page })
     return true
   }
 
   /** Composer text while a clarify card waits: the free-text answer to it,
    *  through the same clarify.lock calls as the card (answerPrompt). With
-   *  more questions still open the text only fills the next one. */
+   *  several questions it answers the page on screen and moves the card to
+   *  the next page; on the last page it sends. */
   async function answerClarifyText(text) {
     const waiting = state.chat.waiting
     if (!waiting || waiting.kind !== 'clarify' || waiting.answering) return { ok: false, error: 'No question is waiting for an answer' }
-    const { picks, complete } = clarifyTextAnswer(waiting, text)
+    const { picks, complete, page } = clarifyTextAnswer(waiting, text)
     if (!complete) {
-      patchWaiting(waiting, { picks: { ...(waiting.picks || {}), ...picks } })
+      patchWaiting(waiting, { picks: { ...(waiting.picks || {}), ...picks }, ...(page !== undefined ? { page } : {}) })
       return { ok: true, status: 'picked' }
     }
     const result = await answerPrompt(picks)
@@ -2243,6 +2258,7 @@ export function createChatController(bot, deps, options = {}) {
     sendIntent,
     answerPrompt,
     pickClarify,
+    pageClarify,
     answerClarifyText,
     respondConnection,
     pollApprovals,

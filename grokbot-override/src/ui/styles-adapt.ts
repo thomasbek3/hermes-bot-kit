@@ -343,6 +343,19 @@ const ADAPT_SRC = /* css */ `
 .gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
 .gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
 .gbo-ask .gbo-card-error { padding: 0 8px 4px; }
+/* Several questions: one page at a time (Grok Bot). Every page sits in the
+   same grid cell so the card keeps the tallest page's height; only the
+   current one shows. A pick is the letter badge in blue, nothing else. */
+.gbo-ask-pages { display: grid; }
+.gbo-ask-pages > .gbo-ask-q { grid-area: 1 / 1; margin-top: 0; }
+.gbo-ask-pages > .gbo-ask-q.is-ghost { visibility: hidden; }
+.gbo-ask.is-paged .gbo-ask-row.is-on .gbo-ask-key { background: #3b82f6; color: #fff; box-shadow: none; }
+.gbo-ask-actions.is-paged { padding: 6px 2px 4px 8px; }
+.gbo-ask-actions.is-paged .gbo-pill-btn { height: 34px; padding: 6px 14px; box-shadow: none; }
+.gbo-ask-actions.is-paged .gbo-pill-btn.is-primary { margin-right: 0; }
+.gbo-ask-dots { display: flex; align-items: center; gap: 6px; margin-right: auto; }
+.gbo-ask-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-border-secondary); }
+.gbo-ask-dot.is-current { background: var(--color-text-tertiary); }
 /* Live ::card and ::preview directives in the open chat. A card sits in the
    choice card's shell (flat fill, radius, padding, type sizes), roomy: at
    least about 300px, at most a bubble's width. The title is the bold

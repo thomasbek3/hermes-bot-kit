@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Grokbot Override: questions come one at a time (2026-11-10)**: a question card with several questions
+  showed them all stacked with one greyed **Answer** button that did nothing until every question had a
+  pick, and nothing said so. It now pages like Grok Bot: one question per page with page dots, a click picks
+  a row (its letter turns blue), **Next** / **Back** / **Skip** per question and **Done** on the last page
+  sends every answer (skipped ones as null). Typing in the composer answers the question on screen and moves
+  on; the page survives a re-render; questions already locked are skipped. One-question cards are unchanged.
 - **Grokbot Override: the first message no longer vanishes (2026-11-10)**: in a new Bot Chat the bubble you
   just sent disappeared (empty state plus "Thinking…") until the reply came, because a transcript re-read
   that ran before the gateway stored the turn rebuilt the chat without it. A sent bubble now stays until
