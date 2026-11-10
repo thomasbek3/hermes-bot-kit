@@ -7,21 +7,21 @@ backed up (`*.bak.<timestamp>`) before overwrite.
 ## Install the desktop plugins (default)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.1/install.sh | bash
 ```
 
 Install just one:
 
 ```bash
-KIT_SKIP_COMPUTER=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10/install.sh)"   # Grokbot Override only
-KIT_SKIP_GROKBOT=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10/install.sh)"   # Computer viewer only
+KIT_SKIP_COMPUTER=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.1/install.sh)"   # Grokbot Override only
+KIT_SKIP_GROKBOT=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.1/install.sh)"   # Computer viewer only
 ```
 
 Into a non-default Hermes home (a separate `~/.hermes`-shaped tree, e.g. a
 second install):
 
 ```bash
-HERMES_HOME="/path/to/other/.hermes" bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10/install.sh)"
+HERMES_HOME="/path/to/other/.hermes" bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.1/install.sh)"
 ```
 
 Do **not** point `HERMES_HOME` at `~/.hermes/profiles/<name>` for these desktop
@@ -79,7 +79,7 @@ it. Then:
 Off by default. It teaches bots to show approval, task and email-draft cards
 in the Grokbot Override chat (question cards need no skill: they come from
 Hermes's built-in `clarify` tool). From a clone, or from a release newer than
-v2026.11.10 (older release manifests do not list the skill; the installer says
+v2026.11.10.1 (older release manifests do not list the skill; the installer says
 so and skips it):
 
 ```bash
@@ -101,8 +101,8 @@ Makes bots reply in a short SMS register. Installs into Hermes profile homes
 and enables itself in each profile's `config.yaml`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10/texting-style/install.sh | bash          # all profiles
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10/texting-style/install.sh | bash -s -- --profiles default,helper
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.1/texting-style/install.sh | bash          # all profiles
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.1/texting-style/install.sh | bash -s -- --profiles default,helper
 ```
 
 Verify: `hermes plugins list` shows `texting-style enabled`. Takes effect on
