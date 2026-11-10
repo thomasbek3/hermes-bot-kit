@@ -4,13 +4,13 @@
 # it on from the command palette). Safe for agents to run unattended:
 # idempotent, no prompts, no sudo, backs up any existing copy before overwriting.
 #
-#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh | bash
 #
 # or from a clone:  bash install.sh
 #
 # Env knobs:
 #   HERMES_HOME            Hermes home dir (default ~/.hermes)
-#   KIT_REF                git ref to fetch (default v2026.11.09)
+#   KIT_REF                git ref to fetch (default v2026.11.09.1)
 #   KIT_SOURCE_DIR         local checkout to copy from (auto-detected from a clone)
 #   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
 #   KIT_SKIP_BUBBLES=1     skip Bubble Mode
@@ -23,7 +23,7 @@
 #   KIT_CARDS_PROFILES     comma-separated profiles for the skill (default: all)
 set -euo pipefail
 
-KIT_REF="${KIT_REF:-v2026.11.09}"
+KIT_REF="${KIT_REF:-v2026.11.09.1}"
 RAW_BASE="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
 PLUGIN_ROOT="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"
 GROKBOT_REL="grokbot-override/plugin.default-off.js"
@@ -37,13 +37,13 @@ usage() {
   cat <<'EOF'
 Install the Hermes Bot Kit desktop plugins.
 
-  curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh | bash
 
 or from a clone:  bash install.sh
 
 Env knobs:
   HERMES_HOME            Hermes home dir (default ~/.hermes)
-  KIT_REF                git ref to fetch (default v2026.11.09)
+  KIT_REF                git ref to fetch (default v2026.11.09.1)
   KIT_SOURCE_DIR         local checkout to copy from
   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
   KIT_SKIP_BUBBLES=1     skip Bubble Mode
