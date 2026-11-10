@@ -274,6 +274,47 @@ const ADAPT_SRC = /* css */ `
 .gbo-choice:hover { background: var(--color-bg-secondary-hover); }
 .gbo-choice.is-on { background: var(--color-primary); color: var(--color-on-primary); }
 .gbo-command { border: 0; border-radius: 12px; background: var(--color-bg-subtle); }
+/* The choice card (a clarify question): the bot bubble's flat fill, a bold
+   question, lettered rows. Settled: the chosen row marked, the rest faded. */
+.gbo-ask {
+  align-self: flex-start; width: 310px; max-width: 100%; display: flex; flex-direction: column; gap: 6px;
+  padding: 14px 8px 6px; border-radius: 18px; background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
+}
+.gbo-ask-q { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gbo-ask-q + .gbo-ask-q { margin-top: 4px; }
+.gbo-ask-title { padding: 0 8px 4px; font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; }
+.gbo-ask-rows { display: flex; flex-direction: column; gap: 2px; }
+.gbo-ask-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 5px 8px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--color-text-primary); font: inherit; font-size: 15px; line-height: 22px; letter-spacing: 0.15px; text-align: left; cursor: pointer;
+  transition: background-color 120ms var(--ease-out);
+}
+.gbo-ask-row:hover:not(:disabled) { background: var(--color-row-selected); }
+.gbo-ask-row:focus-visible { outline: 0; box-shadow: var(--color-border-secondary) 0 0 0 2px inset; }
+.gbo-ask-row:disabled { cursor: default; }
+.gbo-ask-key {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: 6px;
+  box-shadow: var(--color-border-secondary) 0 0 0 1px inset; color: var(--color-text-tertiary); font-size: 12px; font-weight: 500; line-height: 16px;
+}
+.gbo-ask-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.gbo-ask-tag { flex: none; font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-ask-check { display: inline-flex; flex: none; color: var(--color-text-primary); }
+.gbo-ask-check svg { width: 16px; height: 16px; }
+.gbo-ask-row.is-on .gbo-ask-key { background: var(--color-text-primary); color: var(--color-bubble-agent-flat); box-shadow: none; }
+.gbo-ask.is-settled .gbo-ask-row:not(.is-on) { opacity: 0.45; }
+.gbo-ask.is-busy .gbo-ask-row { cursor: progress; }
+.gbo-ask-row.is-typed { cursor: default; }
+.gbo-ask-hint, .gbo-ask-note { padding: 0 8px; font-size: 13px; line-height: 18px; color: var(--color-text-tertiary); }
+.gbo-ask-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 2px 0 8px; }
+.gbo-ask-actions .gbo-pill-btn.is-primary { margin-right: auto; }
+.gbo-ask-actions .gbo-pill-btn { height: 30px; }
+.gbo-ask-skip {
+  padding: 2px 6px; border: 0; border-radius: 8px; background: transparent; color: var(--color-text-quaternary);
+  font: inherit; font-size: 12px; line-height: 16px; cursor: pointer;
+}
+.gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
+.gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
+.gbo-ask .gbo-card-error { padding: 0 8px 4px; }
 
 /* Buttons the override keeps: in the reference's .btn--sm idiom. */
 .gbo-pill-btn {
@@ -314,6 +355,8 @@ const ADAPT_SRC = /* css */ `
 .composer__btn.is-recording { color: var(--color-danger); background: var(--color-danger-bg); }
 .composer__btn.is-recording > svg { opacity: 1; }
 .composer__input:disabled { cursor: default; }
+/* A long prompt (the choice card's "Type your answer…") stays on one line. */
+.composer__input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-composer-note {
   max-width: 960px; margin: 8px auto 0; display: flex; align-items: center; justify-content: center; gap: 8px;
   font-size: 13px; line-height: 18px; color: var(--color-text-secondary);

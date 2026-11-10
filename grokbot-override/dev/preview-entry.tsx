@@ -10,7 +10,7 @@ import { RosterPane } from '../src/ui/Roster'
 import { CSS } from '../src/ui/styles'
 import { rowKey } from '../src/core/roster.js'
 import { overrideChromeCss } from '../src/core/stock.js'
-import { CHAT_ITEMS, MD_ITEMS, ROSTER, SHORT_ITEMS, USER_ITEMS } from './fixtures'
+import { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CHAT_ITEMS, MD_ITEMS, ROSTER, SHORT_ITEMS, USER_ITEMS } from './fixtures'
 import { BOT_SWATCHES } from '../src/core/colors.js'
 import { ShapeFace } from '../src/ui/Avatar'
 import { AVATAR_SHAPES, avatarShapeFor } from '../src/ui/avatarShapes'
@@ -225,7 +225,7 @@ export function render({
   const chrome = frame?.lights ? `\n${overrideChromeCss()}` : ''
   return `<!doctype html><html class="${theme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8">${host}<style>${CSS}\n${PAGE_CSS}${chrome}</style></head><body>${body}${connectSheet}</body></html>`
 }
-export { CSS, MD_ITEMS, SHORT_ITEMS, USER_ITEMS }
+export { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CSS, MD_ITEMS, SHORT_ITEMS, USER_ITEMS }
 
 // Test seams (review r2): the real app module and UI pieces, on the fake SDK.
 export * as appApi from '../src/ui/app'

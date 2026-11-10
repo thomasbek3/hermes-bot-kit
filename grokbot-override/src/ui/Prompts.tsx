@@ -5,17 +5,20 @@
 // app's own cards: components/prompt-overlays.tsx (closing a password card is
 // a refusal, '' ), components/assistant-ui/clarify/pending.tsx (choices, free
 // text, multi-select, Skip) and the connection card's Approve / Not now /
-// Continue (store/connection-request.ts).
+// Continue (store/connection-request.ts). A clarify question is not a box of
+// its own: it is a choice card at the end of the transcript (lettered rows),
+// and the composer types its free-text answer.
 //
 // Secrets: inputs are uncontrolled password fields read once on submit and
 // cleared; the value is never put in React state, chat state or a log.
 
 import * as React from 'react'
 
+import { bareChoice, choiceLetter, clarifyFilled, clarifyPicks } from '../core/prompts.js'
 import { openInBotMode } from './app'
+import { IconCheck } from './iconsRoster'
 
 const TITLES: Record<string, string> = {
-  clarify: 'has a question for you',
   sudo: 'needs your administrator password',
   secret: 'needs a secret value',
   'vault-unlock': 'needs your password manager unlocked',
@@ -23,9 +26,6 @@ const TITLES: Record<string, string> = {
   'vault-code': 'needs a one-time code',
   connection: 'wants to connect'
 }
-
-const RECOMMENDED = '(Recommended)'
-const bare = (choice: string) => (choice.endsWith(RECOMMENDED) ? choice.slice(0, -RECOMMENDED.length).trim() : choice)
 
 function Footer({ waiting, bot }: { waiting: any; bot: any }) {
   if (!waiting.error) return null
@@ -41,86 +41,136 @@ function Footer({ waiting, bot }: { waiting: any; bot: any }) {
   )
 }
 
-function ClarifyCard({ waiting, onAnswer }: { waiting: any; onAnswer: (answer: any) => void }) {
-  const questions: any[] = waiting.questions || []
-  const [answers, setAnswers] = React.useState<Record<string, any>>(() => ({ ...(waiting.locked || {}) }))
-  const [typed, setTyped] = React.useState<Record<string, string>>({})
-  const busy = Boolean(waiting.answering)
-  const value = (q: any) => (typed[q.qid]?.trim() ? typed[q.qid].trim() : answers[q.qid])
-  const complete = questions.every(q => {
-    const v = value(q)
-    return Array.isArray(v) ? v.length > 0 : typeof v === 'string' && v.length > 0
-  })
-  const submit = (overrides?: Record<string, any>) => {
-    const out: Record<string, any> = {}
-    for (const q of questions) out[q.qid] = overrides && q.qid in overrides ? overrides[q.qid] : value(q) ?? null
-    onAnswer(out)
-  }
-  const single = questions.length === 1 && !questions[0].multiSelect && questions[0].choices
+const SETTLED_NOTE: Record<string, string> = {
+  skipped: 'Skipped',
+  expired: 'No longer waiting for an answer'
+}
+
+/** A clarify request as a card in the transcript: the question in bold, one
+ *  row per choice with a letter badge (A, B, C…). One question with single
+ *  choices answers on click; multi-select rows and several questions collect
+ *  picks (kept on the controller) and send with Answer. A typed answer comes
+ *  from the composer (Chat.tsx). Settled (`settled`): the same card, the
+ *  chosen rows marked, nothing clickable. */
+export function ChoiceCard({
+  questions,
+  picks,
+  settled = null,
+  busy = false,
+  name = '',
+  onPick,
+  onAnswer,
+  footer = null
+}: {
+  questions: any[]
+  picks: Record<string, any>
+  settled?: null | { status: string }
+  busy?: boolean
+  name?: string
+  onPick?: (qid: string, value: any) => void
+  onAnswer?: (answer: Record<string, any>) => void
+  footer?: React.ReactNode
+}) {
+  const live = !settled
+  const single = questions.length === 1 && !questions[0].multiSelect && Boolean(questions[0].choices)
+  const complete = questions.every(q => clarifyFilled(picks[q.qid]))
+  const answerWith = (overrides: Record<string, any> = {}) =>
+    onAnswer?.(Object.fromEntries(questions.map(q => [q.qid, q.qid in overrides ? overrides[q.qid] : picks[q.qid] ?? null])))
+  const baseId = React.useId()
   return (
-    <>
-      {questions.map(q => (
-        <fieldset key={q.qid} className="gbo-q" disabled={busy}>
-          <legend>{q.question}</legend>
-          {q.choices ? (
-            <div className="gbo-choices" role={q.multiSelect ? 'group' : 'radiogroup'}>
-              {q.choices.map((choice: string) => {
-                const label = bare(choice)
-                const picked = q.multiSelect ? (answers[q.qid] || []).includes(label) : answers[q.qid] === label
-                return (
-                  <button
-                    key={choice}
-                    type="button"
-                    role={q.multiSelect ? 'checkbox' : 'radio'}
-                    aria-checked={picked}
-                    className={`gbo-choice${picked ? ' is-on' : ''}${choice !== label ? ' is-recommended' : ''}`}
-                    onClick={() => {
-                      if (single) return submit({ [q.qid]: label })
-                      setAnswers(current => {
-                        if (!q.multiSelect) return { ...current, [q.qid]: label }
-                        const list: string[] = current[q.qid] || []
-                        return { ...current, [q.qid]: list.includes(label) ? list.filter(x => x !== label) : [...list, label] }
-                      })
-                    }}
-                  >
-                    {label}
-                    {choice !== label ? <span className="gbo-choice-tag">Recommended</span> : null}
-                  </button>
-                )
-              })}
+    <div
+      className={`gbo-ask${live ? '' : ' is-settled'}${busy ? ' is-busy' : ''}`}
+      role="group"
+      aria-label={name ? `Question from ${name}` : 'Question'}
+      aria-busy={busy || undefined}
+    >
+      {questions.map((q, qi) => {
+        const value = picks[q.qid]
+        const chosen: string[] = Array.isArray(value) ? value : typeof value === 'string' && value ? [value] : []
+        const labels = (q.choices || []).map((choice: string) => bareChoice(choice))
+        const typed = chosen.filter(v => !labels.includes(v))
+        const titleId = `${baseId}-q${qi}`
+        return (
+          <div key={q.qid} className="gbo-ask-q">
+            <div className="gbo-ask-title" id={titleId}>
+              {q.question}
             </div>
+            {q.choices ? (
+              <div className="gbo-ask-rows" role={q.multiSelect ? 'group' : 'radiogroup'} aria-labelledby={titleId}>
+                {q.choices.map((choice: string, i: number) => {
+                  const label = labels[i]
+                  const on = chosen.includes(label)
+                  return (
+                    <button
+                      key={choice}
+                      type="button"
+                      role={q.multiSelect ? 'checkbox' : 'radio'}
+                      aria-checked={on}
+                      disabled={!live || busy}
+                      className={`gbo-ask-row${on ? ' is-on' : ''}`}
+                      onClick={() => {
+                        if (single) return answerWith({ [q.qid]: label })
+                        if (!q.multiSelect) return onPick?.(q.qid, label)
+                        onPick?.(q.qid, on ? chosen.filter(v => v !== label) : [...chosen, label])
+                      }}
+                    >
+                      <span className="gbo-ask-key" aria-hidden="true">
+                        {choiceLetter(i)}
+                      </span>
+                      <span className="gbo-ask-label">{label}</span>
+                      {choice !== label ? <span className="gbo-ask-tag">Recommended</span> : null}
+                      {on ? (
+                        <span className="gbo-ask-check" aria-hidden="true">
+                          <IconCheck />
+                        </span>
+                      ) : null}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+            {typed.map((text, j) => (
+              <div key={text} className="gbo-ask-row is-on is-typed" role="note" aria-label={`Your answer: ${text}`}>
+                <span className="gbo-ask-key" aria-hidden="true">
+                  {choiceLetter(labels.length + j)}
+                </span>
+                <span className="gbo-ask-label">{text}</span>
+                <span className="gbo-ask-check" aria-hidden="true">
+                  <IconCheck />
+                </span>
+              </div>
+            ))}
+            {live && !q.choices && !typed.length ? <div className="gbo-ask-hint">Type your answer below.</div> : null}
+          </div>
+        )
+      })}
+      {live ? (
+        <div className="gbo-ask-actions">
+          {!single ? (
+            <button type="button" className="gbo-pill-btn is-primary" disabled={busy || !complete} onClick={() => answerWith()}>
+              {busy ? 'Sending…' : 'Answer'}
+            </button>
           ) : null}
-          {!q.multiSelect ? (
-            <input
-              className="gbo-input"
-              placeholder={q.choices ? 'Or type your own answer' : 'Your answer'}
-              aria-label={q.question}
-              value={typed[q.qid] || ''}
-              onChange={event => setTyped(current => ({ ...current, [q.qid]: event.target.value }))}
-              onKeyDown={event => {
-                if (event.key === 'Enter' && questions.length === 1 && event.currentTarget.value.trim()) submit()
-              }}
-            />
-          ) : null}
-        </fieldset>
-      ))}
-      <div className="gbo-card-actions">
-        {!single ? (
-          <button type="button" className="gbo-pill-btn is-primary" disabled={busy || !complete} onClick={() => submit()}>
-            {busy ? 'Sending…' : 'Answer'}
+          <button
+            type="button"
+            className="gbo-ask-skip"
+            disabled={busy}
+            onClick={() => onAnswer?.(Object.fromEntries(questions.map(q => [q.qid, null])))}
+          >
+            {busy && single ? 'Sending…' : 'Skip'}
           </button>
-        ) : null}
-        <button
-          type="button"
-          className="gbo-pill-btn"
-          disabled={busy}
-          onClick={() => onAnswer(Object.fromEntries(questions.map(q => [q.qid, null])))}
-        >
-          Skip
-        </button>
-      </div>
-    </>
+        </div>
+      ) : SETTLED_NOTE[settled.status] ? (
+        <div className="gbo-ask-note">{SETTLED_NOTE[settled.status]}</div>
+      ) : null}
+      {footer}
+    </div>
   )
+}
+
+/** A settled choice card (transcript item `kind: 'clarify'`). */
+export function SettledChoiceCard({ item }: { item: any }) {
+  return <ChoiceCard questions={item.questions || []} picks={item.answers || {}} settled={{ status: item.status }} />
 }
 
 /** One-value prompts (sudo, secret, vault unlock / code / save login). */
@@ -289,16 +339,28 @@ function ConnectionCard({ waiting, onRespond }: { waiting: any; onRespond: (resu
 export function WaitingCard({ waiting, bot, name, controller }: { waiting: any; bot: any; name: string; controller: any }) {
   const answer = (value: any) => void controller?.answerPrompt(value)
   const respond = (result: any) => void controller?.respondConnection(result)
+  if (waiting.kind === 'clarify') {
+    return (
+      <ChoiceCard
+        key={waiting.id}
+        questions={waiting.questions || []}
+        picks={clarifyPicks(waiting)}
+        busy={Boolean(waiting.answering)}
+        name={name}
+        onPick={(qid, value) => void controller?.pickClarify(qid, value)}
+        onAnswer={answer}
+        footer={<Footer waiting={waiting} bot={bot} />}
+      />
+    )
+  }
   return (
     <div className="gbo-card is-question" role="group" aria-label="Waiting for your answer">
       <div className="gbo-card-title">Waiting for your answer</div>
       <div className="gbo-card-desc">
         {name} {TITLES[waiting.kind] || 'is waiting for you'}
-        {waiting.kind !== 'clarify' && waiting.kind !== 'sudo' && waiting.kind !== 'secret' && waiting.text ? `: ${waiting.text}` : '.'}
+        {waiting.kind !== 'sudo' && waiting.kind !== 'secret' && waiting.text ? `: ${waiting.text}` : '.'}
       </div>
-      {waiting.kind === 'clarify' ? (
-        <ClarifyCard key={waiting.id} waiting={waiting} onAnswer={answer} />
-      ) : waiting.kind === 'connection' ? (
+      {waiting.kind === 'connection' ? (
         <ConnectionCard waiting={waiting} onRespond={respond} />
       ) : (
         <ValueCard key={waiting.id} waiting={waiting} onAnswer={answer} />

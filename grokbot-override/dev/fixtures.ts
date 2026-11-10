@@ -66,3 +66,31 @@ export const MD_ITEMS = [
   { kind: 'user', id: 'm-u3', text: 'nice, can you send this every morning?', at: morning + 3 * 60_000 },
   { kind: 'assistant', id: 'm-a4', text: 'Done: a “Morning reading digest” now runs at 8:00 AM. You can pause it from the profile panel.', at: morning + 3 * 60_000 + 15_000 }
 ]
+
+/** The choice card (Cards 7): a yes/no question waiting at the end of the
+ *  transcript, the same card settled, and a two-question card. Demo text. */
+export const CARD_ITEMS = [
+  { kind: 'assistant', id: 'k-a1', text: 'Your reading list has two new picks.', at: night },
+  { kind: 'user', id: 'k-u1', text: 'can you ask me with a quick yes/no card?', at: night + 60_000 }
+]
+export const CARD_WAITING = {
+  kind: 'clarify',
+  id: 'k-c1',
+  text: 'Does this yes/no card work for you?',
+  questions: [{ qid: 'k-c1', question: 'Does this yes/no card work for you?', choices: ['Yes', 'No'], multiSelect: false }]
+}
+export const CARD_SETTLED_ITEMS = [
+  ...CARD_ITEMS,
+  { kind: 'clarify', id: 'clarify:k-c1', requestId: 'k-c1', questions: CARD_WAITING.questions, answers: { 'k-c1': 'Yes' }, status: 'answered', at: night + 70_000 },
+  { kind: 'assistant', id: 'k-a2', text: 'Great, I’ll use cards like this from now on.', at: night + 80_000 }
+]
+export const CARD_MULTI_WAITING = {
+  kind: 'clarify',
+  id: 'k-c2',
+  text: 'Which evenings work?',
+  questions: [
+    { qid: 'days', question: 'Which evenings work?', choices: ['Monday', 'Wednesday (Recommended)', 'Friday'], multiSelect: true },
+    { qid: 'why', question: 'Anything I should plan around?', choices: null, multiSelect: false }
+  ],
+  picks: { days: ['Wednesday'] }
+}

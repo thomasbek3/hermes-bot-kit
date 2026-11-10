@@ -97,7 +97,7 @@ import {
   survivorRowIdsFrom,
   userTurnFromEnd
 } from './rewind.js'
-import { VALUE_KINDS, valueResult } from './prompts.js'
+import { clarifySettledItem, clarifyTextAnswer, VALUE_KINDS, valueResult } from './prompts.js'
 import { COMPRESS_TIMEOUT_MS, HELP_TEXT, parseCommandDispatch, parseSlash, renderRpcResult, slashSurface } from './slash.js'
 import {
   APPROVAL_RESPOND_TIMEOUT_MS,
@@ -453,8 +453,9 @@ export function createChatController(bot, deps, options = {}) {
   }
 
   /** Items a history rebuild keeps: anything live while a turn runs; when
-   *  idle only what was never stored (an unsent bubble, a waiting card). */
-  const keepLocal = item => item.failed || item.kind === 'command' || (item.kind === 'approval' && item.status === 'pending')
+   *  idle only what was never stored (an unsent bubble, a waiting card, a
+   *  settled choice card). */
+  const keepLocal = item => item.failed || item.kind === 'command' || item.kind === 'clarify' || (item.kind === 'approval' && item.status === 'pending')
   const keepLive = item => !isPersistedItem(item)
 
   async function open() {
@@ -1029,7 +1030,16 @@ export function createChatController(bot, deps, options = {}) {
       } else {
         throw new Error('Unknown question')
       }
-      patchWaiting(waiting, null)
+      if (waiting.kind === 'clarify') {
+        // The card stays where it was, settled: the choice marked, not
+        // clickable. Dropped with this chat (not stored by Hermes).
+        const settled = clarifySettledItem(waiting, answer, status, now())
+        setChat(chat => ({
+          ...chat,
+          items: [...chat.items.filter(item => item.id !== settled.id), settled],
+          waiting: chat.waiting && chat.waiting.kind === waiting.kind && chat.waiting.id === waiting.id ? null : chat.waiting
+        }))
+      } else patchWaiting(waiting, null)
       return { ok: true, status }
     } catch (error) {
       const unsupported = looksUnsupported(error) // UI only: the card says so, nothing is re-sent
@@ -1040,6 +1050,31 @@ export function createChatController(bot, deps, options = {}) {
       })
       return { ok: false, unsupported }
     }
+  }
+
+  /** A pick on a clarify card that does not send yet (a multi-select row, or
+   *  one question of several): kept on the card until Answer. */
+  function pickClarify(qid, value) {
+    const waiting = state.chat.waiting
+    if (!waiting || waiting.kind !== 'clarify' || waiting.answering) return false
+    if (!(waiting.questions || []).some(q => q.qid === qid)) return false
+    patchWaiting(waiting, { picks: { ...(waiting.picks || {}), [qid]: value } })
+    return true
+  }
+
+  /** Composer text while a clarify card waits: the free-text answer to it,
+   *  through the same clarify.lock calls as the card (answerPrompt). With
+   *  more questions still open the text only fills the next one. */
+  async function answerClarifyText(text) {
+    const waiting = state.chat.waiting
+    if (!waiting || waiting.kind !== 'clarify' || waiting.answering) return { ok: false, error: 'No question is waiting for an answer' }
+    const { picks, complete } = clarifyTextAnswer(waiting, text)
+    if (!complete) {
+      patchWaiting(waiting, { picks: { ...(waiting.picks || {}), ...picks } })
+      return { ok: true, status: 'picked' }
+    }
+    const result = await answerPrompt(picks)
+    return result.ok ? result : { ...result, error: state.chat.waiting?.error || 'Your answer was not sent' }
   }
 
   /** Drive the connection card (`connection.respond`); the card follows the
@@ -2124,6 +2159,8 @@ export function createChatController(bot, deps, options = {}) {
     runSlash,
     completeSlash,
     answerPrompt,
+    pickClarify,
+    answerClarifyText,
     respondConnection,
     pollApprovals,
     hasPendingApproval: () => hasPendingApproval(state.chat.items),

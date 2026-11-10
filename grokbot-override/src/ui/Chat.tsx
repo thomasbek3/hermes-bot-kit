@@ -23,7 +23,7 @@ import { BotText } from './Media'
 import { AssistantActions, Reactions, UserActions } from './MessageActions'
 import { ProfilePanel } from './Profile'
 import { OverlayScroll } from './OverlayScroll'
-import { WaitingCard } from './Prompts'
+import { SettledChoiceCard, WaitingCard } from './Prompts'
 import { ToolGroup } from './Tools'
 import { useStore } from './store'
 
@@ -245,6 +245,8 @@ function Item({
       return <ToolGroup item={item} bot={bot} />
     case 'approval':
       return <ApprovalCard item={item} onAnswer={onAnswer} />
+    case 'clarify':
+      return <SettledChoiceCard item={item} />
     case 'notice':
       return <div className="system-event gbo-notice">{item.text}</div>
     case 'command':
@@ -614,6 +616,8 @@ export function ChatWorkspace({ slot = mainSlot }: { slot?: ChatSlot } = {}) {
           onRestored={clientId => controller?.dropFailed(clientId)}
           onDiscard={id => void controller?.discardStaged([id])}
           onStop={() => void controller?.interrupt()}
+          answering={state.chat.waiting?.kind === 'clarify'}
+          onAnswer={text => controller?.answerClarifyText(text) ?? Promise.resolve({ ok: false, error: 'This chat is closed' })}
         />
       </main>
       {extra ? null : narrow ? drawerOpen ? <ProfileDrawer bot={bot} onClose={closeDrawer} backgroundRef={chatRef} /> : null : panelOpen ? (

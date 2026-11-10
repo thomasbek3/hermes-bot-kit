@@ -93,9 +93,11 @@ test('review r1: owner-safe markdown, narrow drawer, waiting card, stop error', 
 
   // #7: a turn blocked on a clarify/secret answer says so and hands off
   const waiting = render({ waiting: { kind: 'clarify', id: 'c1', text: 'Which branch?', questions: [{ qid: 'c1', question: 'Which branch?', choices: ['main (Recommended)', 'dev'], multiSelect: false }] } })
-  assert.ok(waiting.includes('Waiting for your answer'))
+  // Cards 7: a clarify question is an inline choice card, lettered rows.
+  assert.ok(waiting.includes('class="gbo-ask"') && !waiting.includes('Waiting for your answer'))
   assert.ok(waiting.includes('Which branch?'))
   assert.ok(waiting.includes('Recommended') && waiting.includes('>dev<') && waiting.includes('Skip'), 'answerable here (C11)')
+  assert.ok(waiting.includes('Type your answer, or talk about something…'), 'the composer takes the typed answer')
   assert.ok(!waiting.includes('Thinking…'), 'not shown as thinking')
   const sudo = render({ waiting: { kind: 'sudo', id: 's1', text: 'apt install jq' } })
   assert.ok(sudo.includes('type="password"') && sudo.includes('apt install jq') && sudo.includes('Cancel'))

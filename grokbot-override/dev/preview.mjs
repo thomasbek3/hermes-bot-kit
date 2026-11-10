@@ -84,7 +84,7 @@ function slackPages() {
 
 mkdirSync(outDir, { recursive: true })
 const file = await bundlePreview()
-const { render, renderAvatarSheet, MD_ITEMS, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
+const { render, renderAvatarSheet, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
 const host = live ? hostCss() : ''
 if (live && !host) console.warn('no Hermes stylesheet found: rendering without the host cascade')
 // ROSTER indexes: 0 travel, 1 scholar, 4 recipes (pink), 5 sunny (yellow).
@@ -105,7 +105,15 @@ const pages = live ? {
   'dark-pink.html': { theme: 'dark', botIndex: 4, items: USER_ITEMS, busy: false, pins: ['scholar'] },
   'light-yellow.html': { theme: 'light', botIndex: 5, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny'] },
   'dark-yellow.html': { theme: 'dark', botIndex: 5, items: USER_ITEMS, busy: false, pins: ['scholar', 'recipes', 'sunny', 'travel'] },
-  ...slackPages()
+  ...slackPages(),
+  // Cards 7: the choice card waiting (the composer asks for the answer),
+  // settled, and with two questions.
+  'light-card-waiting.html': { theme: 'light', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_WAITING, hasMore: false, pins: ['scholar'] },
+  'dark-card-waiting.html': { theme: 'dark', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_WAITING, hasMore: false, pins: ['scholar'] },
+  'light-card-settled.html': { theme: 'light', botIndex: 1, items: CARD_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
+  'dark-card-settled.html': { theme: 'dark', botIndex: 1, items: CARD_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
+  'light-card-multi.html': { theme: 'light', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
+  'dark-card-multi.html': { theme: 'dark', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] }
 } : {
   'dark-chat.html': { theme: 'dark' },
   'light-chat.html': { theme: 'light' },

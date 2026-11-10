@@ -15615,6 +15615,45 @@ function applyConnectionUpdate(waiting, payload) {
     deadlineAt: Number.isFinite(payload?.deadline_at) ? payload.deadline_at : waiting.deadlineAt
   };
 }
+var RECOMMENDED = "(Recommended)";
+function bareChoice(choice) {
+  const text = str(choice);
+  return text.endsWith(RECOMMENDED) ? text.slice(0, -RECOMMENDED.length).trim() : text;
+}
+function choiceLetter(index) {
+  return index >= 0 && index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+function clarifyFilled(value) {
+  return Array.isArray(value) ? value.length > 0 : typeof value === "string" && value.length > 0;
+}
+function clarifyPicks(waiting) {
+  return { ...waiting?.locked || {}, ...waiting?.picks || {} };
+}
+function clarifyTextAnswer(waiting, text) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
+  const value = str(text).trim();
+  const picks = clarifyPicks(waiting);
+  if (!questions.length || !value) return { picks, complete: false };
+  const target = questions.find((q) => !clarifyFilled(picks[q.qid])) || questions[questions.length - 1];
+  const current = picks[target.qid];
+  picks[target.qid] = target.multiSelect ? [...Array.isArray(current) ? current.filter((v) => v !== value) : [], value] : value;
+  return { picks, complete: questions.every((q) => clarifyFilled(picks[q.qid])) };
+}
+function clarifySettledItem(waiting, answer, status, at) {
+  const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
+  const answers = {};
+  for (const q of questions) answers[q.qid] = answer && Object.prototype.hasOwnProperty.call(answer, q.qid) ? answer[q.qid] ?? null : null;
+  const skipped = questions.every((q) => !clarifyFilled(answers[q.qid]));
+  return {
+    kind: "clarify",
+    id: `clarify:${String(waiting?.id || "")}`,
+    requestId: String(waiting?.id || ""),
+    questions,
+    answers,
+    status: status === "expired" ? "expired" : skipped ? "skipped" : "answered",
+    ...Number.isFinite(at) ? { at } : {}
+  };
+}
 function valueResult(kind, input) {
   if (kind === "vault-login") {
     const identifier = str(input?.identifier).trim();
@@ -16359,7 +16398,7 @@ function createChatController(bot, deps, options = {}) {
     const page = await deps.readHistory(bot, state.storedId, { limit: HISTORY_PAGE, offset });
     return Array.isArray(page?.messages) ? page.messages : [];
   }
-  const keepLocal = (item) => item.failed || item.kind === "command" || item.kind === "approval" && item.status === "pending";
+  const keepLocal = (item) => item.failed || item.kind === "command" || item.kind === "clarify" || item.kind === "approval" && item.status === "pending";
   const keepLive = (item) => !isPersistedItem(item);
   async function open() {
     const mine = ++generation2;
@@ -16832,7 +16871,14 @@ function createChatController(bot, deps, options = {}) {
       } else {
         throw new Error("Unknown question");
       }
-      patchWaiting(waiting, null);
+      if (waiting.kind === "clarify") {
+        const settled = clarifySettledItem(waiting, answer, status, now());
+        setChat((chat) => ({
+          ...chat,
+          items: [...chat.items.filter((item) => item.id !== settled.id), settled],
+          waiting: chat.waiting && chat.waiting.kind === waiting.kind && chat.waiting.id === waiting.id ? null : chat.waiting
+        }));
+      } else patchWaiting(waiting, null);
       return { ok: true, status };
     } catch (error) {
       const unsupported = looksUnsupported(error);
@@ -16843,6 +16889,24 @@ function createChatController(bot, deps, options = {}) {
       });
       return { ok: false, unsupported };
     }
+  }
+  function pickClarify(qid, value) {
+    const waiting = state.chat.waiting;
+    if (!waiting || waiting.kind !== "clarify" || waiting.answering) return false;
+    if (!(waiting.questions || []).some((q) => q.qid === qid)) return false;
+    patchWaiting(waiting, { picks: { ...waiting.picks || {}, [qid]: value } });
+    return true;
+  }
+  async function answerClarifyText(text) {
+    const waiting = state.chat.waiting;
+    if (!waiting || waiting.kind !== "clarify" || waiting.answering) return { ok: false, error: "No question is waiting for an answer" };
+    const { picks, complete } = clarifyTextAnswer(waiting, text);
+    if (!complete) {
+      patchWaiting(waiting, { picks: { ...waiting.picks || {}, ...picks } });
+      return { ok: true, status: "picked" };
+    }
+    const result = await answerPrompt(picks);
+    return result.ok ? result : { ...result, error: state.chat.waiting?.error || "Your answer was not sent" };
   }
   async function respondConnection(result) {
     const waiting = state.chat.waiting;
@@ -17709,6 +17773,8 @@ ${body}` : body);
     runSlash,
     completeSlash,
     answerPrompt,
+    pickClarify,
+    answerClarifyText,
     respondConnection,
     pollApprovals,
     hasPendingApproval: () => hasPendingApproval(state.chat.items),
@@ -18795,8 +18861,8 @@ function cronJobRestPath(job, suffix = "") {
 function scheduleLabel(schedule) {
   const once = /^once in (.+)$/.exec(schedule || "");
   if (once) return `Once in ${once[1]}`;
-  const bare2 = /^(\d+)([mhd])$/.exec(schedule || "");
-  if (bare2) return `Once in ${bare2[1]}${bare2[2]}`;
+  const bare = /^(\d+)([mhd])$/.exec(schedule || "");
+  if (bare) return `Once in ${bare[1]}${bare[2]}`;
   const match = /^every (\d+)m$/.exec(schedule || "");
   if (match) {
     const minutes = Number(match[1]);
@@ -20930,6 +20996,47 @@ var ADAPT_SRC = (
 .gbo-choice:hover { background: var(--color-bg-secondary-hover); }
 .gbo-choice.is-on { background: var(--color-primary); color: var(--color-on-primary); }
 .gbo-command { border: 0; border-radius: 12px; background: var(--color-bg-subtle); }
+/* The choice card (a clarify question): the bot bubble's flat fill, a bold
+   question, lettered rows. Settled: the chosen row marked, the rest faded. */
+.gbo-ask {
+  align-self: flex-start; width: 310px; max-width: 100%; display: flex; flex-direction: column; gap: 6px;
+  padding: 14px 8px 6px; border-radius: 18px; background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
+}
+.gbo-ask-q { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gbo-ask-q + .gbo-ask-q { margin-top: 4px; }
+.gbo-ask-title { padding: 0 8px 4px; font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; }
+.gbo-ask-rows { display: flex; flex-direction: column; gap: 2px; }
+.gbo-ask-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 5px 8px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--color-text-primary); font: inherit; font-size: 15px; line-height: 22px; letter-spacing: 0.15px; text-align: left; cursor: pointer;
+  transition: background-color 120ms var(--ease-out);
+}
+.gbo-ask-row:hover:not(:disabled) { background: var(--color-row-selected); }
+.gbo-ask-row:focus-visible { outline: 0; box-shadow: var(--color-border-secondary) 0 0 0 2px inset; }
+.gbo-ask-row:disabled { cursor: default; }
+.gbo-ask-key {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: 6px;
+  box-shadow: var(--color-border-secondary) 0 0 0 1px inset; color: var(--color-text-tertiary); font-size: 12px; font-weight: 500; line-height: 16px;
+}
+.gbo-ask-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.gbo-ask-tag { flex: none; font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-ask-check { display: inline-flex; flex: none; color: var(--color-text-primary); }
+.gbo-ask-check svg { width: 16px; height: 16px; }
+.gbo-ask-row.is-on .gbo-ask-key { background: var(--color-text-primary); color: var(--color-bubble-agent-flat); box-shadow: none; }
+.gbo-ask.is-settled .gbo-ask-row:not(.is-on) { opacity: 0.45; }
+.gbo-ask.is-busy .gbo-ask-row { cursor: progress; }
+.gbo-ask-row.is-typed { cursor: default; }
+.gbo-ask-hint, .gbo-ask-note { padding: 0 8px; font-size: 13px; line-height: 18px; color: var(--color-text-tertiary); }
+.gbo-ask-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 2px 0 8px; }
+.gbo-ask-actions .gbo-pill-btn.is-primary { margin-right: auto; }
+.gbo-ask-actions .gbo-pill-btn { height: 30px; }
+.gbo-ask-skip {
+  padding: 2px 6px; border: 0; border-radius: 8px; background: transparent; color: var(--color-text-quaternary);
+  font: inherit; font-size: 12px; line-height: 16px; cursor: pointer;
+}
+.gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
+.gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
+.gbo-ask .gbo-card-error { padding: 0 8px 4px; }
 
 /* Buttons the override keeps: in the reference's .btn--sm idiom. */
 .gbo-pill-btn {
@@ -20970,6 +21077,8 @@ var ADAPT_SRC = (
 .composer__btn.is-recording { color: var(--color-danger); background: var(--color-danger-bg); }
 .composer__btn.is-recording > svg { opacity: 1; }
 .composer__input:disabled { cursor: default; }
+/* A long prompt (the choice card's "Type your answer…") stays on one line. */
+.composer__input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-composer-note {
   max-width: 960px; margin: 8px auto 0; display: flex; align-items: center; justify-content: center; gap: 8px;
   font-size: 13px; line-height: 18px; color: var(--color-text-secondary);
@@ -23497,6 +23606,7 @@ function ComposerNote({
   return null;
 }
 var COMPOSER_MAX_H = 223;
+var ANSWER_PLACEHOLDER = "Type your answer, or talk about something…";
 function Composer({
   bot,
   name,
@@ -23511,7 +23621,9 @@ function Composer({
   onRestored,
   onDiscard,
   onStop,
-  draftRef
+  draftRef,
+  answering = false,
+  onAnswer
 }) {
   const [text, setText] = React5.useState("");
   const [files, setFiles] = React5.useState([]);
@@ -23634,6 +23746,23 @@ ${value}`);
     }
     if (slash && files.length) {
       setNote("A command can’t carry attachments: remove them, or send the text without the leading /.");
+      return;
+    }
+    if (answering && onAnswer) {
+      if (files.length) {
+        setNote("An answer can’t carry attachments: remove them, or answer first and send them after.");
+        return;
+      }
+      setText("");
+      setNote("");
+      setOptions([]);
+      const result2 = await onAnswer(sending);
+      if (ownerRef.current !== sentOwner) return;
+      if (!result2?.ok) {
+        if (!textRef.current.trim()) setText(sending);
+        setNote(`Your answer was not sent${result2?.error ? `: ${result2.error}` : ""}.`);
+      }
+      inputRef.current?.focus();
       return;
     }
     const attachments = files.filter((file) => file.owner === ownerRef.current);
@@ -23762,8 +23891,8 @@ ${value}`);
                 rows: 1,
                 value: text,
                 disabled,
-                placeholder: `Message ${name}`,
-                "aria-label": `Message ${name}`,
+                placeholder: answering ? ANSWER_PLACEHOLDER : `Message ${name}`,
+                "aria-label": answering ? `Answer ${name}` : `Message ${name}`,
                 "aria-autocomplete": "list",
                 onChange: (event) => {
                   setText(event.target.value);
@@ -27946,7 +28075,6 @@ function ProfilePanel({ bot, onClose }) {
 import * as React18 from "react";
 import { Fragment as Fragment10, jsx as jsx20, jsxs as jsxs18 } from "react/jsx-runtime";
 var TITLES = {
-  clarify: "has a question for you",
   sudo: "needs your administrator password",
   secret: "needs a secret value",
   "vault-unlock": "needs your password manager unlocked",
@@ -27954,8 +28082,6 @@ var TITLES = {
   "vault-code": "needs a one-time code",
   connection: "wants to connect"
 };
-var RECOMMENDED = "(Recommended)";
-var bare = (choice) => choice.endsWith(RECOMMENDED) ? choice.slice(0, -RECOMMENDED.length).trim() : choice;
 function Footer({ waiting, bot }) {
   if (!waiting.error) return null;
   return /* @__PURE__ */ jsxs18("div", { className: "gbo-card-error", role: "alert", children: [
@@ -27963,79 +28089,95 @@ function Footer({ waiting, bot }) {
     waiting.unsupported ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-link-btn", onClick: () => void openInBotMode(bot, "Answer the question in the Hermes Bot Chat."), children: "Answer in Hermes Bot Mode" }) : null
   ] });
 }
-function ClarifyCard({ waiting, onAnswer }) {
-  const questions = waiting.questions || [];
-  const [answers, setAnswers] = React18.useState(() => ({ ...waiting.locked || {} }));
-  const [typed, setTyped] = React18.useState({});
-  const busy = Boolean(waiting.answering);
-  const value = (q) => typed[q.qid]?.trim() ? typed[q.qid].trim() : answers[q.qid];
-  const complete = questions.every((q) => {
-    const v = value(q);
-    return Array.isArray(v) ? v.length > 0 : typeof v === "string" && v.length > 0;
-  });
-  const submit = (overrides) => {
-    const out = {};
-    for (const q of questions) out[q.qid] = overrides && q.qid in overrides ? overrides[q.qid] : value(q) ?? null;
-    onAnswer(out);
-  };
-  const single = questions.length === 1 && !questions[0].multiSelect && questions[0].choices;
-  return /* @__PURE__ */ jsxs18(Fragment10, { children: [
-    questions.map((q) => /* @__PURE__ */ jsxs18("fieldset", { className: "gbo-q", disabled: busy, children: [
-      /* @__PURE__ */ jsx20("legend", { children: q.question }),
-      q.choices ? /* @__PURE__ */ jsx20("div", { className: "gbo-choices", role: q.multiSelect ? "group" : "radiogroup", children: q.choices.map((choice) => {
-        const label = bare(choice);
-        const picked = q.multiSelect ? (answers[q.qid] || []).includes(label) : answers[q.qid] === label;
-        return /* @__PURE__ */ jsxs18(
-          "button",
-          {
-            type: "button",
-            role: q.multiSelect ? "checkbox" : "radio",
-            "aria-checked": picked,
-            className: `gbo-choice${picked ? " is-on" : ""}${choice !== label ? " is-recommended" : ""}`,
-            onClick: () => {
-              if (single) return submit({ [q.qid]: label });
-              setAnswers((current) => {
-                if (!q.multiSelect) return { ...current, [q.qid]: label };
-                const list = current[q.qid] || [];
-                return { ...current, [q.qid]: list.includes(label) ? list.filter((x) => x !== label) : [...list, label] };
-              });
-            },
-            children: [
-              label,
-              choice !== label ? /* @__PURE__ */ jsx20("span", { className: "gbo-choice-tag", children: "Recommended" }) : null
-            ]
-          },
-          choice
-        );
-      }) }) : null,
-      !q.multiSelect ? /* @__PURE__ */ jsx20(
-        "input",
-        {
-          className: "gbo-input",
-          placeholder: q.choices ? "Or type your own answer" : "Your answer",
-          "aria-label": q.question,
-          value: typed[q.qid] || "",
-          onChange: (event) => setTyped((current) => ({ ...current, [q.qid]: event.target.value })),
-          onKeyDown: (event) => {
-            if (event.key === "Enter" && questions.length === 1 && event.currentTarget.value.trim()) submit();
-          }
-        }
-      ) : null
-    ] }, q.qid)),
-    /* @__PURE__ */ jsxs18("div", { className: "gbo-card-actions", children: [
-      !single ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !complete, onClick: () => submit(), children: busy ? "Sending…" : "Answer" }) : null,
-      /* @__PURE__ */ jsx20(
-        "button",
-        {
-          type: "button",
-          className: "gbo-pill-btn",
-          disabled: busy,
-          onClick: () => onAnswer(Object.fromEntries(questions.map((q) => [q.qid, null]))),
-          children: "Skip"
-        }
-      )
-    ] })
-  ] });
+var SETTLED_NOTE = {
+  skipped: "Skipped",
+  expired: "No longer waiting for an answer"
+};
+function ChoiceCard({
+  questions,
+  picks,
+  settled = null,
+  busy = false,
+  name = "",
+  onPick,
+  onAnswer,
+  footer = null
+}) {
+  const live = !settled;
+  const single = questions.length === 1 && !questions[0].multiSelect && Boolean(questions[0].choices);
+  const complete = questions.every((q) => clarifyFilled(picks[q.qid]));
+  const answerWith = (overrides = {}) => onAnswer?.(Object.fromEntries(questions.map((q) => [q.qid, q.qid in overrides ? overrides[q.qid] : picks[q.qid] ?? null])));
+  const baseId = React18.useId();
+  return /* @__PURE__ */ jsxs18(
+    "div",
+    {
+      className: `gbo-ask${live ? "" : " is-settled"}${busy ? " is-busy" : ""}`,
+      role: "group",
+      "aria-label": name ? `Question from ${name}` : "Question",
+      "aria-busy": busy || void 0,
+      children: [
+        questions.map((q, qi) => {
+          const value = picks[q.qid];
+          const chosen = Array.isArray(value) ? value : typeof value === "string" && value ? [value] : [];
+          const labels = (q.choices || []).map((choice) => bareChoice(choice));
+          const typed = chosen.filter((v) => !labels.includes(v));
+          const titleId = `${baseId}-q${qi}`;
+          return /* @__PURE__ */ jsxs18("div", { className: "gbo-ask-q", children: [
+            /* @__PURE__ */ jsx20("div", { className: "gbo-ask-title", id: titleId, children: q.question }),
+            q.choices ? /* @__PURE__ */ jsx20("div", { className: "gbo-ask-rows", role: q.multiSelect ? "group" : "radiogroup", "aria-labelledby": titleId, children: q.choices.map((choice, i) => {
+              const label = labels[i];
+              const on = chosen.includes(label);
+              return /* @__PURE__ */ jsxs18(
+                "button",
+                {
+                  type: "button",
+                  role: q.multiSelect ? "checkbox" : "radio",
+                  "aria-checked": on,
+                  disabled: !live || busy,
+                  className: `gbo-ask-row${on ? " is-on" : ""}`,
+                  onClick: () => {
+                    if (single) return answerWith({ [q.qid]: label });
+                    if (!q.multiSelect) return onPick?.(q.qid, label);
+                    onPick?.(q.qid, on ? chosen.filter((v) => v !== label) : [...chosen, label]);
+                  },
+                  children: [
+                    /* @__PURE__ */ jsx20("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
+                    /* @__PURE__ */ jsx20("span", { className: "gbo-ask-label", children: label }),
+                    choice !== label ? /* @__PURE__ */ jsx20("span", { className: "gbo-ask-tag", children: "Recommended" }) : null,
+                    on ? /* @__PURE__ */ jsx20("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx20(IconCheck, {}) }) : null
+                  ]
+                },
+                choice
+              );
+            }) }) : null,
+            typed.map((text, j) => /* @__PURE__ */ jsxs18("div", { className: "gbo-ask-row is-on is-typed", role: "note", "aria-label": `Your answer: ${text}`, children: [
+              /* @__PURE__ */ jsx20("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(labels.length + j) }),
+              /* @__PURE__ */ jsx20("span", { className: "gbo-ask-label", children: text }),
+              /* @__PURE__ */ jsx20("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx20(IconCheck, {}) })
+            ] }, text)),
+            live && !q.choices && !typed.length ? /* @__PURE__ */ jsx20("div", { className: "gbo-ask-hint", children: "Type your answer below." }) : null
+          ] }, q.qid);
+        }),
+        live ? /* @__PURE__ */ jsxs18("div", { className: "gbo-ask-actions", children: [
+          !single ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !complete, onClick: () => answerWith(), children: busy ? "Sending…" : "Answer" }) : null,
+          /* @__PURE__ */ jsx20(
+            "button",
+            {
+              type: "button",
+              className: "gbo-ask-skip",
+              disabled: busy,
+              onClick: () => onAnswer?.(Object.fromEntries(questions.map((q) => [q.qid, null]))),
+              children: busy && single ? "Sending…" : "Skip"
+            }
+          )
+        ] }) : SETTLED_NOTE[settled.status] ? /* @__PURE__ */ jsx20("div", { className: "gbo-ask-note", children: SETTLED_NOTE[settled.status] }) : null,
+        footer
+      ]
+    }
+  );
+}
+function SettledChoiceCard({ item }) {
+  return /* @__PURE__ */ jsx20(ChoiceCard, { questions: item.questions || [], picks: item.answers || {}, settled: { status: item.status } });
 }
 function ValueCard({ waiting, onAnswer }) {
   const first = React18.useRef(null);
@@ -28168,15 +28310,30 @@ function ConnectionCard({ waiting, onRespond }) {
 function WaitingCard({ waiting, bot, name, controller: controller2 }) {
   const answer = (value) => void controller2?.answerPrompt(value);
   const respond = (result) => void controller2?.respondConnection(result);
+  if (waiting.kind === "clarify") {
+    return /* @__PURE__ */ jsx20(
+      ChoiceCard,
+      {
+        questions: waiting.questions || [],
+        picks: clarifyPicks(waiting),
+        busy: Boolean(waiting.answering),
+        name,
+        onPick: (qid, value) => void controller2?.pickClarify(qid, value),
+        onAnswer: answer,
+        footer: /* @__PURE__ */ jsx20(Footer, { waiting, bot })
+      },
+      waiting.id
+    );
+  }
   return /* @__PURE__ */ jsxs18("div", { className: "gbo-card is-question", role: "group", "aria-label": "Waiting for your answer", children: [
     /* @__PURE__ */ jsx20("div", { className: "gbo-card-title", children: "Waiting for your answer" }),
     /* @__PURE__ */ jsxs18("div", { className: "gbo-card-desc", children: [
       name,
       " ",
       TITLES[waiting.kind] || "is waiting for you",
-      waiting.kind !== "clarify" && waiting.kind !== "sudo" && waiting.kind !== "secret" && waiting.text ? `: ${waiting.text}` : "."
+      waiting.kind !== "sudo" && waiting.kind !== "secret" && waiting.text ? `: ${waiting.text}` : "."
     ] }),
-    waiting.kind === "clarify" ? /* @__PURE__ */ jsx20(ClarifyCard, { waiting, onAnswer: answer }, waiting.id) : waiting.kind === "connection" ? /* @__PURE__ */ jsx20(ConnectionCard, { waiting, onRespond: respond }) : /* @__PURE__ */ jsx20(ValueCard, { waiting, onAnswer: answer }, waiting.id),
+    waiting.kind === "connection" ? /* @__PURE__ */ jsx20(ConnectionCard, { waiting, onRespond: respond }) : /* @__PURE__ */ jsx20(ValueCard, { waiting, onAnswer: answer }, waiting.id),
     /* @__PURE__ */ jsx20(Footer, { waiting, bot })
   ] });
 }
@@ -28372,6 +28529,8 @@ function Item({
       return /* @__PURE__ */ jsx22(ToolGroup, { item, bot });
     case "approval":
       return /* @__PURE__ */ jsx22(ApprovalCard, { item, onAnswer });
+    case "clarify":
+      return /* @__PURE__ */ jsx22(SettledChoiceCard, { item });
     case "notice":
       return /* @__PURE__ */ jsx22("div", { className: "system-event gbo-notice", children: item.text });
     case "command":
@@ -28650,7 +28809,9 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
           onCompleteSlash: completeSlash,
           onRestored: (clientId) => controller2?.dropFailed(clientId),
           onDiscard: (id) => void controller2?.discardStaged([id]),
-          onStop: () => void controller2?.interrupt()
+          onStop: () => void controller2?.interrupt(),
+          answering: state.chat.waiting?.kind === "clarify",
+          onAnswer: (text) => controller2?.answerClarifyText(text) ?? Promise.resolve({ ok: false, error: "This chat is closed" })
         },
         rowKey(bot)
       )
