@@ -1914,6 +1914,41 @@ export function createChatController(bot, deps, options = {}) {
     return (await sendDraft(text, attachments)).ok
   }
 
+  /** A card button or a preview widget speaking (Cards 7): a user turn the
+   *  gateway stores as `display_kind: 'hidden'`, so no bubble is drawn and
+   *  the card or widget updating is the visible answer (stock submit.ts).
+   *  Up to 500 characters; never retried by itself. Resolves { ok, error }. */
+  async function sendIntent(text) {
+    const clean = String(text || '').trim()
+    if (!clean) return { ok: false, error: 'Nothing to send' }
+    if (clean.length > 500) return { ok: false, error: 'Too long' }
+    if (!state.storedId || disposed) return { ok: false, error: 'This chat is closed' }
+    const payload = { submissionId: newSubmissionId(), legacy: false, params: null, extra: { display_kind: 'hidden' } }
+    const mark = () => undefined
+    const busyAtSubmit = state.chat.busy
+    try {
+      let runtimeId = await attach()
+      let receipt
+      try {
+        receipt = await submitOnce(runtimeId, clean, [], mark, payload)
+      } catch (error) {
+        if (!isRuntimeNotFoundRefusal(error)) throw error
+        dropRuntime()
+        runtimeId = await attach()
+        receipt = await submitOnce(runtimeId, clean, [], mark, payload)
+      }
+      const status = String(receipt?.status || '')
+      const startsNow = status === 'queued' && !busyAtSubmit && Boolean(receipt?.submission_id || receipt?.admission_id)
+      if (status === 'streaming' || status === 'started' || !status || startsNow) {
+        set(s => ({ chat: { ...s.chat, busy: true } }))
+        onTurnStarted()
+      }
+      return { ok: true, status }
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) }
+    }
+  }
+
   /** A stored user row newer than what was loaded when the message was sent,
    *  with the same text: positive evidence that it arrived. */
   function foundIn(tail, payload) {
@@ -2158,6 +2193,7 @@ export function createChatController(bot, deps, options = {}) {
     react,
     runSlash,
     completeSlash,
+    sendIntent,
     answerPrompt,
     pickClarify,
     answerClarifyText,

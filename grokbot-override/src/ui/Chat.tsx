@@ -19,6 +19,7 @@ import { BotAvatar, botColor } from './Avatar'
 import { Composer } from './Composer'
 import { IconChevron, IconOpen, IconPanel, IconSidebar, IconX } from './icons'
 import { MenuButton } from './kit'
+import { DirectiveBlock, DirectiveContext, type DirectiveScope, useDirectiveSegments } from './Directives'
 import { BotText } from './Media'
 import { AssistantActions, Reactions, UserActions } from './MessageActions'
 import { ProfilePanel } from './Profile'
@@ -172,6 +173,42 @@ export function UserMeta({
   return null
 }
 
+/** An assistant message: one bubble, or, in the open chat, bubbles with its
+ *  live `::card` / `::preview` directives between them (Directives.tsx). */
+function AssistantBody({ item, bot, pos }: { item: any; bot: any; pos: string }) {
+  const { segments, scope } = useDirectiveSegments(item.streaming ? '' : item.text)
+  const time = item.at ? <span className="bubble__time">{clock(item.at)}</span> : null
+  if (item.streaming || !segments || !scope) {
+    return (
+      <div className="bubble-wrap is-left">
+        <div className={`bubble is-agent${pos}${item.streaming ? ' is-streaming' : ''}`}>
+          {item.streaming ? <div className="bubble__plain">{item.text}</div> : <div className="md"><BotText bot={bot} text={item.text} /></div>}
+        </div>
+        {time}
+      </div>
+    )
+  }
+  const lastProse = segments.map((segment: any) => segment.kind).lastIndexOf('prose')
+  return (
+    <>
+      {segments.map((segment: any, index: number) =>
+        segment.kind === 'prose' ? (
+          <div key={index} className="bubble-wrap is-left">
+            <div className={`bubble is-agent${pos}`}>
+              <div className="md">
+                <BotText bot={bot} text={segment.text} />
+              </div>
+            </div>
+            {index === lastProse ? time : null}
+          </div>
+        ) : (
+          <DirectiveBlock key={index} segment={segment} poll={scope.recent.has(item.id)} scope={scope} />
+        )
+      )}
+    </>
+  )
+}
+
 function Item({
   item,
   bot,
@@ -229,14 +266,7 @@ function Item({
       return (
         <div className="gbo-msg is-bot">
           {item.reasoning ? <Thinking text={item.reasoning} /> : null}
-          {item.text ? (
-            <div className="bubble-wrap is-left">
-              <div className={`bubble is-agent${pos}${item.streaming ? ' is-streaming' : ''}`}>
-                {item.streaming ? <div className="bubble__plain">{item.text}</div> : <div className="md"><BotText bot={bot} text={item.text} /></div>}
-              </div>
-              {item.at ? <span className="bubble__time">{clock(item.at)}</span> : null}
-            </div>
-          ) : null}
+          {item.text ? <AssistantBody item={item} bot={bot} pos={pos} /> : null}
           <Reactions item={item} onReact={react} />
           {item.text && !item.streaming ? <AssistantActions item={item} controller={controller} busy={busy} /> : null}
         </div>
@@ -298,6 +328,24 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
   const recheck = (clientId: string) => void controller?.recheck(clientId)
   const openStock = () => void openInBotMode(bot, 'Check whether your message arrived before sending anything again.')
   const activity = state.chat.busy ? activityLabel(state.chat, showWork) : ''
+  // Live directives (Cards 7) belong to this open chat only: its bot, its
+  // stored session, its controller. Cards in the last few messages poll.
+  const recentKey = items.slice(-8).map((item: any) => item.id).join('|')
+  const outer = React.useContext(DirectiveContext)
+  const directives = React.useMemo<DirectiveScope | null>(
+    () =>
+      !controller
+        ? outer
+        : state.storedId
+        ? {
+            bot,
+            sessionId: String(state.storedId),
+            sendIntent: (text: string) => controller.sendIntent(text),
+            recent: new Set(recentKey.split('|'))
+          }
+        : null,
+    [bot, state.storedId, controller, recentKey, outer]
+  )
 
   // A block body on purpose: an effect's return value is its cleanup, and
   // `pin()` returns `true`, which React then called as a function when the
@@ -308,6 +356,7 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
   }, [state.storedId])
 
   return (
+    <DirectiveContext.Provider value={directives}>
     <OverlayScroll wrapClassName="transcript-wrap gbo-transcript-scroll" className="transcript gbo-transcript" scrollRef={ref} onScroll={onScroll}>
       <div className="transcript__col gbo-column">
         {state.hasMore ? (
@@ -355,6 +404,7 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
         ) : null}
       </div>
     </OverlayScroll>
+    </DirectiveContext.Provider>
   )
 }
 

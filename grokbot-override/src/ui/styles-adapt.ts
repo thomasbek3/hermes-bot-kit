@@ -315,6 +315,41 @@ const ADAPT_SRC = /* css */ `
 .gbo-ask-skip:hover:not(:disabled) { color: var(--color-text-primary); }
 .gbo-ask-skip:disabled { opacity: 0.5; cursor: default; }
 .gbo-ask .gbo-card-error { padding: 0 8px 4px; }
+/* Live ::card and ::preview directives in the open chat: the same flat fill
+   as the bot's bubbles; a status chip; pill actions. */
+.gbo-directive { display: flex; flex-direction: column; align-self: stretch; max-width: 560px; margin: 4px 0; }
+.gbo-dcard {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 18px;
+  background: var(--color-bubble-agent-flat); color: var(--color-text-primary); min-width: 0;
+}
+.gbo-dcard.is-loading { min-height: 84px; opacity: 0.6; }
+.gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.gbo-dcard-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; text-transform: none; }
+.gbo-dcard.is-unavailable .gbo-dcard-title { text-transform: capitalize; }
+.gbo-dcard-status {
+  flex: none; padding: 2px 8px; border-radius: var(--radius-full); font-size: 12px; line-height: 16px;
+  color: var(--color-text-secondary); box-shadow: var(--color-border-secondary) 0 0 0 1px inset;
+}
+.gbo-dcard-status.is-done { color: var(--color-success-text); }
+.gbo-dcard-status.is-error { color: var(--color-danger-text); }
+.gbo-dcard-text { margin: 0; white-space: pre-wrap; font-size: 14px; line-height: 20px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.gbo-dcard-text.is-email { color: var(--color-text-primary); }
+.gbo-dcard-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; font-size: 13px; line-height: 18px; }
+.gbo-dcard-kv dt { color: var(--color-text-tertiary); }
+.gbo-dcard-kv dd { margin: 0; overflow-wrap: anywhere; }
+.gbo-dcard-foot { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.gbo-dcard-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.gbo-dcard-actions .gbo-pill-btn svg { width: 14px; height: 14px; }
+.gbo-dcard-note { font-size: 12px; line-height: 16px; color: var(--color-text-tertiary); }
+.gbo-preview { width: 100%; border-radius: 14px; overflow: hidden; }
+.gbo-preview.is-loading { height: 120px; background: var(--color-bubble-agent-flat); opacity: 0.6; }
+.gbo-preview-frame { display: block; width: 100%; border: 0; background: transparent; }
+.gbo-preview-row {
+  display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; border-radius: 14px;
+  background: var(--color-bubble-agent-flat); font-size: 14px; line-height: 20px;
+}
+.gbo-preview-name { font-weight: 500; overflow-wrap: anywhere; }
+.gbo-preview-why { color: var(--color-text-tertiary); font-size: 13px; }
 
 /* Buttons the override keeps: in the reference's .btn--sm idiom. */
 .gbo-pill-btn {

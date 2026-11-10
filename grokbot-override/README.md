@@ -17,8 +17,9 @@ preference shows them.
 
 Hermes Bot Mode is never removed or disabled. The override hides the stock **Bots** tab while it is on and
 does the chat itself: creating a Bot Chat, answering questions and password prompts, slash commands and
-skills, @mentions, tool detail, media, edit / regenerate / rewind, reactions, voice input, chats side by
-side, unread dots and gateway group chats. The palette toggle is the escape hatch back to stock; **Open in
+skills, @mentions, tool detail, media, choice cards for the bot's questions, live `::card` and `::preview`
+widgets, edit / regenerate / rewind, reactions, voice input, chats side by side, unread dots and gateway
+group chats. The palette toggle is the escape hatch back to stock; **Open in
 Hermes Bot Mode** shows up only in error states. The full capability list is in [PARITY.md](PARITY.md).
 
 ## Use

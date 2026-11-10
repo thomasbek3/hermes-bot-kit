@@ -17,6 +17,7 @@ import {
 import { botRestScope, botRouteProblem, botWorkspaceOwnerKey, createBotRequester, isLocalBot, resolveBotConnectionRoute, retainBotRoute, stockOpenTarget } from '../core/routing.js'
 import { cronListParams, cronToggleParams, jobActive, sortJobs } from '../core/cron.js'
 import { filePath, mediaReadRequest } from '../core/media.js'
+import { workspaceReadRequest } from '../core/directives.js'
 import { transcribeRequest } from '../core/voice.js'
 import { createChatController } from '../core/session.js'
 import { createStockController, OVERRIDE_ROSTER_PANE_ID, STOCK_PANE_ID } from '../core/stock.js'
@@ -395,6 +396,16 @@ export function readBotMedia(bot: any, path: string): Promise<string> {
   read.catch(() => mediaCache.delete(key))
   while (mediaCache.size > MEDIA_CACHE_MAX) mediaCache.delete(mediaCache.keys().next().value as string)
   return read
+}
+
+/** Read a text file of the bot's session workspace from the bot's OWN
+ *  backend (Cards 7: `::card` JSON, `::preview` HTML): `rel` is resolved by
+ *  the gateway against that session's working directory, never against the
+ *  active chat's. Resolves the read-text reply ({ text, binary, truncated }). */
+export async function readBotWorkspaceText(bot: any, rel: string, sessionId: string): Promise<any> {
+  const desktop = (globalThis as any).window?.hermesDesktop
+  if (typeof desktop?.api !== 'function') throw new Error('This Hermes build cannot read files')
+  return desktop.api(workspaceReadRequest(rel, sessionId, botRestScope(bot, activeConnectionId())))
 }
 
 /** Transcribe a recording on the bot's own backend (PARITY C29). */

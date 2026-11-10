@@ -84,7 +84,7 @@ function slackPages() {
 
 mkdirSync(outDir, { recursive: true })
 const file = await bundlePreview()
-const { render, renderAvatarSheet, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
+const { render, renderAvatarSheet, DIRECTIVE_FILES, DIRECTIVE_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
 const host = live ? hostCss() : ''
 if (live && !host) console.warn('no Hermes stylesheet found: rendering without the host cascade')
 // ROSTER indexes: 0 travel, 1 scholar, 4 recipes (pink), 5 sunny (yellow).
@@ -113,7 +113,10 @@ const pages = live ? {
   'light-card-settled.html': { theme: 'light', botIndex: 1, items: CARD_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
   'dark-card-settled.html': { theme: 'dark', botIndex: 1, items: CARD_SETTLED_ITEMS, busy: false, hasMore: false, pins: ['scholar'] },
   'light-card-multi.html': { theme: 'light', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
-  'dark-card-multi.html': { theme: 'dark', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] }
+  'dark-card-multi.html': { theme: 'dark', botIndex: 1, items: CARD_ITEMS, busy: true, waiting: CARD_MULTI_WAITING, hasMore: false, pins: ['scholar'] },
+  // Live ::card and ::preview directives in the open chat.
+  'light-card-directives.html': { theme: 'light', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES },
+  'dark-card-directives.html': { theme: 'dark', botIndex: 1, items: DIRECTIVE_ITEMS, busy: false, hasMore: false, pins: ['scholar'], directiveFiles: DIRECTIVE_FILES }
 } : {
   'dark-chat.html': { theme: 'dark' },
   'light-chat.html': { theme: 'light' },

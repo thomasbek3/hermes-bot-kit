@@ -94,3 +94,35 @@ export const CARD_MULTI_WAITING = {
   ],
   picks: { days: ['Wednesday'] }
 }
+
+/** Live directives (Cards 7): an approval card and a small HTML widget, as
+ *  the bot's workspace files would hold them. Demo content. */
+export const DIRECTIVE_ITEMS = [
+  { kind: 'user', id: 'd-u1', text: 'draft the weekly reading note and check with me first', at: night },
+  {
+    kind: 'assistant',
+    id: 'd-a1',
+    text: 'Drafted it. Nothing goes out until you say so.\n\n::card{id="c-7f3a" kind="draft-email" file="cards/c-7f3a.json"}\n\nPages read this week:\n\n::preview{file="charts/pages.html" height="150"}',
+    at: night + 30_000
+  }
+]
+export const DIRECTIVE_FILES: Record<string, any> = {
+  'cards/c-7f3a.json': {
+    text: JSON.stringify({
+      schema: 'card.v1',
+      kind: 'draft-email',
+      title: 'Weekly reading note',
+      status: { state: 'awaiting-approval' },
+      email: { to: 'book-club@example.com', cc: '', subject: 'This week’s reading', bodyText: 'Hi all, two short picks this week: a mystery novel and a birdwatching guide.' },
+      actions: [
+        { label: 'Send it', style: 'primary', send: 'APPROVE c-7f3a send the note' },
+        { label: 'Hold', style: 'default', send: 'HOLD c-7f3a' }
+      ]
+    })
+  },
+  'charts/pages.html': {
+    text: '<html><body><div style="display:flex;gap:8px;align-items:flex-end;height:110px;padding:8px 2px">' +
+      [40, 65, 30, 80, 55, 90, 70].map((h, i) => `<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="width:28px;height:${h}px;border-radius:6px;background:var(--accent)"></div><span style="font-size:11px;color:var(--muted-foreground)">${'MTWTFSS'[i]}</span></div>`).join('') +
+      '</div></body></html>'
+  }
+}

@@ -6,11 +6,12 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { app } from '../src/ui/app'
 import { ChatWorkspace } from '../src/ui/Chat'
+import { DirectiveContext } from '../src/ui/Directives'
 import { RosterPane } from '../src/ui/Roster'
 import { CSS } from '../src/ui/styles'
 import { rowKey } from '../src/core/roster.js'
 import { overrideChromeCss } from '../src/core/stock.js'
-import { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CHAT_ITEMS, MD_ITEMS, ROSTER, SHORT_ITEMS, USER_ITEMS } from './fixtures'
+import { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CHAT_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, MD_ITEMS, ROSTER, SHORT_ITEMS, USER_ITEMS } from './fixtures'
 import { BOT_SWATCHES } from '../src/core/colors.js'
 import { ShapeFace } from '../src/ui/Avatar'
 import { AVATAR_SHAPES, avatarShapeFor } from '../src/ui/avatarShapes'
@@ -115,6 +116,8 @@ export interface RenderOptions {
   panelOpen?: boolean
   /** "Show earlier messages" at the top (default on for a ready chat). */
   hasMore?: boolean
+  /** Live ::card / ::preview directives drawn from these workspace files. */
+  directiveFiles?: Record<string, any> | null
 }
 
 export function render({
@@ -136,7 +139,8 @@ export function render({
   dialog = null,
   connectPreview,
   panelOpen = true,
-  hasMore
+  hasMore,
+  directiveFiles = null
 }: RenderOptions = {}) {
   // A host with the app-action door, so the sidebar toggle draws.
   if (!app.ctx) app.ctx = { runAction: () => ({ ok: true }) }
@@ -198,7 +202,13 @@ export function render({
           </div>
         ) : null}
         {band}
-        <ChatWorkspace />
+        {directiveFiles ? (
+          <DirectiveContext.Provider value={{ bot, sessionId: 's-root', sendIntent: async () => ({ ok: true }), recent: new Set(), preload: directiveFiles, theme }}>
+            <ChatWorkspace />
+          </DirectiveContext.Provider>
+        ) : (
+          <ChatWorkspace />
+        )}
       </div>
     </div>
   )
@@ -225,7 +235,7 @@ export function render({
   const chrome = frame?.lights ? `\n${overrideChromeCss()}` : ''
   return `<!doctype html><html class="${theme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8">${host}<style>${CSS}\n${PAGE_CSS}${chrome}</style></head><body>${body}${connectSheet}</body></html>`
 }
-export { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CSS, MD_ITEMS, SHORT_ITEMS, USER_ITEMS }
+export { CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, CSS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, MD_ITEMS, SHORT_ITEMS, USER_ITEMS }
 
 // Test seams (review r2): the real app module and UI pieces, on the fake SDK.
 export * as appApi from '../src/ui/app'
