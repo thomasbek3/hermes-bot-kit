@@ -5,7 +5,7 @@
 import { attentionFromEvent, clearAttention, noteAttention } from '../core/attention.js'
 import { botMetaKey, effectiveMeta, overlayEntry, pruneOverlay, readServerBotMeta, saveBotMetaPatch } from '../core/botMeta.js'
 import { cronAddParams, cronEditUpdates, cronJobRestPath, cronRemoveParams, CRON_TRIGGER_REQUEST_TIMEOUT_MS, isStoredJobFor } from '../core/cronOps.js'
-import { applyAdvancedConfig, loadAdvanced } from '../core/profileConfig.js'
+import { applyAdvancedConfig, emptyAdvancedState, loadAdvanced } from '../core/profileConfig.js'
 import {
   capabilityPayload,
   composeSoul,
@@ -25,7 +25,7 @@ import { rowKey } from '../core/roster.js'
 import { botRestScope, botWorkspaceOwnerKey, createBotRequester, resolveBotConnectionRoute, stockOpenTarget } from '../core/routing.js'
 import { mergeUsage, usageFromEvent } from '../core/usage.js'
 import { activeConnection, app, backToOverride, beginStockHandoff, loadCron, reloadRoster, selectBot } from './app'
-import { roster2 } from './rosterStores'
+import { roster2, type BotModel } from './rosterStores'
 import { host, queryClient } from './sdk'
 
 let requester: any = null
@@ -324,7 +324,46 @@ export async function saveAdvanced(bot: any, state: any) {
     confirm: confirmAsker || undefined
   })
   invalidateRoster()
+  // The panel's Model row follows a model save from any of the screens.
+  if (state?.dirtyModel) {
+    if (res?.applied?.model === true) setBotModel(bot, { provider: String(state.provider || '').trim(), model: String(state.model || '').trim() })
+    else void loadBotModel(bot, { force: true })
+  }
   return res
+}
+
+function setBotModel(bot: any, patch: Partial<BotModel>) {
+  const key = rowKey(bot)
+  roster2.models.set(all => ({ ...all, [key]: { provider: '', model: '', error: null, ...all[key], ...patch, loading: false, loaded: true } }))
+}
+
+/** The bot's configured model for the panel's Model row: the same
+ *  profiles.describe read the config screens open with (its model section
+ *  only), on the bot's own route. Read once per bot unless `force`. */
+export async function loadBotModel(bot: any, { force = false }: { force?: boolean } = {}) {
+  const key = rowKey(bot)
+  const have = roster2.models.get()[key]
+  if (have && !force && (have.loading || have.loaded)) return
+  roster2.models.set(all => ({ ...all, [key]: { provider: '', model: '', error: null, loaded: false, ...all[key], loading: true } }))
+  try {
+    const res: any = await request(bot, 'profiles.describe', { name: bot.name })
+    setBotModel(bot, { provider: String(res?.model?.provider || ''), model: String(res?.model?.default || ''), error: null })
+  } catch (error: any) {
+    roster2.models.set(all => ({ ...all, [key]: { provider: '', model: '', ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }))
+  }
+}
+
+/** The panel's Model picker: the model section alone, written exactly as
+ *  the config screen writes it (saveAdvanced with only dirtyModel set:
+ *  profiles.configure {name, model, provider}, the expensive-model
+ *  confirmation, or `config unset model` when both are emptied). */
+export function saveBotModel(bot: any, value: { provider: string; model: string }) {
+  return saveAdvanced(bot, { ...emptyAdvancedState(), loaded: true, provider: value.provider, model: value.model, dirtyModel: true })
+}
+
+/** Seed a bot's Model row (the preview and tests). */
+export function primeBotModel(bot: any, value: { provider: string; model: string }) {
+  setBotModel(bot, { ...value, error: null })
 }
 
 /** skills-hub.tsx:146 search (shared hub, active gateway) / :170 install (bot route). */

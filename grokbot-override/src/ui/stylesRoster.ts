@@ -234,12 +234,10 @@ export const ROSTER_CSS = /* css */ `
 .gbo-sheet-primary.is-small { height: 30px; padding: 0 13px; font-size: 13px; }
 .gbo-sheet-out { font-size: 13px; line-height: 1; }
 
-/* usage meter */
-.gbo-meter { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+/* usage meter (the status-bar chip) */
 .gbo-meter-bar { height: 6px; border-radius: 999px; background: var(--gbo-input); overflow: hidden; }
 .gbo-meter-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--gbo-ring); }
 .gbo-meter-bar.is-high > span { background: var(--gbo-warning); }
-.gbo-meter-line { display: flex; justify-content: space-between; gap: 8px; font: var(--gbo-text-label); color: var(--gbo-muted-fg); }
 .gbo-status-meter { display: inline-flex; align-items: center; gap: 6px; font: 11px/16px var(--gbo-font); }
 .gbo-status-meter .gbo-meter-bar { width: 44px; height: 4px; }
 

@@ -1,26 +1,27 @@
 // Right panel: big avatar and name, scheduled jobs (create / edit / run /
-// remove / detail, on/off switches), the bot's computer, its profile and
-// model, and the open chat's context meter. Slack (SlackSetup.tsx), under the
+// remove / detail, on/off switches), the bot's computer, its model (one row
+// that opens the model picker) and its profile. Slack (SlackSetup.tsx), under the
 // jobs: a Suggested "Add to Slack" card while the profile has no Slack, or a
 // "Slack · <status>" card once it has; never both. Markup uses the reference
 // layout's details-panel class names (details__top, details__identity,
 // section-label, panel-card, panel-row, toggle; see styles-ref.ts); the
 // gbo-* classes are hooks.
 
+import * as React from 'react'
+
 import { isLegacyDelegatedRoutine, routineTitle } from '../core/cronOps.js'
 import { displayName, handleOf, rowKey } from '../core/roster.js'
 import { app, backToOverride, loadCron, metaFor, openComputerViewer, openRoom, toggleCron } from './app'
 import { BotAvatar } from './Avatar'
 import { RosterDialogs } from './BotDialogs'
-import { IconClock, IconPlus, IconScreen, IconX } from './icons'
+import { IconChevronDown, IconClock, IconPlus, IconScreen, IconX } from './icons'
 import { IconEdit, IconPlay, IconRefresh, IconSettings, IconTrash, IconUsers } from './iconsRoster'
 import { botFor, openNewGroupForm } from './Rooms'
 import { openDialog, roster2 } from './rosterStores'
-import { runJob } from './rosterActions'
+import { loadBotModel, runJob } from './rosterActions'
 import { openBotScreen } from './Screen'
 import { SlackStatusCard, SuggestedSlack } from './SlackSetup'
 import { useStore } from './store'
-import { UsageBlock } from './UsageMeter'
 import { OverlayScroll } from './OverlayScroll'
 
 function jobWhen(job: any): string {
@@ -35,6 +36,31 @@ function jobWhen(job: any): string {
     }
   }
   return schedule && schedule !== '?' ? schedule : ''
+}
+
+/** One row: "Model", the bot's configured model, a chevron; opens the
+ *  model picker (BotDialogs ModelDialog). */
+function ModelCard({ bot }: { bot: any }) {
+  const key = rowKey(bot)
+  const current = useStore(roster2.models)[key]
+  React.useEffect(() => {
+    void loadBotModel(bot)
+  }, [key])
+  const value = current?.loaded ? current.model || 'Default' : current?.error ? 'Unavailable' : '…'
+  const title = current?.loaded ? `Model: ${current.model ? [current.provider, current.model].filter(Boolean).join(' · ') : 'the profile’s default'}` : current?.error ? `Model: could not read it (${current.error})` : 'Model'
+  return (
+    <section className="gbo-panel-section gbo-model-section">
+      <div className="panel-card gbo-panel-box">
+        <button type="button" className="panel-row panel-row--setting gbo-model-row" title={title} aria-label={`Model: ${value}. Change the model`} onClick={() => openDialog({ kind: 'model', bot })}>
+          <span className="panel-row__title">Model</span>
+          <span className="gbo-model-value">
+            <span className="gbo-model-name">{value}</span>
+            <IconChevronDown />
+          </span>
+        </button>
+      </div>
+    </section>
+  )
 }
 
 /** `onClose` draws the panel's own round close button (top right); the
@@ -173,14 +199,7 @@ export function ProfilePanel({ bot, onClose }: { bot: any; onClose?: () => void 
         </div>
       </section>
 
-      <section className="gbo-panel-section">
-        <div className="section-label gbo-panel-label">
-          <span>Context</span>
-        </div>
-        <div className="panel-card gbo-panel-box">
-          <UsageBlock bot={bot} />
-        </div>
-      </section>
+      <ModelCard bot={bot} />
 
       <section className="gbo-panel-section">
         <div className="section-label gbo-panel-label">

@@ -138,6 +138,29 @@ function useRosterShown(ref: React.RefObject<HTMLDivElement | null>) {
   }, [ref])
 }
 
+/** Mark the roster while it is driven by the pointer (data-gbo-pointer), so
+ *  a focus that Chromium still calls :focus-visible after a click, a closed
+ *  menu or a dialog's focus hand-back draws no ring on the selected pin or
+ *  row. Tab or an arrow key clears it: keyboard focus keeps its ring. */
+const NAV_KEYS = new Set(['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'])
+function usePointerMode(ref: React.RefObject<HTMLDivElement | null>) {
+  React.useEffect(() => {
+    const el = ref.current
+    const doc = el?.ownerDocument
+    if (!el || !doc) return
+    const onPointer = () => el.setAttribute('data-gbo-pointer', '')
+    const onKey = (event: KeyboardEvent) => {
+      if (NAV_KEYS.has(event.key)) el.removeAttribute('data-gbo-pointer')
+    }
+    doc.addEventListener('pointerdown', onPointer, true)
+    doc.addEventListener('keydown', onKey, true)
+    return () => {
+      doc.removeEventListener('pointerdown', onPointer, true)
+      doc.removeEventListener('keydown', onKey, true)
+    }
+  }, [ref])
+}
+
 export function RosterPane() {
   useStore(app.roster)
   const query = useStore(app.query)
@@ -154,6 +177,7 @@ export function RosterPane() {
   const now = useNow()
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   useRosterShown(rootRef)
+  usePointerMode(rootRef)
   const roster = app.roster.get()
   const workingKey = chat && chat.chat?.busy ? rowKey(chat.bot) : ''
   // R14 group rooms are the roster's group rows (R6 Groups only / Bots only).

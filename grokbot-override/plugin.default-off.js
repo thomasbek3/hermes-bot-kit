@@ -19205,20 +19205,6 @@ function costLabel(usage) {
   if (!Number.isFinite(cost) || usage?.cost_usd == null) return "";
   return `${usage?.cost_status === "estimated" ? "~" : ""}$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`;
 }
-function usageDetailRows(usage) {
-  if (!usage) return [];
-  return [
-    ["Context", usageContextLabel(usage)],
-    ["Used", usage.context_max ? `${contextPercent(usage)}%` : ""],
-    ["Model", usage.model || ""],
-    ["Input tokens", usage.input ? compactNumber(usage.input) : ""],
-    ["Output tokens", usage.output ? compactNumber(usage.output) : ""],
-    ["API calls", usage.calls ? String(usage.calls) : ""],
-    ["Compressions", usage.compressions ? String(usage.compressions) : ""],
-    ["Cache hits", typeof usage.cache_hit_pct === "number" ? `${Math.round(usage.cache_hit_pct)}%` : ""],
-    ["Cost", costLabel(usage)]
-  ].filter(([, v]) => v).map(([label, value]) => ({ label, value }));
-}
 
 // src/core/rosterView.js
 var ACTIVE_WINDOW_S = 90;
@@ -19378,7 +19364,9 @@ var roster2 = {
   /** C25: the open chat's usage, keyed by its runtime id. */
   usage: createStore({ key: "", runtimeId: "", usage: null, error: null }),
   /** P3: job ids with a run (trigger) in flight. */
-  running: createStore({})
+  running: createStore({}),
+  /** The panel's Model row: roster key -> the bot's configured model. */
+  models: createStore({})
 };
 function openDialog(state) {
   roster2.dialog.set(state);
@@ -19616,7 +19604,30 @@ async function saveAdvanced(bot, state) {
     confirm: confirmAsker || void 0
   });
   invalidateRoster();
+  if (state?.dirtyModel) {
+    if (res?.applied?.model === true) setBotModel(bot, { provider: String(state.provider || "").trim(), model: String(state.model || "").trim() });
+    else void loadBotModel(bot, { force: true });
+  }
   return res;
+}
+function setBotModel(bot, patch) {
+  const key = rowKey(bot);
+  roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", error: null, ...all[key], ...patch, loading: false, loaded: true } }));
+}
+async function loadBotModel(bot, { force = false } = {}) {
+  const key = rowKey(bot);
+  const have = roster2.models.get()[key];
+  if (have && !force && (have.loading || have.loaded)) return;
+  roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", error: null, loaded: false, ...all[key], loading: true } }));
+  try {
+    const res = await request(bot, "profiles.describe", { name: bot.name });
+    setBotModel(bot, { provider: String(res?.model?.provider || ""), model: String(res?.model?.default || ""), error: null });
+  } catch (error) {
+    roster2.models.set((all) => ({ ...all, [key]: { provider: "", model: "", ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }));
+  }
+}
+function saveBotModel(bot, value) {
+  return saveAdvanced(bot, { ...emptyAdvancedState(), loaded: true, provider: value.provider, model: value.model, dirtyModel: true });
 }
 async function searchSkills(query) {
   const res = await host2.request("skills.manage", { action: "search", query: String(query || "").trim() });
@@ -20642,6 +20653,26 @@ var REF_STYLES = refCss(REF_CSS);
 var ADAPT_SRC = (
   /* css */
   `
+/* ── the override's own tokens ──────────────────────────────────────── */
+/* Bot bubbles are one flat fill; the open bot's row is a rounded neutral
+   highlight (hover a lighter one); a selected pin is fainter still. */
+:root {
+  --color-bubble-agent-flat: #F0F0F0;
+  --color-row-selected: #0000000D;
+  --color-row-hover: #00000008;
+  --color-row-selected-solid: #E9E9E9;
+  --color-row-hover-solid: #EEEEEE;
+  --color-pin-selected: #00000008;
+}
+:root[data-theme='dark'] {
+  --color-bubble-agent-flat: #242424;
+  --color-row-selected: #FFFFFF12;
+  --color-row-hover: #FFFFFF0A;
+  --color-row-selected-solid: #1E1E1E;
+  --color-row-hover-solid: #181818;
+  --color-pin-selected: #FFFFFF0A;
+}
+
 /* ── panes ──────────────────────────────────────────────────────────── */
 /* The roster fills Hermes's sidebar zone (its width is Hermes's); Hermes
    draws the sidebar | workspace hairline itself. */
@@ -20687,6 +20718,8 @@ var ADAPT_SRC = (
 .gbo-section-head.is-rooms .icon-btn--plain { width: 22px; height: 22px; }
 
 .bot-row { color: inherit; text-align: left; }
+.bot-row:hover { background: var(--color-row-hover); }
+.bot-row.is-selected { background: var(--color-row-selected); }
 .bot-row.is-dim { opacity: 0.55; }
 .bot-row.is-hidden { opacity: 0.6; }
 .gbo-row-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -20702,7 +20735,8 @@ var ADAPT_SRC = (
 .pinned__avatar .gbo-row-dot { right: 4px; top: 4px; }
 .gbo-row-face .gbo-row-dot:not(:has([role="status"])) { display: none; }
 .gbo-row-face .gbo-row-dot [role="status"] { width: 8px; height: 8px; border-width: 0; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
-.bot-row.is-selected .gbo-row-dot [role="status"], .bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-bg-active-solid); }
+.bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
+.bot-row.is-selected .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
 .gbo-room-row .bot-row__avatar { width: 36px; justify-content: center; }
 .gbo-row-more {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; opacity: 0;
@@ -20713,7 +20747,13 @@ var ADAPT_SRC = (
 .pinned.gbo-pins { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
 .pinned.gbo-pins.is-1 { display: flex; justify-content: center; }
 .gbo-pin-wrap { min-width: 0; display: flex; justify-content: center; }
-.pinned__tile { color: inherit; max-width: 100%; }
+.pinned__tile { color: inherit; max-width: 100%; border: 0; outline: none; box-shadow: none; }
+.pinned__tile:hover, .pinned__tile.is-selected { background: var(--color-pin-selected); }
+/* Keyboard focus on a pin or row: a soft neutral ring inside the tile, never
+   the blue box; none at all while the roster is being used with the mouse
+   (data-gbo-pointer, set by the roster until the next Tab or arrow key). */
+.pinned__tile:focus-visible, .bot-row:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--color-border-primary); }
+.gbo-roster[data-gbo-pointer] .pinned__tile:focus-visible, .gbo-roster[data-gbo-pointer] .bot-row:focus-visible { box-shadow: none; }
 .pinned:not(.is-1) .pinned__tile { width: 100%; padding: 6px 4px 4px; }
 .pinned:not(.is-1) .pinned__label { width: 100%; }
 .pinned__tile.is-dim { opacity: 0.55; }
@@ -20743,6 +20783,9 @@ var ADAPT_SRC = (
 .group.is-right > .gbo-msg, .transcript__col > .gbo-msg.is-user { align-items: flex-end; align-self: flex-end; }
 .group.is-left > .gbo-msg { align-items: flex-start; }
 .gbo-msg:has(> .gbo-edit) { align-self: stretch; }
+/* Bot bubbles: flat, no sheen, ring or shadow. User bubbles keep the
+   reference's look in the bot's colour. */
+.bubble.is-agent { background: var(--color-bubble-agent-flat); box-shadow: none; border: 0; }
 .bubble.is-user { color: var(--gbo-tint-fg, #FFFFFF); }
 .bubble.is-user a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .bubble.is-user code { background: #FFFFFF2E; border-radius: 4px; padding: 1px 4px; font-family: var(--font-mono-stack); font-size: 13px; }
@@ -20971,8 +21014,13 @@ var ADAPT_SRC = (
 .gbo-slack-card.is-status { height: auto; min-height: 48px; }
 .gbo-slack-card .gbo-slack-card-sub.is-error { color: var(--color-danger-text); }
 .gbo-slack-card .gbo-slack-card-sub.is-warn { color: var(--color-warn-text); }
-.gbo-meter { padding: 8px; }
-.gbo-meter-line { font-size: 13px; line-height: 18px; color: var(--color-text-secondary); }
+/* The Model card: one setting row, the model name and a chevron on the right. */
+.gbo-model-row { height: 36px; padding: 6px 8px; gap: 12px; cursor: pointer; }
+.gbo-model-row:hover { background: var(--color-bg-hover); }
+.gbo-model-row > .panel-row__title { flex: none; }
+.gbo-model-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-text-secondary); }
+.gbo-model-name { min-width: 0; font-size: 13px; line-height: 18px; letter-spacing: 0.195px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gbo-model-value > svg { width: 12px; height: 12px; flex: none; opacity: 0.66; }
 .gbo-meter-bar { background: var(--color-bg-tertiary); }
 .gbo-meter-bar > span { background: var(--gbo-action, var(--color-primary)); }
 .gbo-drawer { background: var(--color-bg-chrome); }
@@ -21323,12 +21371,10 @@ var ROSTER_CSS = (
 .gbo-sheet-primary.is-small { height: 30px; padding: 0 13px; font-size: 13px; }
 .gbo-sheet-out { font-size: 13px; line-height: 1; }
 
-/* usage meter */
-.gbo-meter { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+/* usage meter (the status-bar chip) */
 .gbo-meter-bar { height: 6px; border-radius: 999px; background: var(--gbo-input); overflow: hidden; }
 .gbo-meter-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--gbo-ring); }
 .gbo-meter-bar.is-high > span { background: var(--gbo-warning); }
-.gbo-meter-line { display: flex; justify-content: space-between; gap: 8px; font: var(--gbo-text-label); color: var(--gbo-muted-fg); }
 .gbo-status-meter { display: inline-flex; align-items: center; gap: 6px; font: 11px/16px var(--gbo-font); }
 .gbo-status-meter .gbo-meter-bar { width: 44px; height: 4px; }
 
@@ -22690,7 +22736,7 @@ var OverrideBoundary = class extends React3.Component {
 };
 
 // src/ui/Chat.tsx
-import * as React19 from "react";
+import * as React20 from "react";
 
 // src/core/colors.js
 function expandHex(hex) {
@@ -24329,6 +24375,9 @@ function AssistantActions({ item, controller: controller2, busy }) {
     view
   ] });
 }
+
+// src/ui/Profile.tsx
+import * as React17 from "react";
 
 // src/ui/BotDialogs.tsx
 import * as React13 from "react";
@@ -26186,6 +26235,7 @@ function RosterDialogs() {
   return /* @__PURE__ */ jsxs13(OverrideBoundary, { area: "dialog", onReset: close, children: [
     dialog?.kind === "edit" ? /* @__PURE__ */ jsx14(EditProfileDialog, { bot: dialog.bot, onClose: close }) : null,
     dialog?.kind === "config" ? /* @__PURE__ */ jsx14(ConfigDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
+    dialog?.kind === "model" ? /* @__PURE__ */ jsx14(ModelDialog, { bot: dialog.bot, onClose: close }) : null,
     dialog?.kind === "groups" ? /* @__PURE__ */ jsx14(GroupsDialog, { bot: dialog.bot, onClose: close }) : null,
     dialog?.kind === "create" ? /* @__PURE__ */ jsx14(CreateBotDialog, { initialTab: dialog.tab, initialCaps: dialog.caps, onClose: close }) : null,
     dialog?.kind === "delete" ? /* @__PURE__ */ jsx14(
@@ -26466,6 +26516,65 @@ function ConfigDialog({ bot, initial, onClose }) {
       ] }),
       children: [
         /* @__PURE__ */ jsx14(AdvancedConfig, { bot, state: adv, setState: setAdv }),
+        error ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: error }) : null
+      ]
+    }
+  );
+}
+function ModelDialog({ bot, onClose }) {
+  const current = useStore(roster2.models)[rowKey(bot)];
+  const [value, setValue] = React13.useState(() => current?.loaded ? { provider: current.provider, model: current.model } : null);
+  const [dirty, setDirty] = React13.useState(false);
+  const [busy, setBusy] = React13.useState(false);
+  const [error, setError] = React13.useState(null);
+  React13.useEffect(() => {
+    void loadBotModel(bot);
+  }, [rowKey(bot)]);
+  React13.useEffect(() => {
+    if (!value && current?.loaded) setValue({ provider: current.provider, model: current.model });
+  }, [current?.loaded]);
+  const save = async () => {
+    if (!value) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await saveBotModel(bot, value);
+      if (res?.applied?.model === true) onClose();
+      else if (res?.confirmation?.accepted === false) setError("Not saved: the model was not confirmed.");
+      else setError("Not saved: model");
+    } catch (err2) {
+      setError(String(err2?.message || err2));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ jsxs13(
+    Dialog,
+    {
+      open: true,
+      busy,
+      onClose,
+      title: `${displayName(bot, metaFor(bot))}: model`,
+      description: "Written to the bot’s own Hermes profile on save.",
+      footer: /* @__PURE__ */ jsxs13(Fragment8, { children: [
+        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !dirty || !value, onClick: () => void save(), children: busy ? "Saving…" : "Save" })
+      ] }),
+      children: [
+        value ? /* @__PURE__ */ jsx14(
+          ModelPicker,
+          {
+            bot,
+            value,
+            onChange: (patch) => {
+              setDirty(true);
+              setValue((v) => ({ ...v || { provider: "", model: "" }, ...patch }));
+            }
+          }
+        ) : current?.error ? /* @__PURE__ */ jsxs13("div", { className: "gbo-form-error", children: [
+          "Could not read the bot’s model: ",
+          current.error
+        ] }) : /* @__PURE__ */ jsx14("div", { className: "gbo-form-note", children: "Loading the bot’s model…" }),
         error ? /* @__PURE__ */ jsx14("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
@@ -27548,63 +27657,9 @@ function closeAllScreens() {
 setScreenOpener(openBotScreen);
 onRosterParityStop(closeAllScreens);
 
-// src/ui/UsageMeter.tsx
-import { jsx as jsx18, jsxs as jsxs16 } from "react/jsx-runtime";
-function Bar({ percent }) {
-  if (percent === null) return null;
-  return /* @__PURE__ */ jsx18("span", { className: `gbo-meter-bar${percent >= 80 ? " is-high" : ""}`, role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-label": "Context used", children: /* @__PURE__ */ jsx18("span", { style: { width: `${percent}%` } }) });
-}
-function useBotUsage(bot) {
-  const u = useStore(roster2.usage);
-  useStore(app.chat);
-  return bot && u.key === rowKey(bot) ? u : null;
-}
-function UsageBlock({ bot }) {
-  const u = useBotUsage(bot);
-  const usage = u?.usage;
-  const label = usageContextLabel(usage);
-  if (!u || !label && !u.error) {
-    return /* @__PURE__ */ jsx18("div", { className: "panel-empty gbo-panel-empty", children: u?.runtimeId ? "No usage reported yet." : "Shown once the chat is attached." });
-  }
-  if (!label) return /* @__PURE__ */ jsxs16("div", { className: "panel-empty gbo-panel-empty", children: [
-    "Usage unavailable: ",
-    u.error
-  ] });
-  const percent = contextPercent(usage);
-  return /* @__PURE__ */ jsxs16("div", { className: "gbo-meter", children: [
-    /* @__PURE__ */ jsxs16("div", { className: "gbo-meter-line", children: [
-      /* @__PURE__ */ jsxs16("span", { children: [
-        "Context ",
-        label
-      ] }),
-      /* @__PURE__ */ jsx18("span", { children: percent === null ? "" : `${percent}%` })
-    ] }),
-    /* @__PURE__ */ jsx18(Bar, { percent }),
-    usageDetailRows(usage).filter((r) => r.label !== "Context" && r.label !== "Used").map((r) => /* @__PURE__ */ jsxs16("div", { className: "gbo-meter-line", children: [
-      /* @__PURE__ */ jsx18("span", { children: r.label }),
-      /* @__PURE__ */ jsx18("span", { children: r.value })
-    ] }, r.label))
-  ] });
-}
-function UsageStatusChip() {
-  const u = useStore(roster2.usage);
-  const enabled = useStore(app.enabled);
-  const label = usageContextLabel(u.usage);
-  if (!enabled || !u.runtimeId || !label) return null;
-  const cost = costLabel(u.usage);
-  return /* @__PURE__ */ jsxs16("span", { "data-gbo-root": "", className: "gbo-status-meter", style: { height: "auto", width: "auto" }, title: "Open Bot Chat: context used", children: [
-    /* @__PURE__ */ jsx18(Bar, { percent: contextPercent(u.usage) }),
-    /* @__PURE__ */ jsx18("span", { children: label }),
-    cost ? /* @__PURE__ */ jsxs16("span", { children: [
-      "· ",
-      cost
-    ] }) : null
-  ] });
-}
-
 // src/ui/OverlayScroll.tsx
 import * as React16 from "react";
-import { jsx as jsx19, jsxs as jsxs17 } from "react/jsx-runtime";
+import { jsx as jsx18, jsxs as jsxs16 } from "react/jsx-runtime";
 var MIN_THUMB_PX = 28;
 function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
   if (!(clientHeight > 0) || scrollHeight <= clientHeight + 1) return null;
@@ -27679,7 +27734,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     target.addEventListener("pointerup", end);
     target.addEventListener("pointercancel", end);
   };
-  return /* @__PURE__ */ jsxs17("div", { className: `gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ""}${dragging ? " is-dragging" : ""}`, children: [
+  return /* @__PURE__ */ jsxs16("div", { className: `gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ""}${dragging ? " is-dragging" : ""}`, children: [
     React16.createElement(
       as,
       {
@@ -27693,12 +27748,12 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
       },
       children
     ),
-    /* @__PURE__ */ jsx19("div", { className: "gbo-oscroll-thumb", ref: thumb, "data-scrollable": "false", "aria-hidden": "true", onPointerDown: startDrag })
+    /* @__PURE__ */ jsx18("div", { className: "gbo-oscroll-thumb", ref: thumb, "data-scrollable": "false", "aria-hidden": "true", onPointerDown: startDrag })
   ] });
 }
 
 // src/ui/Profile.tsx
-import { jsx as jsx20, jsxs as jsxs18 } from "react/jsx-runtime";
+import { jsx as jsx19, jsxs as jsxs17 } from "react/jsx-runtime";
 function jobWhen(job) {
   const schedule = String(job?.schedule || "").trim();
   const paused = job?.enabled === false || job?.state === "paused";
@@ -27711,6 +27766,22 @@ function jobWhen(job) {
     }
   }
   return schedule && schedule !== "?" ? schedule : "";
+}
+function ModelCard({ bot }) {
+  const key = rowKey(bot);
+  const current = useStore(roster2.models)[key];
+  React17.useEffect(() => {
+    void loadBotModel(bot);
+  }, [key]);
+  const value = current?.loaded ? current.model || "Default" : current?.error ? "Unavailable" : "…";
+  const title = current?.loaded ? `Model: ${current.model ? [current.provider, current.model].filter(Boolean).join(" · ") : "the profile’s default"}` : current?.error ? `Model: could not read it (${current.error})` : "Model";
+  return /* @__PURE__ */ jsx19("section", { className: "gbo-panel-section gbo-model-section", children: /* @__PURE__ */ jsx19("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--setting gbo-model-row", title, "aria-label": `Model: ${value}. Change the model`, onClick: () => openDialog({ kind: "model", bot }), children: [
+    /* @__PURE__ */ jsx19("span", { className: "panel-row__title", children: "Model" }),
+    /* @__PURE__ */ jsxs17("span", { className: "gbo-model-value", children: [
+      /* @__PURE__ */ jsx19("span", { className: "gbo-model-name", children: value }),
+      /* @__PURE__ */ jsx19(IconChevronDown, {})
+    ] })
+  ] }) }) });
 }
 function ProfilePanel({ bot, onClose }) {
   const cron = useStore(app.cron);
@@ -27736,49 +27807,49 @@ function ProfilePanel({ bot, onClose }) {
   const cronError = mine ? cron.error : null;
   const status = screen.key === rowKey(bot) ? screen.status : null;
   const computerText = `Bot’s computer · ${status == null ? "…" : status.error || status.supported === false ? "Unavailable" : status.running ? "Running" : "Asleep"}`;
-  return /* @__PURE__ */ jsxs18(OverlayScroll, { as: "aside", wrapClassName: "details__scroll gbo-panel-scroll", className: "details__body gbo-panel", "aria-label": `${name} profile`, children: [
-    /* @__PURE__ */ jsx20("div", { className: "details__top", children: onClose ? /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx20(IconX, {}) }) : null }),
-    /* @__PURE__ */ jsxs18("div", { className: "details__identity gbo-panel-hero", children: [
-      /* @__PURE__ */ jsx20(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 71 }),
-      /* @__PURE__ */ jsx20("div", { className: "details__name gbo-panel-name", title: name, children: name }),
-      subtitle ? /* @__PURE__ */ jsx20("div", { className: "gbo-panel-sub", children: subtitle }) : null,
-      description ? /* @__PURE__ */ jsx20("div", { className: "gbo-panel-sub", children: description }) : null
+  return /* @__PURE__ */ jsxs17(OverlayScroll, { as: "aside", wrapClassName: "details__scroll gbo-panel-scroll", className: "details__body gbo-panel", "aria-label": `${name} profile`, children: [
+    /* @__PURE__ */ jsx19("div", { className: "details__top", children: onClose ? /* @__PURE__ */ jsx19("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx19(IconX, {}) }) : null }),
+    /* @__PURE__ */ jsxs17("div", { className: "details__identity gbo-panel-hero", children: [
+      /* @__PURE__ */ jsx19(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 71 }),
+      /* @__PURE__ */ jsx19("div", { className: "details__name gbo-panel-name", title: name, children: name }),
+      subtitle ? /* @__PURE__ */ jsx19("div", { className: "gbo-panel-sub", children: subtitle }) : null,
+      description ? /* @__PURE__ */ jsx19("div", { className: "gbo-panel-sub", children: description }) : null
     ] }),
-    /* @__PURE__ */ jsxs18("div", { className: "details__sections", children: [
-      /* @__PURE__ */ jsxs18("section", { className: "gbo-panel-section", children: [
-        /* @__PURE__ */ jsxs18("div", { className: "section-label section-label--row gbo-panel-label", children: [
-          /* @__PURE__ */ jsx20("span", { children: "Scheduled" }),
-          /* @__PURE__ */ jsxs18("span", { className: "gbo-label-actions", children: [
-            /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--plain", title: "New scheduled job", "aria-label": "New scheduled job", onClick: () => openDialog({ kind: "cron-edit", bot, job: null }), children: /* @__PURE__ */ jsx20(IconPlus, {}) }),
-            /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Reload", "aria-label": "Reload scheduled jobs", onClick: () => void loadCron(bot), children: /* @__PURE__ */ jsx20(IconRefresh, {}) })
+    /* @__PURE__ */ jsxs17("div", { className: "details__sections", children: [
+      /* @__PURE__ */ jsxs17("section", { className: "gbo-panel-section", children: [
+        /* @__PURE__ */ jsxs17("div", { className: "section-label section-label--row gbo-panel-label", children: [
+          /* @__PURE__ */ jsx19("span", { children: "Scheduled" }),
+          /* @__PURE__ */ jsxs17("span", { className: "gbo-label-actions", children: [
+            /* @__PURE__ */ jsx19("button", { type: "button", className: "icon-btn icon-btn--plain", title: "New scheduled job", "aria-label": "New scheduled job", onClick: () => openDialog({ kind: "cron-edit", bot, job: null }), children: /* @__PURE__ */ jsx19(IconPlus, {}) }),
+            /* @__PURE__ */ jsx19("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Reload", "aria-label": "Reload scheduled jobs", onClick: () => void loadCron(bot), children: /* @__PURE__ */ jsx19(IconRefresh, {}) })
           ] })
         ] }),
-        /* @__PURE__ */ jsxs18("div", { className: "panel-card gbo-panel-box", children: [
-          loading && !jobs.length ? /* @__PURE__ */ jsx20("div", { className: "panel-empty gbo-panel-empty", children: "Loading…" }) : null,
-          cronError ? /* @__PURE__ */ jsxs18("div", { className: "panel-empty gbo-panel-empty", children: [
+        /* @__PURE__ */ jsxs17("div", { className: "panel-card gbo-panel-box", children: [
+          loading && !jobs.length ? /* @__PURE__ */ jsx19("div", { className: "panel-empty gbo-panel-empty", children: "Loading…" }) : null,
+          cronError ? /* @__PURE__ */ jsxs17("div", { className: "panel-empty gbo-panel-empty", children: [
             "Could not load jobs: ",
             cronError
           ] }) : null,
-          !loading && !cronError && !jobs.length ? /* @__PURE__ */ jsx20("div", { className: "panel-empty gbo-panel-empty", children: "No scheduled jobs yet." }) : null,
+          !loading && !cronError && !jobs.length ? /* @__PURE__ */ jsx19("div", { className: "panel-empty gbo-panel-empty", children: "No scheduled jobs yet." }) : null,
           jobs.map((job) => {
             const id = String(job.job_id);
             const legacy = isLegacyDelegatedRoutine(job);
             const on = !legacy && job.enabled !== false && job.state !== "paused";
             const error = job.last_error || job.last_fire_error || job.last_delivery_error;
             const title = routineTitle(job);
-            return /* @__PURE__ */ jsxs18("div", { className: "panel-row panel-row--routine gbo-job", children: [
-              /* @__PURE__ */ jsx20("span", { className: "panel-row__icon", children: /* @__PURE__ */ jsx20(IconClock, {}) }),
-              /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row__text gbo-job-open gbo-job-main", title: job.prompt_preview || title, onClick: () => openDialog({ kind: "cron-detail", bot, job }), children: [
-                /* @__PURE__ */ jsx20("span", { className: "panel-row__title gbo-job-name", children: title }),
-                /* @__PURE__ */ jsx20("span", { className: "panel-row__sub gbo-job-when", children: running[id] ? "Running now…" : jobWhen(job) }),
-                legacy ? /* @__PURE__ */ jsx20("span", { className: "panel-row__sub gbo-job-error", children: "Old delegated job: recreate it to switch it on" }) : error ? /* @__PURE__ */ jsx20("span", { className: "panel-row__sub gbo-job-error", title: String(error), children: "Last run failed" }) : null
+            return /* @__PURE__ */ jsxs17("div", { className: "panel-row panel-row--routine gbo-job", children: [
+              /* @__PURE__ */ jsx19("span", { className: "panel-row__icon", children: /* @__PURE__ */ jsx19(IconClock, {}) }),
+              /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row__text gbo-job-open gbo-job-main", title: job.prompt_preview || title, onClick: () => openDialog({ kind: "cron-detail", bot, job }), children: [
+                /* @__PURE__ */ jsx19("span", { className: "panel-row__title gbo-job-name", children: title }),
+                /* @__PURE__ */ jsx19("span", { className: "panel-row__sub gbo-job-when", children: running[id] ? "Running now…" : jobWhen(job) }),
+                legacy ? /* @__PURE__ */ jsx19("span", { className: "panel-row__sub gbo-job-error", children: "Old delegated job: recreate it to switch it on" }) : error ? /* @__PURE__ */ jsx19("span", { className: "panel-row__sub gbo-job-error", title: String(error), children: "Last run failed" }) : null
               ] }),
-              /* @__PURE__ */ jsxs18("span", { className: "gbo-job-actions", children: [
-                /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Run now", "aria-label": `Run ${title} now`, disabled: Boolean(running[id]), onClick: () => void runJob(bot, job), children: /* @__PURE__ */ jsx20(IconPlay, {}) }),
-                /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Edit", "aria-label": `Edit ${title}`, onClick: () => openDialog({ kind: "cron-edit", bot, job }), children: /* @__PURE__ */ jsx20(IconEdit, {}) }),
-                /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Delete", "aria-label": `Delete ${title}`, onClick: () => openDialog({ kind: "cron-remove", bot, job }), children: /* @__PURE__ */ jsx20(IconTrash, {}) })
+              /* @__PURE__ */ jsxs17("span", { className: "gbo-job-actions", children: [
+                /* @__PURE__ */ jsx19("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Run now", "aria-label": `Run ${title} now`, disabled: Boolean(running[id]), onClick: () => void runJob(bot, job), children: /* @__PURE__ */ jsx19(IconPlay, {}) }),
+                /* @__PURE__ */ jsx19("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Edit", "aria-label": `Edit ${title}`, onClick: () => openDialog({ kind: "cron-edit", bot, job }), children: /* @__PURE__ */ jsx19(IconEdit, {}) }),
+                /* @__PURE__ */ jsx19("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Delete", "aria-label": `Delete ${title}`, onClick: () => openDialog({ kind: "cron-remove", bot, job }), children: /* @__PURE__ */ jsx19(IconTrash, {}) })
               ] }),
-              /* @__PURE__ */ jsx20(
+              /* @__PURE__ */ jsx19(
                 "button",
                 {
                   type: "button",
@@ -27788,57 +27859,54 @@ function ProfilePanel({ bot, onClose }) {
                   "aria-label": `${on ? "Pause" : "Resume"} ${title}`,
                   disabled: Boolean(cron.busy?.[id]) || legacy,
                   onClick: () => void toggleCron(bot, job),
-                  children: /* @__PURE__ */ jsx20("span", { className: "toggle__knob" })
+                  children: /* @__PURE__ */ jsx19("span", { className: "toggle__knob" })
                 }
               )
             ] }, id);
           })
         ] })
       ] }),
-      /* @__PURE__ */ jsx20(SuggestedSlack, { bot }),
-      /* @__PURE__ */ jsx20(SlackStatusCard, { bot }),
-      /* @__PURE__ */ jsxs18("section", { className: "gbo-panel-section", children: [
-        /* @__PURE__ */ jsx20("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx20("span", { children: "Computer" }) }),
-        /* @__PURE__ */ jsxs18("div", { className: "panel-card gbo-panel-box", children: [
-          /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: computerText, onClick: () => openBotScreen(bot), children: [
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx20(IconScreen, {}) }),
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__title", children: computerText }),
-            /* @__PURE__ */ jsx20("span", { className: `gbo-status-dot${status?.running ? " is-on" : ""}` })
+      /* @__PURE__ */ jsx19(SuggestedSlack, { bot }),
+      /* @__PURE__ */ jsx19(SlackStatusCard, { bot }),
+      /* @__PURE__ */ jsxs17("section", { className: "gbo-panel-section", children: [
+        /* @__PURE__ */ jsx19("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx19("span", { children: "Computer" }) }),
+        /* @__PURE__ */ jsxs17("div", { className: "panel-card gbo-panel-box", children: [
+          /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: computerText, onClick: () => openBotScreen(bot), children: [
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx19(IconScreen, {}) }),
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__title", children: computerText }),
+            /* @__PURE__ */ jsx19("span", { className: `gbo-status-dot${status?.running ? " is-on" : ""}` })
           ] }),
-          cv.present ? /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Computer viewer · ${cv.visible ? "Showing" : "Hidden"}`, onClick: openComputerViewer, children: [
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx20(IconScreen, {}) }),
-            /* @__PURE__ */ jsxs18("span", { className: "panel-row__title", children: [
+          cv.present ? /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Computer viewer · ${cv.visible ? "Showing" : "Hidden"}`, onClick: openComputerViewer, children: [
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx19(IconScreen, {}) }),
+            /* @__PURE__ */ jsxs17("span", { className: "panel-row__title", children: [
               "Computer viewer · ",
               cv.visible ? "Showing" : "Hidden"
             ] }),
-            /* @__PURE__ */ jsx20("span", { className: `gbo-status-dot${cv.visible ? " is-on" : ""}` })
+            /* @__PURE__ */ jsx19("span", { className: `gbo-status-dot${cv.visible ? " is-on" : ""}` })
           ] }) : null
         ] })
       ] }),
-      /* @__PURE__ */ jsxs18("section", { className: "gbo-panel-section", children: [
-        /* @__PURE__ */ jsx20("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx20("span", { children: "Context" }) }),
-        /* @__PURE__ */ jsx20("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsx20(UsageBlock, { bot }) })
-      ] }),
-      /* @__PURE__ */ jsxs18("section", { className: "gbo-panel-section", children: [
-        /* @__PURE__ */ jsx20("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx20("span", { children: "Profile" }) }),
-        /* @__PURE__ */ jsxs18("div", { className: "panel-card gbo-panel-box", children: [
-          /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Edit profile and avatar", onClick: () => openDialog({ kind: "edit", bot }), children: [
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx20(IconEdit, {}) }),
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__title", children: "Edit profile and avatar" })
+      /* @__PURE__ */ jsx19(ModelCard, { bot }),
+      /* @__PURE__ */ jsxs17("section", { className: "gbo-panel-section", children: [
+        /* @__PURE__ */ jsx19("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx19("span", { children: "Profile" }) }),
+        /* @__PURE__ */ jsxs17("div", { className: "panel-card gbo-panel-box", children: [
+          /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Edit profile and avatar", onClick: () => openDialog({ kind: "edit", bot }), children: [
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx19(IconEdit, {}) }),
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__title", children: "Edit profile and avatar" })
           ] }),
-          /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Skills, tools, MCP and model", onClick: () => openDialog({ kind: "config", bot }), children: [
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx20(IconSettings, {}) }),
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__title", children: "Skills, tools, MCP and model" })
+          /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Skills, tools, MCP and model", onClick: () => openDialog({ kind: "config", bot }), children: [
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx19(IconSettings, {}) }),
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__title", children: "Skills, tools, MCP and model" })
           ] }),
-          /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Groups", onClick: () => openDialog({ kind: "groups", bot }), children: [
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx20(IconUsers, {}) }),
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__title", children: "Groups" })
+          /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Groups", onClick: () => openDialog({ kind: "groups", bot }), children: [
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx19(IconUsers, {}) }),
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__title", children: "Groups" })
           ] }),
-          botRooms.map((room) => /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Open the group chat ${room.name}`, onClick: () => openRoom(rooms.route, room), children: [
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx20(IconUsers, {}) }),
-            /* @__PURE__ */ jsx20("span", { className: "panel-row__title", children: room.name })
+          botRooms.map((room) => /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Open the group chat ${room.name}`, onClick: () => openRoom(rooms.route, room), children: [
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx19(IconUsers, {}) }),
+            /* @__PURE__ */ jsx19("span", { className: "panel-row__title", children: room.name })
           ] }, room.room_id)),
-          rooms.loaded && rooms.route ? /* @__PURE__ */ jsxs18(
+          rooms.loaded && rooms.route ? /* @__PURE__ */ jsxs17(
             "button",
             {
               type: "button",
@@ -27849,21 +27917,21 @@ function ProfilePanel({ bot, onClose }) {
                 backToOverride();
               },
               children: [
-                /* @__PURE__ */ jsx20("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx20(IconPlus, {}) }),
-                /* @__PURE__ */ jsx20("span", { className: "panel-row__title", children: "New group chat…" })
+                /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx19(IconPlus, {}) }),
+                /* @__PURE__ */ jsx19("span", { className: "panel-row__title", children: "New group chat…" })
               ]
             }
           ) : null
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsx20(RosterDialogs, {})
+    /* @__PURE__ */ jsx19(RosterDialogs, {})
   ] });
 }
 
 // src/ui/Prompts.tsx
-import * as React17 from "react";
-import { Fragment as Fragment10, jsx as jsx21, jsxs as jsxs19 } from "react/jsx-runtime";
+import * as React18 from "react";
+import { Fragment as Fragment10, jsx as jsx20, jsxs as jsxs18 } from "react/jsx-runtime";
 var TITLES = {
   clarify: "has a question for you",
   sudo: "needs your administrator password",
@@ -27877,15 +27945,15 @@ var RECOMMENDED = "(Recommended)";
 var bare = (choice) => choice.endsWith(RECOMMENDED) ? choice.slice(0, -RECOMMENDED.length).trim() : choice;
 function Footer({ waiting, bot }) {
   if (!waiting.error) return null;
-  return /* @__PURE__ */ jsxs19("div", { className: "gbo-card-error", role: "alert", children: [
+  return /* @__PURE__ */ jsxs18("div", { className: "gbo-card-error", role: "alert", children: [
     waiting.error,
-    waiting.unsupported ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-link-btn", onClick: () => void openInBotMode(bot, "Answer the question in the Hermes Bot Chat."), children: "Answer in Hermes Bot Mode" }) : null
+    waiting.unsupported ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-link-btn", onClick: () => void openInBotMode(bot, "Answer the question in the Hermes Bot Chat."), children: "Answer in Hermes Bot Mode" }) : null
   ] });
 }
 function ClarifyCard({ waiting, onAnswer }) {
   const questions = waiting.questions || [];
-  const [answers, setAnswers] = React17.useState(() => ({ ...waiting.locked || {} }));
-  const [typed, setTyped] = React17.useState({});
+  const [answers, setAnswers] = React18.useState(() => ({ ...waiting.locked || {} }));
+  const [typed, setTyped] = React18.useState({});
   const busy = Boolean(waiting.answering);
   const value = (q) => typed[q.qid]?.trim() ? typed[q.qid].trim() : answers[q.qid];
   const complete = questions.every((q) => {
@@ -27898,13 +27966,13 @@ function ClarifyCard({ waiting, onAnswer }) {
     onAnswer(out);
   };
   const single = questions.length === 1 && !questions[0].multiSelect && questions[0].choices;
-  return /* @__PURE__ */ jsxs19(Fragment10, { children: [
-    questions.map((q) => /* @__PURE__ */ jsxs19("fieldset", { className: "gbo-q", disabled: busy, children: [
-      /* @__PURE__ */ jsx21("legend", { children: q.question }),
-      q.choices ? /* @__PURE__ */ jsx21("div", { className: "gbo-choices", role: q.multiSelect ? "group" : "radiogroup", children: q.choices.map((choice) => {
+  return /* @__PURE__ */ jsxs18(Fragment10, { children: [
+    questions.map((q) => /* @__PURE__ */ jsxs18("fieldset", { className: "gbo-q", disabled: busy, children: [
+      /* @__PURE__ */ jsx20("legend", { children: q.question }),
+      q.choices ? /* @__PURE__ */ jsx20("div", { className: "gbo-choices", role: q.multiSelect ? "group" : "radiogroup", children: q.choices.map((choice) => {
         const label = bare(choice);
         const picked = q.multiSelect ? (answers[q.qid] || []).includes(label) : answers[q.qid] === label;
-        return /* @__PURE__ */ jsxs19(
+        return /* @__PURE__ */ jsxs18(
           "button",
           {
             type: "button",
@@ -27921,13 +27989,13 @@ function ClarifyCard({ waiting, onAnswer }) {
             },
             children: [
               label,
-              choice !== label ? /* @__PURE__ */ jsx21("span", { className: "gbo-choice-tag", children: "Recommended" }) : null
+              choice !== label ? /* @__PURE__ */ jsx20("span", { className: "gbo-choice-tag", children: "Recommended" }) : null
             ]
           },
           choice
         );
       }) }) : null,
-      !q.multiSelect ? /* @__PURE__ */ jsx21(
+      !q.multiSelect ? /* @__PURE__ */ jsx20(
         "input",
         {
           className: "gbo-input",
@@ -27941,9 +28009,9 @@ function ClarifyCard({ waiting, onAnswer }) {
         }
       ) : null
     ] }, q.qid)),
-    /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-      !single ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !complete, onClick: () => submit(), children: busy ? "Sending…" : "Answer" }) : null,
-      /* @__PURE__ */ jsx21(
+    /* @__PURE__ */ jsxs18("div", { className: "gbo-card-actions", children: [
+      !single ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !complete, onClick: () => submit(), children: busy ? "Sending…" : "Answer" }) : null,
+      /* @__PURE__ */ jsx20(
         "button",
         {
           type: "button",
@@ -27957,8 +28025,8 @@ function ClarifyCard({ waiting, onAnswer }) {
   ] });
 }
 function ValueCard({ waiting, onAnswer }) {
-  const first = React17.useRef(null);
-  const second = React17.useRef(null);
+  const first = React18.useRef(null);
+  const second = React18.useRef(null);
   const busy = Boolean(waiting.answering);
   const login = waiting.kind === "vault-login";
   const secret = waiting.kind !== "vault-code";
@@ -27971,7 +28039,7 @@ function ValueCard({ waiting, onAnswer }) {
     onAnswer(answer);
   };
   const label = waiting.kind === "sudo" ? "Password" : waiting.kind === "secret" ? waiting.envVar || "Value" : waiting.kind === "vault-unlock" ? "Master password" : waiting.kind === "vault-code" ? "Code" : "Username or email";
-  return /* @__PURE__ */ jsxs19(
+  return /* @__PURE__ */ jsxs18(
     "form",
     {
       className: "gbo-q",
@@ -27981,10 +28049,10 @@ function ValueCard({ waiting, onAnswer }) {
         send();
       },
       children: [
-        waiting.kind === "sudo" && waiting.text ? /* @__PURE__ */ jsx21("code", { children: waiting.text }) : null,
-        waiting.kind === "secret" && waiting.text ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: waiting.text }) : null,
-        waiting.kind === "vault-code" && waiting.hint ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: waiting.hint }) : null,
-        /* @__PURE__ */ jsx21(
+        waiting.kind === "sudo" && waiting.text ? /* @__PURE__ */ jsx20("code", { children: waiting.text }) : null,
+        waiting.kind === "secret" && waiting.text ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-desc", children: waiting.text }) : null,
+        waiting.kind === "vault-code" && waiting.hint ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-desc", children: waiting.hint }) : null,
+        /* @__PURE__ */ jsx20(
           "input",
           {
             ref: first,
@@ -27997,10 +28065,10 @@ function ValueCard({ waiting, onAnswer }) {
             disabled: busy
           }
         ),
-        login ? /* @__PURE__ */ jsx21("input", { ref: second, className: "gbo-input", type: "password", "aria-label": "Password", placeholder: "Password", autoComplete: "off", disabled: busy }) : null,
-        /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-          /* @__PURE__ */ jsx21("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: busy ? "Sending…" : login ? "Save login" : "Send" }),
-          /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => send(true), children: waiting.kind === "secret" || login ? "Skip" : "Cancel" })
+        login ? /* @__PURE__ */ jsx20("input", { ref: second, className: "gbo-input", type: "password", "aria-label": "Password", placeholder: "Password", autoComplete: "off", disabled: busy }) : null,
+        /* @__PURE__ */ jsxs18("div", { className: "gbo-card-actions", children: [
+          /* @__PURE__ */ jsx20("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: busy ? "Sending…" : login ? "Save login" : "Send" }),
+          /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => send(true), children: waiting.kind === "secret" || login ? "Skip" : "Cancel" })
         ] })
       ]
     }
@@ -28024,15 +28092,15 @@ function openExternal(url) {
 }
 function ConnectionCard({ waiting, onRespond }) {
   const busy = Boolean(waiting.answering);
-  const forms = React17.useRef({});
+  const forms = React18.useRef({});
   const targets = waiting.targets || [];
-  return /* @__PURE__ */ jsxs19(Fragment10, { children: [
-    targets.length === 0 ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
+  return /* @__PURE__ */ jsxs18(Fragment10, { children: [
+    targets.length === 0 ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
     targets.map((target) => {
       const name = String(target?.name || "");
       const env = Array.isArray(target?.required_env) ? target.required_env : [];
       const open = !target?.resolved && (target?.state === "pending" || target?.state === "initiated" || target?.state === "not_connected");
-      return /* @__PURE__ */ jsxs19(
+      return /* @__PURE__ */ jsxs18(
         "form",
         {
           className: "gbo-target",
@@ -28050,14 +28118,14 @@ function ConnectionCard({ waiting, onRespond }) {
             onRespond({ targets: [{ name, status: "approved", ...Object.keys(values).length ? { env: values } : {} }] });
           },
           children: [
-            /* @__PURE__ */ jsxs19("div", { className: "gbo-target-head", children: [
-              /* @__PURE__ */ jsx21("span", { className: "gbo-target-name", children: target?.display || name }),
-              /* @__PURE__ */ jsx21("span", { className: `gbo-target-state is-${target?.state || "pending"}`, children: TARGET_STATE[target?.state] || target?.state })
+            /* @__PURE__ */ jsxs18("div", { className: "gbo-target-head", children: [
+              /* @__PURE__ */ jsx20("span", { className: "gbo-target-name", children: target?.display || name }),
+              /* @__PURE__ */ jsx20("span", { className: `gbo-target-state is-${target?.state || "pending"}`, children: TARGET_STATE[target?.state] || target?.state })
             ] }),
-            target?.description || target?.detail ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: target.description || target.detail }) : null,
-            target?.instructions ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: target.instructions }) : null,
-            target?.launch?.target ? /* @__PURE__ */ jsx21("code", { children: target.launch.target }) : null,
-            open ? env.map((field) => /* @__PURE__ */ jsx21(
+            target?.description || target?.detail ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-desc", children: target.description || target.detail }) : null,
+            target?.instructions ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-desc", children: target.instructions }) : null,
+            target?.launch?.target ? /* @__PURE__ */ jsx20("code", { children: target.launch.target }) : null,
+            open ? env.map((field) => /* @__PURE__ */ jsx20(
               "input",
               {
                 name: field.name,
@@ -28072,96 +28140,96 @@ function ConnectionCard({ waiting, onRespond }) {
               },
               field.name
             )) : null,
-            open ? /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-              target?.connect_url ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => openExternal(String(target.connect_url)), children: "Sign in" }) : /* @__PURE__ */ jsx21("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: "Approve" }),
-              /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ targets: [{ name, status: "skipped" }] }), children: "Not now" })
+            open ? /* @__PURE__ */ jsxs18("div", { className: "gbo-card-actions", children: [
+              target?.connect_url ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => openExternal(String(target.connect_url)), children: "Sign in" }) : /* @__PURE__ */ jsx20("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: "Approve" }),
+              /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ targets: [{ name, status: "skipped" }] }), children: "Not now" })
             ] }) : null
           ]
         },
         name
       );
     }),
-    /* @__PURE__ */ jsx21("div", { className: "gbo-card-actions", children: /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ settled_by: "continue" }), children: "Continue" }) })
+    /* @__PURE__ */ jsx20("div", { className: "gbo-card-actions", children: /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ settled_by: "continue" }), children: "Continue" }) })
   ] });
 }
 function WaitingCard({ waiting, bot, name, controller: controller2 }) {
   const answer = (value) => void controller2?.answerPrompt(value);
   const respond = (result) => void controller2?.respondConnection(result);
-  return /* @__PURE__ */ jsxs19("div", { className: "gbo-card is-question", role: "group", "aria-label": "Waiting for your answer", children: [
-    /* @__PURE__ */ jsx21("div", { className: "gbo-card-title", children: "Waiting for your answer" }),
-    /* @__PURE__ */ jsxs19("div", { className: "gbo-card-desc", children: [
+  return /* @__PURE__ */ jsxs18("div", { className: "gbo-card is-question", role: "group", "aria-label": "Waiting for your answer", children: [
+    /* @__PURE__ */ jsx20("div", { className: "gbo-card-title", children: "Waiting for your answer" }),
+    /* @__PURE__ */ jsxs18("div", { className: "gbo-card-desc", children: [
       name,
       " ",
       TITLES[waiting.kind] || "is waiting for you",
       waiting.kind !== "clarify" && waiting.kind !== "sudo" && waiting.kind !== "secret" && waiting.text ? `: ${waiting.text}` : "."
     ] }),
-    waiting.kind === "clarify" ? /* @__PURE__ */ jsx21(ClarifyCard, { waiting, onAnswer: answer }, waiting.id) : waiting.kind === "connection" ? /* @__PURE__ */ jsx21(ConnectionCard, { waiting, onRespond: respond }) : /* @__PURE__ */ jsx21(ValueCard, { waiting, onAnswer: answer }, waiting.id),
-    /* @__PURE__ */ jsx21(Footer, { waiting, bot })
+    waiting.kind === "clarify" ? /* @__PURE__ */ jsx20(ClarifyCard, { waiting, onAnswer: answer }, waiting.id) : waiting.kind === "connection" ? /* @__PURE__ */ jsx20(ConnectionCard, { waiting, onRespond: respond }) : /* @__PURE__ */ jsx20(ValueCard, { waiting, onAnswer: answer }, waiting.id),
+    /* @__PURE__ */ jsx20(Footer, { waiting, bot })
   ] });
 }
 
 // src/ui/Tools.tsx
-import * as React18 from "react";
-import { jsx as jsx22, jsxs as jsxs20 } from "react/jsx-runtime";
+import * as React19 from "react";
+import { jsx as jsx21, jsxs as jsxs19 } from "react/jsx-runtime";
 var PREVIEW_CHARS = 4e3;
 function LongText({ text, label }) {
-  const [all, setAll] = React18.useState(false);
+  const [all, setAll] = React19.useState(false);
   const long = text.length > PREVIEW_CHARS;
-  return /* @__PURE__ */ jsxs20("div", { className: "gbo-tool-block", children: [
-    /* @__PURE__ */ jsx22("div", { className: "gbo-tool-block-label", children: label }),
-    /* @__PURE__ */ jsx22("pre", { children: all || !long ? text : `${text.slice(0, PREVIEW_CHARS)}…` }),
-    long ? /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-link-btn", onClick: () => setAll((v) => !v), children: all ? "Show less" : "Show all" }) : null
+  return /* @__PURE__ */ jsxs19("div", { className: "gbo-tool-block", children: [
+    /* @__PURE__ */ jsx21("div", { className: "gbo-tool-block-label", children: label }),
+    /* @__PURE__ */ jsx21("pre", { children: all || !long ? text : `${text.slice(0, PREVIEW_CHARS)}…` }),
+    long ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-link-btn", onClick: () => setAll((v) => !v), children: all ? "Show less" : "Show all" }) : null
   ] });
 }
 function Diff({ diff }) {
-  return /* @__PURE__ */ jsxs20("div", { className: "gbo-tool-block", children: [
-    /* @__PURE__ */ jsx22("div", { className: "gbo-tool-block-label", children: "Changes" }),
-    /* @__PURE__ */ jsx22("pre", { className: "gbo-diff", children: diffLines(diff).map((line, i) => /* @__PURE__ */ jsxs20("span", { className: `is-${line.kind}`, children: [
+  return /* @__PURE__ */ jsxs19("div", { className: "gbo-tool-block", children: [
+    /* @__PURE__ */ jsx21("div", { className: "gbo-tool-block-label", children: "Changes" }),
+    /* @__PURE__ */ jsx21("pre", { className: "gbo-diff", children: diffLines(diff).map((line, i) => /* @__PURE__ */ jsxs19("span", { className: `is-${line.kind}`, children: [
       line.text,
       "\n"
     ] }, i)) })
   ] });
 }
 function ToolRow({ tool, bot }) {
-  const mark = /* @__PURE__ */ jsx22("span", { className: "gbo-tool-mark", children: tool.status === "error" ? "!" : "✓" });
-  const dur = Number(tool.duration) >= 1 ? /* @__PURE__ */ jsxs20("span", { className: "gbo-tool-dur", children: [
+  const mark = /* @__PURE__ */ jsx21("span", { className: "gbo-tool-mark", children: tool.status === "error" ? "!" : "✓" });
+  const dur = Number(tool.duration) >= 1 ? /* @__PURE__ */ jsxs19("span", { className: "gbo-tool-dur", children: [
     Math.round(tool.duration),
     "s"
   ] }) : null;
   if (!hasDetail(tool)) {
-    return /* @__PURE__ */ jsxs20("li", { className: `is-${tool.status}`, children: [
+    return /* @__PURE__ */ jsxs19("li", { className: `is-${tool.status}`, children: [
       mark,
-      /* @__PURE__ */ jsx22("span", { className: "gbo-tool-label", title: tool.summary || tool.label, children: tool.label }),
+      /* @__PURE__ */ jsx21("span", { className: "gbo-tool-label", title: tool.summary || tool.label, children: tool.label }),
       dur
     ] });
   }
-  return /* @__PURE__ */ jsx22("li", { className: `is-${tool.status} has-detail`, children: /* @__PURE__ */ jsxs20("details", { className: "gbo-tool-detail", children: [
-    /* @__PURE__ */ jsxs20("summary", { children: [
+  return /* @__PURE__ */ jsx21("li", { className: `is-${tool.status} has-detail`, children: /* @__PURE__ */ jsxs19("details", { className: "gbo-tool-detail", children: [
+    /* @__PURE__ */ jsxs19("summary", { children: [
       mark,
-      /* @__PURE__ */ jsx22("span", { className: "gbo-tool-label", title: tool.summary || tool.label, children: tool.label }),
+      /* @__PURE__ */ jsx21("span", { className: "gbo-tool-label", title: tool.summary || tool.label, children: tool.label }),
       dur
     ] }),
-    tool.summary ? /* @__PURE__ */ jsx22("div", { className: "gbo-card-desc", children: tool.summary }) : null,
-    tool.diff ? /* @__PURE__ */ jsx22(Diff, { diff: tool.diff }) : null,
-    tool.image ? /* @__PURE__ */ jsx22("div", { className: "gbo-media", children: /* @__PURE__ */ jsx22(OwnerMedia, { bot, item: { path: tool.image, kind: mediaKind(tool.image), name: mediaName(tool.image) } }) }) : null,
-    tool.args ? /* @__PURE__ */ jsx22(LongText, { label: "Arguments", text: tool.args }) : null,
-    tool.result ? /* @__PURE__ */ jsx22(LongText, { label: "Result", text: tool.result }) : null
+    tool.summary ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: tool.summary }) : null,
+    tool.diff ? /* @__PURE__ */ jsx21(Diff, { diff: tool.diff }) : null,
+    tool.image ? /* @__PURE__ */ jsx21("div", { className: "gbo-media", children: /* @__PURE__ */ jsx21(OwnerMedia, { bot, item: { path: tool.image, kind: mediaKind(tool.image), name: mediaName(tool.image) } }) }) : null,
+    tool.args ? /* @__PURE__ */ jsx21(LongText, { label: "Arguments", text: tool.args }) : null,
+    tool.result ? /* @__PURE__ */ jsx21(LongText, { label: "Result", text: tool.result }) : null
   ] }) });
 }
 function ToolGroup({ item, bot }) {
   const running = item.tools.filter((tool) => tool.status === "running");
   const done = item.tools.length - running.length;
   const secs = item.tools.reduce((sum, tool) => sum + (Number(tool.duration) || 0), 0);
-  return /* @__PURE__ */ jsxs20("div", { className: "gbo-tools-wrap", children: [
-    done > 0 ? /* @__PURE__ */ jsxs20("details", { className: "gbo-tools", children: [
-      /* @__PURE__ */ jsxs20("summary", { children: [
-        /* @__PURE__ */ jsx22(IconChevron, {}),
+  return /* @__PURE__ */ jsxs19("div", { className: "gbo-tools-wrap", children: [
+    done > 0 ? /* @__PURE__ */ jsxs19("details", { className: "gbo-tools", children: [
+      /* @__PURE__ */ jsxs19("summary", { children: [
+        /* @__PURE__ */ jsx21(IconChevron, {}),
         done === 1 ? "1 tool" : `${done} tools`,
         secs >= 1 ? ` · ${Math.round(secs)}s` : ""
       ] }),
-      /* @__PURE__ */ jsx22("ul", { children: item.tools.filter((tool) => tool.status !== "running").map((tool) => /* @__PURE__ */ jsx22(ToolRow, { tool, bot }, tool.id)) })
+      /* @__PURE__ */ jsx21("ul", { children: item.tools.filter((tool) => tool.status !== "running").map((tool) => /* @__PURE__ */ jsx21(ToolRow, { tool, bot }, tool.id)) })
     ] }) : null,
-    running.map((tool) => /* @__PURE__ */ jsx22("div", { className: "gbo-activity", children: /* @__PURE__ */ jsxs20("span", { className: "gbo-shimmer", children: [
+    running.map((tool) => /* @__PURE__ */ jsx21("div", { className: "gbo-activity", children: /* @__PURE__ */ jsxs19("span", { className: "gbo-shimmer", children: [
       tool.label,
       "…"
     ] }) }, tool.id))
@@ -28169,14 +28237,14 @@ function ToolGroup({ item, bot }) {
 }
 
 // src/ui/Chat.tsx
-import { Fragment as Fragment11, jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
+import { Fragment as Fragment11, jsx as jsx22, jsxs as jsxs20 } from "react/jsx-runtime";
 function Thinking({ text }) {
-  return /* @__PURE__ */ jsxs21("details", { className: "gbo-think", children: [
-    /* @__PURE__ */ jsxs21("summary", { children: [
-      /* @__PURE__ */ jsx23(IconChevron, {}),
+  return /* @__PURE__ */ jsxs20("details", { className: "gbo-think", children: [
+    /* @__PURE__ */ jsxs20("summary", { children: [
+      /* @__PURE__ */ jsx22(IconChevron, {}),
       "Thought"
     ] }),
-    /* @__PURE__ */ jsx23("div", { className: "gbo-think-body", children: text })
+    /* @__PURE__ */ jsx22("div", { className: "gbo-think-body", children: text })
   ] });
 }
 function ApprovalCard({ item, onAnswer }) {
@@ -28184,13 +28252,13 @@ function ApprovalCard({ item, onAnswer }) {
   const answering = item.status === "answering";
   const stateText = item.status === "answered" ? `${CHOICE_LABELS[item.answer] || item.answer}` : item.status === "resolved" ? "Answered in another window" : item.status === "expired" ? "No longer waiting, nothing was approved" : item.status === "cancelled" ? "No longer waiting" : answering ? "Sending…" : "";
   const ok = item.status === "answered" && item.answer !== "deny";
-  return /* @__PURE__ */ jsxs21("div", { className: `card${pending ? "" : " is-resolved"}`, role: "group", "aria-label": "Approval needed", children: [
-    /* @__PURE__ */ jsx23("div", { className: "card__head", children: /* @__PURE__ */ jsxs21("div", { className: "card__titles", children: [
-      /* @__PURE__ */ jsx23("div", { className: "card__title", children: "May I run this?" }),
-      item.description ? /* @__PURE__ */ jsx23("div", { className: "card__sub", children: item.description }) : null
+  return /* @__PURE__ */ jsxs20("div", { className: `card${pending ? "" : " is-resolved"}`, role: "group", "aria-label": "Approval needed", children: [
+    /* @__PURE__ */ jsx22("div", { className: "card__head", children: /* @__PURE__ */ jsxs20("div", { className: "card__titles", children: [
+      /* @__PURE__ */ jsx22("div", { className: "card__title", children: "May I run this?" }),
+      item.description ? /* @__PURE__ */ jsx22("div", { className: "card__sub", children: item.description }) : null
     ] }) }),
-    item.command ? /* @__PURE__ */ jsx23("div", { className: "card__body", children: /* @__PURE__ */ jsx23("code", { children: item.command }) }) : null,
-    pending ? /* @__PURE__ */ jsx23("div", { className: "card__actions", children: item.choices.map((choice) => /* @__PURE__ */ jsx23(
+    item.command ? /* @__PURE__ */ jsx22("div", { className: "card__body", children: /* @__PURE__ */ jsx22("code", { children: item.command }) }) : null,
+    pending ? /* @__PURE__ */ jsx22("div", { className: "card__actions", children: item.choices.map((choice) => /* @__PURE__ */ jsx22(
       "button",
       {
         type: "button",
@@ -28200,11 +28268,11 @@ function ApprovalCard({ item, onAnswer }) {
         children: CHOICE_LABELS[choice] || choice
       },
       choice
-    )) }) : /* @__PURE__ */ jsxs21("div", { className: `card__outcome${ok ? " is-ok" : ""}`, children: [
+    )) }) : /* @__PURE__ */ jsxs20("div", { className: `card__outcome${ok ? " is-ok" : ""}`, children: [
       ok ? "✓ " : "",
       stateText
     ] }),
-    item.error ? /* @__PURE__ */ jsx23("div", { className: "card__error gbo-card-error", children: item.error }) : null
+    item.error ? /* @__PURE__ */ jsx22("div", { className: "card__error gbo-card-error", children: item.error }) : null
   ] });
 }
 function UserMeta({
@@ -28217,36 +28285,36 @@ function UserMeta({
     if (item.delivery !== "not-sent") {
       const status = !item.checked ? "Delivery unknown: checking the chat history…" : item.checkFailed ? "Delivery unknown: the chat history could not be read." : "Delivery unknown: not in the chat history yet. It may still be queued.";
       if (item.idempotent) {
-        return /* @__PURE__ */ jsxs21("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
-          /* @__PURE__ */ jsxs21("span", { children: [
+        return /* @__PURE__ */ jsxs20("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
+          /* @__PURE__ */ jsxs20("span", { children: [
             status,
             " Retrying is safe: Hermes recognises this message and never runs it twice."
           ] }),
-          /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRetry(item.id), children: "Retry" }),
-          item.checked ? /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRecheck(item.id), children: "Check again" }) : null
+          /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRetry(item.id), children: "Retry" }),
+          item.checked ? /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRecheck(item.id), children: "Check again" }) : null
         ] });
       }
-      return /* @__PURE__ */ jsxs21("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
-        /* @__PURE__ */ jsxs21("span", { children: [
+      return /* @__PURE__ */ jsxs20("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
+        /* @__PURE__ */ jsxs20("span", { children: [
           status,
           " It is not sent again from here, so it cannot run twice."
         ] }),
-        item.checked ? /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRecheck(item.id), children: "Check again" }) : null,
-        /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-pill-btn", onClick: onOpen, children: "Open in Hermes Bot Mode" })
+        item.checked ? /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRecheck(item.id), children: "Check again" }) : null,
+        /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-pill-btn", onClick: onOpen, children: "Open in Hermes Bot Mode" })
       ] });
     }
-    return /* @__PURE__ */ jsxs21("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
+    return /* @__PURE__ */ jsxs20("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
       "Not sent: ",
       item.failed,
-      /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRetry(item.id), children: "Retry" })
+      /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRetry(item.id), children: "Retry" })
     ] });
   }
   if (item.receipt === "unknown") {
-    return /* @__PURE__ */ jsx23("div", { className: "gbo-msg-meta gbo-msg-failed", children: "Hermes accepted this message but lost track of it, so it will not run." });
+    return /* @__PURE__ */ jsx22("div", { className: "gbo-msg-meta gbo-msg-failed", children: "Hermes accepted this message but lost track of it, so it will not run." });
   }
-  if (item.receipt === "terminal") return /* @__PURE__ */ jsx23("div", { className: "gbo-msg-meta", children: "Already delivered" });
+  if (item.receipt === "terminal") return /* @__PURE__ */ jsx22("div", { className: "gbo-msg-meta", children: "Already delivered" });
   if (item.pending || item.receipt === "queued" || item.receipt === "steered" || item.receipt === "redirected") {
-    return /* @__PURE__ */ jsx23("div", { className: "gbo-msg-meta", children: item.pending ? "Sending…" : item.receipt === "queued" ? "Queued after the current reply" : "Sent to the running reply" });
+    return /* @__PURE__ */ jsx22("div", { className: "gbo-msg-meta", children: item.pending ? "Sending…" : item.receipt === "queued" ? "Queued after the current reply" : "Sent to the running reply" });
   }
   return null;
 }
@@ -28265,49 +28333,49 @@ function Item({
   const react = (emoji) => void controller2?.react(item.id, emoji);
   switch (item.kind) {
     case "divider":
-      return /* @__PURE__ */ jsx23("div", { className: "divider gbo-divider", children: item.label });
+      return /* @__PURE__ */ jsx22("div", { className: "divider gbo-divider", children: item.label });
     case "user":
-      return /* @__PURE__ */ jsxs21("div", { className: "gbo-msg is-user", children: [
-        item.attachments?.length ? /* @__PURE__ */ jsx23("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx23("span", { className: "gbo-chip", children: a2.name || a2.kind }, i)) }) : null,
-        item.text ? /* @__PURE__ */ jsxs21("div", { className: "bubble-wrap is-right", children: [
-          /* @__PURE__ */ jsx23("div", { className: `bubble is-user${pos}`, children: /* @__PURE__ */ jsx23("div", { className: "bubble__plain", children: item.text }) }),
-          item.at ? /* @__PURE__ */ jsx23("span", { className: "bubble__time", children: clock(item.at) }) : null
+      return /* @__PURE__ */ jsxs20("div", { className: "gbo-msg is-user", children: [
+        item.attachments?.length ? /* @__PURE__ */ jsx22("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx22("span", { className: "gbo-chip", children: a2.name || a2.kind }, i)) }) : null,
+        item.text ? /* @__PURE__ */ jsxs20("div", { className: "bubble-wrap is-right", children: [
+          /* @__PURE__ */ jsx22("div", { className: `bubble is-user${pos}`, children: /* @__PURE__ */ jsx22("div", { className: "bubble__plain", children: item.text }) }),
+          item.at ? /* @__PURE__ */ jsx22("span", { className: "bubble__time", children: clock(item.at) }) : null
         ] }) : null,
-        /* @__PURE__ */ jsx23(Reactions, { item, onReact: react }),
-        /* @__PURE__ */ jsx23(UserMeta, { item, onRetry, onRecheck, onOpen }),
-        /* @__PURE__ */ jsx23(UserActions, { item, controller: controller2, busy, onPrefill })
+        /* @__PURE__ */ jsx22(Reactions, { item, onReact: react }),
+        /* @__PURE__ */ jsx22(UserMeta, { item, onRetry, onRecheck, onOpen }),
+        /* @__PURE__ */ jsx22(UserActions, { item, controller: controller2, busy, onPrefill })
       ] });
     case "assistant":
-      return /* @__PURE__ */ jsxs21("div", { className: "gbo-msg is-bot", children: [
-        item.reasoning ? /* @__PURE__ */ jsx23(Thinking, { text: item.reasoning }) : null,
-        item.text ? /* @__PURE__ */ jsxs21("div", { className: "bubble-wrap is-left", children: [
-          /* @__PURE__ */ jsx23("div", { className: `bubble is-agent${pos}${item.streaming ? " is-streaming" : ""}`, children: item.streaming ? /* @__PURE__ */ jsx23("div", { className: "bubble__plain", children: item.text }) : /* @__PURE__ */ jsx23("div", { className: "md", children: /* @__PURE__ */ jsx23(BotText, { bot, text: item.text }) }) }),
-          item.at ? /* @__PURE__ */ jsx23("span", { className: "bubble__time", children: clock(item.at) }) : null
+      return /* @__PURE__ */ jsxs20("div", { className: "gbo-msg is-bot", children: [
+        item.reasoning ? /* @__PURE__ */ jsx22(Thinking, { text: item.reasoning }) : null,
+        item.text ? /* @__PURE__ */ jsxs20("div", { className: "bubble-wrap is-left", children: [
+          /* @__PURE__ */ jsx22("div", { className: `bubble is-agent${pos}${item.streaming ? " is-streaming" : ""}`, children: item.streaming ? /* @__PURE__ */ jsx22("div", { className: "bubble__plain", children: item.text }) : /* @__PURE__ */ jsx22("div", { className: "md", children: /* @__PURE__ */ jsx22(BotText, { bot, text: item.text }) }) }),
+          item.at ? /* @__PURE__ */ jsx22("span", { className: "bubble__time", children: clock(item.at) }) : null
         ] }) : null,
-        /* @__PURE__ */ jsx23(Reactions, { item, onReact: react }),
-        item.text && !item.streaming ? /* @__PURE__ */ jsx23(AssistantActions, { item, controller: controller2, busy }) : null
+        /* @__PURE__ */ jsx22(Reactions, { item, onReact: react }),
+        item.text && !item.streaming ? /* @__PURE__ */ jsx22(AssistantActions, { item, controller: controller2, busy }) : null
       ] });
     case "tools":
-      return /* @__PURE__ */ jsx23(ToolGroup, { item, bot });
+      return /* @__PURE__ */ jsx22(ToolGroup, { item, bot });
     case "approval":
-      return /* @__PURE__ */ jsx23(ApprovalCard, { item, onAnswer });
+      return /* @__PURE__ */ jsx22(ApprovalCard, { item, onAnswer });
     case "notice":
-      return /* @__PURE__ */ jsx23("div", { className: "system-event gbo-notice", children: item.text });
+      return /* @__PURE__ */ jsx22("div", { className: "system-event gbo-notice", children: item.text });
     case "command":
-      return /* @__PURE__ */ jsxs21("div", { className: `gbo-command${item.error ? " is-error" : ""}`, role: "status", children: [
-        /* @__PURE__ */ jsx23("div", { className: "gbo-command-head", children: item.command }),
-        item.running ? /* @__PURE__ */ jsx23("div", { className: "gbo-shimmer", children: "Running…" }) : item.output ? /* @__PURE__ */ jsx23("pre", { children: item.output }) : null
+      return /* @__PURE__ */ jsxs20("div", { className: `gbo-command${item.error ? " is-error" : ""}`, role: "status", children: [
+        /* @__PURE__ */ jsx22("div", { className: "gbo-command-head", children: item.command }),
+        item.running ? /* @__PURE__ */ jsx22("div", { className: "gbo-shimmer", children: "Running…" }) : item.output ? /* @__PURE__ */ jsx22("pre", { children: item.output }) : null
       ] });
     case "error":
-      return /* @__PURE__ */ jsx23("div", { className: "notice is-error gbo-error", children: item.text });
+      return /* @__PURE__ */ jsx22("div", { className: "notice is-error gbo-error", children: item.text });
     default:
       return null;
   }
 }
 function useStickToBottom(dep) {
-  const ref = React19.useRef(null);
-  const stick = React19.useRef(true);
-  React19.useLayoutEffect(() => {
+  const ref = React20.useRef(null);
+  const stick = React20.useRef(true);
+  React20.useLayoutEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [dep]);
@@ -28320,12 +28388,12 @@ function useStickToBottom(dep) {
   };
   return { ref, onScroll, pin };
 }
-var SlotContext = React19.createContext(mainSlot);
-var useController = () => React19.useContext(SlotContext).controller();
+var SlotContext = React20.createContext(mainSlot);
+var useController = () => React20.useContext(SlotContext).controller();
 function Transcript({ state, bot, meta, onPrefill }) {
   const items = state.chat.items;
   const showWork = useStore(app.showWork);
-  const decorated = React19.useMemo(() => groupMessages(withDividers(visibleItems(items, showWork))), [items, showWork]);
+  const decorated = React20.useMemo(() => groupMessages(withDividers(visibleItems(items, showWork))), [items, showWork]);
   const { ref, onScroll, pin } = useStickToBottom(items);
   const controller2 = useController();
   const answer = (requestId, choice) => void controller2?.respondApproval(requestId, choice);
@@ -28333,52 +28401,52 @@ function Transcript({ state, bot, meta, onPrefill }) {
   const recheck = (clientId) => void controller2?.recheck(clientId);
   const openStock = () => void openInBotMode(bot, "Check whether your message arrived before sending anything again.");
   const activity2 = state.chat.busy ? activityLabel(state.chat, showWork) : "";
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     pin();
   }, [state.storedId]);
-  return /* @__PURE__ */ jsx23(OverlayScroll, { wrapClassName: "transcript-wrap gbo-transcript-scroll", className: "transcript gbo-transcript", scrollRef: ref, onScroll, children: /* @__PURE__ */ jsxs21("div", { className: "transcript__col gbo-column", children: [
-    state.hasMore ? /* @__PURE__ */ jsx23("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void controller2?.loadEarlier(), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
-    !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs21("div", { className: "empty-chat", children: [
-      /* @__PURE__ */ jsx23(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
-      /* @__PURE__ */ jsx23("div", { className: "empty-chat__title", children: displayName(bot, meta) }),
-      /* @__PURE__ */ jsx23("div", { className: "empty-chat__sub", children: "Send a message to start the conversation" })
+  return /* @__PURE__ */ jsx22(OverlayScroll, { wrapClassName: "transcript-wrap gbo-transcript-scroll", className: "transcript gbo-transcript", scrollRef: ref, onScroll, children: /* @__PURE__ */ jsxs20("div", { className: "transcript__col gbo-column", children: [
+    state.hasMore ? /* @__PURE__ */ jsx22("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void controller2?.loadEarlier(), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
+    !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs20("div", { className: "empty-chat", children: [
+      /* @__PURE__ */ jsx22(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
+      /* @__PURE__ */ jsx22("div", { className: "empty-chat__title", children: displayName(bot, meta) }),
+      /* @__PURE__ */ jsx22("div", { className: "empty-chat__sub", children: "Send a message to start the conversation" })
     ] }) : null,
     decorated.map((entry) => {
       const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
-      if (entry.kind !== "group") return /* @__PURE__ */ jsx23(Item, { item: entry, ...props }, entry.id);
+      if (entry.kind !== "group") return /* @__PURE__ */ jsx22(Item, { item: entry, ...props }, entry.id);
       const bubbles = entry.items.filter((item) => item.text);
-      return /* @__PURE__ */ jsx23("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx23(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.id)) }, entry.id);
+      return /* @__PURE__ */ jsx22("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx22(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.id)) }, entry.id);
     }),
-    state.chat.waiting ? /* @__PURE__ */ jsx23(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
-    activity2 ? /* @__PURE__ */ jsxs21("div", { className: "activity-line gbo-activity", role: "status", children: [
-      /* @__PURE__ */ jsx23("span", { className: "activity-line__mark", children: /* @__PURE__ */ jsx23(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 22 }) }),
-      /* @__PURE__ */ jsxs21("span", { className: "activity-line__text shimmer", children: [
+    state.chat.waiting ? /* @__PURE__ */ jsx22(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
+    activity2 ? /* @__PURE__ */ jsxs20("div", { className: "activity-line gbo-activity", role: "status", children: [
+      /* @__PURE__ */ jsx22("span", { className: "activity-line__mark", children: /* @__PURE__ */ jsx22(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 22 }) }),
+      /* @__PURE__ */ jsxs20("span", { className: "activity-line__text shimmer", children: [
         activity2,
         "…"
       ] })
     ] }) : null,
-    state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx23("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
+    state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx22("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
   ] }) });
 }
 function Center({ state, bot }) {
   const controller2 = useController();
-  const slot = React19.useContext(SlotContext);
+  const slot = React20.useContext(SlotContext);
   const name = displayName(bot, metaFor(bot));
   if (state.phase === "no-chat") {
-    return /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsx23(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 80 }),
-      /* @__PURE__ */ jsx23("h2", { children: "No Bot Chat yet" }),
-      /* @__PURE__ */ jsxs21("p", { children: [
+    return /* @__PURE__ */ jsxs20("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsx22(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 80 }),
+      /* @__PURE__ */ jsx22("h2", { children: "No Bot Chat yet" }),
+      /* @__PURE__ */ jsxs20("p", { children: [
         name,
         " has no Bot Chat yet. Start it here; it is the same one forever-chat Hermes Bot Mode opens."
       ] }),
-      /* @__PURE__ */ jsx23("button", { type: "button", className: "btn btn--primary", onClick: () => void controller2?.create(), children: "Start Bot Chat" })
+      /* @__PURE__ */ jsx22("button", { type: "button", className: "btn btn--primary", onClick: () => void controller2?.create(), children: "Start Bot Chat" })
     ] });
   }
   if (state.phase === "creating") {
-    return /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsx23(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 72, working: true }),
-      /* @__PURE__ */ jsxs21("p", { children: [
+    return /* @__PURE__ */ jsxs20("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsx22(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 72, working: true }),
+      /* @__PURE__ */ jsxs20("p", { children: [
         "Starting ",
         name,
         "’s Bot Chat…"
@@ -28389,25 +28457,25 @@ function Center({ state, bot }) {
     const fresh = freshBot(bot);
     const retry = () => fresh && fresh !== bot && !slot.extra ? selectBot(fresh) : void controller2?.open();
     const stockProblem = stockHandoffProblem(fresh || bot);
-    return /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsxs21("h2", { children: [
+    return /* @__PURE__ */ jsxs20("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsxs20("h2", { children: [
         "Could not open ",
         name
       ] }),
-      /* @__PURE__ */ jsx23("p", { children: state.error }),
-      stockProblem ? /* @__PURE__ */ jsxs21("p", { children: [
+      /* @__PURE__ */ jsx22("p", { children: state.error }),
+      stockProblem ? /* @__PURE__ */ jsxs20("p", { children: [
         stockProblem,
         ". Hermes Bot Mode is not offered until it is."
       ] }) : null,
-      /* @__PURE__ */ jsxs21("div", { className: "gbo-card-actions", children: [
-        /* @__PURE__ */ jsx23("button", { type: "button", className: "btn btn--primary", onClick: retry, children: "Try again" }),
-        stockProblem ? null : /* @__PURE__ */ jsx23("button", { type: "button", className: "btn btn--secondary", onClick: () => void openInBotMode(fresh || bot), children: "Open in Hermes Bot Mode" })
+      /* @__PURE__ */ jsxs20("div", { className: "gbo-card-actions", children: [
+        /* @__PURE__ */ jsx22("button", { type: "button", className: "btn btn--primary", onClick: retry, children: "Try again" }),
+        stockProblem ? null : /* @__PURE__ */ jsx22("button", { type: "button", className: "btn btn--secondary", onClick: () => void openInBotMode(fresh || bot), children: "Open in Hermes Bot Mode" })
       ] })
     ] });
   }
-  return /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
-    /* @__PURE__ */ jsx23(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 72, working: true }),
-    /* @__PURE__ */ jsxs21("p", { children: [
+  return /* @__PURE__ */ jsxs20("div", { className: "gbo-center", children: [
+    /* @__PURE__ */ jsx22(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 72, working: true }),
+    /* @__PURE__ */ jsxs20("p", { children: [
       "Opening ",
       name,
       "’s chat…"
@@ -28416,7 +28484,7 @@ function Center({ state, bot }) {
 }
 var NARROW_PANE_PX = 900;
 function usePaneWidth(ref, enabled = true) {
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     const el = ref.current;
     if (!enabled) return void 0;
     const RO = globalThis.ResizeObserver;
@@ -28455,7 +28523,7 @@ function PanelSash({ rootRef }) {
     target.addEventListener("pointerup", end);
     target.addEventListener("pointercancel", end);
   };
-  return /* @__PURE__ */ jsx23(
+  return /* @__PURE__ */ jsx22(
     "div",
     {
       className: "gbo-panel-sash",
@@ -28470,14 +28538,14 @@ function PanelSash({ rootRef }) {
   );
 }
 function ProfileDrawer({ bot, onClose, backgroundRef }) {
-  const ref = React19.useRef(null);
-  React19.useEffect(() => {
+  const ref = React20.useRef(null);
+  React20.useEffect(() => {
     if (!ref.current) return;
     return trapFocus(ref.current, { background: backgroundRef.current });
   }, [backgroundRef]);
-  return /* @__PURE__ */ jsxs21(Fragment11, { children: [
-    /* @__PURE__ */ jsx23("div", { className: "gbo-scrim", "aria-hidden": "true", onClick: onClose }),
-    /* @__PURE__ */ jsxs21(
+  return /* @__PURE__ */ jsxs20(Fragment11, { children: [
+    /* @__PURE__ */ jsx22("div", { className: "gbo-scrim", "aria-hidden": "true", onClick: onClose }),
+    /* @__PURE__ */ jsxs20(
       "div",
       {
         className: "gbo-drawer",
@@ -28488,8 +28556,8 @@ function ProfileDrawer({ bot, onClose, backgroundRef }) {
         ref,
         onKeyDown: (event) => drawerKeyDown(event, ref.current, onClose),
         children: [
-          /* @__PURE__ */ jsx23("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-drawer-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx23(IconX, {}) }),
-          /* @__PURE__ */ jsx23(ProfilePanel, { bot })
+          /* @__PURE__ */ jsx22("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-drawer-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx22(IconX, {}) }),
+          /* @__PURE__ */ jsx22(ProfilePanel, { bot })
         ]
       }
     )
@@ -28504,22 +28572,22 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const panelWidth = useStore(app.panelWidth);
   const roster = useStore(app.roster);
   const rosterShown = useStore(app.rosterShown);
-  const rootRef = React19.useRef(null);
-  const draftRef = React19.useRef(null);
-  const chatRef = React19.useRef(null);
+  const rootRef = React20.useRef(null);
+  const draftRef = React20.useRef(null);
+  const chatRef = React20.useRef(null);
   usePaneWidth(rootRef, !slot.extra);
-  const closeDrawer = React19.useCallback(() => app.drawerOpen.set(false), []);
+  const closeDrawer = React20.useCallback(() => app.drawerOpen.set(false), []);
   const bot = state?.bot ? findBot(rowKey(state.bot)) || state.bot : findBot(selectedKey);
   const pending = !state && bot && !slot.extra ? rowKey(bot) : "";
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     if (!pending || app.chat.get()) return;
     const target = findBot(pending);
     if (target) selectBot(target, { openWorkspace: false });
   }, [pending]);
   if (!bot || !state) {
-    return /* @__PURE__ */ jsx23("div", { "data-gbo-root": "", className: "gbo-ws", ref: rootRef, children: /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsx23("h2", { children: "Pick a bot" }),
-      /* @__PURE__ */ jsx23("p", { children: "Choose a bot in the Bots sidebar to open its Bot Chat." })
+    return /* @__PURE__ */ jsx22("div", { "data-gbo-root": "", className: "gbo-ws", ref: rootRef, children: /* @__PURE__ */ jsxs20("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsx22("h2", { children: "Pick a bot" }),
+      /* @__PURE__ */ jsx22("p", { children: "Choose a bot in the Bots sidebar to open its Bot Chat." })
     ] }) });
   }
   const meta = metaFor(bot);
@@ -28531,29 +28599,29 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const shown = extra ? false : narrow ? drawerOpen : panelOpen;
   const togglePanel = () => extra ? selectBot(bot) : narrow ? app.drawerOpen.set(!drawerOpen) : setPanelOpen(!panelOpen);
   const completeSlash = (text) => controller2?.completeSlash(text) ?? Promise.resolve({ items: [], replaceFrom: 0 });
-  const view = /* @__PURE__ */ jsxs21("div", { "data-gbo-root": "", className: `gbo-ws${narrow && !extra ? " is-narrow" : ""}`, style, ref: rootRef, children: [
-    /* @__PURE__ */ jsxs21("main", { className: "chat gbo-chat", ref: chatRef, children: [
-      /* @__PURE__ */ jsxs21("header", { className: "chat__header gbo-head", children: [
-        !extra && !rosterShown && canToggleSidebar() ? /* @__PURE__ */ jsx23("div", { className: "gbo-head-left", children: /* @__PURE__ */ jsx23("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Show sidebar (⌘B)", "aria-label": "Show sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx23(IconSidebar, {}) }) }) : null,
-        /* @__PURE__ */ jsx23("span", { className: "chat__pill-anchor", children: /* @__PURE__ */ jsxs21("button", { type: "button", className: "chat__pill gbo-head-pill", title: `${name}: profile`, "aria-expanded": shown, onClick: togglePanel, children: [
-          /* @__PURE__ */ jsx23(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 27, working: Boolean(state.chat.busy) }),
-          /* @__PURE__ */ jsx23("span", { className: "chat__pill-name", children: name })
+  const view = /* @__PURE__ */ jsxs20("div", { "data-gbo-root": "", className: `gbo-ws${narrow && !extra ? " is-narrow" : ""}`, style, ref: rootRef, children: [
+    /* @__PURE__ */ jsxs20("main", { className: "chat gbo-chat", ref: chatRef, children: [
+      /* @__PURE__ */ jsxs20("header", { className: "chat__header gbo-head", children: [
+        !extra && !rosterShown && canToggleSidebar() ? /* @__PURE__ */ jsx22("div", { className: "gbo-head-left", children: /* @__PURE__ */ jsx22("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Show sidebar (⌘B)", "aria-label": "Show sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx22(IconSidebar, {}) }) }) : null,
+        /* @__PURE__ */ jsx22("span", { className: "chat__pill-anchor", children: /* @__PURE__ */ jsxs20("button", { type: "button", className: "chat__pill gbo-head-pill", title: `${name}: profile`, "aria-expanded": shown, onClick: togglePanel, children: [
+          /* @__PURE__ */ jsx22(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 27, working: Boolean(state.chat.busy) }),
+          /* @__PURE__ */ jsx22("span", { className: "chat__pill-name", children: name })
         ] }) }),
-        /* @__PURE__ */ jsxs21("div", { className: "chat__header-right gbo-head-right", children: [
-          !extra && !shown ? /* @__PURE__ */ jsx23("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-toggle", title: "Show profile", "aria-label": "Show profile", "aria-expanded": false, onClick: togglePanel, children: /* @__PURE__ */ jsx23(IconPanel, {}) }) : null,
-          /* @__PURE__ */ jsx23(
+        /* @__PURE__ */ jsxs20("div", { className: "chat__header-right gbo-head-right", children: [
+          !extra && !shown ? /* @__PURE__ */ jsx22("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-toggle", title: "Show profile", "aria-label": "Show profile", "aria-expanded": false, onClick: togglePanel, children: /* @__PURE__ */ jsx22(IconPanel, {}) }) : null,
+          /* @__PURE__ */ jsx22(
             MenuButton,
             {
               label: "Share",
               className: "share-btn",
-              entries: [{ label: "Open another chat beside this one", icon: /* @__PURE__ */ jsx23(IconOpen, {}), onSelect: () => openBotInNewTab(bot) }],
+              entries: [{ label: "Open another chat beside this one", icon: /* @__PURE__ */ jsx22(IconOpen, {}), onSelect: () => openBotInNewTab(bot) }],
               children: "Share"
             }
           )
         ] })
       ] }),
-      ready ? /* @__PURE__ */ jsx23(Transcript, { state, bot, meta, onPrefill: (text) => draftRef.current?.(text, draftOwnerKey(bot)) }) : /* @__PURE__ */ jsx23(Center, { state, bot }),
-      /* @__PURE__ */ jsx23(
+      ready ? /* @__PURE__ */ jsx22(Transcript, { state, bot, meta, onPrefill: (text) => draftRef.current?.(text, draftOwnerKey(bot)) }) : /* @__PURE__ */ jsx22(Center, { state, bot }),
+      /* @__PURE__ */ jsx22(
         Composer,
         {
           bot,
@@ -28574,33 +28642,33 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
         rowKey(bot)
       )
     ] }),
-    extra ? null : narrow ? drawerOpen ? /* @__PURE__ */ jsx23(ProfileDrawer, { bot, onClose: closeDrawer, backgroundRef: chatRef }) : null : panelOpen ? /* @__PURE__ */ jsxs21("div", { className: "details gbo-panel-dock", style: { width: panelWidth }, children: [
-      /* @__PURE__ */ jsx23(PanelSash, { rootRef }),
-      /* @__PURE__ */ jsx23("div", { className: "gbo-drag-band", "aria-hidden": "true" }),
-      /* @__PURE__ */ jsx23(ProfilePanel, { bot, onClose: () => setPanelOpen(false) })
+    extra ? null : narrow ? drawerOpen ? /* @__PURE__ */ jsx22(ProfileDrawer, { bot, onClose: closeDrawer, backgroundRef: chatRef }) : null : panelOpen ? /* @__PURE__ */ jsxs20("div", { className: "details gbo-panel-dock", style: { width: panelWidth }, children: [
+      /* @__PURE__ */ jsx22(PanelSash, { rootRef }),
+      /* @__PURE__ */ jsx22("div", { className: "gbo-drag-band", "aria-hidden": "true" }),
+      /* @__PURE__ */ jsx22(ProfilePanel, { bot, onClose: () => setPanelOpen(false) })
     ] }) : null
   ] });
-  return /* @__PURE__ */ jsx23(SlotContext.Provider, { value: slot, children: view });
+  return /* @__PURE__ */ jsx22(SlotContext.Provider, { value: slot, children: view });
 }
 
 // src/ui/Roster.tsx
-import * as React21 from "react";
+import * as React22 from "react";
 
 // src/ui/Unread.tsx
-import * as React20 from "react";
-import { jsx as jsx24 } from "react/jsx-runtime";
+import * as React21 from "react";
+import { jsx as jsx23 } from "react/jsx-runtime";
 function UnreadDot({ bot }) {
   const Dot = sdk.SessionStatusDot;
   const id = botCanonicalSessionId(bot);
   if (!id || !(typeof Dot === "function" || Dot && typeof Dot === "object")) return null;
-  return /* @__PURE__ */ jsx24("span", { className: "gbo-row-dot", children: React20.createElement(Dot, { storedSessionId: id }) });
+  return /* @__PURE__ */ jsx23("span", { className: "gbo-row-dot", children: React21.createElement(Dot, { storedSessionId: id }) });
 }
 
 // src/ui/Roster.tsx
-import { Fragment as Fragment12, jsx as jsx25, jsxs as jsxs22 } from "react/jsx-runtime";
+import { Fragment as Fragment12, jsx as jsx24, jsxs as jsxs21 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
-  const [now, setNow] = React21.useState(() => Date.now());
-  React21.useEffect(() => {
+  const [now, setNow] = React22.useState(() => Date.now());
+  React22.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(id);
   }, [ms]);
@@ -28615,8 +28683,8 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
   const age = at ? shortAge(at, now) : "";
   const attention = attentionFor(bot);
   const entries = botMenuEntries(bot);
-  return /* @__PURE__ */ jsxs22("div", { className: "gbo-row-wrap", children: [
-    /* @__PURE__ */ jsx25(ContextMenuFor, { entries, children: /* @__PURE__ */ jsxs22(
+  return /* @__PURE__ */ jsxs21("div", { className: "gbo-row-wrap", children: [
+    /* @__PURE__ */ jsx24(ContextMenuFor, { entries, children: /* @__PURE__ */ jsxs21(
       "button",
       {
         type: "button",
@@ -28626,23 +28694,23 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
         onClick: () => selectBot(bot),
         onPointerEnter: () => warmBot(bot),
         children: [
-          /* @__PURE__ */ jsxs22("span", { className: "bot-row__avatar gbo-row-face", children: [
-            /* @__PURE__ */ jsx25(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 40, working }),
-            /* @__PURE__ */ jsx25(UnreadDot, { bot })
+          /* @__PURE__ */ jsxs21("span", { className: "bot-row__avatar gbo-row-face", children: [
+            /* @__PURE__ */ jsx24(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 40, working }),
+            /* @__PURE__ */ jsx24(UnreadDot, { bot })
           ] }),
-          /* @__PURE__ */ jsxs22("span", { className: "bot-row__text gbo-row-main", children: [
-            /* @__PURE__ */ jsxs22("span", { className: "gbo-row-line", children: [
-              /* @__PURE__ */ jsx25("span", { className: "bot-row__name gbo-row-name", children: name }),
-              meta?.pinned ? /* @__PURE__ */ jsx25(IconPin, {}) : null,
-              hidden ? /* @__PURE__ */ jsx25("span", { className: "gbo-row-flag", title: "Hidden from the roster", children: /* @__PURE__ */ jsx25(IconEyeOff, {}) }) : null,
-              attention ? /* @__PURE__ */ jsx25("span", { className: "gbo-attn", role: "img", "aria-label": "needs attention", title: botAttentionHint(attention.reason), children: /* @__PURE__ */ jsx25(IconWarn, {}) }) : null
+          /* @__PURE__ */ jsxs21("span", { className: "bot-row__text gbo-row-main", children: [
+            /* @__PURE__ */ jsxs21("span", { className: "gbo-row-line", children: [
+              /* @__PURE__ */ jsx24("span", { className: "bot-row__name gbo-row-name", children: name }),
+              meta?.pinned ? /* @__PURE__ */ jsx24(IconPin, {}) : null,
+              hidden ? /* @__PURE__ */ jsx24("span", { className: "gbo-row-flag", title: "Hidden from the roster", children: /* @__PURE__ */ jsx24(IconEyeOff, {}) }) : null,
+              attention ? /* @__PURE__ */ jsx24("span", { className: "gbo-attn", role: "img", "aria-label": "needs attention", title: botAttentionHint(attention.reason), children: /* @__PURE__ */ jsx24(IconWarn, {}) }) : null
             ] }),
-            /* @__PURE__ */ jsx25("span", { className: `bot-row__preview gbo-row-preview${working ? " is-working" : ""}`, children: line })
+            /* @__PURE__ */ jsx24("span", { className: `bot-row__preview gbo-row-preview${working ? " is-working" : ""}`, children: line })
           ] })
         ]
       }
     ) }),
-    /* @__PURE__ */ jsx25(MenuButton, { entries, label: `Actions for ${name}`, className: "icon-btn gbo-row-more" })
+    /* @__PURE__ */ jsx24(MenuButton, { entries, label: `Actions for ${name}`, className: "icon-btn gbo-row-more" })
   ] });
 }
 var PIN_AVATAR = [67, 58, 52, 46];
@@ -28650,7 +28718,7 @@ function PinnedBot({ bot, size, selected, working }) {
   const meta = metaFor(bot);
   const name = displayName(bot, meta);
   const dim = sourceUnreachable(bot);
-  return /* @__PURE__ */ jsx25("div", { className: "gbo-pin-wrap", children: /* @__PURE__ */ jsx25(ContextMenuFor, { entries: botMenuEntries(bot), children: /* @__PURE__ */ jsxs22(
+  return /* @__PURE__ */ jsx24("div", { className: "gbo-pin-wrap", children: /* @__PURE__ */ jsx24(ContextMenuFor, { entries: botMenuEntries(bot), children: /* @__PURE__ */ jsxs21(
     "button",
     {
       type: "button",
@@ -28660,17 +28728,17 @@ function PinnedBot({ bot, size, selected, working }) {
       onClick: () => selectBot(bot),
       onPointerEnter: () => warmBot(bot),
       children: [
-        /* @__PURE__ */ jsxs22("span", { className: "pinned__avatar gbo-row-face gbo-pin-face", children: [
-          /* @__PURE__ */ jsx25(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size, working }),
-          /* @__PURE__ */ jsx25(UnreadDot, { bot })
+        /* @__PURE__ */ jsxs21("span", { className: "pinned__avatar gbo-row-face gbo-pin-face", children: [
+          /* @__PURE__ */ jsx24(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size, working }),
+          /* @__PURE__ */ jsx24(UnreadDot, { bot })
         ] }),
-        /* @__PURE__ */ jsx25("span", { className: "pinned__label gbo-pin-name", children: name })
+        /* @__PURE__ */ jsx24("span", { className: "pinned__label gbo-pin-name", children: name })
       ]
     }
   ) }) });
 }
 function useRosterShown(ref) {
-  React21.useEffect(() => {
+  React22.useEffect(() => {
     app.rosterShown.set(true);
     const el = ref.current;
     const RO = globalThis.ResizeObserver;
@@ -28685,6 +28753,24 @@ function useRosterShown(ref) {
     return () => observer2?.disconnect();
   }, [ref]);
 }
+var NAV_KEYS = /* @__PURE__ */ new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
+function usePointerMode(ref) {
+  React22.useEffect(() => {
+    const el = ref.current;
+    const doc = el?.ownerDocument;
+    if (!el || !doc) return;
+    const onPointer = () => el.setAttribute("data-gbo-pointer", "");
+    const onKey = (event) => {
+      if (NAV_KEYS.has(event.key)) el.removeAttribute("data-gbo-pointer");
+    };
+    doc.addEventListener("pointerdown", onPointer, true);
+    doc.addEventListener("keydown", onKey, true);
+    return () => {
+      doc.removeEventListener("pointerdown", onPointer, true);
+      doc.removeEventListener("keydown", onKey, true);
+    };
+  }, [ref]);
+}
 function RosterPane() {
   useStore(app.roster);
   const query = useStore(app.query);
@@ -28697,10 +28783,11 @@ function RosterPane() {
   useStore(roster2.metaWrites);
   useStore(roster2.attention);
   const pins = useStore(app.pinnedBots);
-  const [searching, setSearching] = React21.useState(false);
+  const [searching, setSearching] = React22.useState(false);
   const now = useNow();
-  const rootRef = React21.useRef(null);
+  const rootRef = React22.useRef(null);
   useRosterShown(rootRef);
+  usePointerMode(rootRef);
   const roster = app.roster.get();
   const workingKey = chat && chat.chat?.busy ? rowKey(chat.bot) : "";
   const rooms = useStore(app.rooms);
@@ -28724,7 +28811,7 @@ function RosterPane() {
   const chatKey = chat ? rowKey(chat.bot) : "";
   const row = (bot, hidden = false) => {
     const key = rowKey(bot);
-    return /* @__PURE__ */ jsx25(
+    return /* @__PURE__ */ jsx24(
       BotRow,
       {
         bot,
@@ -28738,12 +28825,12 @@ function RosterPane() {
     );
   };
   const showSearchBox = searching || Boolean(query) || Boolean(view.showFilters && view.activeFilterCount);
-  return /* @__PURE__ */ jsxs22("div", { "data-gbo-root": "", className: "sidebar gbo-roster", ref: rootRef, children: [
-    /* @__PURE__ */ jsxs22("div", { className: "sidebar__titlebar gbo-roster-top", children: [
-      /* @__PURE__ */ jsx25("h2", { className: "gbo-roster-title", children: "Bots" }),
-      /* @__PURE__ */ jsxs22("div", { className: "sidebar__controls", children: [
-        canToggleSidebar() ? /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Hide sidebar (⌘B)", "aria-label": "Hide sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx25(IconSidebar, {}) }) : null,
-        /* @__PURE__ */ jsx25(
+  return /* @__PURE__ */ jsxs21("div", { "data-gbo-root": "", className: "sidebar gbo-roster", ref: rootRef, children: [
+    /* @__PURE__ */ jsxs21("div", { className: "sidebar__titlebar gbo-roster-top", children: [
+      /* @__PURE__ */ jsx24("h2", { className: "gbo-roster-title", children: "Bots" }),
+      /* @__PURE__ */ jsxs21("div", { className: "sidebar__controls", children: [
+        canToggleSidebar() ? /* @__PURE__ */ jsx24("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Hide sidebar (⌘B)", "aria-label": "Hide sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx24(IconSidebar, {}) }) : null,
+        /* @__PURE__ */ jsx24(
           "button",
           {
             type: "button",
@@ -28755,15 +28842,15 @@ function RosterPane() {
               setSearching((v) => !v);
               if (showSearchBox) app.query.set("");
             },
-            children: /* @__PURE__ */ jsx25(IconSearch, {})
+            children: /* @__PURE__ */ jsx24(IconSearch, {})
           }
         ),
-        /* @__PURE__ */ jsx25(MenuButton, { entries: newMenuEntries(), label: "New bot or group", className: "icon-btn", children: /* @__PURE__ */ jsx25(IconPlus, {}) })
+        /* @__PURE__ */ jsx24(MenuButton, { entries: newMenuEntries(), label: "New bot or group", className: "icon-btn", children: /* @__PURE__ */ jsx24(IconPlus, {}) })
       ] })
     ] }),
-    showSearchBox ? /* @__PURE__ */ jsx25("div", { className: "gbo-search-row", children: /* @__PURE__ */ jsxs22("label", { className: "text-input gbo-search", children: [
-      /* @__PURE__ */ jsx25(IconSearch, {}),
-      /* @__PURE__ */ jsx25(
+    showSearchBox ? /* @__PURE__ */ jsx24("div", { className: "gbo-search-row", children: /* @__PURE__ */ jsxs21("label", { className: "text-input gbo-search", children: [
+      /* @__PURE__ */ jsx24(IconSearch, {}),
+      /* @__PURE__ */ jsx24(
         "input",
         {
           autoFocus: searching,
@@ -28778,56 +28865,56 @@ function RosterPane() {
           }
         }
       ),
-      view.showFilters ? /* @__PURE__ */ jsxs22("span", { className: "gbo-search-filter", children: [
-        /* @__PURE__ */ jsx25(
+      view.showFilters ? /* @__PURE__ */ jsxs21("span", { className: "gbo-search-filter", children: [
+        /* @__PURE__ */ jsx24(
           MenuButton,
           {
             entries: filterMenuEntries(view, groupCount),
             label: view.activeFilterCount ? `Filter roster, ${view.activeFilterCount} active` : "Filter roster",
             className: `icon-btn icon-btn--plain${view.activeFilterCount ? " has-filters" : ""}`,
-            children: /* @__PURE__ */ jsx25(IconFilter, {})
+            children: /* @__PURE__ */ jsx24(IconFilter, {})
           }
         ),
-        view.activeFilterCount ? /* @__PURE__ */ jsx25("span", { className: "gbo-filter-count", children: view.activeFilterCount }) : null
+        view.activeFilterCount ? /* @__PURE__ */ jsx24("span", { className: "gbo-filter-count", children: view.activeFilterCount }) : null
       ] }) : null
     ] }) }) : null,
-    unreachable2.length ? /* @__PURE__ */ jsxs22("div", { className: "gbo-source-retry", role: "status", children: [
-      /* @__PURE__ */ jsx25(IconWarn, {}),
-      /* @__PURE__ */ jsx25("span", { children: unreachable2.length === 1 ? `${unreachable2[0].label || unreachable2[0].connectionId} is not reachable` : `${unreachable2.length} connections are not reachable` }),
-      /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-link-btn", disabled: retrying, onClick: () => void retrySources(), children: retrying ? "Retrying…" : "Retry" })
+    unreachable2.length ? /* @__PURE__ */ jsxs21("div", { className: "gbo-source-retry", role: "status", children: [
+      /* @__PURE__ */ jsx24(IconWarn, {}),
+      /* @__PURE__ */ jsx24("span", { children: unreachable2.length === 1 ? `${unreachable2[0].label || unreachable2[0].connectionId} is not reachable` : `${unreachable2.length} connections are not reachable` }),
+      /* @__PURE__ */ jsx24("button", { type: "button", className: "gbo-link-btn", disabled: retrying, onClick: () => void retrySources(), children: retrying ? "Retrying…" : "Retry" })
     ] }) : null,
-    /* @__PURE__ */ jsxs22(OverlayScroll, { wrapClassName: "gbo-roster-scroll", className: "sidebar__scroll gbo-roster-list", role: "list", children: [
-      pinned?.shown.length ? /* @__PURE__ */ jsx25("div", { className: `pinned gbo-pins is-${pinned.shown.length}`, role: "group", "aria-label": "Pinned bots", children: pinned.shown.map((bot) => {
+    /* @__PURE__ */ jsxs21(OverlayScroll, { wrapClassName: "gbo-roster-scroll", className: "sidebar__scroll gbo-roster-list", role: "list", children: [
+      pinned?.shown.length ? /* @__PURE__ */ jsx24("div", { className: `pinned gbo-pins is-${pinned.shown.length}`, role: "group", "aria-label": "Pinned bots", children: pinned.shown.map((bot) => {
         const key = rowKey(bot);
-        return /* @__PURE__ */ jsx25(PinnedBot, { bot, size: PIN_AVATAR[pinned.shown.length - 1], selected: key === selectedKey, working: key === workingKey }, key);
+        return /* @__PURE__ */ jsx24(PinnedBot, { bot, size: PIN_AVATAR[pinned.shown.length - 1], selected: key === selectedKey, working: key === workingKey }, key);
       }) }) : null,
-      roster.rows.length === 0 ? /* @__PURE__ */ jsx25("div", { className: "gbo-roster-empty", children: roster.origin === "none" && !roster.error ? "Loading bots…" : roster.error ? /* @__PURE__ */ jsxs22("div", { className: "gbo-empty-card", children: [
-        /* @__PURE__ */ jsxs22("span", { children: [
+      roster.rows.length === 0 ? /* @__PURE__ */ jsx24("div", { className: "gbo-roster-empty", children: roster.origin === "none" && !roster.error ? "Loading bots…" : roster.error ? /* @__PURE__ */ jsxs21("div", { className: "gbo-empty-card", children: [
+        /* @__PURE__ */ jsxs21("span", { children: [
           "Could not load bots: ",
           roster.error
         ] }),
-        /* @__PURE__ */ jsxs22("button", { type: "button", className: "gbo-btn is-small", disabled: retrying, onClick: () => void retrySources(), children: [
-          /* @__PURE__ */ jsx25(IconRefresh, {}),
+        /* @__PURE__ */ jsxs21("button", { type: "button", className: "gbo-btn is-small", disabled: retrying, onClick: () => void retrySources(), children: [
+          /* @__PURE__ */ jsx24(IconRefresh, {}),
           retrying ? "Retrying…" : "Retry now"
         ] })
-      ] }) : "No bots yet." }) : view.allHidden && !hiddenExpanded ? /* @__PURE__ */ jsxs22("div", { className: "gbo-empty-card", children: [
-        /* @__PURE__ */ jsx25("strong", { children: "All bots are hidden" }),
-        /* @__PURE__ */ jsx25("span", { children: "Hidden bots keep working; they are just not listed." }),
-        /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
-      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx25("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs22(Fragment12, { children: [
+      ] }) : "No bots yet." }) : view.allHidden && !hiddenExpanded ? /* @__PURE__ */ jsxs21("div", { className: "gbo-empty-card", children: [
+        /* @__PURE__ */ jsx24("strong", { children: "All bots are hidden" }),
+        /* @__PURE__ */ jsx24("span", { children: "Hidden bots keep working; they are just not listed." }),
+        /* @__PURE__ */ jsx24("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
+      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx24("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs21(Fragment12, { children: [
         list.map((section) => {
           const isCollapsed = collapsed.includes(section.name);
-          return /* @__PURE__ */ jsxs22("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
-            list.length > 1 || section.name !== "Unassigned" ? /* @__PURE__ */ jsxs22("button", { type: "button", className: "gbo-section-head", "aria-expanded": !isCollapsed, onClick: () => toggleSection(section.name), children: [
-              /* @__PURE__ */ jsx25(IconChevronDown, {}),
+          return /* @__PURE__ */ jsxs21("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
+            list.length > 1 || section.name !== "Unassigned" ? /* @__PURE__ */ jsxs21("button", { type: "button", className: "gbo-section-head", "aria-expanded": !isCollapsed, onClick: () => toggleSection(section.name), children: [
+              /* @__PURE__ */ jsx24(IconChevronDown, {}),
               section.name,
-              /* @__PURE__ */ jsx25("span", { className: "gbo-count", children: section.bots.length })
+              /* @__PURE__ */ jsx24("span", { className: "gbo-count", children: section.bots.length })
             ] }) : null,
             isCollapsed ? null : section.bots.map((bot) => row(bot))
           ] }, section.name);
         }),
-        view.showHiddenSection ? /* @__PURE__ */ jsxs22("div", { role: "group", "aria-label": "Hidden", className: "bot-list gbo-hidden-head", children: [
-          /* @__PURE__ */ jsxs22(
+        view.showHiddenSection ? /* @__PURE__ */ jsxs21("div", { role: "group", "aria-label": "Hidden", className: "bot-list gbo-hidden-head", children: [
+          /* @__PURE__ */ jsxs21(
             "button",
             {
               type: "button",
@@ -28836,25 +28923,47 @@ function RosterPane() {
               disabled: view.hasConstraint,
               onClick: () => roster2.hiddenExpanded.set(!hiddenExpanded),
               children: [
-                /* @__PURE__ */ jsx25(IconChevronDown, {}),
+                /* @__PURE__ */ jsx24(IconChevronDown, {}),
                 "Hidden",
-                /* @__PURE__ */ jsx25("span", { className: "gbo-count", children: view.hasConstraint ? view.hidden.length : view.hiddenCount })
+                /* @__PURE__ */ jsx24("span", { className: "gbo-count", children: view.hasConstraint ? view.hidden.length : view.hiddenCount })
               ]
             }
           ),
-          view.showHiddenRows ? hiddenListed.length ? hiddenListed.map((bot) => row(bot, true)) : /* @__PURE__ */ jsx25("div", { className: "gbo-roster-empty", children: "No hidden bot matches." }) : null
+          view.showHiddenRows ? hiddenListed.length ? hiddenListed.map((bot) => row(bot, true)) : /* @__PURE__ */ jsx24("div", { className: "gbo-roster-empty", children: "No hidden bot matches." }) : null
         ] }) : null
       ] }),
-      showGroups ? /* @__PURE__ */ jsx25(RoomsSection, { query }) : null
+      showGroups ? /* @__PURE__ */ jsx24(RoomsSection, { query }) : null
     ] }),
-    /* @__PURE__ */ jsxs22("div", { className: "sidebar__footer gbo-roster-foot", children: [
-      /* @__PURE__ */ jsx25("div", { className: "sidebar__fade" }),
-      /* @__PURE__ */ jsx25("div", { className: "account", children: /* @__PURE__ */ jsxs22("span", { className: "account__btn", children: [
-        /* @__PURE__ */ jsx25("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: "You" }),
-        /* @__PURE__ */ jsx25("span", { className: "account__name gbo-user-name", children: roster.rows.length ? `${roster.rows.length} bots` : "Bots" })
+    /* @__PURE__ */ jsxs21("div", { className: "sidebar__footer gbo-roster-foot", children: [
+      /* @__PURE__ */ jsx24("div", { className: "sidebar__fade" }),
+      /* @__PURE__ */ jsx24("div", { className: "account", children: /* @__PURE__ */ jsxs21("span", { className: "account__btn", children: [
+        /* @__PURE__ */ jsx24("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: "You" }),
+        /* @__PURE__ */ jsx24("span", { className: "account__name gbo-user-name", children: roster.rows.length ? `${roster.rows.length} bots` : "Bots" })
       ] }) })
     ] }),
-    /* @__PURE__ */ jsx25(RosterDialogs, {})
+    /* @__PURE__ */ jsx24(RosterDialogs, {})
+  ] });
+}
+
+// src/ui/UsageMeter.tsx
+import { jsx as jsx25, jsxs as jsxs22 } from "react/jsx-runtime";
+function Bar({ percent }) {
+  if (percent === null) return null;
+  return /* @__PURE__ */ jsx25("span", { className: `gbo-meter-bar${percent >= 80 ? " is-high" : ""}`, role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-label": "Context used", children: /* @__PURE__ */ jsx25("span", { style: { width: `${percent}%` } }) });
+}
+function UsageStatusChip() {
+  const u = useStore(roster2.usage);
+  const enabled = useStore(app.enabled);
+  const label = usageContextLabel(u.usage);
+  if (!enabled || !u.runtimeId || !label) return null;
+  const cost = costLabel(u.usage);
+  return /* @__PURE__ */ jsxs22("span", { "data-gbo-root": "", className: "gbo-status-meter", style: { height: "auto", width: "auto" }, title: "Open Bot Chat: context used", children: [
+    /* @__PURE__ */ jsx25(Bar, { percent: contextPercent(u.usage) }),
+    /* @__PURE__ */ jsx25("span", { children: label }),
+    cost ? /* @__PURE__ */ jsxs22("span", { children: [
+      "· ",
+      cost
+    ] }) : null
   ] });
 }
 

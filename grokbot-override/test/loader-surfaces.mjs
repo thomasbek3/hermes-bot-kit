@@ -254,10 +254,12 @@ export async function exerciseSurfaces(t, { primitives }) {
   emit({ type: 'clarify.request', session_id: 'rt-security', payload: { request_id: 'q1', question: 'Which branch?', choices: ['main', 'dev'] } })
   await waitFor(() => chatEl.textContent.includes('Which branch?'), 'C11 clarify card')
 
-  // Profile panel (P1-P7, C25, R14 group chats in the panel).
+  // Profile panel (P1-P7, the Model row, R14 group chats in the panel).
   if (!chatEl.querySelector('.gbo-panel')) byLabel(chatEl, 'Show profile').click()
   const panel = await waitFor(() => chatEl.querySelector('.gbo-panel') && chatEl.querySelector('.gbo-job-open') && chatEl.querySelector('.gbo-panel'), 'the profile panel with jobs')
   for (const text of ['Scheduled', 'Digest', 'Bot’s computer', 'Edit profile and avatar', 'Skills, tools, MCP and model', 'Groups', 'Launch', 'New group chat…']) assert.ok(panel.textContent.includes(text), `profile panel: ${text}`)
+  assert.ok(panel.querySelector('button.gbo-model-row'), 'profile panel: the Model row')
+  for (const text of ['Context', 'Input tokens', 'Cache hits']) assert.ok(!panel.textContent.includes(text), `no usage block in the panel: ${text}`)
   assert.ok(!panel.textContent.includes('Group chats are listed'), 'no hand-off to stock for group chats')
 
   // C25 status-bar chip.

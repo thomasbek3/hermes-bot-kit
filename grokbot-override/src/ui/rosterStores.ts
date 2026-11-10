@@ -11,11 +11,22 @@ export type DialogState =
   | { kind: 'groups'; bot: any }
   | { kind: 'create'; tab?: string; caps?: any }
   | { kind: 'config'; bot: any; initial?: any }
+  | { kind: 'model'; bot: any }
   | { kind: 'cron-edit'; bot: any; job: any | null }
   | { kind: 'cron-detail'; bot: any; job: any }
   | { kind: 'cron-remove'; bot: any; job: any }
   | { kind: 'slack'; bot: any; initial?: any }
   | { kind: 'slack-status'; bot: any }
+
+/** A bot's configured model as profiles.describe reports it ('' = the
+ *  profile has none of its own). */
+export interface BotModel {
+  loading: boolean
+  loaded: boolean
+  provider: string
+  model: string
+  error: null | string
+}
 
 export const roster2 = {
   /** R6: session-only, like stock's pane state. */
@@ -33,7 +44,9 @@ export const roster2 = {
   /** C25: the open chat's usage, keyed by its runtime id. */
   usage: createStore<{ key: string; runtimeId: string; usage: any | null; error: null | string }>({ key: '', runtimeId: '', usage: null, error: null }),
   /** P3: job ids with a run (trigger) in flight. */
-  running: createStore<Record<string, boolean>>({})
+  running: createStore<Record<string, boolean>>({}),
+  /** The panel's Model row: roster key -> the bot's configured model. */
+  models: createStore<Record<string, BotModel>>({})
 }
 
 export function openDialog(state: DialogState) {

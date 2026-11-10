@@ -15,6 +15,8 @@ import { BOT_SWATCHES } from '../src/core/colors.js'
 import { ShapeFace } from '../src/ui/Avatar'
 import { AVATAR_SHAPES, avatarShapeFor } from '../src/ui/avatarShapes'
 import { roster2 } from '../src/ui/rosterStores'
+import { primeBotModel } from '../src/ui/rosterActions'
+import { primeModelOptions } from '../src/ui/ProfileConfig'
 import { slack } from '../src/ui/slackActions'
 import { SlackConnect } from '../src/ui/SlackConnect'
 const avatarShapeForKey = (key: string) => avatarShapeFor(key).name
@@ -151,6 +153,9 @@ export function render({
   )
   slack.hidden.set(slackOption?.hidden ? [rowKey(bot)] : [])
   roster2.dialog.set(dialog ? { ...dialog, bot } : null)
+  // The panel's Model row and its picker: an invented demo model.
+  primeBotModel(bot, { provider: 'example', model: 'atlas-large' })
+  primeModelOptions(bot, { providers: [{ slug: 'example', name: 'Example', models: ['atlas-large', 'atlas-small'], authenticated: true }] })
   app.selectedKey.set(selected ? rowKey(bot) : '')
   app.panelOpen.set(panelOpen)
   app.chat.set(

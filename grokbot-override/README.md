@@ -48,8 +48,8 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
 - **Group chats** (gateway-owned rooms) are listed under the bots and open as their own tab. A member's
   failed group turn puts the needs-attention badge on its row, like a failed Bot Chat turn.
 - The profile panel creates, edits, runs and deletes scheduled jobs, opens the bot's computer (live screen
-  with take over / hand back), lists the group chats the bot is in, and shows the open chat's context and
-  cost meter (also in the status bar).
+  with take over / hand back), lists the group chats the bot is in, and shows the bot's model in one row
+  that opens the model picker. The open chat's context and cost meter is in the status bar.
 - Palette doors: **new bot**, **edit this bot's profile**, **this bot's skills, tools and model**, **new
   scheduled job for this bot**, **open this bot's computer**.
 - **Grokbot Override: self-check (read-only)**: reads the roster, one bot's Bot Chat registry and history

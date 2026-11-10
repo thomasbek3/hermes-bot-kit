@@ -10,6 +10,26 @@
 import { refCss } from './styles-ref'
 
 const ADAPT_SRC = /* css */ `
+/* ── the override's own tokens ──────────────────────────────────────── */
+/* Bot bubbles are one flat fill; the open bot's row is a rounded neutral
+   highlight (hover a lighter one); a selected pin is fainter still. */
+:root {
+  --color-bubble-agent-flat: #F0F0F0;
+  --color-row-selected: #0000000D;
+  --color-row-hover: #00000008;
+  --color-row-selected-solid: #E9E9E9;
+  --color-row-hover-solid: #EEEEEE;
+  --color-pin-selected: #00000008;
+}
+:root[data-theme='dark'] {
+  --color-bubble-agent-flat: #242424;
+  --color-row-selected: #FFFFFF12;
+  --color-row-hover: #FFFFFF0A;
+  --color-row-selected-solid: #1E1E1E;
+  --color-row-hover-solid: #181818;
+  --color-pin-selected: #FFFFFF0A;
+}
+
 /* ── panes ──────────────────────────────────────────────────────────── */
 /* The roster fills Hermes's sidebar zone (its width is Hermes's); Hermes
    draws the sidebar | workspace hairline itself. */
@@ -55,6 +75,8 @@ const ADAPT_SRC = /* css */ `
 .gbo-section-head.is-rooms .icon-btn--plain { width: 22px; height: 22px; }
 
 .bot-row { color: inherit; text-align: left; }
+.bot-row:hover { background: var(--color-row-hover); }
+.bot-row.is-selected { background: var(--color-row-selected); }
 .bot-row.is-dim { opacity: 0.55; }
 .bot-row.is-hidden { opacity: 0.6; }
 .gbo-row-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -70,7 +92,8 @@ const ADAPT_SRC = /* css */ `
 .pinned__avatar .gbo-row-dot { right: 4px; top: 4px; }
 .gbo-row-face .gbo-row-dot:not(:has([role="status"])) { display: none; }
 .gbo-row-face .gbo-row-dot [role="status"] { width: 8px; height: 8px; border-width: 0; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
-.bot-row.is-selected .gbo-row-dot [role="status"], .bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-bg-active-solid); }
+.bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
+.bot-row.is-selected .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
 .gbo-room-row .bot-row__avatar { width: 36px; justify-content: center; }
 .gbo-row-more {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; opacity: 0;
@@ -81,7 +104,13 @@ const ADAPT_SRC = /* css */ `
 .pinned.gbo-pins { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
 .pinned.gbo-pins.is-1 { display: flex; justify-content: center; }
 .gbo-pin-wrap { min-width: 0; display: flex; justify-content: center; }
-.pinned__tile { color: inherit; max-width: 100%; }
+.pinned__tile { color: inherit; max-width: 100%; border: 0; outline: none; box-shadow: none; }
+.pinned__tile:hover, .pinned__tile.is-selected { background: var(--color-pin-selected); }
+/* Keyboard focus on a pin or row: a soft neutral ring inside the tile, never
+   the blue box; none at all while the roster is being used with the mouse
+   (data-gbo-pointer, set by the roster until the next Tab or arrow key). */
+.pinned__tile:focus-visible, .bot-row:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--color-border-primary); }
+.gbo-roster[data-gbo-pointer] .pinned__tile:focus-visible, .gbo-roster[data-gbo-pointer] .bot-row:focus-visible { box-shadow: none; }
 .pinned:not(.is-1) .pinned__tile { width: 100%; padding: 6px 4px 4px; }
 .pinned:not(.is-1) .pinned__label { width: 100%; }
 .pinned__tile.is-dim { opacity: 0.55; }
@@ -111,6 +140,9 @@ const ADAPT_SRC = /* css */ `
 .group.is-right > .gbo-msg, .transcript__col > .gbo-msg.is-user { align-items: flex-end; align-self: flex-end; }
 .group.is-left > .gbo-msg { align-items: flex-start; }
 .gbo-msg:has(> .gbo-edit) { align-self: stretch; }
+/* Bot bubbles: flat, no sheen, ring or shadow. User bubbles keep the
+   reference's look in the bot's colour. */
+.bubble.is-agent { background: var(--color-bubble-agent-flat); box-shadow: none; border: 0; }
 .bubble.is-user { color: var(--gbo-tint-fg, #FFFFFF); }
 .bubble.is-user a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .bubble.is-user code { background: #FFFFFF2E; border-radius: 4px; padding: 1px 4px; font-family: var(--font-mono-stack); font-size: 13px; }
@@ -339,8 +371,13 @@ const ADAPT_SRC = /* css */ `
 .gbo-slack-card.is-status { height: auto; min-height: 48px; }
 .gbo-slack-card .gbo-slack-card-sub.is-error { color: var(--color-danger-text); }
 .gbo-slack-card .gbo-slack-card-sub.is-warn { color: var(--color-warn-text); }
-.gbo-meter { padding: 8px; }
-.gbo-meter-line { font-size: 13px; line-height: 18px; color: var(--color-text-secondary); }
+/* The Model card: one setting row, the model name and a chevron on the right. */
+.gbo-model-row { height: 36px; padding: 6px 8px; gap: 12px; cursor: pointer; }
+.gbo-model-row:hover { background: var(--color-bg-hover); }
+.gbo-model-row > .panel-row__title { flex: none; }
+.gbo-model-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-text-secondary); }
+.gbo-model-name { min-width: 0; font-size: 13px; line-height: 18px; letter-spacing: 0.195px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gbo-model-value > svg { width: 12px; height: 12px; flex: none; opacity: 0.66; }
 .gbo-meter-bar { background: var(--color-bg-tertiary); }
 .gbo-meter-bar > span { background: var(--gbo-action, var(--color-primary)); }
 .gbo-drawer { background: var(--color-bg-chrome); }
