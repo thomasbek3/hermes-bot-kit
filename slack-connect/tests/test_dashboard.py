@@ -377,3 +377,147 @@ def test_readiness_missing_config_relay_public_and_workspace(tmp_path, monkeypat
     assert ready == {'ready': False, 'infrastructure_ready': True, 'workspace_ready': False, 'missing': 'workspace_token'}
     monkeypatch.setattr(api, 'workspace_service', lambda: SimpleNamespace(workspaces=lambda: [{'ok': True}]))
     assert api.readiness(root, lambda *args, **kwargs: Response())['ready'] is True
+
+
+class Switch:
+    """Fake platforms.slack.enabled: None = key absent."""
+    def __init__(self, value):
+        self.value, self.calls = value, []
+    def is_off(self):
+        self.calls.append('get')
+        return self.value is False
+    def set(self, enabled):
+        self.calls.append(('set', enabled))
+        self.value = enabled
+
+
+def with_switch(value):
+    switch = Switch(value)
+    api.make_service().slack_switch = switch
+    return switch
+
+
+def apps_entry(data):
+    return next(iter(json.loads((data / 'apps.json').read_text()).values()))
+
+
+def test_connect_turns_explicitly_disabled_slack_on_and_records_it(context):
+    client, _, _, _, data, _ = context
+    switch = with_switch(False)
+    order = []
+    api.make_service().lifecycle.install = lambda: order.append(switch.value)
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 200
+    assert switch.value is True and order == [True]
+    assert apps_entry(data)['prior_slack_enabled'] is False
+
+
+@pytest.mark.parametrize('value', [None, True])
+def test_connect_leaves_absent_or_enabled_slack_alone(context, value):
+    client, _, _, _, data, _ = context
+    switch = with_switch(value)
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 200
+    assert switch.calls == ['get'] and switch.value is value
+    assert 'prior_slack_enabled' not in apps_entry(data)
+    assert client.delete('/connect').status_code == 200
+    assert switch.calls == ['get']
+
+
+def test_connect_rollbacks_restore_disabled_slack(context):
+    client, slack, _, env, data, _ = context
+    service = api.make_service()
+    # Gateway reload refused.
+    switch = with_switch(False)
+    def refused():
+        raise api.platform_module.GatewayReloadError('Gateway refused or did not answer the plugin reload')
+    service.lifecycle.install = refused
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 503
+    assert switch.value is False and switch.calls == ['get', ('set', True), ('set', False)]
+    assert json.loads((data / 'apps.json').read_text()) == {}
+    service.lifecycle.install = lambda: None
+    # Slack refused to create the app.
+    switch = with_switch(False)
+    create = slack.create
+    slack.create = lambda *_: {'ok': False, 'error': 'not_allowed'}
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 409
+    assert switch.value is False and json.loads((data / 'apps.json').read_text()) == {}
+    slack.create = create
+    # Created app rolled back after a later failure.
+    switch = with_switch(False)
+    slack.fail_icon = True
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 503
+    assert ('delete', 'A1') in slack.calls and env == {}
+    assert switch.value is False and json.loads((data / 'apps.json').read_text()) == {}
+
+
+def test_remove_restores_disabled_slack(context):
+    client, _, _, env, data, _ = context
+    switch = with_switch(False)
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 200
+    assert switch.value is True
+    assert client.delete('/connect').json() == {'ok': True}
+    assert switch.value is False and switch.calls[-1] == ('set', False)
+    assert json.loads((data / 'apps.json').read_text()) == {} and not env
+
+
+def test_remove_keeps_record_when_restore_fails(context):
+    client, _, _, _, data, _ = context
+    switch = with_switch(False)
+    assert client.post('/connect', json={'team_id':'T1'}).status_code == 200
+    def broken(enabled):
+        raise api.platform_module.GatewayReloadError("Could not change this bot's Slack setting.")
+    switch.set = broken
+    assert client.delete('/connect').status_code == 503
+    assert apps_entry(data)['prior_slack_enabled'] is False
+    switch.set = Switch.set.__get__(switch)
+    assert client.delete('/connect').status_code == 200
+    assert switch.value is False
+
+
+def test_slack_switch_runs_hermes_python_isolated_without_values_in_output(tmp_path, monkeypatch):
+    from types import ModuleType
+    module = ModuleType('pm.environments')
+    module.project_python = lambda project: project / 'selected-env/bin/python'
+    monkeypatch.setitem(sys.modules, 'pm.environments', module)
+    calls, codes = [], [3, 0, 0, 7]
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=codes.pop(0))
+    root, home = tmp_path / 'root', tmp_path / 'root/profiles/test-profile'
+    switch = api.SlackSwitch(home, root, run)
+    assert switch.is_off() is True
+    assert switch.is_off() is False
+    switch.set(True)
+    with pytest.raises(api.platform_module.GatewayReloadError):
+        switch.is_off()
+    for argv, kwargs in calls:
+        assert argv[0] == str(root / 'hermes-agent/selected-env/bin/python') and argv[1] == '-I'
+        assert argv[2].endswith('slack_switch.py') and argv[3] == str(root / 'hermes-agent')
+        assert kwargs['env']['HERMES_HOME'] == str(home)
+        assert kwargs['stdout'] is api.subprocess.DEVNULL and kwargs['stderr'] is api.subprocess.DEVNULL
+    assert calls[2][0][4:] == ['set', 'true']
+
+
+def test_slack_switch_script_reads_only_explicit_false(tmp_path):
+    import subprocess as sp
+    agent = tmp_path / 'agent'
+    agent.mkdir()
+    (agent / 'hermes_constants.py').write_text('import os\ndef get_hermes_home():\n    return os.environ["HERMES_HOME"]\n')
+    home = tmp_path / 'home'
+    home.mkdir()
+    script = BASE / 'dashboard' / 'slack_switch.py'
+    def get(text):
+        if text is None:
+            (home / 'config.yaml').unlink(missing_ok=True)
+        else:
+            (home / 'config.yaml').write_text(text)
+        result = sp.run([sys.executable, str(script), str(agent), 'get'], env={'HERMES_HOME': str(home), 'PATH': ''},
+                        capture_output=True, text=True)
+        assert result.stdout == '' and result.stderr == ''
+        return result.returncode
+    pytest.importorskip('yaml')
+    assert get(None) == 0
+    assert get('model: x\n') == 0
+    assert get('platforms:\n  slack:\n    extra:\n      rich_blocks: true\n') == 0
+    assert get('platforms:\n  slack:\n    enabled: true\n') == 0
+    assert get('platforms:\n  slack:\n    enabled: false\n    extra:\n      rich_blocks: true\n') == 3
+    assert get('platforms:\n  slack:\n    enabled: "false"\n') == 3

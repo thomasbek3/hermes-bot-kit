@@ -103,6 +103,13 @@ installer leaves to you.
 3. Pick the workspace and click **Connect**. Slack opens; click **Allow**.
 4. The window shows *Connected*, and the bot sends you a welcome DM in Slack.
 
+Connect changes only that bot's profile: it adds the Slack credentials to its
+`.env`, turns on the bot's own Slack platform plugin, and, if the bot's
+`config.yaml` has Slack switched off (`platforms.slack.enabled: false`, often
+left from an older setup), switches it on with Hermes's own config helper. No
+other setting is touched. If Connect fails or you later remove the bot from
+Slack, the switch goes back to off.
+
 ## Remove a bot from Slack
 
 Open the bot's Slack window and click **Remove from Slack**. This deletes the

@@ -31,7 +31,7 @@ PLUGIN = 'slack-connect'
 PLUGIN_FILES = ('common/__init__.py', 'common/core.py', 'common/token_store.py', 'common/config.py',
                 'dashboard/manifest.json', 'dashboard/plugin_api.py', 'dashboard/service.py',
                 'dashboard/slack_api.py', 'dashboard/platform_lifecycle.py', 'dashboard/platform_selection.py',
-                'dashboard/dist/index.js')
+                'dashboard/slack_switch.py', 'dashboard/dist/index.js')
 PLATFORM_FILES = ('plugin.yaml', '__init__.py', 'http_adapter.py')
 RELAY_FILES = ('relay.py', 'run.py', 'profile_helper.py')
 COMMON_FILES = ('__init__.py', 'core.py', 'token_store.py', 'config.py')

@@ -72,6 +72,34 @@ def set_platform_enabled(home, root, enabled):
         raise platform_module.GatewayReloadError('Slack platform selection failed; Hermes dependencies may be out of date. No shared dependency rebuild was requested.')
 
 
+SLACK_OFF = 3
+
+
+class SlackSwitch:
+    """platforms.slack.enabled in one profile, through Hermes's own config helpers."""
+
+    def __init__(self, home, root, run=None):
+        self.home, self.root = Path(home), Path(root)
+        self.run = run or subprocess.run
+
+    def _call(self, *args):
+        from pm.environments import project_python
+        env = dict(os.environ, HERMES_HOME=str(self.home), HERMES_DISABLE_LAZY_INSTALLS='1', PYTHONDONTWRITEBYTECODE='1')
+        python = project_python(self.root / 'hermes-agent')
+        return self.run([str(python), '-I', str(HERE / 'slack_switch.py'), str(self.root / 'hermes-agent'), *args],
+                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+
+    def is_off(self):
+        code = self._call('get')
+        if code not in (0, SLACK_OFF):
+            raise platform_module.GatewayReloadError("Could not read this bot's Slack setting.")
+        return code == SLACK_OFF
+
+    def set(self, enabled):
+        if self._call('set', 'true' if enabled else 'false'):
+            raise platform_module.GatewayReloadError("Could not change this bot's Slack setting.")
+
+
 def check_profile_idle(root, profile):
     from gateway.control_socket import query_gateway_control
     answer = query_gateway_control(root, 'active-work', params={'profile': profile})
@@ -119,7 +147,8 @@ def make_service():
         return slack.post('auth.test', token, {}).get('ok') is True
     return service_module.Service(root, home.name, slack,
         load_env, save, remove, lambda: notify_multiplexer_profiles_changed(home.name), lambda: slack_module.profile_icon(home), live, lifecycle,
-        lambda: check_profile_idle(root, home.name), lambda: recycle_profile(root, home.name))
+        lambda: check_profile_idle(root, home.name), lambda: recycle_profile(root, home.name),
+        SlackSwitch(home, root))
 
 
 def homes():
