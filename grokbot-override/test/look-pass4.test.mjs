@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url'
 
 import { BOT_SWATCHES, botSwatch, botTintVars, parseColor } from '../src/core/colors.js'
 import { MAX_PINS, pinsFrom, pinState, togglePin, withoutPinned } from '../src/core/pins.js'
-import { activityLabel, showWorkFrom, visibleItems } from '../src/core/workRows.js'
+import { activityLabel, loadShowWork, showWorkFrom, visibleItems } from '../src/core/workRows.js'
 import { rowKey } from '../src/core/roster.js'
 
 const ready = existsSync(new URL('../node_modules/esbuild', import.meta.url)) && existsSync(new URL('../node_modules/react-dom', import.meta.url))
@@ -91,9 +91,18 @@ test('Thought and tool rows are hidden by default; approvals, notices, errors an
   assert.equal(visibleItems(ITEMS, true), ITEMS, 'the preference brings every row back')
 })
 
-test('the work-rows preference is Bubble Mode\'s stored showWork, true only when explicitly true', () => {
+test('the work-rows setting is the override\'s stored showWork, true only when explicitly true', () => {
   assert.equal(showWorkFrom(true), true)
   for (const value of [false, undefined, null, 'true', 1]) assert.equal(showWorkFrom(value), false)
+})
+
+test('the work-rows setting: Bubble Mode\'s old preference is copied once, the override\'s own value wins after', () => {
+  assert.deepEqual(loadShowWork(undefined, true), { value: true, write: true }, 'copied on the first run')
+  assert.deepEqual(loadShowWork(undefined, undefined), { value: false, write: true }, 'none: hidden, stored once')
+  assert.deepEqual(loadShowWork(undefined, 'true'), { value: false, write: true }, 'only an explicit true')
+  assert.deepEqual(loadShowWork(false, true), { value: false, write: false }, 'already set: the old preference is not read again')
+  assert.deepEqual(loadShowWork(true, false), { value: true, write: false })
+  assert.deepEqual(loadShowWork('yes', true), { value: true, write: true }, 'a malformed own value is replaced by the copy')
 })
 
 test('with work rows hidden the working indicator stands in for a running tool or a reply still thinking', () => {

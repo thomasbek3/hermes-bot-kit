@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Install the Hermes Bot Kit desktop plugins: Bubble Mode + Computer viewer
-# + Bot Sections + Task Dock + Grokbot Override (installed switched off; turn
-# it on from the command palette). Safe for agents to run unattended:
+# Install the Hermes Bot Kit desktop plugins: Grokbot Override (switched on;
+# the command palette switches back to stock Bot Mode) + the Computer viewer.
+# Safe for agents to run unattended:
 # idempotent, no prompts, no sudo, backs up any existing copy before overwriting.
 #
 #   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.09.1/install.sh | bash
@@ -13,11 +13,10 @@
 #   KIT_REF                git ref to fetch (default v2026.11.09.1)
 #   KIT_SOURCE_DIR         local checkout to copy from (auto-detected from a clone)
 #   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
-#   KIT_SKIP_BUBBLES=1     skip Bubble Mode
 #   KIT_SKIP_COMPUTER=1    skip the Computer viewer
-#   KIT_SKIP_SECTIONS=1    skip Bot Sections
-#   KIT_SKIP_TASK_DOCK=1   skip Task Dock
 #   KIT_SKIP_GROKBOT=1     skip Grokbot Override
+#   KIT_REMOVE_RETIRED=1   move this kit's retired plugin folders (Bubble Mode,
+#                          Task Dock, Bot Sections) out of desktop-plugins/
 #   KIT_CARDS_SKILL=1      also install the agent-cards skill (off by default)
 #   KIT_CARDS_SKILL=remove remove the agent-cards skill this kit installed, then stop
 #   KIT_CARDS_PROFILES     comma-separated profiles for the skill (default: all)
@@ -26,7 +25,7 @@ set -euo pipefail
 KIT_REF="${KIT_REF:-v2026.11.09.1}"
 RAW_BASE="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
 PLUGIN_ROOT="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"
-GROKBOT_REL="grokbot-override/plugin.default-off.js"
+GROKBOT_REL="grokbot-override/plugin.js"
 HERMES_ROOT="${HERMES_HOME:-$HOME/.hermes}"
 CARDS_REL="grokbot-override/skills/agent-cards/SKILL.md"
 # The kit's copy says so in its front matter; any other agent-cards skill is
@@ -46,11 +45,12 @@ Env knobs:
   KIT_REF                git ref to fetch (default v2026.11.09.1)
   KIT_SOURCE_DIR         local checkout to copy from
   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
-  KIT_SKIP_BUBBLES=1     skip Bubble Mode
   KIT_SKIP_COMPUTER=1    skip the Computer viewer
-  KIT_SKIP_SECTIONS=1    skip Bot Sections
-  KIT_SKIP_TASK_DOCK=1   skip Task Dock
-  KIT_SKIP_GROKBOT=1     skip Grokbot Override (installed switched off)
+  KIT_SKIP_GROKBOT=1     skip Grokbot Override (installed switched on)
+  KIT_REMOVE_RETIRED=1   move this kit's retired plugin folders (bubble-mode,
+                         task-dock, bot-sections; only copies carrying this
+                         kit's marker) to desktop-plugins-retired-<YYYYMMDD>/
+                         next to desktop-plugins/ (nothing is deleted)
   KIT_CARDS_SKILL=1      also install the agent-cards skill (cards in the
                          Grokbot Override chat) into the skills folder of the
                          default profile and every profile (off by default)
@@ -141,7 +141,7 @@ fi
 SOURCE_DIR=""
 if [ -n "${KIT_SOURCE_DIR:-}" ]; then
   SOURCE_DIR=$(CDPATH= cd -- "${KIT_SOURCE_DIR}" && pwd)
-elif [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/bubble-mode/plugin.js" ]; then
+elif [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/computer-viewer/plugin.js" ]; then
   SOURCE_DIR="${SCRIPT_DIR}"
 fi
 
@@ -202,32 +202,59 @@ stage_file() {
 
 js_marker() {
   case "$1" in
-    bubble-mode/plugin.js) printf '%s\n' "hermes-bubble-mode-style" ;;
     computer-viewer/plugin.js) printf '%s\n' "computer-viewer" ;;
-    bot-sections/plugin.js) printf '%s\n' "hermes-bot-sections-style" ;;
-    task-dock/plugin.js) printf '%s\n' "hermes-task-dock-style" ;;
     "${GROKBOT_REL}") printf '%s\n' "grokbot-override-style" ;;
   esac
 }
 
 js_label() {
   case "$1" in
-    bubble-mode/plugin.js) printf '%s\n' "Bubble Mode" ;;
     computer-viewer/plugin.js) printf '%s\n' "Computer viewer" ;;
-    bot-sections/plugin.js) printf '%s\n' "Bot Sections" ;;
-    task-dock/plugin.js) printf '%s\n' "Task Dock" ;;
     "${GROKBOT_REL}") printf '%s\n' "Grokbot Override" ;;
     *) printf '%s\n' "$1" ;;
   esac
 }
 
-# Where a staged file lands under desktop-plugins/. Grokbot Override ships a
-# build whose toggle starts off; it is installed under the plugin's own name.
+# Where a staged file lands under desktop-plugins/: the same path.
 dest_rel() {
-  case "$1" in
-    "${GROKBOT_REL}") printf '%s\n' "grokbot-override/plugin.js" ;;
-    *) printf '%s\n' "$1" ;;
-  esac
+  printf '%s\n' "$1"
+}
+
+# Plugins this kit used to install, with the marker their plugin.js carried.
+# A folder without that marker is someone else's and is never touched.
+RETIRED_PLUGINS="bubble-mode:hermes-bubble-mode-style task-dock:hermes-task-dock-style bot-sections:hermes-bot-sections-style"
+
+retired_report() {
+  local entry name marker file dest n found="" moved_to=""
+  for entry in ${RETIRED_PLUGINS}; do
+    name="${entry%%:*}"
+    marker="${entry#*:}"
+    file="${PLUGIN_ROOT}/${name}/plugin.js"
+    [ -f "${file}" ] || continue
+    grep -qF "${marker}" "${file}" || continue
+    found="${found} ${name}"
+  done
+  [ -n "${found}" ] || return 0
+  if [ "${KIT_REMOVE_RETIRED:-0}" = "1" ]; then
+    moved_to="$(dirname -- "${PLUGIN_ROOT}")/desktop-plugins-retired-$(date +%Y%m%d)"
+    mkdir -p "${moved_to}"
+    for name in ${found}; do
+      # Never into or over an earlier move from the same day.
+      dest="${moved_to}/${name}"
+      n=1
+      while [ -e "${dest}" ]; do
+        n=$((n + 1))
+        dest="${moved_to}/${name}.${n}"
+      done
+      mv "${PLUGIN_ROOT}/${name}" "${dest}"
+      echo "Retired          -- moved ${name} to ${dest}"
+    done
+  else
+    echo
+    echo "Retired plugins still installed:${found}. Bubble Mode, Task Dock and Bot Sections are no longer"
+    echo "part of the kit (Grokbot Override has its own sections and work-rows setting)."
+    echo "To move them out: KIT_REMOVE_RETIRED=1 bash install.sh (to desktop-plugins-retired-<date>/; nothing is deleted)."
+  fi
 }
 
 check_js() {
@@ -260,9 +287,6 @@ rollback_this_run() {
       rm -f "${dest}"
     done < "${CREATED_FILE}"
   fi
-  rmdir "${PLUGIN_ROOT}/bubble-mode" 2>/dev/null || true
-  rmdir "${PLUGIN_ROOT}/bot-sections" 2>/dev/null || true
-  rmdir "${PLUGIN_ROOT}/task-dock" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/grokbot-override" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/computer-viewer/vendor" 2>/dev/null || true
   rmdir "${PLUGIN_ROOT}/computer-viewer" 2>/dev/null || true
@@ -289,9 +313,6 @@ install_file() {
   cp "${src}" "${dest}"
 }
 
-if [ "${KIT_SKIP_BUBBLES:-0}" != "1" ]; then
-  need "bubble-mode/plugin.js"
-fi
 if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
   need "computer-viewer/plugin.js"
   need "computer-viewer/connect-mac.sh"
@@ -301,12 +322,6 @@ if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
   need "computer-viewer/connect-windows.ps1"
   need "computer-viewer/hiperf-windows.ps1"
   need "computer-viewer/hiperf-agent.py"
-fi
-if [ "${KIT_SKIP_SECTIONS:-0}" != "1" ]; then
-  need "bot-sections/plugin.js"
-fi
-if [ "${KIT_SKIP_TASK_DOCK:-0}" != "1" ]; then
-  need "task-dock/plugin.js"
 fi
 if [ "${KIT_SKIP_GROKBOT:-0}" != "1" ]; then
   need "${GROKBOT_REL}"
@@ -458,32 +473,25 @@ else
   install_all
   INSTALL_OK=1
 
-  if [ "${KIT_SKIP_BUBBLES:-0}" != "1" ]; then
-    echo "Bubble Mode      -> ${PLUGIN_ROOT}/bubble-mode/plugin.js"
-  fi
   if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
     echo "Computer viewer  -> ${PLUGIN_ROOT}/computer-viewer/plugin.js (+ helper scripts)"
   fi
-  if [ "${KIT_SKIP_SECTIONS:-0}" != "1" ]; then
-    echo "Bot Sections     -> ${PLUGIN_ROOT}/bot-sections/plugin.js"
-  fi
-  if [ "${KIT_SKIP_TASK_DOCK:-0}" != "1" ]; then
-    echo "Task Dock        -> ${PLUGIN_ROOT}/task-dock/plugin.js"
-  fi
   if [ "${GROKBOT_INSTALLED}" = "1" ]; then
-    echo "Grokbot Override -> ${PLUGIN_ROOT}/grokbot-override/plugin.js (installed switched off)"
+    echo "Grokbot Override -> ${PLUGIN_ROOT}/grokbot-override/plugin.js (switched on unless you turned it off before)"
   fi
   if [ "${CARDS_INSTALLED}" = "1" ]; then
     cat "${TMP_DIR}/.cards-report"
   fi
 fi
 
+retired_report
+
 echo
 echo "Finish: in Hermes Desktop press Cmd+Shift+P -> 'Reload plugins' (or restart the app)."
-echo "Bubble Mode toggle: Cmd+Shift+P -> 'Bubble Mode: toggle'."
-echo "Bot Sections toggle: Cmd+Shift+P -> 'Bot Sections: toggle'."
-echo "Task Dock toggle: Cmd+Shift+P -> 'Task Dock: toggle'."
-echo "Grokbot Override (starts off): Cmd+Shift+P -> 'Grokbot Override: toggle'; run it again for stock Bot Mode."
+if [ "${GROKBOT_INSTALLED:-0}" = "1" ]; then
+  echo "Grokbot Override is on: Cmd+Shift+P -> 'Grokbot Override: toggle' switches back to stock Bot Mode (and on again)."
+  echo "Sections: Bots roster + -> 'New section'. Work rows: Cmd+Shift+P -> 'Grokbot Override: show work rows'."
+fi
 echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."
 if [ "${CARDS_INSTALLED:-0}" = "1" ]; then
   echo "Cards skill: new chats load it; a chat started before keeps its old mode until its session restarts."

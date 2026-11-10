@@ -8,6 +8,7 @@
 // offline-row retention.
 
 import { botRouteKey, resolveBotConnectionRoute } from './routing.js'
+import { sectionIdFor } from './sections.js'
 
 export const STOCK_ROSTER_KEY = ['hermes-bots', 'roster']
 export const STOCK_CACHE_MAX_AGE_MS = 20_000
@@ -207,9 +208,22 @@ export function sourceUnreachable(bot) {
 
 const UNASSIGNED = 'Unassigned'
 
-/** Group rows into sections. Priority: kit Bot Sections storage, then Bot
- *  Mode's user sections (meta.sectionName), then one section per connection. */
-export function buildSections(rows, { metaFor, kitSections, query = '' }) {
+/** The name keys a copied Bot Sections layout uses for a bot. */
+export function sectionNameKeys(bot, meta) {
+  return [bot?.name, displayName(bot, meta), handleOf(bot).slice(1)]
+}
+
+/** The roster's own section a bot is in ('' = Default; core/sections.js). */
+export function ownSectionOf(bot, sections, metaFor) {
+  return sectionIdFor(sections, rowKey(bot), sectionNameKeys(bot, metaFor(bot)))
+}
+
+/** Group rows into sections. The roster's own sections (core/sections.js)
+ *  come first, in their order; a bot in none of them is grouped the default
+ *  way: Bot Mode's user sections (meta.sectionName), else one section per
+ *  connection. Own sections carry `id` and `own: true`; with `keepEmpty` an
+ *  own section with no bots is still listed (so a new one can be filled). */
+export function buildSections(rows, { metaFor, sections = null, query = '', keepEmpty = false }) {
   const q = String(query || '').trim().toLowerCase()
   const visible = rows.filter(bot => {
     const meta = metaFor(bot)
@@ -225,27 +239,25 @@ export function buildSections(rows, { metaFor, kitSections, query = '' }) {
     return displayName(a, ma).localeCompare(displayName(b, mb))
   }
 
-  const kitOverrides = kitSections?.overrides && typeof kitSections.overrides === 'object' ? kitSections.overrides : null
-  const kitCustom = Array.isArray(kitSections?.custom) ? kitSections.custom.map(String).filter(Boolean) : []
-  const useKit = Boolean(kitOverrides && (kitCustom.length || Object.keys(kitOverrides).length))
+  const ownList = Array.isArray(sections?.sections) ? sections.sections : []
+  const mine = new Map(ownList.map(section => [section.id, []]))
+  const rest = []
+  for (const bot of visible) {
+    const id = ownList.length ? ownSectionOf(bot, sections, metaFor) : ''
+    if (id && mine.has(id)) mine.get(id).push(bot)
+    else rest.push(bot)
+  }
+  const ownSections = ownList
+    .map(section => ({ id: section.id, name: section.name, own: true, collapsed: Boolean(section.collapsed), bots: mine.get(section.id).sort(order) }))
+    .filter(section => keepEmpty || section.bots.length > 0)
+  return [...ownSections, ...defaultSections(rest, metaFor, order)]
+}
 
+/** The grouping a bot has without a section of its own. */
+function defaultSections(visible, metaFor, order) {
   let sectionOf
   let ladder
-
-  if (useKit) {
-    ladder = [...kitCustom.filter(name => name !== UNASSIGNED), UNASSIGNED]
-    const known = new Set(ladder)
-    sectionOf = bot => {
-      for (const key of [bot.name, displayName(bot, metaFor(bot)), handleOf(bot).slice(1)]) {
-        const k = String(key || '').trim().toLowerCase()
-        if (k && Object.prototype.hasOwnProperty.call(kitOverrides, k)) {
-          const name = String(kitOverrides[k] || '').trim()
-          return known.has(name) ? name : UNASSIGNED
-        }
-      }
-      return UNASSIGNED
-    }
-  } else if (visible.some(bot => metaFor(bot)?.sectionName)) {
+  if (visible.some(bot => metaFor(bot)?.sectionName)) {
     const names = []
     for (const bot of visible) {
       const name = String(metaFor(bot)?.sectionName || '').trim()

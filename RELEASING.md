@@ -14,7 +14,7 @@ git push origin vYYYY.MM.DD
 ```
 
 `scripts/release.sh` refuses a dirty tree and an existing tag. It rewrites
-the pinned ref in the installers, root shims, README one-liners, and the
+the pinned ref in the installers, the host scripts, README one-liners, and the
 `RAW_REPO_URL` line in `computer-viewer/plugin.js`; regenerates
 `MANIFEST.sha256` (strict: every path in `scripts/manifest-files.txt` must
 exist); runs the same tests as CI; commits `release: <tag>`; and creates

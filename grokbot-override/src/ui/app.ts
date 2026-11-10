@@ -10,6 +10,7 @@ import {
   buildSections,
   displayName,
   mergeRoster,
+  ownSectionOf,
   readStockRoster,
   rowKey,
   sourceUnreachable
@@ -23,7 +24,19 @@ import { createChatController } from '../core/session.js'
 import { createStockController, OVERRIDE_ROSTER_PANE_ID, STOCK_PANE_ID } from '../core/stock.js'
 import { dragPanelWidth, PANEL_WIDTH, PANEL_WIDTH_KEY, storedPanelWidth } from '../core/panelWidth.js'
 import { PINS_KEY, pinsFrom, pinState, togglePin } from '../core/pins.js'
-import { SHOW_WORK_KEY, SHOW_WORK_PLUGIN, showWorkFrom } from '../core/workRows.js'
+import {
+  addSection,
+  assignBot,
+  deleteSection,
+  emptySections,
+  LEGACY_SECTIONS_PLUGIN,
+  loadSections,
+  moveSection,
+  renameSection,
+  SECTIONS_KEY,
+  toggleSectionCollapsed
+} from '../core/sections.js'
+import { LEGACY_SHOW_WORK_KEY, LEGACY_SHOW_WORK_PLUGIN, loadShowWork, SHOW_WORK_KEY } from '../core/workRows.js'
 import { botCanonicalSessionId, createActivityTracker } from '../core/activity.js'
 import { looksUnsupported } from '../core/outcomes.js'
 import { resetMarker, SEEN_KEY, seenFrom, stepMarker } from '../core/newMarker.js'
@@ -37,7 +50,6 @@ import { roster2 } from './rosterStores'
 import { createStore, type Store } from './store'
 import { CSS, STYLE_ID } from './styles'
 
-declare const __GBO_DEFAULT_ON__: boolean
 declare const __GBO_PROBE__: boolean
 
 export const PLUGIN_ID = 'grokbot-override'
@@ -48,7 +60,9 @@ const OWN_FETCH_MIN_MS = 15_000
 // bots deleted on a machine leave the roster (dropDeadRows).
 const OWN_VERIFY_MS = 60_000
 
-export const DEFAULT_ON: boolean = typeof __GBO_DEFAULT_ON__ === 'boolean' ? __GBO_DEFAULT_ON__ : true
+// The override starts on (it is the kit's main plugin); the palette toggle
+// switches back to stock Bot Mode and that choice is remembered.
+export const DEFAULT_ON = true
 
 export interface RosterState {
   rows: any[]
@@ -59,7 +73,13 @@ export interface RosterState {
   localMeta: Record<string, any>
   /** The active gateway's bot_mode_protocol flag (data.ts:885). */
   protocolInjected?: boolean
-  kitSections: null | { custom: string[]; overrides: Record<string, string> }
+}
+
+/** The roster's own sections (core/sections.js). */
+export interface SectionsState {
+  version: number
+  sections: Array<{ id: string; name: string; collapsed: boolean }>
+  assign: Record<string, string>
 }
 
 export const app = {
@@ -71,11 +91,13 @@ export const app = {
     origin: 'none',
     error: null,
     updatedAt: 0,
-    localMeta: {},
-    kitSections: null
+    localMeta: {}
   }),
   query: createStore(''),
+  // Collapsed default sections (by name); the own sections keep theirs.
   collapsed: createStore<string[]>([]),
+  // The roster's own sections, in the override's plugin storage.
+  sections: createStore<SectionsState>(emptySections()),
   selectedKey: createStore(''),
   panelOpen: createStore(true),
   // The profile panel's width (core/panelWidth.js), dragged from its hairline.
@@ -97,7 +119,7 @@ export const app = {
   rooms: createStore<{ route: any; rooms: any[]; error: null | string; loaded: boolean }>({ route: null, rooms: [], error: null, loaded: false }),
   computerViewer: createStore<{ present: boolean; visible: boolean }>({ present: false, visible: false }),
   // Thought and tool rows in the Bot Chat (core/workRows.js): hidden unless
-  // Bubble Mode's "toggle work rows" preference says to show them.
+  // the override's "show work rows" setting is on.
   showWork: createStore<boolean>(false),
   // Bots pinned to the top of the sidebar (core/pins.js): route keys in pin
   // order, kept in the override's own plugin storage.
@@ -190,13 +212,7 @@ function activeConnectionId(): null | string {
 
 function readSideData() {
   const localMeta = readPluginStorage<Record<string, any>>('hermes-bots', 'bot-meta-v2', {}) || {}
-  const kitEnabled = readPluginStorage<boolean>('bot-sections', 'enabled', true) !== false
-  const custom = readPluginStorage<string[]>('bot-sections', 'customSections', [])
-  const overrides = readPluginStorage<Record<string, string>>('bot-sections', 'sectionOverrides', {})
-  const kitSections = kitEnabled && (Array.isArray(custom) || (overrides && typeof overrides === 'object'))
-    ? { custom: Array.isArray(custom) ? custom : [], overrides: overrides && typeof overrides === 'object' ? overrides : {} }
-    : null
-  return { localMeta: localMeta && typeof localMeta === 'object' ? localMeta : {}, kitSections }
+  return { localMeta: localMeta && typeof localMeta === 'object' ? localMeta : {} }
 }
 
 async function fetchOwnRoster() {
@@ -319,7 +335,7 @@ export function reloadRoster() {
 
 export function sections() {
   const r = app.roster.get()
-  return buildSections(r.rows, { metaFor, kitSections: r.kitSections, query: app.query.get() })
+  return buildSections(r.rows, { metaFor, sections: app.sections.get(), query: app.query.get() })
 }
 
 export function findBot(key: string) {
@@ -1147,7 +1163,6 @@ function enable() {
   const tick = () => {
     rosterTimer = setTimer(() => {
       refreshRoster()
-      refreshShowWork()
       tick()
     }, ROSTER_TICK_MS)
   }
@@ -1224,11 +1239,22 @@ export function setEnabled(value: boolean) {
   else disable()
 }
 
-/** Re-read Bubble Mode's work-rows preference (its palette command writes it
- *  in this window without an event, so the roster tick picks it up). */
-export function refreshShowWork() {
-  const next = showWorkFrom(readPluginStorage<unknown>(SHOW_WORK_PLUGIN, SHOW_WORK_KEY, false))
-  if (next !== app.showWork.get()) app.showWork.set(next)
+/** Load the work-rows setting; on the first run, copy Bubble Mode's old
+ *  "toggle work rows" preference once (its storage is only read). */
+function startShowWork() {
+  const { value, write } = loadShowWork(
+    storageGet<unknown>(SHOW_WORK_KEY, undefined),
+    readPluginStorage<unknown>(LEGACY_SHOW_WORK_PLUGIN, LEGACY_SHOW_WORK_KEY, false)
+  )
+  app.showWork.set(value)
+  if (write) storageSet(SHOW_WORK_KEY, value)
+}
+
+/** The palette's "show work rows": Thought and tool rows in the chat. */
+export function setShowWork(value: boolean) {
+  const next = Boolean(value)
+  app.showWork.set(next)
+  storageSet(SHOW_WORK_KEY, next)
 }
 
 // ── pinned bots ──────────────────────────────────────────────────────────
@@ -1264,7 +1290,8 @@ export function toggleTopPin(bot: any): boolean {
 export function start(ctx: any) {
   app.ctx = ctx
   app.pinnedBots.set(pinsFrom(storageGet(PINS_KEY, [])))
-  refreshShowWork()
+  startSections()
+  startShowWork()
   requestForBot = createBotRequester(host, { activeConnectionId })
   app.selectedKey.set(String(storageGet('selected', '') || ''))
   app.panelOpen.set(storageGet('panelOpen', true) !== false)
@@ -1402,6 +1429,86 @@ export function startPanelResize(startX: number, workspaceWidth: number) {
 export function resetPanelWidth() {
   app.panelWidth.set(PANEL_WIDTH.default)
   storageSet(PANEL_WIDTH_KEY, PANEL_WIDTH.default)
+}
+
+// ── the roster's own sections (core/sections.js) ─────────────────────────
+
+function applySections(stored: unknown) {
+  const { state, write } = loadSections({
+    stored,
+    readLegacy: (key: string, fallback: unknown) => readPluginStorage<unknown>(LEGACY_SECTIONS_PLUGIN, key, fallback),
+    collapsedHere: storageGet<unknown>('collapsed', [])
+  })
+  app.sections.set(state)
+  if (write) storageSet(SECTIONS_KEY, state)
+}
+
+/** Load the own sections; on the first run, copy the Bot Sections layout in
+ *  once (its storage is only read). A storage that answers with a promise
+ *  is waited for, so a slow read never looks like a first run. */
+function startSections() {
+  try {
+    const stored = app.ctx?.storage?.get?.(SECTIONS_KEY, undefined)
+    if (stored && typeof (stored as any).then === 'function') {
+      ;(stored as Promise<unknown>).then(applySections, () => undefined)
+      return
+    }
+    applySections(stored)
+  } catch {
+    /* holds the empty state for this window */
+  }
+}
+
+function updateSections(fn: (state: SectionsState) => SectionsState) {
+  const current = app.sections.get()
+  const next = fn(current)
+  if (next === current) return
+  app.sections.set(next)
+  storageSet(SECTIONS_KEY, next)
+}
+
+/** New section at the end; returns its id ('' for an empty name). */
+export function createSection(name: string): string {
+  let id = ''
+  updateSections(state => {
+    const result = addSection(state, name)
+    id = result.id
+    return result.state
+  })
+  return id
+}
+
+export function renameOwnSection(id: string, name: string) {
+  updateSections(state => renameSection(state, id, name))
+}
+
+export function deleteOwnSection(id: string) {
+  updateSections(state => deleteSection(state, id))
+}
+
+export function moveOwnSection(id: string, delta: number) {
+  updateSections(state => moveSection(state, id, delta))
+}
+
+export function toggleOwnSection(id: string) {
+  updateSections(state => toggleSectionCollapsed(state, id))
+}
+
+/** Move a bot to one of the own sections, or '' for Default. */
+export function moveBotToSection(bot: any, id: string) {
+  if (!bot) return
+  updateSections(state => assignBot(state, rowKey(bot), id))
+}
+
+/** The own section a bot is in ('' = Default). */
+export function botSectionId(bot: any): string {
+  return ownSectionOf(bot, app.sections.get(), metaFor)
+}
+
+/** How many roster bots (hidden ones too) are in an own section. */
+export function botsInSection(id: string): number {
+  const state = app.sections.get()
+  return app.roster.get().rows.filter((bot: any) => !bot?.ghost && ownSectionOf(bot, state, metaFor) === id).length
 }
 
 export function toggleSection(name: string) {

@@ -28,12 +28,8 @@ jobs:
 
       - name: Syntax-check plugins
         run: |
-          node --check bubble-mode/plugin.js
-          node --check bot-sections/plugin.js
-          node --check task-dock/plugin.js
           node --check computer-viewer/plugin.js
           node --check grokbot-override/plugin.js
-          node --check grokbot-override/plugin.default-off.js
 
       # Whole-repo privacy guard: no private hosts, addresses, home folders,
       # workspace ids, business or bot names in any tracked text file.
@@ -41,7 +37,7 @@ jobs:
         run: node --test tests/privacy-guard.test.mjs
 
       - name: Plugin unit tests
-        run: node --test bubble-mode/plugin.test.mjs bot-sections/plugin.test.mjs task-dock/plugin.test.mjs computer-viewer/plugin.test.mjs grokbot-override/test/*.test.mjs
+        run: node --test computer-viewer/plugin.test.mjs grokbot-override/test/*.test.mjs
 
       # The committed single-file plugin.js must match its src/, it must load
       # and run the way Hermes's runtime loader runs it (test/loader-*.test.mjs:

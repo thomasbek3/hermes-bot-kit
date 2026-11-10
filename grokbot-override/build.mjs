@@ -2,11 +2,9 @@
 // takes: plain ESM whose only imports are @hermes/plugin-sdk, react and
 // react/jsx-runtime (the loader's allowlist).
 //
-//   node build.mjs                      write plugin.js and plugin.default-off.js
-//   node build.mjs --check              fail if either is stale
-//   node build.mjs --default-off --out <file>
-//                                       a copy whose toggle defaults OFF
-//                                       (plugin.default-off.js is that copy)
+//   node build.mjs                      write plugin.js
+//   node build.mjs --check              fail if it is stale
+//   node build.mjs --out <file>         write the bundle to another file
 //   node build.mjs --probe ...          also run the read-only self-check
 //                                       once after load (live verification)
 
@@ -19,7 +17,6 @@ import { build } from 'esbuild'
 const root = dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
 const check = args.includes('--check')
-const defaultOff = args.includes('--default-off')
 const probe = args.includes('--probe')
 const outIndex = args.indexOf('--out')
 const outFile = outIndex >= 0 ? resolve(args[outIndex + 1]) : resolve(root, 'plugin.js')
@@ -82,7 +79,7 @@ ${indent(licence('LICENSE-APACHE-2.0'))}
 
 if (banner.slice(3, -2).includes('*/')) throw new Error('a licence text would close the banner comment early')
 
-async function bundle(on) {
+async function bundle() {
   const result = await build({
     entryPoints: [resolve(root, 'src/index.tsx')],
     // Source-path comments in the bundle are relative to this folder, whatever
@@ -94,7 +91,7 @@ async function bundle(on) {
     target: 'es2022',
     jsx: 'automatic',
     external: ['@hermes/plugin-sdk', 'react', 'react/jsx-runtime'],
-    define: { __GBO_DEFAULT_ON__: on ? 'true' : 'false', __GBO_PROBE__: probe ? 'true' : 'false' },
+    define: { __GBO_PROBE__: probe ? 'true' : 'false' },
     banner: { js: banner },
     legalComments: 'inline',
     charset: 'utf8',
@@ -104,20 +101,10 @@ async function bundle(on) {
   return result.outputFiles[0].text
 }
 
-// A plain build / --check covers both committed files: plugin.js (toggle
-// starts on, for a manual copy) and plugin.default-off.js (toggle starts off;
-// the kit's root install.sh installs it as grokbot-override/plugin.js, so the
-// override stays opt-in). Any other flag builds just the one file asked for.
-const outputs =
-  outIndex >= 0 || defaultOff || probe
-    ? [{ file: outFile, on: !defaultOff }]
-    : [
-        { file: resolve(root, 'plugin.js'), on: true },
-        { file: resolve(root, 'plugin.default-off.js'), on: false }
-      ]
-
-for (const { file, on } of outputs) {
-  const text = await bundle(on)
+// The committed plugin.js is what the kit's root install.sh installs; its
+// toggle starts on (a toggle the user already set wins).
+for (const file of [outFile]) {
+  const text = await bundle()
   if (check) {
     const current = existsSync(file) ? readFileSync(file, 'utf8') : ''
     if (current !== text) {

@@ -101,7 +101,7 @@ export interface RenderOptions {
   /** A stylesheet the page links before the override's own CSS: the real
    *  Hermes renderer CSS, so the preview reproduces the live cascade. */
   hostCss?: string
-  /** Show Thought and tool rows (Bubble Mode's work-rows preference). */
+  /** Show Thought and tool rows (the override's work-rows setting). */
   showWork?: boolean
   /** Bots pinned to the top, as ROSTER names. */
   pins?: string[]
@@ -124,6 +124,8 @@ export interface RenderOptions {
   newLine?: null | string
   /** Hermes Settings reachable through ctx.runAction (default yes). */
   settings?: boolean
+  /** The roster's own sections: names, their ROSTER bot names, collapsed. */
+  sections?: Array<{ name: string; bots?: string[]; collapsed?: boolean }>
 }
 
 export function render({
@@ -149,7 +151,8 @@ export function render({
   directiveFiles = null,
   userName = '',
   newLine = null,
-  settings = true
+  settings = true,
+  sections = []
 }: RenderOptions = {}) {
   // A host with the app-action door, so the sidebar toggle and the footer's
   // settings button draw.
@@ -160,7 +163,20 @@ export function render({
   app.pinnedBots.set(pins.map(name => ROSTER.find(bot => bot.name === name)).filter(Boolean).map(bot => rowKey(bot)))
   app.narrow.set(narrow)
   app.drawerOpen.set(drawerOpen)
-  app.roster.set({ rows: ROSTER, sources: [], origin: 'stock', error: null, updatedAt: Date.now(), localMeta: {}, kitSections: null })
+  app.roster.set({ rows: ROSTER, sources: [], origin: 'stock', error: null, updatedAt: Date.now(), localMeta: {} })
+  const assign: Record<string, string> = {}
+  app.sections.set({
+    version: 1,
+    sections: sections.map((section, i) => {
+      const id = `demo-${i}`
+      for (const name of section.bots || []) {
+        const row = ROSTER.find(bot => bot.name === name)
+        if (row) assign[rowKey(row)] = id
+      }
+      return { id, name: section.name, collapsed: Boolean(section.collapsed) }
+    }),
+    assign
+  })
   const bot = ROSTER[botIndex] || ROSTER[0]
   slack.state.set(
     slackOption

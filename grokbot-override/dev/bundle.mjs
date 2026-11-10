@@ -20,7 +20,7 @@ export async function bundlePreview() {
     outfile: out,
     external: ['react', 'react-dom', 'react-dom/server', 'react/jsx-runtime'],
     alias: { '@hermes/plugin-sdk': join(root, 'dev/fake-sdk.ts') },
-    define: { __GBO_DEFAULT_ON__: 'true', __GBO_PROBE__: 'false', 'process.env.NODE_ENV': '"production"' },
+    define: { __GBO_PROBE__: 'false', 'process.env.NODE_ENV': '"production"' },
     logLevel: 'error'
   })
   return out

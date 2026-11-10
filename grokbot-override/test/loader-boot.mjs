@@ -155,8 +155,6 @@ export async function waitFor(check, label, ms = 3000) {
 export async function bootPlugin(t, { tweak, answers, historyFor = history, api, primitives = false, smoke = false, rows, sources, storage = {}, showWork = false, ctxExtras = {} } = {}) {
   const { JSDOM } = await import('jsdom')
   const dom = installDom(JSDOM)
-  // Bubble Mode's work-rows preference: tool and Thought rows are drawn.
-  if (showWork) localStorage.setItem('hermes.plugin.bubble-mode.showWork', 'true')
   const calls = []
   const errors = []
   const { require } = reactRequire()
@@ -178,6 +176,8 @@ export async function bootPlugin(t, { tweak, answers, historyFor = history, api,
   let disposers = []
   const roots = []
   const store = new Map(Object.entries(storage))
+  // The override's work-rows setting: tool and Thought rows are drawn.
+  if (showWork) store.set('showWork', true)
   let internals = null
   const timers = new Set()
   const ctx = () => ({

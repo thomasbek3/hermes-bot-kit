@@ -13,14 +13,29 @@ import { pinState, withoutPinned } from '../core/pins.js'
 import { deriveRosterView, unreachableSources } from '../core/rosterView.js'
 import { shortAge } from '../core/time.js'
 import { footerPerson } from '../core/person.js'
-import { app, canOpenSettings, canToggleSidebar, loadUserName, metaFor, openSettings, selectBot, toggleSection, toggleSidebar, warmBot } from './app'
+import {
+  app,
+  canOpenSettings,
+  canToggleSidebar,
+  createSection,
+  deleteOwnSection,
+  loadUserName,
+  metaFor,
+  openSettings,
+  renameOwnSection,
+  selectBot,
+  toggleOwnSection,
+  toggleSection,
+  toggleSidebar,
+  warmBot
+} from './app'
 import { BotAvatar } from './Avatar'
 import { RosterDialogs } from './BotDialogs'
 import { IconChevronDown, IconPin, IconPlus, IconSearch, IconSidebar } from './icons'
 import { IconEyeOff, IconFilter, IconRefresh, IconSettings, IconWarn } from './iconsRoster'
-import { ContextMenuFor, MenuButton } from './kit'
+import { Confirm, ContextMenuFor, MenuButton } from './kit'
 import { attentionFor, retrySources } from './rosterActions'
-import { botMenuEntries, filterMenuEntries, newMenuEntries } from './RosterMenus'
+import { botMenuEntries, filterMenuEntries, newMenuEntries, sectionMenuEntries } from './RosterMenus'
 import { roster2 } from './rosterStores'
 import { useStore } from './store'
 import { UnreadDot } from './Unread'
@@ -82,6 +97,64 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }: { 
         </button>
       </ContextMenuFor>
       <MenuButton entries={entries} label={`Actions for ${name}`} className="icon-btn gbo-row-more" />
+    </div>
+  )
+}
+
+/** The inline name field of a section (a new one, or a rename): Enter or
+ *  leaving the field saves, Escape cancels, an empty name saves nothing. A
+ *  menu that just closed hands focus back to its trigger; a blur in the
+ *  first moments is that, not the user leaving, so the field takes focus
+ *  back. */
+function SectionNameField({ initial = '', label, onCommit, onCancel }: { initial?: string; label: string; onCommit: (name: string) => void; onCancel: () => void }) {
+  const [value, setValue] = React.useState(initial)
+  const ref = React.useRef<HTMLInputElement | null>(null)
+  const done = React.useRef(false)
+  const mountedAt = React.useRef(Date.now())
+  React.useEffect(() => {
+    const focus = () => {
+      if (done.current) return
+      ref.current?.focus()
+      ref.current?.select()
+    }
+    focus()
+    const id = setTimeout(focus, 60)
+    return () => clearTimeout(id)
+  }, [])
+  const finish = (save: boolean) => {
+    if (done.current) return
+    done.current = true
+    const name = (ref.current?.value ?? value).trim()
+    if (save && name) onCommit(name)
+    else onCancel()
+  }
+  return (
+    <div className="gbo-section-edit">
+      <input
+        ref={ref}
+        className="gbo-section-input"
+        aria-label={label}
+        placeholder="Section name"
+        value={value}
+        onChange={event => setValue(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            finish(true)
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            finish(false)
+          }
+        }}
+        onBlur={() => {
+          if (Date.now() - mountedAt.current < 400) {
+            setTimeout(() => ref.current?.focus(), 0)
+            return
+          }
+          finish(true)
+        }}
+      />
     </div>
   )
 }
@@ -174,6 +247,9 @@ export function RosterPane() {
   useStore(roster2.metaWrites)
   useStore(roster2.attention)
   const pins = useStore(app.pinnedBots)
+  const ownSections = useStore(app.sections)
+  const sectionEdit = useStore(roster2.sectionEdit)
+  const sectionDelete = useStore(roster2.sectionDelete)
   const person = footerPerson(useStore(app.userName))
   React.useEffect(() => loadUserName(), [])
   const [searching, setSearching] = React.useState(false)
@@ -193,7 +269,22 @@ export function RosterPane() {
   const pinned = view.hasConstraint ? null : pinState(pins, (roster.rows || []).filter((bot: any) => !bot?.ghost), rowKey)
   const listed = pinned ? withoutPinned(view.rows, pinned, rowKey) : view.rows
   const hiddenListed = pinned ? withoutPinned(view.hidden, pinned, rowKey) : view.hidden
-  const list = buildSections(listed, { metaFor, kitSections: roster.kitSections, query: '' })
+  // Own sections stay listed while empty (so a new one can be filled), but
+  // not while a search or filter narrows the list.
+  const list = buildSections(listed, { metaFor, sections: ownSections, query: '', keepEmpty: !view.hasConstraint })
+  const ownCount = list.filter((section: any) => section.own).length
+  const newSectionField =
+    sectionEdit?.kind === 'new' ? (
+      <SectionNameField
+        key="new-section"
+        label="New section name"
+        onCommit={name => {
+          createSection(name)
+          roster2.sectionEdit.set(null)
+        }}
+        onCancel={() => roster2.sectionEdit.set(null)}
+      />
+    ) : null
   const unreachable = unreachableSources(view.gatewayOptions)
   const livePreview = (() => {
     if (!chat) return ''
@@ -337,19 +428,42 @@ export function RosterPane() {
           </div>
         ) : (
           <>
-            {list.map(section => {
-              const isCollapsed = collapsed.includes(section.name)
+            {ownCount === 0 ? newSectionField : null}
+            {list.map((section: any, index: number) => {
+              const isCollapsed = section.own ? section.collapsed : collapsed.includes(section.name)
+              const renaming = section.own && sectionEdit?.kind === 'rename' && sectionEdit.id === section.id
+              const head = renaming ? (
+                <SectionNameField
+                  initial={section.name}
+                  label={`Rename ${section.name}`}
+                  onCommit={name => {
+                    renameOwnSection(section.id, name)
+                    roster2.sectionEdit.set(null)
+                  }}
+                  onCancel={() => roster2.sectionEdit.set(null)}
+                />
+              ) : section.own || list.length > 1 || section.name !== 'Unassigned' ? (
+                <ContextMenuFor entries={sectionMenuEntries(section)}>
+                  <button
+                    type="button"
+                    className={`gbo-section-head${section.own ? ' is-own' : ''}`}
+                    aria-expanded={!isCollapsed}
+                    onClick={() => (section.own ? toggleOwnSection(section.id) : toggleSection(section.name))}
+                  >
+                    <IconChevronDown />
+                    {section.name}
+                    <span className="gbo-count">{section.bots.length}</span>
+                  </button>
+                </ContextMenuFor>
+              ) : null
               return (
-                <div key={section.name} role="group" aria-label={section.name} className="bot-list">
-                  {list.length > 1 || section.name !== 'Unassigned' ? (
-                    <button type="button" className="gbo-section-head" aria-expanded={!isCollapsed} onClick={() => toggleSection(section.name)}>
-                      <IconChevronDown />
-                      {section.name}
-                      <span className="gbo-count">{section.bots.length}</span>
-                    </button>
-                  ) : null}
-                  {isCollapsed ? null : section.bots.map((bot: any) => row(bot))}
-                </div>
+                <React.Fragment key={section.own ? `own:${section.id}` : `default:${section.name}`}>
+                  <div role="group" aria-label={section.name} className="bot-list">
+                    {head}
+                    {isCollapsed ? null : section.bots.map((bot: any) => row(bot))}
+                  </div>
+                  {section.own && index === ownCount - 1 ? newSectionField : null}
+                </React.Fragment>
               )
             })}
             {view.showHiddenSection ? (
@@ -389,6 +503,21 @@ export function RosterPane() {
         ) : null}
       </div>
       <RosterDialogs />
+      <Confirm
+        open={Boolean(sectionDelete)}
+        title={`Delete “${sectionDelete?.name || ''}”?`}
+        description={
+          sectionDelete?.count === 1
+            ? 'Its one bot goes back to its default section.'
+            : `Its ${sectionDelete?.count || 0} bots go back to their default sections.`
+        }
+        confirmLabel="Delete section"
+        destructive
+        onConfirm={() => {
+          if (sectionDelete) deleteOwnSection(sectionDelete.id)
+        }}
+        onClose={() => roster2.sectionDelete.set(null)}
+      />
     </div>
   )
 }

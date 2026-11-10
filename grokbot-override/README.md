@@ -13,8 +13,8 @@ Hermes Bot Mode opens, so history is shared both ways.
 The look follows Hermes's light and dark themes. Each bot wears a simple shape (blob, cloud, clover, flower,
 heart, hexagon, house, sparkle, square, star, teardrop or pebble) in its own colour, chosen from its exact
 route key; a bot with a photo shows the photo. Your bubbles, the send button and switches take the open
-bot's colour; the bot's bubbles are one flat grey. Thinking and tool rows are hidden in the chat unless Bubble
-Mode's "toggle work rows" preference shows them. A thin red **NEW** line marks the first bot message you have not
+bot's colour; the bot's bubbles are one flat grey. Thinking and tool rows are hidden in the chat until the
+palette's **Grokbot Override: show work rows** turns them on (the same command hides them again). A thin red **NEW** line marks the first bot message you have not
 seen when you open a chat. The sidebar footer shows your initials and name (this computer's account name, the only
 one Hermes gives plugins; "You" without it) and a round button that opens Hermes Settings. The transcript stays put
 while you scroll past live cards, and message actions float beside the message on hover.
@@ -46,6 +46,13 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
   Bot Mode; only a source Bot Mode marks unavailable or removed is dimmed.
 - **Pin to top** (row menu) puts up to four bots as big avatars above the roster; the pins live in the
   override's own plugin storage and never touch Bot Mode's data.
+- **Sections.** **+ → New section…** adds a named section (an emoji in the name is just text). Right-click a
+  section header to **Rename…**, **Move up / Move down** or **Delete section…** (its bots go back to their
+  default section; you are asked first only when it has bots); click it to collapse. Right-click a bot →
+  **Move to section →** a section or **Default**. Bots in no section of yours are grouped as before (Bot
+  Mode's sections, else by connection). Sections live in the override's own plugin storage; a layout made
+  with the retired Bot Sections plugin is copied in once on the first run and its own data is left as it
+  was.
 - The profile panel's **Slack** card shows whether the bot is in Slack. **Test connection** asks Slack
   itself (`auth.test`) through the optional [slack-check](../slack-check/README.md) backend plugin;
   when the backend does not have it, the card shows a short hint in place of the button.
@@ -137,8 +144,8 @@ show the `::card` line as plain text.
 ## Supported Hermes version
 
 Built and checked against **Hermes Agent `2bd378ed1b`** (Desktop plugin SDK, gateway contract and Bot
-Mode source at that commit). It reads private Bot Mode details (its roster cache key, the Bot Sections
-plugin's storage, the stock tab's DOM attribute and pane id) and classifies gateway errors (`prompt.submit`, steer, slash
+Mode source at that commit). It reads private Bot Mode details (its roster cache key, the stock tab's DOM attribute and pane id; once,
+the retired Bot Sections plugin's storage to copy a layout in) and classifies gateway errors (`prompt.submit`, steer, slash
 commands, rewind, title) from that commit's gateway source, all in one module (`src/core/outcomes.js`):
 only a documented refusal raised before anything ran authorizes a fallback or a second write. There is no pinned upstream contract suite yet, so
 on any other Hermes version treat it as unverified: turn it off (palette toggle) if Bot Mode misbehaves.
@@ -168,15 +175,15 @@ the override off disposes every chat at once.
 
 ## Install
 
-The kit's root `install.sh` installs it with the other desktop plugins (skip it with `KIT_SKIP_GROKBOT=1`).
-It installs `plugin.default-off.js` as `~/.hermes/desktop-plugins/grokbot-override/plugin.js`: the same
-bundle with the toggle starting **off**, so stock Bot Mode is unchanged until you run **Grokbot Override:
-toggle** (the choice is remembered in the override's plugin storage). Reload plugins or restart Hermes
-Desktop after installing.
+The kit's root `install.sh` installs it with the other desktop plugins (skip it with `KIT_SKIP_GROKBOT=1`)
+as `~/.hermes/desktop-plugins/grokbot-override/plugin.js`, switched **on**: it is the kit's main plugin.
+**Grokbot Override: toggle** switches back to stock Bot Mode and the choice is remembered in the
+override's plugin storage, so a toggle you have already set wins over the default (an install from before
+2026-11-10, which started off, stays off if you switched it off; one never toggled starts on). Reload
+plugins or restart Hermes Desktop after installing.
 
-By hand: copy `plugin.js` (toggle starts on) or `plugin.default-off.js` (starts off) to
-`~/.hermes/desktop-plugins/grokbot-override/plugin.js`. The folder name must stay `grokbot-override` (it
-is the plugin id). Either way, a toggle you have already set wins over the file's default.
+By hand: copy `plugin.js` to `~/.hermes/desktop-plugins/grokbot-override/plugin.js`. The folder name must
+stay `grokbot-override` (it is the plugin id).
 
 `plugin.js` is self-contained for licensing too: its leading `/*!` comment carries the full MIT texts (this
 kit, Hermes Agent and the layout CSS in `src/ui/styles-ref.ts`), the full Apache License 2.0 text and the
@@ -189,8 +196,8 @@ owed. The same texts sit beside it in this folder (`LICENSE-APACHE-2.0`, `LICENS
 ```bash
 cd grokbot-override
 npm ci                 # esbuild, react and react-dom (dev only)
-npm run build          # src/ -> plugin.js and plugin.default-off.js (commit both)
-npm run check          # fails if either is stale
+npm run build          # src/ -> plugin.js (commit it)
+npm run check          # fails if it is stale
 npm test               # node:test; the render, app-layer and loader smoke tests need `npm ci`
 node dev/preview.mjs out/   # fixture-data preview pages (HTML + SVG)
 node dev/preview.mjs out/ --live   # framed like the live window, plus avatars-sheet.html
@@ -201,9 +208,8 @@ The pictures in `screenshots/` are screenshots of `--live` pages with demo data:
 `light-new-line.html` and `dark-new-line.html` (the NEW line and footer), and `light-slack-connect-new.html`,
 `light-slack-connect-connected.html` and `light-slack-connected.html` (the Add to Slack strip).
 
-`node build.mjs --default-off --out <file>` writes a single copy whose toggle starts off (that is what
-`plugin.default-off.js` is). `--probe` additionally runs the read-only self-check once,
-six seconds after load.
+`node build.mjs --out <file>` writes the bundle to another file. `--probe` additionally runs the
+read-only self-check once, six seconds after load.
 
 ## Licences
 

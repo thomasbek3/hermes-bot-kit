@@ -4,7 +4,7 @@
 
 **The Grok Bot experience for your Hermes fleet.**
 
-Texting-style chat bubbles + a live window into your bots' computers.
+A chat-app Bot Mode screen + a live window into your bots' computers.
 
 [![Hermes Desktop](https://img.shields.io/badge/Hermes_Desktop-%E2%89%A5%200.20.5-8b5cf6?style=flat-square)](https://github.com/NousResearch/hermes-agent)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-444?style=flat-square)](#install)
@@ -12,7 +12,7 @@ Texting-style chat bubbles + a live window into your bots' computers.
 [![Last commit](https://img.shields.io/github/last-commit/thomasbek3/hermes-bot-kit?style=flat-square)](https://github.com/thomasbek3/hermes-bot-kit/commits/master)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-[![Plugins](https://img.shields.io/badge/plugins-6-blue?style=flat-square)](#whats-in-the-kit)
+[![Plugins](https://img.shields.io/badge/plugins-4-blue?style=flat-square)](#whats-in-the-kit)
 [![Single file](https://img.shields.io/badge/plugins-single--file%20ESM-orange?style=flat-square)](#requirements)
 [![No build step](https://img.shields.io/badge/build%20step-none-success?style=flat-square)](#requirements)
 [![Agent installable](https://img.shields.io/badge/install-agent--safe%20%C2%B7%20unattended-blueviolet?style=flat-square)](#install)
@@ -32,17 +32,15 @@ Desktop plugins plus an optional agent plugin, one install:
 
 | Plugin | What it does |
 |---|---|
-| 💬 **[Bubble Mode](bubble-mode/)** | The full texting look — **only on each bot's main Bot Chat**: iMessage bubbles, a "..." typing indicator while the bot works, and thinking/tool/timer/background-process noise hidden (approvals and agent-to-agent "Message from X" chips always visible; one palette command brings the work rows back). Work sessions, side tabs, and Sessions view are never touched. Pure CSS, fails safe. |
-| 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Auto-connects the moment your bot starts using its computer**, so you watch it work. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
-| 🗂️ **[Bot Sections](bot-sections/)** | Grok-Bot-style **named sections in the Bots roster**: right-click a header to create, rename (autosave, with an iMessage-style emoji palette), or delete sections; click to collapse (instant, persisted); native-styled menu with hover tooltips. Fresh installs start from one **Unassigned** bucket; layouts live in plugin storage and survive updates. Move bots via the palette (auto-discovered for every bot in your roster). Agents (e.g. your chief-of-staff bot) can write `~/.hermes/bot-sections.json` to place bots into company sections; manual moves still win until the file changes again. **Bots only** (on by default): the sidebar shows just the Bots roster with the Sessions tab hidden (sessions untouched); **⌘⇧P → Bot Sections: Sessions tab toggle** brings it back. |
-| 🤖 **[Grokbot Override](grokbot-override/)** *(preview, installed switched off)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘⇧P → Grokbot Override: toggle** turns the override on and switches back instantly. See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
-| 📌 **[Task Dock](task-dock/)** | A compact **Tasks list pinned above the composer** in Bot Chats. The app's own widget dies when you switch bots (live stream only, cleared on unmount). This plugin copies it while it is on screen and puts the copy back when you return, marked stale. Per-bot snapshots, 24h expiry. |
+| 🤖 **[Grokbot Override](grokbot-override/)** *(preview, the kit's main plugin, installed switched on)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots and **your own named sections**, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘⇧P → Grokbot Override: toggle** switches back to stock instantly (and on again). See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
+| 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Auto-connects the moment your bot starts using its computer**, so you watch it work. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin (**orgo-computer**) that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
+| 💼 **[Slack](slack-connect/)** | Optional add-ons for the override's Slack card: **one-click Add to Slack** ([slack-connect](slack-connect/README.md), with [slack-relay](slack-relay/README.md) and [slack-http](slack-http/README.md)) and **Test connection** ([slack-check](slack-check/README.md)). |
 
 <p align="center">
-  <img src="bot-sections/screenshots/roster-sections.png" alt="Hermes Desktop with Bot Sections in the roster and the Computer pane docked" width="900">
+  <img src="grokbot-override/screenshots/light.png" alt="Grokbot Override: pinned bots, the roster, the open chat in the bot's colour, and the profile panel with Scheduled, Slack Connected and the Model row" width="900">
 </p>
-<p align="center"><em>The kit in one screen: iMessage-style Bot Chat, named roster sections, and the live Computer pane (demo bots and a demo desktop).</em></p>
+<p align="center"><em>Grokbot Override with demo bots, rendered from the plugin's preview harness.</em></p>
 
 
 ## Install
@@ -55,18 +53,9 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.
 
 Then in Hermes Desktop: **⌘K → Reload plugins** (or restart the app).
 
-- Bubble Mode is on immediately; toggle with **⌘⇧P → Bubble Mode: toggle**.
-- Bot Sections is on immediately in the Bots roster; toggle with
-  **⌘⇧P → Bot Sections: toggle**. Cycle a bot with
-  **⌘⇧P → `Bot Sections: cycle <bot>`**. The Sessions tab is hidden by
-  default (Bots only); **⌘⇧P → Bot Sections: Sessions tab toggle** shows it.
-  Agents can also assign bots by
-  writing `~/.hermes/bot-sections.json` (see the
-  [Bot Sections README](bot-sections/README.md)).
-- Task Dock is on immediately in Bot Chats; toggle with
-  **⌘K → Task Dock: toggle**.
-- Grokbot Override is installed **switched off**, so stock Bot Mode is unchanged.
-  Turn it on (and back off) with **⌘⇧P → Grokbot Override: toggle**.
+- Grokbot Override is installed **switched on**: its Bots tab replaces the
+  stock one. **⌘⇧P → Grokbot Override: toggle** switches back to stock Bot
+  Mode (and on again); a choice you made before is kept on upgrade.
 - The Computer pane: enable **Computer** in **Settings → Plugins**, then add a
   computer — see the [computer-viewer README](computer-viewer/README.md) for
   connecting cloud boxes, spare Macs/PCs, HD mode, and giving bots hands.
@@ -76,9 +65,16 @@ Grokbot Override chat) is opt-in: run the installer from a clone with
 `KIT_CARDS_SKILL=1` (and `KIT_CARDS_SKILL=remove` to take it out again). See
 [Cards](grokbot-override/README.md#cards).
 
-Want just one plugin? `KIT_SKIP_BUBBLES=1`, `KIT_SKIP_COMPUTER=1`,
-`KIT_SKIP_SECTIONS=1`, `KIT_SKIP_TASK_DOCK=1` or `KIT_SKIP_GROKBOT=1` in
-front of the command, or use each plugin's own install instructions.
+Want just one plugin? `KIT_SKIP_COMPUTER=1` or `KIT_SKIP_GROKBOT=1` in front
+of the command, or use each plugin's own install instructions.
+
+**Retired on 2026-11-10:** Bubble Mode, Bot Sections and Task Dock. Grokbot
+Override took over what the kit still used from them: its own roster sections
+(your Bot Sections layout is copied over once, the old data is left as it was)
+and its own work-rows setting. Task Dock was not ported. If an older install
+left their folders in `desktop-plugins/`, the installer says so; run it with
+`KIT_REMOVE_RETIRED=1` to move exactly those kit folders to
+`desktop-plugins-retired-<date>/` (nothing is deleted).
 
 **texting-style** is an *agent* plugin (it changes how bots write, per Hermes
 profile), so it has its own one-liner:
@@ -94,9 +90,9 @@ coding agents read that file automatically.)
 ## New: Grokbot Override
 
 <p align="center">
-  <img src="grokbot-override/screenshots/light.png" alt="Grokbot Override: pinned bots, the roster, the open chat in the bot's colour, and the profile panel with Scheduled, Slack Connected and the Model row" width="720">
+  <img src="grokbot-override/screenshots/dark.png" alt="Grokbot Override in dark mode: pinned bots, the roster, the open chat and the profile panel" width="720">
 </p>
-<p align="center"><em>Demo bots, rendered from the plugin's preview harness. Dark mode and more pictures: <a href="grokbot-override/README.md">Grokbot Override README</a>.</em></p>
+<p align="center"><em>Demo bots, rendered from the plugin's preview harness. More pictures: <a href="grokbot-override/README.md">Grokbot Override README</a>.</em></p>
 
 What you get:
 
@@ -121,8 +117,11 @@ What you get:
   [slack-check](slack-check/README.md) backend plugin) and a **Model** row.
 - **A NEW line** above the first message you have not seen, and a footer with
   your name and a button to Hermes Settings.
+- **Your own roster sections.** **+ → New section**, right-click a section
+  header to rename, move or delete it, click it to collapse; right-click a
+  bot → **Move to section**.
 - **Hidden work rows.** Thinking and tool rows stay out of the chat by default.
-  Bubble Mode's "toggle work rows" command brings them back.
+  **⌘⇧P → Grokbot Override: show work rows** brings them back.
 
 <p align="center">
   <img src="grokbot-override/screenshots/slack-strip.png" alt="Add to Slack in three steps: Connect, Connected to Acme Team Slack, and the Slack card reading Connected" width="860">
@@ -145,27 +144,25 @@ built on, not live-qualified on every Hermes version (see the
 
 ```
 install.sh          one-command installer for the desktop plugins
-bubble-mode/        Bubble Mode: plugin, installer, docs
-bot-sections/       Bot Sections: plugin, docs
-task-dock/          Task Dock: persistent Tasks panel for Bot Chats
 grokbot-override/   Grokbot Override: src/, the built plugin.js, tests, docs
 slack-check/        optional backend plugin: the Slack card's Test connection
 slack-connect/      optional Add to Slack add-on (with slack-relay/, slack-http/)
 texting-style/      agent plugin: SMS-register reply style, per profile
 computer-viewer/    Computer: plugin, host connect scripts, HD agent,
                     orgo-computer agent plugin, orgo-term / orgo-hands, docs
-connect-*.sh/.ps1   compatibility shims (old one-liners keep working)
-hiperf-*.sh/.ps1    compatibility shims (same)
 SECURITY.md         security policy (VNC/networking guidance lives in the
                     computer-viewer README)
 ```
 
 ## Formerly `hermes-computer-viewer`
 
-This repo was renamed on 2026-08-27 and absorbed
-`hermes-bubble-mode` (now archived, history preserved under `bubble-mode/`).
-GitHub redirects all old repo links, and the root shim scripts keep every
-previously published `curl … | bash` / `irm … | iex` one-liner working.
+This repo was renamed on 2026-08-27 and absorbed `hermes-bubble-mode`
+(archived; Bubble Mode itself was retired from the kit on 2026-11-10, its
+history stays in git). GitHub redirects all old repo links. The host scripts
+live in `computer-viewer/` (for example
+`computer-viewer/connect-mac.sh`); the root shims that forwarded there were
+removed on 2026-11-10, so one-liners pinned to an older release tag keep
+working while new ones use the `computer-viewer/` path.
 
 ## Fine print
 

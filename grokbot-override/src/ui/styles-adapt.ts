@@ -73,6 +73,12 @@ const ADAPT_SRC = /* css */ `
 .gbo-section-head:disabled { cursor: default; }
 .gbo-section-head.is-rooms { padding-right: 4px; }
 .gbo-section-head.is-rooms .icon-btn--plain { width: 22px; height: 22px; }
+.gbo-section-edit { padding: 10px 4px 4px; }
+.gbo-section-input {
+  width: 100%; height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--color-border-focus);
+  background: transparent; color: var(--color-ink); font-size: 13px; line-height: 18px; outline: none;
+}
+.gbo-section-input::placeholder { color: var(--color-text-quaternary); }
 
 .bot-row { color: inherit; text-align: left; }
 .bot-row:hover { background: var(--color-row-hover); }

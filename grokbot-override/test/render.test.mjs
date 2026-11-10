@@ -15,7 +15,7 @@ test('the roster, chat and profile panel render every transcript state', { skip:
   t.after(() => rmSync(dirname(file), { recursive: true, force: true }))
   const { render } = await import(pathToFileURL(file).href)
 
-  // Work rows shown (Bubble Mode's preference); hidden by default is
+  // Work rows shown (the override's work-rows setting); hidden by default is
   // covered in test/look-pass4.test.mjs.
   const html = render({ theme: 'dark', showWork: true })
   for (const text of [

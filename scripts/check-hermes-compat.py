@@ -16,7 +16,7 @@ production = '\n'.join(p.read_text() for p in src.rglob('*')
                        if p.suffix in {'.ts', '.tsx', '.css'}
                        and '.test.' not in p.name and '.spec.' not in p.name)
 errors = []
-for name in ('bubble-mode', 'bot-sections', 'task-dock', 'computer-viewer'):
+for name in ('computer-viewer',):
     plugin = (kit / name / 'plugin.js').read_text()
     for block in re.findall(r'import\s*\{([^}]+)\}\s*from [\'"]@hermes/plugin-sdk[\'"]', plugin):
         for symbol in block.split(','):

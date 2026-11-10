@@ -66,9 +66,6 @@ assert_exec() {
 # Happy path
 home=$(new_home)
 HERMES_HOME="${home}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}" >/dev/null
-assert_plugin "${home}" "bubble-mode/plugin.js"
-assert_plugin "${home}" "bot-sections/plugin.js"
-assert_plugin "${home}" "task-dock/plugin.js"
 assert_plugin "${home}" "computer-viewer/plugin.js"
 assert_plugin "${home}" "computer-viewer/connect-mac.sh"
 assert_plugin "${home}" "computer-viewer/connect-linux.sh"
@@ -86,17 +83,13 @@ if awk '$2 == "computer-viewer/vendor/novnc-rfb.mjs" { found=1 } END { exit foun
 fi
 echo "OK  happy path"
 
-# Grokbot Override: the default-off build lands under the plugin's own name,
-# so the override stays off until it is toggled on from the palette.
-grokbot_dest="${home}/desktop-plugins/grokbot-override/plugin.js"
-[ -f "${grokbot_dest}" ] || fail "missing ${grokbot_dest}"
-expected=$(manifest_hash "grokbot-override/plugin.default-off.js") || fail "grokbot default-off build not in MANIFEST.sha256"
-[ "${expected}" = "$(file_sha256 "${grokbot_dest}")" ] || fail "grokbot-override/plugin.js is not the default-off build"
-grep -q 'var DEFAULT_ON = true ? false : true;' "${grokbot_dest}" || fail "installed Grokbot Override does not start off"
-if [ -e "${home}/desktop-plugins/grokbot-override/plugin.default-off.js" ]; then
-  fail "the build's source name was installed too"
+# Grokbot Override: the committed plugin.js, switched on by default.
+assert_plugin "${home}" "grokbot-override/plugin.js"
+grep -qx 'var DEFAULT_ON = true;' "${home}/desktop-plugins/grokbot-override/plugin.js" || fail "installed Grokbot Override does not start on"
+if grep -q 'default-off' "${MANIFEST}"; then
+  fail "the manifest still lists a default-off build"
 fi
-echo "OK  Grokbot Override installed switched off"
+echo "OK  Grokbot Override installed switched on"
 
 # The helper scripts' offline digest check needs a manifest next to them.
 manifest_dest="${home}/desktop-plugins/MANIFEST.sha256"
@@ -147,7 +140,7 @@ if not b:
     raise SystemExit("empty plugin")
 b[0] ^= 0x01
 p.write_bytes(b)
-' "${tampered}/task-dock/plugin.js"
+' "${tampered}/computer-viewer/plugin.js"
 bad_home=$(new_home)
 set +e
 HERMES_HOME="${bad_home}" KIT_SOURCE_DIR="${tampered}" bash "${INSTALLER}" >/dev/null 2>&1
@@ -159,21 +152,19 @@ if [ -e "${bad_home}/desktop-plugins" ]; then
 fi
 echo "OK  tamper"
 
-# KIT_SKIP_TASK_DOCK=1 skips exactly that plugin
+# KIT_SKIP_COMPUTER=1 skips exactly that plugin
 skip_home=$(new_home)
-HERMES_HOME="${skip_home}" KIT_SOURCE_DIR="${ROOT}" KIT_SKIP_TASK_DOCK=1 bash "${INSTALLER}" >/dev/null
-[ -f "${skip_home}/desktop-plugins/bubble-mode/plugin.js" ] || fail "skip: bubble-mode missing"
-[ -f "${skip_home}/desktop-plugins/bot-sections/plugin.js" ] || fail "skip: bot-sections missing"
-[ -f "${skip_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "skip: computer-viewer missing"
-if [ -e "${skip_home}/desktop-plugins/task-dock" ]; then
-  fail "skip: task-dock was installed"
+HERMES_HOME="${skip_home}" KIT_SOURCE_DIR="${ROOT}" KIT_SKIP_COMPUTER=1 bash "${INSTALLER}" >/dev/null
+[ -f "${skip_home}/desktop-plugins/grokbot-override/plugin.js" ] || fail "skip: grokbot-override missing"
+if [ -e "${skip_home}/desktop-plugins/computer-viewer" ]; then
+  fail "skip: computer-viewer was installed"
 fi
-echo "OK  KIT_SKIP_TASK_DOCK"
+echo "OK  KIT_SKIP_COMPUTER"
 
 # KIT_SKIP_GROKBOT=1 skips exactly that plugin
 skip_home=$(new_home)
 HERMES_HOME="${skip_home}" KIT_SOURCE_DIR="${ROOT}" KIT_SKIP_GROKBOT=1 bash "${INSTALLER}" >/dev/null
-[ -f "${skip_home}/desktop-plugins/task-dock/plugin.js" ] || fail "skip: task-dock missing"
+[ -f "${skip_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "skip: computer-viewer missing"
 if [ -e "${skip_home}/desktop-plugins/grokbot-override" ]; then
   fail "skip: grokbot-override was installed"
 fi
@@ -187,11 +178,56 @@ grep -v ' grokbot-override/' "${old}/MANIFEST.sha256" > "${old}/MANIFEST.next"
 mv "${old}/MANIFEST.next" "${old}/MANIFEST.sha256"
 old_home=$(new_home)
 HERMES_HOME="${old_home}" KIT_SOURCE_DIR="${old}" bash "${INSTALLER}" >/dev/null 2>&1 || fail "install from an older manifest failed"
-[ -f "${old_home}/desktop-plugins/task-dock/plugin.js" ] || fail "older manifest: task-dock missing"
+[ -f "${old_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "older manifest: computer-viewer missing"
 if [ -e "${old_home}/desktop-plugins/grokbot-override" ]; then
   fail "older manifest: grokbot-override was installed"
 fi
 echo "OK  older manifest without Grokbot Override"
+
+# Retired plugins (Bubble Mode, Task Dock, Bot Sections): an upgrade names
+# this kit's copies and leaves them alone; a folder without the kit's marker
+# is never mentioned or moved.
+seed_retired() {
+  mkdir -p "$1/desktop-plugins/bubble-mode" "$1/desktop-plugins/task-dock" "$1/desktop-plugins/bot-sections"
+  printf 'const STYLE_ID = "hermes-bubble-mode-style"\n' > "$1/desktop-plugins/bubble-mode/plugin.js"
+  printf 'const STYLE_ID = "hermes-task-dock-style"\n' > "$1/desktop-plugins/task-dock/plugin.js"
+  printf '// my own sections plugin\n' > "$1/desktop-plugins/bot-sections/plugin.js"
+}
+retired_home=$(new_home)
+seed_retired "${retired_home}"
+out=$(HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}")
+printf '%s\n' "${out}" | grep -q 'Retired plugins still installed: bubble-mode task-dock\.' || fail "no note naming the kit's retired plugins: ${out}"
+printf '%s\n' "${out}" | grep -q 'KIT_REMOVE_RETIRED=1' || fail "the note does not say how to remove them"
+if printf '%s\n' "${out}" | grep -q 'installed:.*bot-sections'; then
+  fail "an unmarked folder was named"
+fi
+for name in bubble-mode task-dock bot-sections; do
+  [ -f "${retired_home}/desktop-plugins/${name}/plugin.js" ] || fail "the note path moved ${name}"
+done
+if ls -d "${retired_home}"/desktop-plugins-retired-* >/dev/null 2>&1; then
+  fail "the note path created a retired folder"
+fi
+echo "OK  retired plugins: note only"
+
+# KIT_REMOVE_RETIRED=1 moves exactly the kit-marked folders, never deletes.
+HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" KIT_REMOVE_RETIRED=1 bash "${INSTALLER}" >/dev/null
+moved="${retired_home}/desktop-plugins-retired-$(date +%Y%m%d)"
+grep -q 'hermes-bubble-mode-style' "${moved}/bubble-mode/plugin.js" || fail "bubble-mode was not moved intact"
+grep -q 'hermes-task-dock-style' "${moved}/task-dock/plugin.js" || fail "task-dock was not moved intact"
+[ ! -e "${retired_home}/desktop-plugins/bubble-mode" ] || fail "bubble-mode is still in desktop-plugins"
+[ ! -e "${retired_home}/desktop-plugins/task-dock" ] || fail "task-dock is still in desktop-plugins"
+grep -qx '// my own sections plugin' "${retired_home}/desktop-plugins/bot-sections/plugin.js" || fail "an unmarked folder was touched"
+[ ! -e "${moved}/bot-sections" ] || fail "an unmarked folder was moved"
+[ -f "${retired_home}/desktop-plugins/grokbot-override/plugin.js" ] || fail "the kit's plugins went with them"
+out=$(HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" KIT_REMOVE_RETIRED=1 bash "${INSTALLER}")
+if printf '%s\n' "${out}" | grep -q 'Retired'; then
+  fail "a rerun after the move still reports retired plugins"
+fi
+# A second batch the same day never overwrites the first.
+seed_retired "${retired_home}"
+HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" KIT_REMOVE_RETIRED=1 bash "${INSTALLER}" >/dev/null
+[ "$(ls -d "${moved}"/bubble-mode* | wc -l | tr -d ' ')" = "2" ] || fail "a same-day second move overwrote the first"
+echo "OK  KIT_REMOVE_RETIRED=1"
 
 # Rerun is idempotent (no new .bak.* when nothing changed)
 bak_before=$(find "${home}" -name '*.bak.*' | wc -l | tr -d ' ')
@@ -225,7 +261,7 @@ assert_skill "${cards_home}/profiles/alpha"
 grep -qx 'mine' "${cards_home}/profiles/beta/skills/agent-cards/SKILL.md" || fail "the user's own agent-cards skill was replaced"
 printf '%s\n' "${out}" | grep -q 'is your own agent-cards skill; left alone' || fail "no note about the user's own skill"
 printf '%s\n' "${out}" | grep -q 'keeps its old mode until its session restarts' || fail "no note about running chats"
-[ -f "${cards_home}/desktop-plugins/bubble-mode/plugin.js" ] || fail "cards install skipped the plugins"
+[ -f "${cards_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "cards install skipped the plugins"
 echo "OK  KIT_CARDS_SKILL=1 (root home, profiles, user's own skill kept)"
 
 bak_before=$(find "${cards_home}" -name '*.bak.*' | wc -l | tr -d ' ')
@@ -268,7 +304,7 @@ grep -v " ${CARDS_REL}\$" "${old_cards}/MANIFEST.sha256" > "${old_cards}/MANIFES
 mv "${old_cards}/MANIFEST.next" "${old_cards}/MANIFEST.sha256"
 old_cards_home=$(new_home)
 HERMES_HOME="${old_cards_home}" KIT_SOURCE_DIR="${old_cards}" KIT_CARDS_SKILL=1 bash "${INSTALLER}" >/dev/null 2>&1 || fail "cards install from an older manifest failed"
-[ -f "${old_cards_home}/desktop-plugins/task-dock/plugin.js" ] || fail "older manifest: task-dock missing"
+[ -f "${old_cards_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "older manifest: computer-viewer missing"
 [ ! -e "${old_cards_home}/skills" ] || fail "older manifest: the skill was installed"
 echo "OK  older manifest without the cards skill"
 

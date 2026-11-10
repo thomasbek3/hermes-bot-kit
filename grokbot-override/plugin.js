@@ -9761,8 +9761,8 @@ var init_novnc_rfb = __esm({
         }
       }
       // Encrypt 8 bytes of text
-      enc8(text2) {
-        const b2 = text2.slice();
+      enc8(text3) {
+        const b2 = text3.slice();
         let i = 0, l, r, x;
         l = b2[i++] << 24 | b2[i++] << 16 | b2[i++] << 8 | b2[i++];
         r = b2[i++] << 24 | b2[i++] << 16 | b2[i++] << 8 | b2[i++];
@@ -11956,23 +11956,23 @@ var init_novnc_rfb = __esm({
       blur() {
         this._canvas.blur();
       }
-      clipboardPasteFrom(text2) {
+      clipboardPasteFrom(text3) {
         if (this._rfbConnectionState !== "connected" || this._viewOnly) {
           return;
         }
         if (this._clipboardServerCapabilitiesFormats[extendedClipboardFormatText] && this._clipboardServerCapabilitiesActions[extendedClipboardActionNotify]) {
-          this._clipboardText = text2;
+          this._clipboardText = text3;
           _RFB.messages.extendedClipboardNotify(this._sock, [extendedClipboardFormatText]);
         } else {
           let length, i;
           let data;
           length = 0;
-          for (let codePoint of text2) {
+          for (let codePoint of text3) {
             length++;
           }
           data = new Uint8Array(length);
           i = 0;
-          for (let codePoint of text2) {
+          for (let codePoint of text3) {
             let code = codePoint.codePointAt(0);
             if (code > 255) {
               code = 63;
@@ -13446,13 +13446,13 @@ var init_novnc_rfb = __esm({
           return false;
         }
         if (length >= 0) {
-          const text2 = this._sock.rQshiftStr(length);
+          const text3 = this._sock.rQshiftStr(length);
           if (this._viewOnly) {
             return true;
           }
           this.dispatchEvent(new CustomEvent(
             "clipboard",
-            { detail: { text: text2 } }
+            { detail: { text: text3 } }
           ));
         } else {
           length = Math.abs(length);
@@ -14092,15 +14092,15 @@ var init_novnc_rfb = __esm({
             throw new Error("Unsupported extended clipboard format for Provide message.");
           }
           inData[i] = inData[i].replace(/\r\n|\r|\n/gm, "\r\n");
-          let text2 = encodeUTF8(inData[i] + "\0");
+          let text3 = encodeUTF8(inData[i] + "\0");
           dataToDeflate.push(
-            text2.length >> 24 & 255,
-            text2.length >> 16 & 255,
-            text2.length >> 8 & 255,
-            text2.length & 255
+            text3.length >> 24 & 255,
+            text3.length >> 16 & 255,
+            text3.length >> 8 & 255,
+            text3.length & 255
           );
-          for (let j = 0; j < text2.length; j++) {
-            dataToDeflate.push(text2.charCodeAt(j));
+          for (let j = 0; j < text3.length; j++) {
+            dataToDeflate.push(text3.charCodeAt(j));
           }
         }
         let deflatedData = deflator.deflate(new Uint8Array(dataToDeflate));
@@ -14366,9 +14366,9 @@ function botRouteProblem(bot, activeConnectionId2) {
   const name = String(bot?.name || "this bot");
   if (resolved.status === "owner_removed") return `${name} has no connection owner yet; its roster row is still loading`;
   if (bot?.remoteSource || bot?.ghost || bot?.retained) return `${name}’s connection is not known yet; its roster row is still loading`;
-  const own = String(bot?.connectionId || "").trim();
+  const own2 = String(bot?.connectionId || "").trim();
   const active = String(activeConnectionId2 || "").trim() || "local";
-  if (own && own !== active) return `${name} lives on ${String(bot?.connectionLabel || own)}, and its route there is not known yet`;
+  if (own2 && own2 !== active) return `${name} lives on ${String(bot?.connectionLabel || own2)}, and its route there is not known yet`;
   return null;
 }
 function stockOpenTarget(bot, activeConnectionId2) {
@@ -14507,8 +14507,8 @@ function expectHistory(summary) {
 
 // src/core/tools.js
 var TOOL_TEXT_MAX = 64e3;
-function clip(text2, max = TOOL_TEXT_MAX) {
-  const value = typeof text2 === "string" ? text2 : text2 == null ? "" : safeJson(text2);
+function clip(text3, max = TOOL_TEXT_MAX) {
+  const value = typeof text3 === "string" ? text3 : text3 == null ? "" : safeJson(text3);
   return value.length > max ? `${value.slice(0, max)}
 … (${value.length - max} more characters)` : value;
 }
@@ -14591,8 +14591,8 @@ function parseMetadata(value) {
 }
 function rowText(row) {
   if (row?.display_content !== void 0 && row?.display_content !== null) {
-    const text2 = contentText(row.display_content);
-    if (text2) return text2;
+    const text3 = contentText(row.display_content);
+    if (text3) return text3;
   }
   if (typeof row?.text === "string") return row.text;
   return contentText(row?.content);
@@ -14642,8 +14642,8 @@ function parseToolCalls(row) {
     }
     const labels = storedLabels[id];
     const context = args && typeof args === "object" ? firstArgPreview(args) : "";
-    const text2 = argsText(args);
-    return { id, name, label: toolLabel({ name, labels, context }), status: "done", ...text2 ? { args: text2 } : {} };
+    const text3 = argsText(args);
+    return { id, name, label: toolLabel({ name, labels, context }), status: "done", ...text3 ? { args: text3 } : {} };
   }).filter(Boolean);
 }
 function firstArgPreview(args) {
@@ -14654,16 +14654,16 @@ function firstArgPreview(args) {
 }
 var SYSTEM_NOTICE_KINDS = /* @__PURE__ */ new Set(["model_switch", "personality_switch", "failed_turn", "auto_continue", "internal_notification"]);
 var PARTIAL_FAILED_TURN_NOTICE = "This turn did not complete. Some actions may already have run; verify their effects before resending.";
-function isSystemNotice(kind, role, text2) {
+function isSystemNotice(kind, role, text3) {
   if (!SYSTEM_NOTICE_KINDS.has(kind)) return false;
-  return !(kind === "failed_turn" && role === "assistant" && text2 === PARTIAL_FAILED_TURN_NOTICE);
+  return !(kind === "failed_turn" && role === "assistant" && text3 === PARTIAL_FAILED_TURN_NOTICE);
 }
 function failedTurnError(meta) {
   if (!meta) return "";
   if (typeof meta.error === "string" && meta.error.trim()) return meta.error.trim();
   const surface = meta.error_surface && typeof meta.error_surface === "object" ? meta.error_surface : null;
-  const text2 = surface && (typeof surface.message === "string" && surface.message.trim() ? surface.message : typeof surface.code === "string" ? surface.code : "");
-  return text2 ? text2.trim() : "";
+  const text3 = surface && (typeof surface.message === "string" && surface.message.trim() ? surface.message : typeof surface.code === "string" ? surface.code : "");
+  return text3 ? text3.trim() : "";
 }
 function historyToItems(rows, { idPrefix = "h:" } = {}) {
   const items = [];
@@ -14689,10 +14689,10 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
         flushTools();
         items.push({ kind: "error", id: `${rowId(row, index, idPrefix)}-error`, text: failure, at });
       }
-      const text2 = meta && typeof meta.display_text === "string" && meta.display_text || rowText(row);
-      if (text2.trim()) {
+      const text3 = meta && typeof meta.display_text === "string" && meta.display_text || rowText(row);
+      if (text3.trim()) {
         flushTools();
-        items.push({ kind: "notice", id: rowId(row, index, idPrefix), text: text2.trim(), at, ...isSystemNotice(kind, role, text2.trim()) ? { system: kind } : {} });
+        items.push({ kind: "notice", id: rowId(row, index, idPrefix), text: text3.trim(), at, ...isSystemNotice(kind, role, text3.trim()) ? { system: kind } : {} });
       }
       return;
     }
@@ -14712,11 +14712,11 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
     }
     if (role === "assistant") {
       const calls = parseToolCalls(row);
-      const text2 = rowText(row).trim();
+      const text3 = rowText(row).trim();
       const reasoning = rowReasoning(row);
-      if (text2 || reasoning) {
+      if (text3 || reasoning) {
         flushTools();
-        items.push({ kind: "assistant", id: rowId(row, index, idPrefix), text: text2, at, ...reasoning ? { reasoning } : {}, ...rowExtras(row) });
+        items.push({ kind: "assistant", id: rowId(row, index, idPrefix), text: text3, at, ...reasoning ? { reasoning } : {}, ...rowExtras(row) });
       }
       if (calls.length) {
         const group = toolGroup(at);
@@ -14726,13 +14726,13 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
     }
     if (role === "user") {
       flushTools();
-      const text2 = rowText(row);
+      const text3 = rowText(row);
       const images = contentImages(row.display_content ?? row.content);
-      if (!text2.trim() && !images) return;
+      if (!text3.trim() && !images) return;
       items.push({
         kind: "user",
         id: rowId(row, index, idPrefix),
-        text: text2,
+        text: text3,
         at,
         ...images ? { attachments: Array.from({ length: images }, () => ({ kind: "image", name: "image" })) } : {},
         ...rowExtras(row)
@@ -14799,6 +14799,131 @@ function rebuildItems(current, persisted, keep) {
     if (after.has(item.id)) out.push(...after.get(item.id));
   }
   return [...out, ...tail];
+}
+
+// src/core/sections.js
+var SECTIONS_KEY = "sections";
+var LEGACY_SECTIONS_PLUGIN = "bot-sections";
+var SECTIONS_VERSION = 1;
+var LEGACY_UNASSIGNED = "Unassigned";
+var own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+var isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+var text = (value) => typeof value === "string" ? value.trim() : "";
+function emptySections() {
+  return { version: SECTIONS_VERSION, sections: [], assign: {} };
+}
+function sectionsFrom(value) {
+  if (!isPlainObject(value) || value.version !== SECTIONS_VERSION) return null;
+  const sections2 = [];
+  const ids = /* @__PURE__ */ new Set();
+  for (const entry of Array.isArray(value.sections) ? value.sections : []) {
+    const id = text(entry?.id);
+    if (!id || ids.has(id)) continue;
+    ids.add(id);
+    sections2.push({ id, name: text(entry?.name) || id, collapsed: entry?.collapsed === true });
+  }
+  const assign = {};
+  if (isPlainObject(value.assign)) {
+    for (const [key, target] of Object.entries(value.assign)) {
+      if (!key || typeof target !== "string") continue;
+      if (target === "" || ids.has(target)) assign[key] = target;
+    }
+  }
+  return { version: SECTIONS_VERSION, sections: sections2, assign };
+}
+function migrateLegacy(read, collapsedHere = []) {
+  const safe = (key, fallback) => {
+    try {
+      const value = read(key, fallback);
+      return value === void 0 || value === null ? fallback : value;
+    } catch {
+      return fallback;
+    }
+  };
+  const custom = safe("customSections", []);
+  const names = safe("sectionNames", {});
+  const collapsed = safe("collapsedSections", []);
+  const overrides = safe("sectionOverrides", {});
+  const folded = new Set([
+    ...Array.isArray(collapsed) ? collapsed : [],
+    ...Array.isArray(collapsedHere) ? collapsedHere : []
+  ].map(text));
+  const state = emptySections();
+  const ids = /* @__PURE__ */ new Set();
+  for (const raw of Array.isArray(custom) ? custom : []) {
+    const id = text(raw);
+    if (!id || id === LEGACY_UNASSIGNED || ids.has(id)) continue;
+    ids.add(id);
+    const label = isPlainObject(names) ? text(names[id]) : "";
+    state.sections.push({ id, name: label || id, collapsed: folded.has(id) });
+  }
+  if (isPlainObject(overrides)) {
+    for (const [rawKey, rawTarget] of Object.entries(overrides)) {
+      const key = text(rawKey).toLowerCase();
+      const target = text(rawTarget);
+      if (key && ids.has(target)) state.assign[key] = target;
+    }
+  }
+  return state;
+}
+function loadSections({ stored, readLegacy, collapsedHere }) {
+  const current = sectionsFrom(stored);
+  if (current) return { state: current, write: false };
+  return { state: migrateLegacy(readLegacy, collapsedHere), write: true };
+}
+var idCounter = 0;
+function newSectionId(state, now = Date.now()) {
+  const taken = new Set((state?.sections || []).map((section) => section.id));
+  for (; ; ) {
+    idCounter += 1;
+    const id = `s-${now.toString(36)}-${idCounter.toString(36)}`;
+    if (!taken.has(id)) return id;
+  }
+}
+function addSection(state, name, id = newSectionId(state)) {
+  const label = text(name);
+  if (!label) return { state, id: "" };
+  return { state: { ...state, sections: [...state.sections, { id, name: label, collapsed: false }] }, id };
+}
+function renameSection(state, id, name) {
+  const label = text(name);
+  const section = state.sections.find((entry) => entry.id === id);
+  if (!label || !section || section.name === label) return state;
+  return { ...state, sections: state.sections.map((entry) => entry.id === id ? { ...entry, name: label } : entry) };
+}
+function deleteSection(state, id) {
+  if (!state.sections.some((entry) => entry.id === id)) return state;
+  const assign = {};
+  for (const [key, target] of Object.entries(state.assign)) if (target !== id) assign[key] = target;
+  return { ...state, sections: state.sections.filter((entry) => entry.id !== id), assign };
+}
+function moveSection(state, id, delta) {
+  const from = state.sections.findIndex((entry) => entry.id === id);
+  const to = from + (delta < 0 ? -1 : 1);
+  if (from < 0 || to < 0 || to >= state.sections.length) return state;
+  const sections2 = [...state.sections];
+  [sections2[from], sections2[to]] = [sections2[to], sections2[from]];
+  return { ...state, sections: sections2 };
+}
+function toggleSectionCollapsed(state, id) {
+  if (!state.sections.some((entry) => entry.id === id)) return state;
+  return { ...state, sections: state.sections.map((entry) => entry.id === id ? { ...entry, collapsed: !entry.collapsed } : entry) };
+}
+function assignBot(state, key, id) {
+  if (!key) return state;
+  const target = id && state.sections.some((entry) => entry.id === id) ? id : "";
+  if (own(state.assign, key) && state.assign[key] === target) return state;
+  return { ...state, assign: { ...state.assign, [key]: target } };
+}
+function sectionIdFor(state, exactKey, nameKeys = []) {
+  if (!state || !state.sections.length) return "";
+  const known = (id) => id && state.sections.some((entry) => entry.id === id) ? id : "";
+  if (exactKey && own(state.assign, exactKey)) return known(state.assign[exactKey]);
+  for (const raw of nameKeys) {
+    const key = text(raw).toLowerCase();
+    if (key && own(state.assign, key)) return known(state.assign[key]);
+  }
+  return "";
 }
 
 // src/core/roster.js
@@ -14947,7 +15072,13 @@ function sourceUnreachable(bot) {
   return !botSourceStatus(bot).available;
 }
 var UNASSIGNED = "Unassigned";
-function buildSections(rows, { metaFor: metaFor2, kitSections, query = "" }) {
+function sectionNameKeys(bot, meta) {
+  return [bot?.name, displayName(bot, meta), handleOf(bot).slice(1)];
+}
+function ownSectionOf(bot, sections2, metaFor2) {
+  return sectionIdFor(sections2, rowKey(bot), sectionNameKeys(bot, metaFor2(bot)));
+}
+function buildSections(rows, { metaFor: metaFor2, sections: sections2 = null, query = "", keepEmpty = false }) {
   const q = String(query || "").trim().toLowerCase();
   const visible2 = rows.filter((bot) => {
     const meta = metaFor2(bot);
@@ -14961,25 +15092,21 @@ function buildSections(rows, { metaFor: metaFor2, kitSections, query = "" }) {
     if (Boolean(ma?.pinned) !== Boolean(mb?.pinned)) return ma?.pinned ? -1 : 1;
     return displayName(a2, ma).localeCompare(displayName(b2, mb));
   };
-  const kitOverrides = kitSections?.overrides && typeof kitSections.overrides === "object" ? kitSections.overrides : null;
-  const kitCustom = Array.isArray(kitSections?.custom) ? kitSections.custom.map(String).filter(Boolean) : [];
-  const useKit = Boolean(kitOverrides && (kitCustom.length || Object.keys(kitOverrides).length));
+  const ownList = Array.isArray(sections2?.sections) ? sections2.sections : [];
+  const mine = new Map(ownList.map((section) => [section.id, []]));
+  const rest = [];
+  for (const bot of visible2) {
+    const id = ownList.length ? ownSectionOf(bot, sections2, metaFor2) : "";
+    if (id && mine.has(id)) mine.get(id).push(bot);
+    else rest.push(bot);
+  }
+  const ownSections = ownList.map((section) => ({ id: section.id, name: section.name, own: true, collapsed: Boolean(section.collapsed), bots: mine.get(section.id).sort(order) })).filter((section) => keepEmpty || section.bots.length > 0);
+  return [...ownSections, ...defaultSections(rest, metaFor2, order)];
+}
+function defaultSections(visible2, metaFor2, order) {
   let sectionOf;
   let ladder;
-  if (useKit) {
-    ladder = [...kitCustom.filter((name) => name !== UNASSIGNED), UNASSIGNED];
-    const known = new Set(ladder);
-    sectionOf = (bot) => {
-      for (const key of [bot.name, displayName(bot, metaFor2(bot)), handleOf(bot).slice(1)]) {
-        const k = String(key || "").trim().toLowerCase();
-        if (k && Object.prototype.hasOwnProperty.call(kitOverrides, k)) {
-          const name = String(kitOverrides[k] || "").trim();
-          return known.has(name) ? name : UNASSIGNED;
-        }
-      }
-      return UNASSIGNED;
-    };
-  } else if (visible2.some((bot) => metaFor2(bot)?.sectionName)) {
+  if (visible2.some((bot) => metaFor2(bot)?.sectionName)) {
     const names = [];
     for (const bot of visible2) {
       const name = String(metaFor2(bot)?.sectionName || "").trim();
@@ -15087,7 +15214,7 @@ function filePath(path) {
     return value.replace(/^file:\/\//i, "");
   }
 }
-function extractMedia(text2) {
+function extractMedia(text3) {
   const media = [];
   const seen = /* @__PURE__ */ new Set();
   const add2 = (path, remote = false) => {
@@ -15101,7 +15228,7 @@ function extractMedia(text2) {
     const { path, punctuation } = quoted ? { path: unq, punctuation: "" } : splitPunctuation(unq);
     return plausible(path) ? { path, punctuation } : null;
   };
-  let out = String(text2 || "").replace(MEDIA_LINE_RE, (whole, lead, value) => {
+  let out = String(text3 || "").replace(MEDIA_LINE_RE, (whole, lead, value) => {
     const hit = take(value);
     if (!hit) return whole;
     add2(hit.path);
@@ -15154,8 +15281,8 @@ function parseDirectiveAttrs(body) {
   }
   return attrs;
 }
-function splitDirectives(text2) {
-  const raw = String(text2 || "");
+function splitDirectives(text3) {
+  const raw = String(text3 || "");
   if (!raw.includes("::")) return null;
   const out = [];
   let prose = "";
@@ -15229,7 +15356,7 @@ var MAX_ACTIONS = 3;
 var ACTION_STYLES = ["primary", "danger"];
 var isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 var filled = (value) => typeof value === "string" && value.trim().length > 0;
-var text = (value) => typeof value === "string" ? value : "";
+var text2 = (value) => typeof value === "string" ? value : "";
 function bodyItem(item) {
   if (!isObject(item)) return null;
   if (item.type === "text") return typeof item.text === "string" ? { type: "text", text: item.text } : null;
@@ -15261,9 +15388,9 @@ function validateCard(value) {
     title: value.title.trim(),
     status: { state: value.status.state, label: filled(value.status.label) ? value.status.label.trim() : null },
     body: (value.body || []).map(bodyItem).filter(Boolean),
-    email: value.email ? { to: text(value.email.to), cc: text(value.email.cc), subject: text(value.email.subject), bodyText: text(value.email.bodyText) } : null,
+    email: value.email ? { to: text2(value.email.to), cc: text2(value.email.cc), subject: text2(value.email.subject), bodyText: text2(value.email.bodyText) } : null,
     actions,
-    resolved: isObject(value.resolved) ? { action: value.resolved.action.trim(), at: text(value.resolved.at) } : null
+    resolved: isObject(value.resolved) ? { action: value.resolved.action.trim(), at: text2(value.resolved.at) } : null
   };
 }
 function cardFromRead(result) {
@@ -15658,14 +15785,14 @@ function segmentStamp(payload) {
   const offset = nonNegativeInt(record.offset);
   return offset === null ? { turnId, segment } : { turnId, segment, offset };
 }
-function admitSegmentDelta(cursor, stamp2, text2) {
+function admitSegmentDelta(cursor, stamp2, text3) {
   const offset = stamp2.offset ?? 0;
-  const end = offset + text2.length;
+  const end = offset + text3.length;
   if (!cursor || cursor.turnId !== stamp2.turnId || stamp2.segment > cursor.segment) {
-    return { cursor: { turnId: stamp2.turnId, segment: stamp2.segment, end }, text: text2 };
+    return { cursor: { turnId: stamp2.turnId, segment: stamp2.segment, end }, text: text3 };
   }
   if (stamp2.segment < cursor.segment || end <= cursor.end) return { cursor, text: "" };
-  return { cursor: { ...cursor, end }, text: text2.slice(Math.max(0, cursor.end - offset)) };
+  return { cursor: { ...cursor, end }, text: text3.slice(Math.max(0, cursor.end - offset)) };
 }
 function admitSegmentSeal(cursor, stamp2) {
   const next = { turnId: stamp2.turnId, segment: stamp2.segment + 1, end: 0 };
@@ -15832,8 +15959,8 @@ function applyConnectionUpdate(waiting, payload) {
 }
 var RECOMMENDED = "(Recommended)";
 function bareChoice(choice) {
-  const text2 = str(choice);
-  return text2.endsWith(RECOMMENDED) ? text2.slice(0, -RECOMMENDED.length).trim() : text2;
+  const text3 = str(choice);
+  return text3.endsWith(RECOMMENDED) ? text3.slice(0, -RECOMMENDED.length).trim() : text3;
 }
 function choiceLetter(index) {
   return index >= 0 && index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
@@ -15844,9 +15971,9 @@ function clarifyFilled(value) {
 function clarifyPicks(waiting) {
   return { ...waiting?.locked || {}, ...waiting?.picks || {} };
 }
-function clarifyTextAnswer(waiting, text2) {
+function clarifyTextAnswer(waiting, text3) {
   const questions = Array.isArray(waiting?.questions) ? waiting.questions : [];
-  const value = str(text2).trim();
+  const value = str(text3).trim();
   const picks = clarifyPicks(waiting);
   if (!questions.length || !value) return { picks, complete: false };
   const target = questions.find((q) => !clarifyFilled(picks[q.qid])) || questions[questions.length - 1];
@@ -15882,19 +16009,19 @@ function valueResult(kind, input) {
 function emptyLive() {
   return { turnId: "", cursor: void 0, bubbleId: null, toolsId: null, reasoning: "", streamed: false, sealed: "" };
 }
-var sealText = (live, text2) => ({ ...live, sealed: `${live.sealed || ""}${text2 || ""}` });
+var sealText = (live, text3) => ({ ...live, sealed: `${live.sealed || ""}${text3 || ""}` });
 function unshownTurnText(full, shown) {
-  const text2 = String(full || "");
+  const text3 = String(full || "");
   const seen = String(shown || "");
-  if (!seen.trim()) return text2;
+  if (!seen.trim()) return text3;
   let i = 0;
   for (let j = 0; j < seen.length; j += 1) {
     if (/\s/.test(seen[j])) continue;
-    while (i < text2.length && /\s/.test(text2[i])) i += 1;
-    if (i >= text2.length || text2[i] !== seen[j]) return null;
+    while (i < text3.length && /\s/.test(text3[i])) i += 1;
+    if (i >= text3.length || text3[i] !== seen[j]) return null;
     i += 1;
   }
-  return text2.slice(i).replace(/^\s+/, "");
+  return text3.slice(i).replace(/^\s+/, "");
 }
 function initialChatState(items = []) {
   return { items, busy: false, status: null, live: emptyLive(), waiting: null };
@@ -15916,12 +16043,12 @@ function closeBubble(state) {
     live: { ...sealText(state.live, bubble?.text), bubbleId: null }
   };
 }
-function appendToBubble(state, text2, at) {
+function appendToBubble(state, text3, at) {
   const bubble = findItem(state.items, state.live.bubbleId);
   if (bubble) {
     return {
       ...state,
-      items: replaceItem(state.items, bubble.id, (item) => ({ text: item.text + text2, streaming: true })),
+      items: replaceItem(state.items, bubble.id, (item) => ({ text: item.text + text3, streaming: true })),
       live: { ...state.live, streamed: true, toolsId: null }
     };
   }
@@ -15929,16 +16056,16 @@ function appendToBubble(state, text2, at) {
   const reasoning = state.live.reasoning;
   return {
     ...state,
-    items: [...state.items, { kind: "assistant", id, text: text2, at, streaming: true, ...reasoning ? { reasoning } : {} }],
+    items: [...state.items, { kind: "assistant", id, text: text3, at, streaming: true, ...reasoning ? { reasoning } : {} }],
     live: { ...state.live, bubbleId: id, streamed: true, toolsId: null, reasoning: "" }
   };
 }
-function appendReasoning(state, text2) {
+function appendReasoning(state, text3) {
   const bubble = findItem(state.items, state.live.bubbleId);
   if (bubble) {
-    return { ...state, items: replaceItem(state.items, bubble.id, (item) => ({ reasoning: (item.reasoning || "") + text2 })) };
+    return { ...state, items: replaceItem(state.items, bubble.id, (item) => ({ reasoning: (item.reasoning || "") + text3 })) };
   }
-  return { ...state, live: { ...state.live, reasoning: state.live.reasoning + text2 } };
+  return { ...state, live: { ...state.live, reasoning: state.live.reasoning + text3 } };
 }
 function lastAssistantText(state) {
   for (let i = state.items.length - 1; i >= 0; i -= 1) {
@@ -15970,32 +16097,32 @@ function applyEvent(state, event, now = Date.now()) {
     }
     case "message.delta": {
       if (payload.text === null) return closeBubble(state);
-      let text2 = typeof payload.text === "string" ? payload.text : "";
+      let text3 = typeof payload.text === "string" ? payload.text : "";
       const stamp2 = segmentStamp(payload);
       let live = state.live;
       if (stamp2) {
-        const admitted = admitSegmentDelta(live.cursor, stamp2, text2);
+        const admitted = admitSegmentDelta(live.cursor, stamp2, text3);
         live = { ...live, cursor: admitted.cursor };
-        text2 = admitted.text;
+        text3 = admitted.text;
       }
       const status = state.status?.kind === "tool" ? null : state.status;
-      if (!text2) return { ...state, busy: true, status, live };
-      return appendToBubble({ ...state, busy: true, status, live }, text2, now);
+      if (!text3) return { ...state, busy: true, status, live };
+      return appendToBubble({ ...state, busy: true, status, live }, text3, now);
     }
     case "reasoning.delta":
     case "thinking.delta": {
-      const text2 = typeof payload.text === "string" ? payload.text : "";
-      return text2 ? appendReasoning({ ...state, busy: true }, text2) : state;
+      const text3 = typeof payload.text === "string" ? payload.text : "";
+      return text3 ? appendReasoning({ ...state, busy: true }, text3) : state;
     }
     case "reasoning.available": {
-      const text2 = typeof payload.text === "string" ? payload.text : "";
-      if (!text2) return state;
+      const text3 = typeof payload.text === "string" ? payload.text : "";
+      if (!text3) return state;
       const bubble = findItem(state.items, state.live.bubbleId);
-      if (bubble) return { ...state, items: replaceItem(state.items, bubble.id, { reasoning: text2 }) };
-      return { ...state, live: { ...state.live, reasoning: text2 } };
+      if (bubble) return { ...state, items: replaceItem(state.items, bubble.id, { reasoning: text3 }) };
+      return { ...state, live: { ...state.live, reasoning: text3 } };
     }
     case "message.interim": {
-      const text2 = typeof payload.text === "string" ? payload.text.trim() : "";
+      const text3 = typeof payload.text === "string" ? payload.text.trim() : "";
       const stamp2 = segmentStamp(payload);
       let live = state.live;
       if (stamp2) {
@@ -16003,20 +16130,20 @@ function applyEvent(state, event, now = Date.now()) {
         live = { ...live, cursor: admitted.cursor };
         if (!admitted.fresh) return { ...state, live };
       }
-      if (!text2) return closeBubble({ ...state, live });
+      if (!text3) return closeBubble({ ...state, live });
       const bubble = findItem(state.items, live.bubbleId);
       if (bubble) {
         return {
           ...state,
-          items: replaceItem(state.items, bubble.id, { text: text2, streaming: false }),
-          live: { ...sealText(live, text2), bubbleId: null }
+          items: replaceItem(state.items, bubble.id, { text: text3, streaming: false }),
+          live: { ...sealText(live, text3), bubbleId: null }
         };
       }
       const reasoning = live.reasoning;
       return {
         ...state,
-        items: [...state.items, { kind: "assistant", id: liveId("a"), text: text2, at: now, ...reasoning ? { reasoning } : {} }],
-        live: { ...sealText(live, text2), bubbleId: null, reasoning: "", toolsId: null, streamed: true }
+        items: [...state.items, { kind: "assistant", id: liveId("a"), text: text3, at: now, ...reasoning ? { reasoning } : {} }],
+        live: { ...sealText(live, text3), bubbleId: null, reasoning: "", toolsId: null, streamed: true }
       };
     }
     case "tool.generating": {
@@ -16065,9 +16192,9 @@ function applyEvent(state, event, now = Date.now()) {
       };
     }
     case "status.update": {
-      const text2 = typeof payload.text === "string" ? payload.text.trim() : "";
-      if (!text2) return state;
-      return { ...state, status: { kind: String(payload.kind || "status"), text: text2 } };
+      const text3 = typeof payload.text === "string" ? payload.text.trim() : "";
+      if (!text3) return state;
+      return { ...state, status: { kind: String(payload.kind || "status"), text: text3 } };
     }
     case "message.complete": {
       const final = typeof payload.text === "string" ? payload.text.trim() : "";
@@ -16162,13 +16289,13 @@ function isUserTurn(row) {
 }
 function retryText(content) {
   const parts = typeof content === "string" ? [content] : Array.isArray(content) ? content : [null];
-  let text2 = "";
+  let text3 = "";
   for (const part of parts) {
-    if (typeof part === "string") text2 += part;
-    else if (part && typeof part === "object" && TEXT_PARTS.has(part.type) && typeof part.text === "string" && Object.keys(part).length === 2) text2 += part.text;
+    if (typeof part === "string") text3 += part;
+    else if (part && typeof part === "object" && TEXT_PARTS.has(part.type) && typeof part.text === "string" && Object.keys(part).length === 2) text3 += part.text;
     else return null;
   }
-  return text2.trim() ? text2 : "";
+  return text3.trim() ? text3 : "";
 }
 function userTurnFromEnd(rows, turnsBack) {
   const turns = (Array.isArray(rows) ? rows : []).filter(isUserTurn);
@@ -16291,8 +16418,8 @@ var DESKTOP_ONLY = /* @__PURE__ */ new Set([
   "bg",
   "background"
 ]);
-function parseSlash(text2) {
-  const match = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(String(text2 || "").trim());
+function parseSlash(text3) {
+  const match = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(String(text3 || "").trim());
   if (!match) return null;
   const raw = match[1].toLowerCase();
   const name = ALIASES[raw] || raw;
@@ -16798,12 +16925,12 @@ function createChatController(bot, deps, options = {}) {
         bubbleId = `inflight:${now()}`;
         items = [...items, { kind: "assistant", id: bubbleId, text: whole, at: now(), streaming: true }];
       } else if (whole && replaceText) {
-        const text2 = unshownTurnText(whole, chat.live.sealed);
-        if (text2 && bubbleId) {
-          items = items.map((item) => item.id === bubbleId ? { ...item, text: text2, streaming: true } : item);
-        } else if (text2) {
+        const text3 = unshownTurnText(whole, chat.live.sealed);
+        if (text3 && bubbleId) {
+          items = items.map((item) => item.id === bubbleId ? { ...item, text: text3, streaming: true } : item);
+        } else if (text3) {
           bubbleId = `inflight:${now()}`;
-          items = [...items, { kind: "assistant", id: bubbleId, text: text2, at: now(), streaming: true }];
+          items = [...items, { kind: "assistant", id: bubbleId, text: text3, at: now(), streaming: true }];
         }
       }
       if (initial && inflight?.status === "error" && inflight.error && !running) {
@@ -17112,10 +17239,10 @@ function createChatController(bot, deps, options = {}) {
     patchWaiting(waiting, { picks: { ...waiting.picks || {}, [qid]: value } });
     return true;
   }
-  async function answerClarifyText(text2) {
+  async function answerClarifyText(text3) {
     const waiting = state.chat.waiting;
     if (!waiting || waiting.kind !== "clarify" || waiting.answering) return { ok: false, error: "No question is waiting for an answer" };
-    const { picks, complete } = clarifyTextAnswer(waiting, text2);
+    const { picks, complete } = clarifyTextAnswer(waiting, text3);
     if (!complete) {
       patchWaiting(waiting, { picks: { ...waiting.picks || {}, ...picks } });
       return { ok: true, status: "picked" };
@@ -17177,8 +17304,8 @@ function createChatController(bot, deps, options = {}) {
     } catch {
     }
   }
-  async function runSlash(text2, depth = 0) {
-    const parsed2 = parseSlash(text2);
+  async function runSlash(text3, depth = 0) {
+    const parsed2 = parseSlash(text3);
     if (!parsed2) return { ok: false };
     const surface = slashSurface(parsed2);
     const id = `cmd:${now()}:${Math.random().toString(36).slice(2, 7)}`;
@@ -17331,9 +17458,9 @@ ${body}` : body);
     const sent = await sendDraft(display, [], { submitText: message, ...state.chat.busy ? { extra: { queued: true } } : {} });
     return { ok: sent.ok };
   }
-  async function completeSlash(text2) {
+  async function completeSlash(text3) {
     try {
-      const params = state.runtimeId ? { text: text2, session_id: state.runtimeId } : { text: text2, profile: String(bot?.name || "default") };
+      const params = state.runtimeId ? { text: text3, session_id: state.runtimeId } : { text: text3, profile: String(bot?.name || "default") };
       const res = await deps.requestForBot(bot, "complete.slash", params);
       return { items: Array.isArray(res?.items) ? res.items : [], replaceFrom: Number.isFinite(res?.replace_from) ? res.replace_from : 0 };
     } catch {
@@ -17375,18 +17502,18 @@ ${body}` : body);
       return { rows: cutRewoundRows(s.rows, rowId2), chat: { ...s.chat, items: s.chat.items.slice(0, at) } };
     });
   }
-  async function resubmitFrom(target, text2, files = []) {
+  async function resubmitFrom(target, text3, files = []) {
     if (!target?.rowId || target.kind !== "user") return { ok: false, delivery: "not-sent", error: "This message is not saved yet" };
     if (state.chat.busy) return { ok: false, delivery: "not-sent", error: "Wait for the reply to finish" };
     const extra = truncationFor(target);
     cutFrom(target.id);
-    const result = await sendDraft(text2, files, { extra });
+    const result = await sendDraft(text3, files, { extra });
     if (!result.ok && result.delivery === "not-sent") void refresh();
     return result;
   }
-  async function editMessage(itemId, text2) {
+  async function editMessage(itemId, text3) {
     const target = state.chat.items.find((item) => item.id === itemId);
-    const clean = String(text2 || "").trim();
+    const clean = String(text3 || "").trim();
     if (!clean) return { ok: false, delivery: "not-sent", error: "Nothing to send" };
     return resubmitFrom(target, clean);
   }
@@ -17422,9 +17549,9 @@ ${body}` : body);
           const target = userTurnFromEnd(snapshot?.messages, turnsBack);
           if (!target) return { served: true, ok: false, nothing: true };
           if (intent === "retry") {
-            const text2 = retryText(target.content);
-            if (text2 === null) return { served: true, ok: false, error: "This turn carries media or annotations, so it cannot be retried from here." };
-            if (!text2) return { served: true, ok: false, nothing: true };
+            const text3 = retryText(target.content);
+            if (text3 === null) return { served: true, ok: false, error: "This turn carries media or annotations, so it cannot be retried from here." };
+            if (!text3) return { served: true, ok: false, nothing: true };
           }
           receipt = await rewind({ target_message_id: target.row_id, derived_target: true });
           cutRow = target.row_id;
@@ -17458,16 +17585,16 @@ ${body}` : body);
     }
     if (intent === "undo") {
       show(`↶ Undid ${res.count === 1 ? "1 message" : `${res.count} messages`}. Edit and resend, or send something new.`);
-      const text3 = rewoundText(res.content);
-      return { ok: true, ...text3.trim() ? { prefill: text3 } : {} };
+      const text4 = rewoundText(res.content);
+      return { ok: true, ...text4.trim() ? { prefill: text4 } : {} };
     }
-    const text2 = retryText(res.content);
-    if (!text2) {
+    const text3 = retryText(res.content);
+    if (!text3) {
       show("Nothing to retry.");
       return { ok: false };
     }
     removeItem(id);
-    const sent = await sendDraft(text2, []);
+    const sent = await sendDraft(text3, []);
     return { ok: sent.ok };
   }
   async function rewindTo(itemId) {
@@ -17488,8 +17615,8 @@ ${body}` : body);
         return { ok: false, error: res.error || "Nothing was rewound" };
       }
       show(`↶ Rewound ${res.count === 1 ? "1 message" : `${res.count} messages`}; the message is back in the composer.`);
-      const text2 = rewoundText(res.content);
-      return { ok: true, prefill: text2.trim() ? text2 : target.text };
+      const text3 = rewoundText(res.content);
+      return { ok: true, prefill: text3.trim() ? text3 : target.text };
     }
     const result = await execSlash(parseSlash(`/undo ${turns}`), id, show, 0);
     void refresh();
@@ -17611,7 +17738,7 @@ ${body}` : body);
       await detachEntry(runtimeId, key, entry, { strict: false });
     }
   }
-  async function submitOnce(runtimeId, text2, attachments, mark, payload, { exact = false, extra = {} } = {}) {
+  async function submitOnce(runtimeId, text3, attachments, mark, payload, { exact = false, extra = {} } = {}) {
     let params;
     if (exact && payload.params) {
       params = { ...payload.params, session_id: runtimeId };
@@ -17620,7 +17747,7 @@ ${body}` : body);
       mark("stage");
       await detachStrays(runtimeId, new Set(attachments.map((file) => String(file?.id || ""))));
       const { refs, images } = attachments.length ? await stageAttachments(runtimeId, attachments) : { refs: [], images: [] };
-      const body = refs.length ? `${text2}${text2 ? "\n\n" : ""}${refs.join("\n")}` : text2;
+      const body = refs.length ? `${text3}${text3 ? "\n\n" : ""}${refs.join("\n")}` : text3;
       if (disposed) throw new Error("This chat was closed");
       params = {
         session_id: runtimeId,
@@ -17663,8 +17790,8 @@ ${body}` : body);
       else inFlightFiles.delete(id);
     }
   };
-  async function sendDraft(text2, attachments = [], sendOptions = {}) {
-    const clean = String(text2 || "").trim();
+  async function sendDraft(text3, attachments = [], sendOptions = {}) {
+    const clean = String(text3 || "").trim();
     const files = Array.isArray(attachments) ? attachments : [];
     if (!clean && !files.length || !state.storedId) return { ok: false, delivery: "not-sent", error: "Nothing to send" };
     const owner = draftOwnerKey(bot);
@@ -17789,11 +17916,11 @@ ${body}` : body);
     void refresh();
     return { ok: true, delivery: "sent", clientId, receipt: status };
   }
-  async function send(text2, attachments = []) {
-    return (await sendDraft(text2, attachments)).ok;
+  async function send(text3, attachments = []) {
+    return (await sendDraft(text3, attachments)).ok;
   }
-  async function sendIntent(text2) {
-    const clean = String(text2 || "").trim();
+  async function sendIntent(text3) {
+    const clean = String(text3 || "").trim();
     if (!clean) return { ok: false, error: "Nothing to send" };
     if (clean.length > 500) return { ok: false, error: "Too long" };
     if (!state.storedId || disposed) return { ok: false, error: "This chat is closed" };
@@ -18258,10 +18385,15 @@ function withoutPinned(rows, state, keyOf) {
 }
 
 // src/core/workRows.js
-var SHOW_WORK_PLUGIN = "bubble-mode";
 var SHOW_WORK_KEY = "showWork";
+var LEGACY_SHOW_WORK_PLUGIN = "bubble-mode";
+var LEGACY_SHOW_WORK_KEY = "showWork";
 function showWorkFrom(value) {
   return value === true;
+}
+function loadShowWork(stored, legacy) {
+  if (typeof stored === "boolean") return { value: stored, write: false };
+  return { value: showWorkFrom(legacy), write: true };
 }
 function visibleItems(items, showWork) {
   const list = Array.isArray(items) ? items : [];
@@ -18535,8 +18667,8 @@ function roomItems(events, members) {
     const id = `room:${event?.seq ?? event?.event_id}`;
     if (MESSAGE_KINDS.has(event?.kind)) {
       const member = event?.actor?.kind === "member";
-      const text2 = String(payload.text || payload.content || "");
-      const own = !member && event?.actor?.id === "desktop" && !event?.actor?.display_name;
+      const text3 = String(payload.text || payload.content || "");
+      const own2 = !member && event?.actor?.id === "desktop" && !event?.actor?.display_name;
       const scheduled = !member && /^cron(-notice)?:/.test(String(event?.actor?.id || ""));
       out.push({
         kind: member ? "room-member" : "room-user",
@@ -18544,8 +18676,8 @@ function roomItems(events, members) {
         seq: event.seq,
         eventId: event.event_id,
         at,
-        text: text2,
-        author: member ? String(event?.actor?.display_name || nameOf2(event?.actor?.id)) : own ? "You" : String(event?.actor?.display_name || event?.actor?.id || "Someone"),
+        text: text3,
+        author: member ? String(event?.actor?.display_name || nameOf2(event?.actor?.id)) : own2 ? "You" : String(event?.actor?.display_name || event?.actor?.id || "Someone"),
         memberId: member ? String(event?.actor?.id || "") : "",
         profile: member ? String(roster.get(String(event?.actor?.id || ""))?.profile || event?.actor?.id || "") : "",
         scheduled,
@@ -18652,8 +18784,8 @@ function createRoomController(route, roomId, deps) {
       schedule();
     }, ROOM_POLL_MS);
   }
-  async function post(text2, { thread } = {}) {
-    const clean = String(text2 || "").trim();
+  async function post(text3, { thread } = {}) {
+    const clean = String(text3 || "").trim();
     if (!clean) return { ok: false, posted: "no" };
     const eventId = uuid();
     const entry = { eventId, text: clean, params: { room_id: roomId, event_id: eventId, payload: { text: clean, thread_id: thread || eventId } }, status: "sending", at: Date.now() };
@@ -18782,12 +18914,12 @@ function blobatarMarkup(seed, size, trait) {
   }
 }
 var MARKDOWN_SAFE_PROPS = Object.freeze({ media: false, previewOnly: true });
-function Markdown({ text: text2 }) {
+function Markdown({ text: text3 }) {
   const Component2 = sdk.MessageTextContent;
   if (typeof Component2 === "function" || Component2 && typeof Component2 === "object") {
-    return React.createElement(Component2, { text: text2, ...MARKDOWN_SAFE_PROPS });
+    return React.createElement(Component2, { text: text3, ...MARKDOWN_SAFE_PROPS });
   }
-  return React.createElement("div", { className: "gbo-plain" }, text2);
+  return React.createElement("div", { className: "gbo-plain" }, text3);
 }
 function readPluginStorage(pluginId, key, fallback) {
   try {
@@ -18954,14 +19086,14 @@ function attentionReasonFromError(errorTextOrReason) {
   const raw = String(errorTextOrReason || "").trim();
   if (!raw) return null;
   if (CLASSES.has(raw)) return raw;
-  const text2 = raw.toLowerCase();
-  if (/rate.?limit|too many requests|\b429\b|\b5\d\d\b|server error|overloaded|timed?.?out|timeout|temporar/.test(text2)) return null;
-  if (/no llm provider|no access token|not configured|no api key|missing api key/.test(text2)) return "missing_config";
-  if (/\b401\b|\b403\b|unauthorized|forbidden|authentication|invalid.?api.?key|credentials? (are )?(invalid|expired)/.test(text2)) {
+  const text3 = raw.toLowerCase();
+  if (/rate.?limit|too many requests|\b429\b|\b5\d\d\b|server error|overloaded|timed?.?out|timeout|temporar/.test(text3)) return null;
+  if (/no llm provider|no access token|not configured|no api key|missing api key/.test(text3)) return "missing_config";
+  if (/\b401\b|\b403\b|unauthorized|forbidden|authentication|invalid.?api.?key|credentials? (are )?(invalid|expired)/.test(text3)) {
     return "provider_auth_or_access";
   }
-  if (/quota|out of funds|insufficient (credits?|funds|balance)|payment required|\b402\b|billing/.test(text2)) return "provider_quota_limit";
-  if (/\bblocked\b/.test(text2)) return "agent_blocked";
+  if (/quota|out of funds|insufficient (credits?|funds|balance)|payment required|\b402\b|billing/.test(text3)) return "provider_quota_limit";
+  if (/\bblocked\b/.test(text3)) return "agent_blocked";
   return null;
 }
 function noteAttention(map, key, errorTextOrReason, now = Date.now()) {
@@ -18981,8 +19113,8 @@ function attentionFromEvent(event) {
   if (type === "message.complete") {
     const failed = payload.status === "error" || Boolean(payload.error);
     if (failed) return { kind: "fail", text: payload.reason || payload.failure_reason || payload.error || "error" };
-    const text2 = String(payload.text ?? payload.content ?? payload.final ?? "").trim();
-    return text2 || payload.status === "complete" || payload.status === "done" ? { kind: "ok" } : null;
+    const text3 = String(payload.text ?? payload.content ?? payload.final ?? "").trim();
+    return text3 || payload.status === "complete" || payload.status === "done" ? { kind: "ok" } : null;
   }
   if (type === "error") return { kind: "fail", text: payload.reason || payload.message || payload.error || "" };
   return null;
@@ -18995,8 +19127,8 @@ function attentionFromRoomEvent(event, members) {
     return String(m?.profile || id || "").trim();
   };
   if (kind === "turn.failed" && payload.member_id) {
-    const text2 = payload.reason_code || payload.reason || payload.error || "";
-    return { kind: "fail", profile: profileOf(payload.member_id), text: String(text2) };
+    const text3 = payload.reason_code || payload.reason || payload.error || "";
+    return { kind: "fail", profile: profileOf(payload.member_id), text: String(text3) };
   }
   if ((kind === "message" || kind === "message.member") && event?.actor?.kind === "member" && event?.actor?.id) {
     const body = String(payload.text ?? payload.content ?? "").trim();
@@ -19288,7 +19420,7 @@ function toggleEntry(state, kind, name, enabled) {
   const dirtyKey = { skills: "dirtySkills", toolsets: "dirtyToolsets", mcp: "dirtyMcp" }[kind];
   return { ...state, [dirtyKey]: true, [kind]: (state[kind] || []).map((x) => x.name === name ? { ...x, enabled } : x) };
 }
-function advancedPayload(bot, state, ensureSoul = (text2) => text2) {
+function advancedPayload(bot, state, ensureSoul = (text3) => text3) {
   const payload = { name: bot.name };
   let clearModel = false;
   let modelInvalid = false;
@@ -19445,10 +19577,10 @@ function hasMessagingProtocol(soul) {
   return /(^|\n)## Messaging other agents(\s|$)/.test(soul || "");
 }
 function ensureMessagingProtocol(soul, name, roster, injected = false) {
-  const text2 = String(soul || "").trim();
-  if (injected || hasMessagingProtocol(text2)) return text2;
+  const text3 = String(soul || "").trim();
+  if (injected || hasMessagingProtocol(text3)) return text3;
   const section = messagingProtocolSection(name, roster);
-  return text2 ? text2 + "\n\n" + section : section;
+  return text3 ? text3 + "\n\n" + section : section;
 }
 function composeSoul({ name, title, description, roster, customSoul, injected = false }) {
   if (customSoul && String(customSoul).trim()) return ensureMessagingProtocol(customSoul, name, roster, injected);
@@ -19509,8 +19641,8 @@ function editedLook(opened, current) {
   if (String(current.title || "").trim() !== String(opened.title || "").trim()) patch.title = String(current.title || "").trim();
   return Object.keys(patch).length > 0 ? patch : null;
 }
-function describeArgv(bot, text2) {
-  return ["profile", "describe", String(bot?.name || ""), "--text", String(text2 || "")];
+function describeArgv(bot, text3) {
+  return ["profile", "describe", String(bot?.name || ""), "--text", String(text3 || "")];
 }
 function duplicateName(bot, roster) {
   const base4 = String(bot?.name || "");
@@ -19767,7 +19899,11 @@ var roster2 = {
   /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
    *  the first unread bot message (null: none; absent: not decided), and the
    *  per-bot seen watermark (ms; plugin storage `seenAt`). */
-  newLine: createStore({ markers: {}, seen: {} })
+  newLine: createStore({ markers: {}, seen: {} }),
+  /** The roster's own sections: the inline name field that is open (a new
+   *  section, or renaming one), and the delete waiting for a confirm. */
+  sectionEdit: createStore(null),
+  sectionDelete: createStore(null)
 };
 function openDialog(state) {
   roster2.dialog.set(state);
@@ -20001,7 +20137,7 @@ async function saveAdvanced(bot, state) {
     }
   }
   const res = await applyAdvancedConfig(request, bot, state, {
-    ensureSoul: (text2) => ensureMessagingProtocol(text2, bot.name, rows, injected),
+    ensureSoul: (text3) => ensureMessagingProtocol(text3, bot.name, rows, injected),
     confirm: confirmAsker || void 0
   });
   invalidateRoster();
@@ -20966,24 +21102,24 @@ var ROOT = "[data-gbo-root]";
 var DARK_ROOT = '.dark [data-gbo-root], [data-gbo-root][data-gbo-theme="dark"]';
 var KEYFRAMES = ["rise", "breathe", "shimmer", "bob", "slideIn"];
 var ZOOM = 0.896;
-function splitTop(text2, sep) {
+function splitTop(text3, sep) {
   const out = [];
   let depth = 0;
   let quote = "";
   let start2 = 0;
-  for (let i = 0; i < text2.length; i += 1) {
-    const c2 = text2[i];
+  for (let i = 0; i < text3.length; i += 1) {
+    const c2 = text3[i];
     if (quote) {
       if (c2 === quote) quote = "";
     } else if (c2 === '"' || c2 === "'") quote = c2;
     else if (c2 === "(" || c2 === "[") depth += 1;
     else if (c2 === ")" || c2 === "]") depth -= 1;
     else if (c2 === sep && depth === 0) {
-      out.push(text2.slice(start2, i));
+      out.push(text3.slice(start2, i));
       start2 = i + 1;
     }
   }
-  out.push(text2.slice(start2));
+  out.push(text3.slice(start2));
   return out;
 }
 function scopeSelector(raw) {
@@ -21016,21 +21152,21 @@ function adaptBlock(block) {
   return block.replace(/var\(--bot-on-action, #FFFFFF\)/g, "var(--gbo-tint-fg, var(--g-color-on-primary))").replace(/--bot-bubble\b/g, "--gbo-tint-bg").replace(/--bot-action-hover\b/g, "--gbo-action-hover").replace(/--bot-action\b/g, "--gbo-action").replace(/--bot-on-action\b/g, "--gbo-tint-fg").replace(/--(?!gbo-|g-|paragraph-gap\b|conversation-text-font-size\b|dt-line-height\b)([a-z][\w-]*)/g, "--g-$1").replace(/(animation:[^;]*)/g, (decl) => decl.replace(new RegExp(`\\b(${KEYFRAMES.join("|")})\\b`, "g"), "gbo-ref-$1")).replace(/(?<![\w.#-])(-?\d*\.?\d+)px\b/g, (_m, v) => px(v));
 }
 function refCss(css) {
-  const text2 = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const text3 = css.replace(/\/\*[\s\S]*?\*\//g, "");
   let out = "";
   let i = 0;
-  while (i < text2.length) {
-    const open = text2.indexOf("{", i);
+  while (i < text3.length) {
+    const open = text3.indexOf("{", i);
     if (open < 0) break;
-    const prelude = text2.slice(i, open).trim();
+    const prelude = text3.slice(i, open).trim();
     let depth = 1;
     let j = open + 1;
-    while (j < text2.length && depth) {
-      if (text2[j] === "{") depth += 1;
-      else if (text2[j] === "}") depth -= 1;
+    while (j < text3.length && depth) {
+      if (text3[j] === "{") depth += 1;
+      else if (text3[j] === "}") depth -= 1;
       j += 1;
     }
-    const inner = text2.slice(open + 1, j - 1);
+    const inner = text3.slice(open + 1, j - 1);
     if (prelude.startsWith("@keyframes")) {
       const name = prelude.slice("@keyframes".length).trim();
       out += `@keyframes gbo-ref-${name} {${adaptBlock(inner)}}
@@ -21117,6 +21253,12 @@ var ADAPT_SRC = (
 .gbo-section-head:disabled { cursor: default; }
 .gbo-section-head.is-rooms { padding-right: 4px; }
 .gbo-section-head.is-rooms .icon-btn--plain { width: 22px; height: 22px; }
+.gbo-section-edit { padding: 10px 4px 4px; }
+.gbo-section-input {
+  width: 100%; height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--color-border-focus);
+  background: transparent; color: var(--color-ink); font-size: 13px; line-height: 18px; outline: none;
+}
+.gbo-section-input::placeholder { color: var(--color-text-quaternary); }
 
 .bot-row { color: inherit; text-align: left; }
 .bot-row:hover { background: var(--color-row-hover); }
@@ -22154,7 +22296,7 @@ var WORKSPACE_ID = "grokbot-override";
 var ROSTER_TICK_MS = 3e3;
 var OWN_FETCH_MIN_MS = 15e3;
 var OWN_VERIFY_MS = 6e4;
-var DEFAULT_ON = true ? true : true;
+var DEFAULT_ON = true;
 var app = {
   ctx: null,
   enabled: createStore(false),
@@ -22164,11 +22306,13 @@ var app = {
     origin: "none",
     error: null,
     updatedAt: 0,
-    localMeta: {},
-    kitSections: null
+    localMeta: {}
   }),
   query: createStore(""),
+  // Collapsed default sections (by name); the own sections keep theirs.
   collapsed: createStore([]),
+  // The roster's own sections, in the override's plugin storage.
+  sections: createStore(emptySections()),
   selectedKey: createStore(""),
   panelOpen: createStore(true),
   // The profile panel's width (core/panelWidth.js), dragged from its hairline.
@@ -22190,7 +22334,7 @@ var app = {
   rooms: createStore({ route: null, rooms: [], error: null, loaded: false }),
   computerViewer: createStore({ present: false, visible: false }),
   // Thought and tool rows in the Bot Chat (core/workRows.js): hidden unless
-  // Bubble Mode's "toggle work rows" preference says to show them.
+  // the override's "show work rows" setting is on.
   showWork: createStore(false),
   // Bots pinned to the top of the sidebar (core/pins.js): route keys in pin
   // order, kept in the override's own plugin storage.
@@ -22262,11 +22406,7 @@ function activeConnectionId() {
 }
 function readSideData() {
   const localMeta = readPluginStorage("hermes-bots", "bot-meta-v2", {}) || {};
-  const kitEnabled = readPluginStorage("bot-sections", "enabled", true) !== false;
-  const custom = readPluginStorage("bot-sections", "customSections", []);
-  const overrides = readPluginStorage("bot-sections", "sectionOverrides", {});
-  const kitSections = kitEnabled && (Array.isArray(custom) || overrides && typeof overrides === "object") ? { custom: Array.isArray(custom) ? custom : [], overrides: overrides && typeof overrides === "object" ? overrides : {} } : null;
-  return { localMeta: localMeta && typeof localMeta === "object" ? localMeta : {}, kitSections };
+  return { localMeta: localMeta && typeof localMeta === "object" ? localMeta : {} };
 }
 async function fetchOwnRoster() {
   if (ownFetchInFlight) return;
@@ -22333,9 +22473,9 @@ function ackBot(bot) {
 function refreshRoster() {
   const side = readSideData();
   const cached2 = readStockRoster(queryClient2(), activeConnectionId());
-  const own = app.roster.get();
-  if (cached2 && cached2.profiles.length && !(own.origin === "own" && own.updatedAt > cached2.updatedAt)) {
-    const sources = cached2.sources.length ? cached2.sources : own.sources;
+  const own2 = app.roster.get();
+  if (cached2 && cached2.profiles.length && !(own2.origin === "own" && own2.updatedAt > cached2.updatedAt)) {
+    const sources = cached2.sources.length ? cached2.sources : own2.sources;
     app.roster.set((s) => ({
       ...s,
       ...side,
@@ -22365,7 +22505,7 @@ function reloadRoster() {
 }
 function sections() {
   const r = app.roster.get();
-  return buildSections(r.rows, { metaFor, kitSections: r.kitSections, query: app.query.get() });
+  return buildSections(r.rows, { metaFor, sections: app.sections.get(), query: app.query.get() });
 }
 function findBot(key) {
   if (!key) return null;
@@ -23007,7 +23147,6 @@ function enable() {
   const tick = () => {
     rosterTimer = setTimer(() => {
       refreshRoster();
-      refreshShowWork();
       tick();
     }, ROSTER_TICK_MS);
   };
@@ -23069,9 +23208,18 @@ function setEnabled(value) {
   if (next) enable();
   else disable();
 }
-function refreshShowWork() {
-  const next = showWorkFrom(readPluginStorage(SHOW_WORK_PLUGIN, SHOW_WORK_KEY, false));
-  if (next !== app.showWork.get()) app.showWork.set(next);
+function startShowWork() {
+  const { value, write } = loadShowWork(
+    storageGet(SHOW_WORK_KEY, void 0),
+    readPluginStorage(LEGACY_SHOW_WORK_PLUGIN, LEGACY_SHOW_WORK_KEY, false)
+  );
+  app.showWork.set(value);
+  if (write) storageSet2(SHOW_WORK_KEY, value);
+}
+function setShowWork(value) {
+  const next = Boolean(value);
+  app.showWork.set(next);
+  storageSet2(SHOW_WORK_KEY, next);
 }
 function isPinnedTop(bot) {
   return pinState(app.pinnedBots.get(), app.roster.get().rows, rowKey).shown.some((row) => rowKey(row) === rowKey(bot));
@@ -23096,7 +23244,8 @@ function toggleTopPin(bot) {
 function start(ctx) {
   app.ctx = ctx;
   app.pinnedBots.set(pinsFrom(storageGet(PINS_KEY, [])));
-  refreshShowWork();
+  startSections();
+  startShowWork();
   requestForBot = createBotRequester(host2, { activeConnectionId });
   app.selectedKey.set(String(storageGet("selected", "") || ""));
   app.panelOpen.set(storageGet("panelOpen", true) !== false);
@@ -23196,6 +23345,66 @@ function startPanelResize(startX, workspaceWidth) {
 function resetPanelWidth() {
   app.panelWidth.set(PANEL_WIDTH.default);
   storageSet2(PANEL_WIDTH_KEY, PANEL_WIDTH.default);
+}
+function applySections(stored) {
+  const { state, write } = loadSections({
+    stored,
+    readLegacy: (key, fallback) => readPluginStorage(LEGACY_SECTIONS_PLUGIN, key, fallback),
+    collapsedHere: storageGet("collapsed", [])
+  });
+  app.sections.set(state);
+  if (write) storageSet2(SECTIONS_KEY, state);
+}
+function startSections() {
+  try {
+    const stored = app.ctx?.storage?.get?.(SECTIONS_KEY, void 0);
+    if (stored && typeof stored.then === "function") {
+      ;
+      stored.then(applySections, () => void 0);
+      return;
+    }
+    applySections(stored);
+  } catch {
+  }
+}
+function updateSections(fn) {
+  const current = app.sections.get();
+  const next = fn(current);
+  if (next === current) return;
+  app.sections.set(next);
+  storageSet2(SECTIONS_KEY, next);
+}
+function createSection(name) {
+  let id = "";
+  updateSections((state) => {
+    const result = addSection(state, name);
+    id = result.id;
+    return result.state;
+  });
+  return id;
+}
+function renameOwnSection(id, name) {
+  updateSections((state) => renameSection(state, id, name));
+}
+function deleteOwnSection(id) {
+  updateSections((state) => deleteSection(state, id));
+}
+function moveOwnSection(id, delta) {
+  updateSections((state) => moveSection(state, id, delta));
+}
+function toggleOwnSection(id) {
+  updateSections((state) => toggleSectionCollapsed(state, id));
+}
+function moveBotToSection(bot, id) {
+  if (!bot) return;
+  updateSections((state) => assignBot(state, rowKey(bot), id));
+}
+function botSectionId(bot) {
+  return ownSectionOf(bot, app.sections.get(), metaFor);
+}
+function botsInSection(id) {
+  const state = app.sections.get();
+  return app.roster.get().rows.filter((bot) => !bot?.ghost && ownSectionOf(bot, state, metaFor) === id).length;
 }
 function toggleSection(name) {
   app.collapsed.set((list) => {
@@ -23382,13 +23591,13 @@ function hslToRgb(h, s, l) {
   return [f2(0), f2(8), f2(4)].map((v) => Math.round(v * 255));
 }
 function parseColor(value) {
-  const text2 = String(value ?? "").trim().toLowerCase();
-  const hex = text2.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/);
+  const text3 = String(value ?? "").trim().toLowerCase();
+  const hex = text3.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/);
   if (hex) {
     const c2 = expandHex(hex[1]).slice(0, 6);
     return [0, 2, 4].map((offset) => Number.parseInt(c2.substring(offset, offset + 2), 16));
   }
-  const fn = text2.match(/^(rgba?|hsla?)\(([^)]*)\)$/);
+  const fn = text3.match(/^(rgba?|hsla?)\(([^)]*)\)$/);
   if (!fn) return null;
   const parts = fn[2].split(/[\s,/]+/).filter(Boolean);
   if (parts.length < 3) return null;
@@ -23798,8 +24007,8 @@ function formsFor(bot) {
   }
   return forms;
 }
-function mentionedBots(text2, roster, openBot) {
-  const prose = String(text2 || "").replace(/```[\s\S]*?```/g, " ").replace(/`[^`\n]*`/g, " ");
+function mentionedBots(text3, roster, openBot) {
+  const prose = String(text3 || "").replace(/```[\s\S]*?```/g, " ").replace(/`[^`\n]*`/g, " ");
   if (!/(^|\s)@[a-z0-9]/i.test(prose)) return [];
   const openKey = openBot ? rowKey(openBot) : "";
   const byForm = /* @__PURE__ */ new Map();
@@ -24041,8 +24250,8 @@ function readDataUrl(file, signal) {
     reader.readAsDataURL(file);
   });
 }
-function completionToken(text2, caret) {
-  const before = text2.slice(0, caret);
+function completionToken(text3, caret) {
+  const before = text3.slice(0, caret);
   const slash = /^\/([^\s/]*)$/.exec(before);
   if (slash) return { kind: "/", query: slash[1], from: 0 };
   const at = /(^|\s)@([a-z0-9_-]*)$/i.exec(before);
@@ -24104,7 +24313,7 @@ function Composer({
   answering = false,
   onAnswer
 }) {
-  const [text2, setText] = React5.useState("");
+  const [text3, setText] = React5.useState("");
   const [files, setFiles] = React5.useState([]);
   const [note, setNote] = React5.useState("");
   const [options, setOptions] = React5.useState([]);
@@ -24115,8 +24324,8 @@ function Composer({
   const owner = draftOwnerKey(bot);
   const ownerRef = React5.useRef(owner);
   ownerRef.current = owner;
-  const textRef = React5.useRef(text2);
-  textRef.current = text2;
+  const textRef = React5.useRef(text3);
+  textRef.current = text3;
   const filesRef = React5.useRef(files);
   filesRef.current = files;
   const reads = React5.useRef(/* @__PURE__ */ new Set());
@@ -24157,9 +24366,9 @@ ${value}`);
     el.style.height = "0px";
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_H)}px`;
     el.style.overflowY = el.scrollHeight > COMPOSER_MAX_H ? "auto" : "hidden";
-  }, [text2]);
+  }, [text3]);
   React5.useEffect(() => {
-    const token = completionToken(text2, caret);
+    const token = completionToken(text3, caret);
     const seq = ++completionSeq.current;
     if (!token) {
       setOptions((current) => current.length ? [] : current);
@@ -24174,7 +24383,7 @@ ${value}`);
     const complete = completeRef.current;
     if (!complete) return void 0;
     const timer = setTimeout(() => {
-      void complete(text2.slice(0, caret)).then((res) => {
+      void complete(text3.slice(0, caret)).then((res) => {
         if (seq !== completionSeq.current) return;
         setOptions(
           (res.items || []).slice(0, 12).map((item) => ({
@@ -24188,10 +24397,10 @@ ${value}`);
       });
     }, 120);
     return () => clearTimeout(timer);
-  }, [text2, caret, roster, bot]);
+  }, [text3, caret, roster, bot]);
   const pick = (option) => {
-    const before = text2.slice(0, option.from);
-    const after = text2.slice(caret);
+    const before = text3.slice(0, option.from);
+    const after = text3.slice(caret);
     const insert = option.insert.endsWith(" ") ? option.insert : `${option.insert} `;
     const next = `${before}${insert}${after.replace(/^\S*/, "")}`;
     setText(next);
@@ -24206,12 +24415,12 @@ ${value}`);
       }
     });
   };
-  const slash = text2.trimStart().startsWith("/");
-  const mentions = React5.useMemo(() => slash ? [] : mentionedBots(text2, roster, bot), [text2, roster, bot, slash]);
-  const canSend = !disabled && !blocked && (text2.trim().length > 0 || files.length > 0);
+  const slash = text3.trimStart().startsWith("/");
+  const mentions = React5.useMemo(() => slash ? [] : mentionedBots(text3, roster, bot), [text3, roster, bot, slash]);
+  const canSend = !disabled && !blocked && (text3.trim().length > 0 || files.length > 0);
   const submit = async () => {
     if (!canSend) return;
-    const sending = text2;
+    const sending = text3;
     const sentOwner = owner;
     if (slash && !files.length) {
       setText("");
@@ -24302,7 +24511,7 @@ ${value}`);
         void addFiles(event.dataTransfer.files);
       },
       children: [
-        open ? /* @__PURE__ */ jsx5("div", { className: "gbo-popover", role: "listbox", "aria-label": text2.startsWith("/") ? "Commands" : "Bots", children: options.map((option, i) => /* @__PURE__ */ jsxs4(
+        open ? /* @__PURE__ */ jsx5("div", { className: "gbo-popover", role: "listbox", "aria-label": text3.startsWith("/") ? "Commands" : "Bots", children: options.map((option, i) => /* @__PURE__ */ jsxs4(
           "button",
           {
             type: "button",
@@ -24368,7 +24577,7 @@ ${value}`);
                 ref: inputRef,
                 className: "composer__input",
                 rows: 1,
-                value: text2,
+                value: text3,
                 disabled,
                 placeholder: answering ? ANSWER_PLACEHOLDER : `Message ${name}`,
                 "aria-label": answering ? `Answer ${name}` : `Message ${name}`,
@@ -24485,6 +24694,7 @@ var IconSettings = () => /* @__PURE__ */ jsxs5("svg", { ...base2, children: [
   /* @__PURE__ */ jsx6("path", { d: "M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" })
 ] });
 var IconCheck = () => /* @__PURE__ */ jsx6("svg", { ...base2, strokeWidth: 2.2, children: /* @__PURE__ */ jsx6("path", { d: "m5 12.5 4.5 4.5L19 7.5" }) });
+var IconFolder = () => /* @__PURE__ */ jsx6("svg", { ...base2, children: /* @__PURE__ */ jsx6("path", { d: "M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" }) });
 
 // src/ui/kit.tsx
 import { Fragment as Fragment2, jsx as jsx7, jsxs as jsxs6 } from "react/jsx-runtime";
@@ -24602,10 +24812,10 @@ function Check({ checked, onChange, children, meta, disabled, title }) {
   ] });
 }
 function Select({ value, onChange, options, label, disabled }) {
-  return /* @__PURE__ */ jsx7("select", { className: "gbo-select", "aria-label": label, value, disabled, onChange: (event) => onChange(event.target.value), children: options.map(([id, text2]) => /* @__PURE__ */ jsx7("option", { value: id, children: text2 }, id)) });
+  return /* @__PURE__ */ jsx7("select", { className: "gbo-select", "aria-label": label, value, disabled, onChange: (event) => onChange(event.target.value), children: options.map(([id, text3]) => /* @__PURE__ */ jsx7("option", { value: id, children: text3 }, id)) });
 }
 function Tabs({ value, onChange, tabs: tabs2 }) {
-  return /* @__PURE__ */ jsx7("div", { className: "gbo-tabs", role: "tablist", children: tabs2.map(([id, text2]) => /* @__PURE__ */ jsx7("button", { type: "button", role: "tab", "aria-selected": value === id, onClick: () => onChange(id), children: text2 }, id)) });
+  return /* @__PURE__ */ jsx7("div", { className: "gbo-tabs", role: "tablist", children: tabs2.map(([id, text3]) => /* @__PURE__ */ jsx7("button", { type: "button", role: "tab", "aria-selected": value === id, onClick: () => onChange(id), children: text3 }, id)) });
 }
 function itemInner(entry) {
   return /* @__PURE__ */ jsxs6(Fragment2, { children: [
@@ -25085,9 +25295,9 @@ function PreviewDirective({ attrs, source, scope }) {
 function DirectiveBlock({ segment, poll, scope }) {
   return /* @__PURE__ */ jsx8("div", { className: "gbo-directive", children: segment.name === "card" ? /* @__PURE__ */ jsx8(CardDirective, { attrs: segment.attrs, source: segment.source, poll, scope }) : /* @__PURE__ */ jsx8(PreviewDirective, { attrs: segment.attrs, source: segment.source, scope }) });
 }
-function useDirectiveSegments(text2) {
+function useDirectiveSegments(text3) {
   const scope = React7.useContext(DirectiveContext);
-  const segments = React7.useMemo(() => scope ? splitDirectives(text2) : null, [scope, text2]);
+  const segments = React7.useMemo(() => scope ? splitDirectives(text3) : null, [scope, text3]);
   return { segments, scope };
 }
 
@@ -25170,8 +25380,8 @@ function MediaStrip({ bot, media }) {
   if (!media.length) return null;
   return /* @__PURE__ */ jsx9("div", { className: "gbo-media", children: media.map((item) => /* @__PURE__ */ jsx9(OwnerMedia, { bot, item }, item.path)) });
 }
-function BotText({ bot, text: text2 }) {
-  const { text: clean, media } = React8.useMemo(() => extractMedia(text2), [text2]);
+function BotText({ bot, text: text3 }) {
+  const { text: clean, media } = React8.useMemo(() => extractMedia(text3), [text3]);
   return /* @__PURE__ */ jsxs8(Fragment5, { children: [
     clean ? /* @__PURE__ */ jsx9(Markdown, { text: clean }) : null,
     /* @__PURE__ */ jsx9(MediaStrip, { bot, media })
@@ -25217,9 +25427,9 @@ function ReactButton({ onReact }) {
     )) }) : null
   ] });
 }
-function copyText(text2) {
+function copyText(text3) {
   try {
-    void globalThis.navigator?.clipboard?.writeText?.(text2);
+    void globalThis.navigator?.clipboard?.writeText?.(text3);
   } catch {
   }
 }
@@ -25719,9 +25929,9 @@ function McpSetup({ bot, entry, onDone }) {
     },
     []
   );
-  const fail = (text2) => {
+  const fail = (text3) => {
     setPhase("error");
-    setMessage(text2);
+    setMessage(text3);
   };
   const ensureAdded = async () => {
     if (entry.fromCatalog && !entry.installed) await request(bot, "mcp.servers.add", { profile: bot.name, name: entry.name, preset: entry.name });
@@ -25766,7 +25976,7 @@ function McpSetup({ bot, entry, onDone }) {
     const secrets = entered.map(([, value]) => value).filter(Boolean);
     const held = { entered, secrets };
     pending.current = held;
-    const scrub = (text2) => secrets.reduce((out, value) => out.split(value).join("••••"), text2);
+    const scrub = (text3) => secrets.reduce((out, value) => out.split(value).join("••••"), text3);
     setPhase("busy");
     try {
       for (let i = 0; i < entered.length; i += 1) {
@@ -25934,8 +26144,8 @@ var BOT_EVENTS = [
   "app_context_changed",
   "app_home_opened"
 ];
-function cut(text2, n) {
-  return Array.from(String(text2)).slice(0, n).join("");
+function cut(text3, n) {
+  return Array.from(String(text3)).slice(0, n).join("");
 }
 var sorted = (list) => [...list].sort((a2, b2) => a2 < b2 ? -1 : a2 > b2 ? 1 : 0);
 function slackManifest(botName) {
@@ -25973,10 +26183,10 @@ var TOKEN_RULES = {
 function slackTokenError(kind, value) {
   const rule = TOKEN_RULES[kind];
   if (!rule) return "Unknown token";
-  const text2 = String(value ?? "").trim();
-  if (!text2) return `Paste the ${rule.label.toLowerCase()}`;
-  if (!text2.startsWith(rule.prefix)) return `The ${rule.label.toLowerCase()} starts with ${rule.prefix}`;
-  if (/\s/.test(text2) || text2.length <= rule.prefix.length + 8) return `That does not look like a whole ${rule.label.toLowerCase()}`;
+  const text3 = String(value ?? "").trim();
+  if (!text3) return `Paste the ${rule.label.toLowerCase()}`;
+  if (!text3.startsWith(rule.prefix)) return `The ${rule.label.toLowerCase()} starts with ${rule.prefix}`;
+  if (/\s/.test(text3) || text3.length <= rule.prefix.length + 8) return `That does not look like a whole ${rule.label.toLowerCase()}`;
   return null;
 }
 function slackPlatformFrom(response) {
@@ -25999,8 +26209,8 @@ function slackPanelCard(state, key, hidden) {
   if (slackAlreadySet(state.platform)) return "status";
   return hiddenKeysFrom(hidden).includes(key) ? null : "suggested";
 }
-function short(text2, max = 48) {
-  const line = String(text2 || "").split("\n")[0].trim();
+function short(text3, max = 48) {
+  const line = String(text3 || "").split("\n")[0].trim();
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 }
 function gatewayStatusRequest(scope) {
@@ -26136,8 +26346,8 @@ function restFailure(error) {
   return { status, detail: detail || "Request failed" };
 }
 var TOKEN_LIKE = /\b(?:xoxe[.-]|xox[a-z]-|xapp-)[A-Za-z0-9.-]+/g;
-function withoutSecrets(text2, secrets) {
-  let out = String(text2 ?? "");
+function withoutSecrets(text3, secrets) {
+  let out = String(text3 ?? "");
   for (const secret of secrets || []) {
     const s = String(secret ?? "").trim();
     if (s.length >= 4) out = out.split(s).join("[token]");
@@ -26152,8 +26362,8 @@ function slackIsConnected(entry) {
 }
 function slackError(error, fallback, secrets = []) {
   const { status, detail } = restFailure(error);
-  const text2 = status === 409 ? detail : detail || fallback;
-  return new Error(withoutSecrets(text2 || fallback, secrets));
+  const text3 = status === 409 ? detail : detail || fallback;
+  return new Error(withoutSecrets(text3 || fallback, secrets));
 }
 async function saveSlackTokens(call, scope, tokens) {
   const appError = slackTokenError("app", tokens?.appToken);
@@ -26265,16 +26475,16 @@ function logClock(stamp2, now) {
 }
 function slackLogLine(lastLog, testOk, now = Date.now()) {
   if (!lastLog || typeof lastLog !== "object") return "";
-  const text2 = withoutSecrets(String(lastLog.text ?? ""), []).trim();
-  if (!text2) return "";
+  const text3 = withoutSecrets(String(lastLog.text ?? ""), []).trim();
+  if (!text3) return "";
   const at = logClock(lastLog.at || lastLog.ts, now);
-  if (/^\[Slack\] (?:Socket Mode connected|HTTP Events mode ready|Authenticated as)/.test(text2)) return at ? `Last connected ${at}` : "Connected before";
-  if (/unhealthy/.test(text2)) return testOk ? "" : `Likely reason: ${at ? `${text2} (${at})` : text2}`;
+  if (/^\[Slack\] (?:Socket Mode connected|HTTP Events mode ready|Authenticated as)/.test(text3)) return at ? `Last connected ${at}` : "Connected before";
+  if (/unhealthy/.test(text3)) return testOk ? "" : `Likely reason: ${at ? `${text3} (${at})` : text3}`;
   return "";
 }
 function slackCheckVerdict(check, now = Date.now()) {
   if (!check) return null;
-  const clean = (text2) => withoutSecrets(String(text2 ?? ""), []).trim();
+  const clean = (text3) => withoutSecrets(String(text3 ?? ""), []).trim();
   if (check.kind === "missing") return { tone: "note", message: SLACK_CHECK_HINT, lines: [], log: "" };
   const result = check.result && typeof check.result === "object" ? check.result : null;
   const log = slackLogLine(result?.last_log, check.kind === "ok", now);
@@ -27960,13 +28170,13 @@ function RoomWorkspace({ slot }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length, state.posts?.length]);
   const send = async () => {
-    const text2 = draft;
-    if (!text2.trim()) return;
+    const text3 = draft;
+    if (!text3.trim()) return;
     setDraft("");
     setNote("");
-    const res = await controller2.post(text2);
+    const res = await controller2.post(text3);
     if (!res.ok && res.posted === "no") {
-      setDraft((current) => current.trim() ? current : text2);
+      setDraft((current) => current.trim() ? current : text3);
       setNote(`Not posted: ${res.error || "refused"}. Your message is back in the composer.`);
     }
   };
@@ -28229,6 +28439,7 @@ function botMenuEntries(bot) {
     { label: top ? "Unpin" : "Pin to top", icon: /* @__PURE__ */ jsx17(IconPin, {}), disabled: full, meta: full ? "4 max" : void 0, onSelect: () => void toggleTopPin(bot) },
     { label: meta?.pinned ? "Unpin from section" : "Pin first in section", icon: /* @__PURE__ */ jsx17(IconPin, {}), onSelect: () => void togglePinned(bot) },
     { label: meta?.hidden ? "Unhide" : "Hide", icon: meta?.hidden ? /* @__PURE__ */ jsx17(IconEye, {}) : /* @__PURE__ */ jsx17(IconEyeOff, {}), onSelect: () => void toggleHidden(bot) },
+    { label: "Move to section", icon: /* @__PURE__ */ jsx17(IconFolder, {}), sub: moveToSectionEntries(bot) },
     "sep",
     { label: "Edit profile…", icon: /* @__PURE__ */ jsx17(IconEdit, {}), onSelect: () => openDialog({ kind: "edit", bot }) },
     { label: "Skills, tools and model…", icon: /* @__PURE__ */ jsx17(IconSettings, {}), onSelect: () => openDialog({ kind: "config", bot }) },
@@ -28239,6 +28450,43 @@ function botMenuEntries(bot) {
   ];
   if (!isDefaultBot(bot)) entries.push("sep", { label: "Delete…", icon: /* @__PURE__ */ jsx17(IconTrash, {}), destructive: true, onSelect: () => openDialog({ kind: "delete", bot }) });
   return entries;
+}
+function moveToSectionEntries(bot) {
+  const current = botSectionId(bot);
+  const entries = app.sections.get().sections.map((section) => ({
+    label: section.name,
+    checked: section.id === current,
+    onSelect: () => moveBotToSection(bot, section.id)
+  }));
+  if (entries.length) entries.push("sep");
+  entries.push({ label: "Default", checked: current === "", onSelect: () => moveBotToSection(bot, "") });
+  entries.push("sep", { label: "New section…", onSelect: () => startNewSection() });
+  return entries;
+}
+function startNewSection() {
+  roster2.sectionEdit.set({ kind: "new" });
+}
+function requestDeleteSection(id) {
+  const section = app.sections.get().sections.find((entry) => entry.id === id);
+  if (!section) return;
+  const count = botsInSection(id);
+  if (count === 0) deleteOwnSection(id);
+  else roster2.sectionDelete.set({ id, name: section.name, count });
+}
+function sectionMenuEntries(section) {
+  const list = app.sections.get().sections;
+  const index = section.own ? list.findIndex((entry) => entry.id === section.id) : -1;
+  if (index < 0) return [{ label: "New section…", icon: /* @__PURE__ */ jsx17(IconFolder, {}), onSelect: () => startNewSection() }];
+  const id = list[index].id;
+  return [
+    { label: "Rename…", icon: /* @__PURE__ */ jsx17(IconEdit, {}), onSelect: () => roster2.sectionEdit.set({ kind: "rename", id }) },
+    { label: "Move up", disabled: index === 0, onSelect: () => moveOwnSection(id, -1) },
+    { label: "Move down", disabled: index === list.length - 1, onSelect: () => moveOwnSection(id, 1) },
+    "sep",
+    { label: "New section…", icon: /* @__PURE__ */ jsx17(IconFolder, {}), onSelect: () => startNewSection() },
+    "sep",
+    { label: "Delete section…", icon: /* @__PURE__ */ jsx17(IconTrash, {}), destructive: true, onSelect: () => requestDeleteSection(id) }
+  ];
 }
 function filterMenuEntries(view, groupCount = 0) {
   const filters = roster2.filters.get();
@@ -28270,7 +28518,8 @@ function filterMenuEntries(view, groupCount = 0) {
 function newMenuEntries() {
   return [
     { label: "New bot…", onSelect: () => openDialog({ kind: "create" }) },
-    ...newGroupOpener ? [{ label: "New group chat…", onSelect: () => newGroupOpener?.() }] : []
+    ...newGroupOpener ? [{ label: "New group chat…", onSelect: () => newGroupOpener?.() }] : [],
+    { label: "New section…", onSelect: () => startNewSection() }
   ];
 }
 
@@ -28445,10 +28694,10 @@ function BotScreen({ bot }) {
         const target = canvasHost.current;
         const onPaste = (event) => {
           if (client.viewOnly) return;
-          const text2 = event.clipboardData?.getData("text");
-          if (text2 && text2.length <= MAX_PASTE_CUT_TEXT) {
+          const text3 = event.clipboardData?.getData("text");
+          if (text3 && text3.length <= MAX_PASTE_CUT_TEXT) {
             event.preventDefault();
-            client.clipboardPasteFrom(text2);
+            client.clipboardPasteFrom(text3);
           }
         };
         target.addEventListener("paste", onPaste);
@@ -28986,11 +29235,11 @@ function ChoiceCard({
                 choice
               );
             }) }) : null,
-            typed.map((text2, j) => /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-row is-on is-typed", role: "note", "aria-label": `Your answer: ${text2}`, children: [
+            typed.map((text3, j) => /* @__PURE__ */ jsxs19("div", { className: "gbo-ask-row is-on is-typed", role: "note", "aria-label": `Your answer: ${text3}`, children: [
               /* @__PURE__ */ jsx21("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(labels.length + j) }),
-              /* @__PURE__ */ jsx21("span", { className: "gbo-ask-label", children: text2 }),
+              /* @__PURE__ */ jsx21("span", { className: "gbo-ask-label", children: text3 }),
               /* @__PURE__ */ jsx21("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx21(IconCheck, {}) })
-            ] }, text2)),
+            ] }, text3)),
             live && !q.choices && !typed.length ? /* @__PURE__ */ jsx21("div", { className: "gbo-ask-hint", children: "Type your answer below." }) : null
           ] }, q.qid);
         }),
@@ -29182,12 +29431,12 @@ function WaitingCard({ waiting, bot, name, controller: controller2 }) {
 import * as React20 from "react";
 import { jsx as jsx22, jsxs as jsxs20 } from "react/jsx-runtime";
 var PREVIEW_CHARS = 4e3;
-function LongText({ text: text2, label }) {
+function LongText({ text: text3, label }) {
   const [all, setAll] = React20.useState(false);
-  const long = text2.length > PREVIEW_CHARS;
+  const long = text3.length > PREVIEW_CHARS;
   return /* @__PURE__ */ jsxs20("div", { className: "gbo-tool-block", children: [
     /* @__PURE__ */ jsx22("div", { className: "gbo-tool-block-label", children: label }),
-    /* @__PURE__ */ jsx22("pre", { children: all || !long ? text2 : `${text2.slice(0, PREVIEW_CHARS)}…` }),
+    /* @__PURE__ */ jsx22("pre", { children: all || !long ? text3 : `${text3.slice(0, PREVIEW_CHARS)}…` }),
     long ? /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-link-btn", onClick: () => setAll((v) => !v), children: all ? "Show less" : "Show all" }) : null
   ] });
 }
@@ -29248,13 +29497,13 @@ function ToolGroup({ item, bot }) {
 
 // src/ui/Chat.tsx
 import { Fragment as Fragment13, jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
-function Thinking({ text: text2 }) {
+function Thinking({ text: text3 }) {
   return /* @__PURE__ */ jsxs21("details", { className: "gbo-think", children: [
     /* @__PURE__ */ jsxs21("summary", { children: [
       /* @__PURE__ */ jsx23(IconChevron, {}),
       "Thought"
     ] }),
-    /* @__PURE__ */ jsx23("div", { className: "gbo-think-body", children: text2 })
+    /* @__PURE__ */ jsx23("div", { className: "gbo-think-body", children: text3 })
   ] });
 }
 function ApprovalCard({ item, onAnswer }) {
@@ -29487,7 +29736,7 @@ function Transcript({ state, bot, meta, onPrefill }) {
     () => !controller2 ? outer : state.storedId ? {
       bot,
       sessionId: String(state.storedId),
-      sendIntent: (text2) => controller2.sendIntent(text2),
+      sendIntent: (text3) => controller2.sendIntent(text3),
       recent: new Set(recentKey.split("|"))
     } : null,
     [bot, state.storedId, controller2, recentKey, outer]
@@ -29689,7 +29938,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const extra = slot.extra;
   const shown = extra ? false : narrow ? drawerOpen : panelOpen;
   const togglePanel = () => extra ? selectBot(bot) : narrow ? app.drawerOpen.set(!drawerOpen) : setPanelOpen(!panelOpen);
-  const completeSlash = (text2) => controller2?.completeSlash(text2) ?? Promise.resolve({ items: [], replaceFrom: 0 });
+  const completeSlash = (text3) => controller2?.completeSlash(text3) ?? Promise.resolve({ items: [], replaceFrom: 0 });
   const view = /* @__PURE__ */ jsxs21("div", { "data-gbo-root": "", className: `gbo-ws${narrow && !extra ? " is-narrow" : ""}`, style, ref: rootRef, children: [
     /* @__PURE__ */ jsxs21("main", { className: "chat gbo-chat", ref: chatRef, children: [
       /* @__PURE__ */ jsxs21("header", { className: "chat__header gbo-head", children: [
@@ -29711,7 +29960,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
           )
         ] })
       ] }),
-      ready ? /* @__PURE__ */ jsx23(Transcript, { state, bot, meta, onPrefill: (text2) => draftRef.current?.(text2, draftOwnerKey(bot)) }) : /* @__PURE__ */ jsx23(Center, { state, bot }),
+      ready ? /* @__PURE__ */ jsx23(Transcript, { state, bot, meta, onPrefill: (text3) => draftRef.current?.(text3, draftOwnerKey(bot)) }) : /* @__PURE__ */ jsx23(Center, { state, bot }),
       /* @__PURE__ */ jsx23(
         Composer,
         {
@@ -29723,14 +29972,14 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
           stopError: state.stopError,
           blocked: state.sendBlocked,
           draftRef,
-          onSend: (text2, attachments, options) => controller2?.sendDraft(text2, attachments, options) ?? Promise.resolve({ ok: false, delivery: "not-sent", error: "This chat is closed" }),
-          onSlash: (text2) => controller2?.runSlash(text2) ?? Promise.resolve({ ok: false }),
+          onSend: (text3, attachments, options) => controller2?.sendDraft(text3, attachments, options) ?? Promise.resolve({ ok: false, delivery: "not-sent", error: "This chat is closed" }),
+          onSlash: (text3) => controller2?.runSlash(text3) ?? Promise.resolve({ ok: false }),
           onCompleteSlash: completeSlash,
           onRestored: (clientId) => controller2?.dropFailed(clientId),
           onDiscard: (id) => void controller2?.discardStaged([id]),
           onStop: () => void controller2?.interrupt(),
           answering: state.chat.waiting?.kind === "clarify",
-          onAnswer: (text2) => controller2?.answerClarifyText(text2) ?? Promise.resolve({ ok: false, error: "This chat is closed" })
+          onAnswer: (text3) => controller2?.answerClarifyText(text3) ?? Promise.resolve({ ok: false, error: "This chat is closed" })
         },
         rowKey(bot)
       )
@@ -29772,7 +30021,7 @@ function UnreadDot({ bot }) {
 }
 
 // src/ui/Roster.tsx
-import { Fragment as Fragment14, jsx as jsx25, jsxs as jsxs22 } from "react/jsx-runtime";
+import { Fragment as Fragment15, jsx as jsx25, jsxs as jsxs22 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
   const [now, setNow] = React23.useState(() => Date.now());
   React23.useEffect(() => {
@@ -29819,6 +30068,57 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
     ) }),
     /* @__PURE__ */ jsx25(MenuButton, { entries, label: `Actions for ${name}`, className: "icon-btn gbo-row-more" })
   ] });
+}
+function SectionNameField({ initial = "", label, onCommit, onCancel }) {
+  const [value, setValue] = React23.useState(initial);
+  const ref = React23.useRef(null);
+  const done = React23.useRef(false);
+  const mountedAt = React23.useRef(Date.now());
+  React23.useEffect(() => {
+    const focus = () => {
+      if (done.current) return;
+      ref.current?.focus();
+      ref.current?.select();
+    };
+    focus();
+    const id = setTimeout(focus, 60);
+    return () => clearTimeout(id);
+  }, []);
+  const finish = (save) => {
+    if (done.current) return;
+    done.current = true;
+    const name = (ref.current?.value ?? value).trim();
+    if (save && name) onCommit(name);
+    else onCancel();
+  };
+  return /* @__PURE__ */ jsx25("div", { className: "gbo-section-edit", children: /* @__PURE__ */ jsx25(
+    "input",
+    {
+      ref,
+      className: "gbo-section-input",
+      "aria-label": label,
+      placeholder: "Section name",
+      value,
+      onChange: (event) => setValue(event.target.value),
+      onKeyDown: (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          finish(true);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          finish(false);
+        }
+      },
+      onBlur: () => {
+        if (Date.now() - mountedAt.current < 400) {
+          setTimeout(() => ref.current?.focus(), 0);
+          return;
+        }
+        finish(true);
+      }
+    }
+  ) });
 }
 var PIN_AVATAR = [67, 58, 52, 46];
 function PinnedBot({ bot, size, selected, working }) {
@@ -29890,6 +30190,9 @@ function RosterPane() {
   useStore(roster2.metaWrites);
   useStore(roster2.attention);
   const pins = useStore(app.pinnedBots);
+  const ownSections = useStore(app.sections);
+  const sectionEdit = useStore(roster2.sectionEdit);
+  const sectionDelete = useStore(roster2.sectionDelete);
   const person = footerPerson(useStore(app.userName));
   React23.useEffect(() => loadUserName(), []);
   const [searching, setSearching] = React23.useState(false);
@@ -29906,7 +30209,20 @@ function RosterPane() {
   const pinned = view.hasConstraint ? null : pinState(pins, (roster.rows || []).filter((bot) => !bot?.ghost), rowKey);
   const listed = pinned ? withoutPinned(view.rows, pinned, rowKey) : view.rows;
   const hiddenListed = pinned ? withoutPinned(view.hidden, pinned, rowKey) : view.hidden;
-  const list = buildSections(listed, { metaFor, kitSections: roster.kitSections, query: "" });
+  const list = buildSections(listed, { metaFor, sections: ownSections, query: "", keepEmpty: !view.hasConstraint });
+  const ownCount = list.filter((section) => section.own).length;
+  const newSectionField = sectionEdit?.kind === "new" ? /* @__PURE__ */ jsx25(
+    SectionNameField,
+    {
+      label: "New section name",
+      onCommit: (name) => {
+        createSection(name);
+        roster2.sectionEdit.set(null);
+      },
+      onCancel: () => roster2.sectionEdit.set(null)
+    },
+    "new-section"
+  ) : null;
   const unreachable2 = unreachableSources(view.gatewayOptions);
   const livePreview = (() => {
     if (!chat) return "";
@@ -30010,17 +30326,43 @@ function RosterPane() {
         /* @__PURE__ */ jsx25("strong", { children: "All bots are hidden" }),
         /* @__PURE__ */ jsx25("span", { children: "Hidden bots keep working; they are just not listed." }),
         /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
-      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx25("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs22(Fragment14, { children: [
-        list.map((section) => {
-          const isCollapsed = collapsed.includes(section.name);
-          return /* @__PURE__ */ jsxs22("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
-            list.length > 1 || section.name !== "Unassigned" ? /* @__PURE__ */ jsxs22("button", { type: "button", className: "gbo-section-head", "aria-expanded": !isCollapsed, onClick: () => toggleSection(section.name), children: [
-              /* @__PURE__ */ jsx25(IconChevronDown, {}),
-              section.name,
-              /* @__PURE__ */ jsx25("span", { className: "gbo-count", children: section.bots.length })
-            ] }) : null,
-            isCollapsed ? null : section.bots.map((bot) => row(bot))
-          ] }, section.name);
+      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx25("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs22(Fragment15, { children: [
+        ownCount === 0 ? newSectionField : null,
+        list.map((section, index) => {
+          const isCollapsed = section.own ? section.collapsed : collapsed.includes(section.name);
+          const renaming = section.own && sectionEdit?.kind === "rename" && sectionEdit.id === section.id;
+          const head = renaming ? /* @__PURE__ */ jsx25(
+            SectionNameField,
+            {
+              initial: section.name,
+              label: `Rename ${section.name}`,
+              onCommit: (name) => {
+                renameOwnSection(section.id, name);
+                roster2.sectionEdit.set(null);
+              },
+              onCancel: () => roster2.sectionEdit.set(null)
+            }
+          ) : section.own || list.length > 1 || section.name !== "Unassigned" ? /* @__PURE__ */ jsx25(ContextMenuFor, { entries: sectionMenuEntries(section), children: /* @__PURE__ */ jsxs22(
+            "button",
+            {
+              type: "button",
+              className: `gbo-section-head${section.own ? " is-own" : ""}`,
+              "aria-expanded": !isCollapsed,
+              onClick: () => section.own ? toggleOwnSection(section.id) : toggleSection(section.name),
+              children: [
+                /* @__PURE__ */ jsx25(IconChevronDown, {}),
+                section.name,
+                /* @__PURE__ */ jsx25("span", { className: "gbo-count", children: section.bots.length })
+              ]
+            }
+          ) }) : null;
+          return /* @__PURE__ */ jsxs22(React23.Fragment, { children: [
+            /* @__PURE__ */ jsxs22("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
+              head,
+              isCollapsed ? null : section.bots.map((bot) => row(bot))
+            ] }),
+            section.own && index === ownCount - 1 ? newSectionField : null
+          ] }, section.own ? `own:${section.id}` : `default:${section.name}`);
         }),
         view.showHiddenSection ? /* @__PURE__ */ jsxs22("div", { role: "group", "aria-label": "Hidden", className: "bot-list gbo-hidden-head", children: [
           /* @__PURE__ */ jsxs22(
@@ -30051,7 +30393,21 @@ function RosterPane() {
       ] }) }),
       canOpenSettings() ? /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn gbo-foot-btn", title: "Hermes settings", "aria-label": "Open Hermes settings", onClick: () => void openSettings(), children: /* @__PURE__ */ jsx25(IconSettings, {}) }) : null
     ] }),
-    /* @__PURE__ */ jsx25(RosterDialogs, {})
+    /* @__PURE__ */ jsx25(RosterDialogs, {}),
+    /* @__PURE__ */ jsx25(
+      Confirm,
+      {
+        open: Boolean(sectionDelete),
+        title: `Delete “${sectionDelete?.name || ""}”?`,
+        description: sectionDelete?.count === 1 ? "Its one bot goes back to its default section." : `Its ${sectionDelete?.count || 0} bots go back to their default sections.`,
+        confirmLabel: "Delete section",
+        destructive: true,
+        onConfirm: () => {
+          if (sectionDelete) deleteOwnSection(sectionDelete.id);
+        },
+        onClose: () => roster2.sectionDelete.set(null)
+      }
+    )
   ] });
 }
 
@@ -30165,6 +30521,20 @@ var index_default = {
           detailVariant: "state",
           keepOpen: true,
           run: () => setEnabled(!app.enabled.get())
+        }
+      },
+      // Thought and tool rows in the chat (core/workRows.js), hidden by default.
+      {
+        id: "palette-show-work",
+        area: PALETTE_AREA2,
+        data: {
+          id: `${PLUGIN_ID}.show-work`,
+          label: "Grokbot Override: show work rows",
+          keywords: ["work", "tools", "thinking", "thought", "reasoning", "rows", "override"],
+          detail: () => app.showWork.get() ? "on" : "off",
+          detailVariant: "state",
+          keepOpen: true,
+          run: () => setShowWork(!app.showWork.get())
         }
       },
       {

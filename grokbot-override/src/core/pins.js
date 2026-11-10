@@ -6,8 +6,8 @@
 // Bot Mode's metadata or any gateway.
 //
 // Stores checked first (2026-11-09): `bot-pinned-tabs` pins a bot's Sessions
-// as tabs (Hermes's pinned-session keys), and `bot-sections` stores section
-// names and assignments only; neither holds pinned bots. Bot Mode's own
+// as tabs (Hermes's pinned-session keys), and the retired `bot-sections`
+// stored section names and assignments only; neither holds pinned bots. Bot Mode's own
 // `meta.pinned` is a ui_meta write on the bot's gateway that orders a row
 // first in its section (PARITY R11), which this must not touch.
 //

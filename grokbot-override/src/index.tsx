@@ -2,7 +2,7 @@
 // on the Hermes engine. Bot Mode itself is never removed or disabled; see
 // PARITY.md for what this screen does and where it hands back to Bot Mode.
 
-import { app, backToOverride, findBot, isPinnedTop, openInBotMode, PLUGIN_ID, PROBE, selectBot, selfCheck, setEnabled, setRenderers, start, stop, toggleTopPin } from './ui/app'
+import { app, backToOverride, findBot, isPinnedTop, openInBotMode, PLUGIN_ID, PROBE, selectBot, selfCheck, setEnabled, setRenderers, setShowWork, start, stop, toggleTopPin } from './ui/app'
 import { OverrideBoundary } from './ui/Boundary'
 import { ChatWorkspace } from './ui/Chat'
 import { primeModelOptions } from './ui/ProfileConfig'
@@ -60,6 +60,20 @@ export default {
           detailVariant: 'state',
           keepOpen: true,
           run: () => setEnabled(!app.enabled.get())
+        }
+      },
+      // Thought and tool rows in the chat (core/workRows.js), hidden by default.
+      {
+        id: 'palette-show-work',
+        area: PALETTE_AREA,
+        data: {
+          id: `${PLUGIN_ID}.show-work`,
+          label: 'Grokbot Override: show work rows',
+          keywords: ['work', 'tools', 'thinking', 'thought', 'reasoning', 'rows', 'override'],
+          detail: () => (app.showWork.get() ? 'on' : 'off'),
+          detailVariant: 'state',
+          keepOpen: true,
+          run: () => setShowWork(!app.showWork.get())
         }
       },
       {

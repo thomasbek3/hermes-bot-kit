@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **The kit is slimmer (2026-11-10)**: it keeps Grokbot Override, the Computer pane (computer-viewer +
+  orgo-computer), texting-style and the Slack pieces. **Bubble Mode, Task Dock and Bot Sections are
+  retired** (their folders, tests and pictures are removed; history stays in git), and so are the six
+  root forwarding shims (`connect-*.sh` / `hiperf-*` at the repo root; the real scripts are in
+  `computer-viewer/`, and one-liners pinned to an older release tag keep working) and
+  `REPORT-BOT-SECTIONS.md`.
+- **Grokbot Override owns sections**: its own roster sections in its plugin storage (`sections`): + → New
+  section, right-click a header to rename (inline, autosave), move up / down or delete (its bots go back
+  to their default section; a confirm only when it has bots), click to collapse, and **Move to section →**
+  on a bot's menu. A Bot Sections layout (sections, names, order, collapsed state, assignments) is copied
+  in once on the first run; the Bot Sections storage is never changed.
+- **Grokbot Override owns the work-rows setting**: **Grokbot Override: show work rows** in the palette
+  (hidden by default, stored in its own plugin storage); Bubble Mode's old preference is copied once.
+- **Installer**: installs Grokbot Override **switched on** (the committed `plugin.js`;
+  `plugin.default-off.js` and its build target are gone; a toggle the user set before still wins), the
+  Computer pane and, opt-in, the cards skill. `KIT_SKIP_BUBBLES`, `KIT_SKIP_SECTIONS` and
+  `KIT_SKIP_TASK_DOCK` are gone. On upgrade it names any `bubble-mode`, `task-dock` or `bot-sections`
+  folder that carries this kit's marker and says how to remove it; `KIT_REMOVE_RETIRED=1` moves exactly
+  those folders to `desktop-plugins-retired-<YYYYMMDD>/` (never deletes, never touches other folders).
 - **Ready for a new user**: every tracked file and picture now uses demo content (bot names, sections,
   workspaces, desktops); `tests/privacy-guard.test.mjs` (run in CI) keeps private host names, addresses,
   home folders, workspace ids, business and bot names and real email addresses out of every tracked text
