@@ -13,7 +13,7 @@
 //   _append_inflight_delta), so a snapshot repair subtracts it (review r3 #4).
 
 import { admitSegmentDelta, admitSegmentSeal, segmentStamp } from './segments.js'
-import { toolLabel } from './history.js'
+import { BACKGROUND_NOTICE_KINDS, backgroundNotice, toolLabel } from './history.js'
 import { approvalFromPayload, upsertApproval, cancelApprovals, settleApprovals } from './approvals.js'
 import { applyConnectionUpdate, inputRequestFrom, keepCardProgress } from './prompts.js'
 import { completeDetail, startDetail } from './tools.js'
@@ -127,7 +127,15 @@ export function applyEvent(state, event, now = Date.now()) {
       let next = closeBubble(state)
       next = { ...next, busy: true, status: null, live: { ...emptyLive(), turnId } }
       const card = typeof payload.display_text === 'string' && payload.display_text.trim()
-      if (card) next = { ...next, items: [...next.items, { kind: 'notice', id: liveId('n'), text: card.trim(), at: now }] }
+      if (card) {
+        // A producer card (background process / agent work finished) is a
+        // work row with a short label (history.js BACKGROUND_NOTICE_KINDS).
+        const kind = typeof payload.display_kind === 'string' ? payload.display_kind : ''
+        const notice = BACKGROUND_NOTICE_KINDS.has(kind)
+          ? backgroundNotice(kind, card, { id: liveId('n'), at: now })
+          : { kind: 'notice', id: liveId('n'), text: card.trim(), at: now }
+        next = { ...next, items: [...next.items, notice] }
+      }
       return next
     }
 

@@ -119,7 +119,8 @@ test('REST rows become bubbles, tool groups and notices; hidden and system rows 
   assert.equal(items[3].text, 'The lake cabin sleeps four.')
   assert.equal(items[3].reasoning, 'Look it up.')
   assert.equal(items[4].text, 'how is it going?', 'display_content wins over raw content')
-  assert.equal(items[5].text, 'Background job finished')
+  assert.equal(items[5].text, 'Background task finished', 'a background card shows a short label')
+  assert.equal(items[5].title, 'Background job finished', 'its line is the tooltip')
   assert.equal(items[0].at, 1762560000 * 1000)
 })
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Grokbot Override: no raw background-process lines (2026-11-10)**: a grey line under a reply read
+  "Background Process Finished: " followed by the full path of the command. It is a work row now: hidden by
+  default, and with **show work rows** on it reads "Background task finished" (or failed / stopped), with the
+  command only in its tooltip. Errors and approvals still always show.
 - **Grokbot Override: questions come one at a time (2026-11-10)**: a question card with several questions
   showed them all stacked with one greyed **Answer** button that did nothing until every question had a
   pick, and nothing said so. It now pages like Grok Bot: one question per page with page dots, a click picks

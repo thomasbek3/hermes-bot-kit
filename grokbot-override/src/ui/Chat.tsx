@@ -282,7 +282,11 @@ function Item({
     case 'clarify':
       return <SettledChoiceCard item={item} />
     case 'notice':
-      return <div className="system-event gbo-notice">{item.text}</div>
+      return (
+        <div className="system-event gbo-notice" title={item.title || undefined}>
+          {item.text}
+        </div>
+      )
     case 'command':
       return (
         <div className={`gbo-command${item.error ? ' is-error' : ''}`} role="status">

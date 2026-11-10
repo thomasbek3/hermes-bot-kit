@@ -14658,6 +14658,29 @@ function isSystemNotice(kind, role, text3) {
   if (!SYSTEM_NOTICE_KINDS.has(kind)) return false;
   return !(kind === "failed_turn" && role === "assistant" && text3 === PARTIAL_FAILED_TURN_NOTICE);
 }
+var BACKGROUND_NOTICE_KINDS = /* @__PURE__ */ new Set(["process_complete", "async_delegation_complete"]);
+var PROCESS_OUTCOMES = [
+  [/^\s*(\d+) background processes finished/i, (m) => `${m[1]} background tasks finished`],
+  [/^\s*background process failed to start/i, () => "Background task failed to start"],
+  [/^\s*background process failed/i, () => "Background task failed"],
+  [/^\s*background process terminated/i, () => "Background task stopped"],
+  [/^\s*background process lost/i, () => "Background task lost"],
+  [/^\s*background process finished/i, () => "Background task finished"]
+];
+function backgroundNoticeLabel(kind, text3) {
+  if (kind === "async_delegation_complete") return "Background agent work finished";
+  const line = String(text3 || "");
+  for (const [re, label] of PROCESS_OUTCOMES) {
+    const m = re.exec(line);
+    if (m) return label(m);
+  }
+  return kind === "process_complete" ? "Background task finished" : "Background task update";
+}
+var TITLE_MAX = 300;
+function backgroundNotice(kind, text3, fields) {
+  const full = String(text3 || "").replace(/\s+/g, " ").trim();
+  return { kind: "notice", ...fields, text: backgroundNoticeLabel(kind, full), ...full ? { title: full.length > TITLE_MAX ? `${full.slice(0, TITLE_MAX - 1)}…` : full } : {}, system: kind };
+}
 function failedTurnError(meta) {
   if (!meta) return "";
   if (typeof meta.error === "string" && meta.error.trim()) return meta.error.trim();
@@ -14690,6 +14713,11 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
         items.push({ kind: "error", id: `${rowId(row, index, idPrefix)}-error`, text: failure, at });
       }
       const text3 = meta && typeof meta.display_text === "string" && meta.display_text || rowText(row);
+      if (BACKGROUND_NOTICE_KINDS.has(kind)) {
+        flushTools();
+        items.push(backgroundNotice(kind, text3, { id: rowId(row, index, idPrefix), at }));
+        return;
+      }
       if (text3.trim()) {
         flushTools();
         items.push({ kind: "notice", id: rowId(row, index, idPrefix), text: text3.trim(), at, ...isSystemNotice(kind, role, text3.trim()) ? { system: kind } : {} });
@@ -16142,7 +16170,11 @@ function applyEvent(state, event, now = Date.now()) {
       let next = closeBubble(state);
       next = { ...next, busy: true, status: null, live: { ...emptyLive(), turnId } };
       const card = typeof payload.display_text === "string" && payload.display_text.trim();
-      if (card) next = { ...next, items: [...next.items, { kind: "notice", id: liveId("n"), text: card.trim(), at: now }] };
+      if (card) {
+        const kind = typeof payload.display_kind === "string" ? payload.display_kind : "";
+        const notice = BACKGROUND_NOTICE_KINDS.has(kind) ? backgroundNotice(kind, card, { id: liveId("n"), at: now }) : { kind: "notice", id: liveId("n"), text: card.trim(), at: now };
+        next = { ...next, items: [...next.items, notice] };
+      }
       return next;
     }
     case "message.delta": {
@@ -18506,7 +18538,11 @@ function visibleItems(items, showWork) {
 function activityLabel(chat, showWork) {
   if (!chat || chat.waiting) return "";
   const status = chat.status;
-  if (status?.text) return status.kind === "compacting" ? "Summarizing earlier messages" : status.text;
+  if (status?.text) {
+    if (status.kind === "compacting") return "Summarizing earlier messages";
+    if (status.kind === "process") return backgroundNoticeLabel("", status.text);
+    return status.text;
+  }
   const items = Array.isArray(chat.items) ? chat.items : [];
   const last = items[items.length - 1];
   if (last?.kind === "tools" && Array.isArray(last.tools) && last.tools.some((tool) => tool?.status === "running")) return showWork ? "" : "Working";
@@ -29808,7 +29844,7 @@ function Item({
     case "clarify":
       return /* @__PURE__ */ jsx23(SettledChoiceCard, { item });
     case "notice":
-      return /* @__PURE__ */ jsx23("div", { className: "system-event gbo-notice", children: item.text });
+      return /* @__PURE__ */ jsx23("div", { className: "system-event gbo-notice", title: item.title || void 0, children: item.text });
     case "command":
       return /* @__PURE__ */ jsxs21("div", { className: `gbo-command${item.error ? " is-error" : ""}`, role: "status", children: [
         /* @__PURE__ */ jsx23("div", { className: "gbo-command-head", children: item.command }),
