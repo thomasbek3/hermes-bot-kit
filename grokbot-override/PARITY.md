@@ -48,6 +48,20 @@ The chat | profile panel hairline is the override's own resizer: drag (panel 260
 stored as `panelWidth` in the override's plugin storage, double-click resets to 360 px (`src/core/panelWidth.js`,
 `test/panel-width.test.mjs`). Display and layout only; no behaviour, routing or data changes.
 
+Chat look and cards (2026-11-09): bot bubbles are one flat fill (dark `#242424`, light `#F0F0F0`); the profile panel
+has a **Model** row showing the bot's model that opens the model picker (C21). Bot Chats are desktop sessions:
+`session.create` and `session.resume` send `source: 'desktop'` as stock Desktop does, so the bot is told markdown,
+`MEDIA:` files and inline widgets render (a gateway that refuses the key gets the call once without it; a session
+created before keeps its old source until it restarts). A clarify request is an inline choice card at the end of the
+transcript (lettered rows, multi-select and several questions with **Answer**, typed text as the free-text answer, a
+settled card stays in place; C11). `::card{…}` and `::preview{…}` lines in the open chat are drawn live from the
+bot's own session (`src/core/directives.js`, `src/ui/Directives.tsx`): `card.v1` files read by REST relative to the
+session's working directory and re-read every 3 s until final, buttons and widget intents sent back as hidden user
+turns, previews in a frame sandboxed like stock's. Re-reads key by the bot's route, so the transcript does not jump
+while scrolling past a card. The generic skill that teaches bots the card format is `skills/agent-cards/SKILL.md`
+(installed on request by the kit's `install.sh`, `KIT_CARDS_SKILL=1`). Tests: `test/look-pass6.test.mjs`,
+`test/cards7-*.test.mjs`, `test/cards8-live-card.test.mjs`, `test/look9-card-scroll.test.mjs`.
+
 The one escape hatch left in normal flows is the global toggle. **Open in Hermes Bot Mode** appears only in
 error states: a send whose delivery is unknown and that carried no submission id, a chat that could not be
 opened, a route this Desktop cannot hold open, and a question the connected gateway cannot take an answer for.

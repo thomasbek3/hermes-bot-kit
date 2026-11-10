@@ -6,6 +6,15 @@ Slack's Allow page, and when you click Allow the bot is in Slack. It answers
 DMs and @mentions with the same plugins, context and memories it uses in
 Hermes. **Remove from Slack** deletes the app again.
 
+<p align="center">
+  <img src="../grokbot-override/screenshots/slack-strip.png" alt="Add to Slack in three steps: the Add to Slack window with the Acme Team workspace and Connect, the Connected to Acme Team Slack window, and the Slack card reading Connected" width="860">
+</p>
+<p align="center"><em>Connect, then you click Allow in your browser, then Connected. Demo workspace; Slack's own page is not shown.</em></p>
+
+In the [Grokbot Override](../grokbot-override/README.md) the same window opens from **Add to Slack** in the
+bot's profile panel, and the panel's Slack card reads **Connected** afterwards. Every app it creates gets the
+full set of permissions the bot needs (the scopes in `common/core.py`).
+
 Without this add-on, Hermes's Slack window falls back to the regular
 "paste two tokens" dialog (Socket Mode). That dialog keeps working either way.
 
