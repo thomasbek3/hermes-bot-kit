@@ -21,6 +21,11 @@ const ADAPT_SRC = /* css */ `
   --color-row-hover-solid: #EEEEEE;
   --color-pin-selected: #00000008;
   --color-code-block: #FAFAFA;
+  --color-ftile-page: #FFFFFF;
+  --color-ftile-line: #0000001F;
+  --color-sheet-grid: #0000000F;
+  --color-sheet-head: #FAFAFA;
+  --color-sheet-focus: #2F7BF6;
 }
 :root[data-theme='dark'] {
   --color-bubble-agent-flat: #242424;
@@ -30,6 +35,11 @@ const ADAPT_SRC = /* css */ `
   --color-row-hover-solid: #181818;
   --color-pin-selected: #FFFFFF0A;
   --color-code-block: #1A1A1A;
+  --color-ftile-page: #2A2A2A;
+  --color-ftile-line: #FFFFFF26;
+  --color-sheet-grid: #FFFFFF14;
+  --color-sheet-head: #1C1C1C;
+  --color-sheet-focus: #4C8DFF;
 }
 
 /* ── panes ──────────────────────────────────────────────────────────── */
@@ -247,8 +257,10 @@ const ADAPT_SRC = /* css */ `
 .gbo-media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 /* Files a bot sends (ui/Media.tsx FileCard): one card each under the
    bubble, stacked 8px apart; a white rounded card with a soft ring and
-   shadow (a ring only in dark), a grey document tile, the name in medium
-   weight, the size small and grey; a round download button on hover. */
+   shadow (a ring only in dark), a tile by type (ui/FileIcons.tsx: a white
+   sheet with grid lines and a green band for a spreadsheet, red for PDF,
+   blue for documents; #38's grey document tile for text and the rest), the
+   name in medium weight, the size small and grey, a round download button. */
 .gbo-files { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 6px; max-width: 100%; }
 .gbo-file-card {
   position: relative; display: flex; align-items: center; width: 220px; max-width: 100%; min-width: 0; border-radius: 16px;
@@ -265,19 +277,121 @@ const ADAPT_SRC = /* css */ `
   background: var(--color-bg-subtle); box-shadow: var(--color-border-tertiary) 0 0 0 0.5px inset; color: var(--color-text-quaternary);
 }
 .gbo-file-card-icon svg { width: 24px; height: 24px; }
+.gbo-file-card-icon:is(.is-sheet, .is-pdf, .is-image, .is-doc) { background: none; box-shadow: none; }
+.gbo-file-card-icon:is(.is-sheet, .is-pdf, .is-image, .is-doc) svg { width: 36px; height: 44px; }
+.gbo-ftile-page { fill: var(--color-ftile-page); }
+.gbo-ftile-line { fill: none; stroke: var(--color-ftile-line); stroke-width: 1; }
+.gbo-ftile-edge { fill: none; stroke: var(--color-ftile-line); stroke-width: 1; }
 .gbo-file-card-text { display: flex; flex-direction: column; min-width: 0; }
 .gbo-file-card-name { font-size: 14px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-file-card-size { font-size: 12px; line-height: 16px; letter-spacing: 0.12px; color: var(--color-text-tertiary); }
 .gbo-file-card-save {
   flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin-right: 12px; padding: 0; border: 0; border-radius: var(--radius-full);
-  background: transparent; color: var(--color-text-secondary); cursor: pointer; opacity: 0; transition: opacity 120ms var(--ease-out), background 120ms var(--ease-out);
+  background: transparent; color: var(--color-text-tertiary); cursor: pointer; transition: color 120ms var(--ease-out), background 120ms var(--ease-out);
 }
 .gbo-file-card-save svg { width: 18px; height: 18px; }
-.gbo-file-card:hover .gbo-file-card-save, .gbo-file-card:focus-within .gbo-file-card-save { opacity: 1; }
+.gbo-file-card:hover .gbo-file-card-save, .gbo-file-card:focus-within .gbo-file-card-save { color: var(--color-text-secondary); }
 .gbo-file-card-save:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.gbo-file-preview-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.gbo-file-preview { max-height: min(60vh, 560px); overflow: auto; margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--color-code-block); color: var(--color-text-primary); }
+.gbo-file-card-save:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 1px; }
+/* The file viewer (ui/FileViewer.tsx): a large rounded panel over the chat;
+   a header with the close X left, the name in a pill centred, the row count
+   and a round download button right; the body fills the rest. */
+.gbo-viewer {
+  position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; overflow: hidden;
+  border-radius: 16px; background: var(--color-bg-elevated); color: var(--color-text-primary); box-shadow: var(--shadow-card);
+  font-size: 14px; line-height: 20px;
+}
+.gbo-modal-fallback.is-viewer { padding: 16px; place-items: stretch; }
+.gbo-modal-fallback.is-viewer > .gbo-viewer { width: auto; height: auto; }
+.gbo-viewer-head { position: relative; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 52px; padding: 0 12px; }
+.gbo-viewer-close, .gbo-viewer-save {
+  flex: none; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: var(--radius-full);
+  background: transparent; box-shadow: var(--color-border-tertiary) 0 0 0 0.5px inset; color: var(--color-text-secondary); cursor: pointer;
+}
+.gbo-viewer-close svg, .gbo-viewer-save svg { width: 18px; height: 18px; }
+.gbo-viewer-close:hover, .gbo-viewer-save:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.gbo-viewer-close:focus-visible, .gbo-viewer-save:focus-visible, .gbo-viewer-pill:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 1px; }
+.gbo-viewer-name {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: calc(100% - 320px); margin: 0; padding: 7px 14px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-radius: var(--radius-full); background: var(--color-bg-elevated);
+  box-shadow: var(--color-border-tertiary) 0 0 0 0.5px inset; font-size: 14px; line-height: 20px; font-weight: 500; color: var(--color-text-primary);
+}
+.gbo-viewer-tools { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.gbo-viewer-meta { color: var(--color-text-tertiary); font-size: 12px; line-height: 16px; white-space: nowrap; }
+.gbo-viewer-pill {
+  height: 28px; padding: 0 12px; border: 0; border-radius: var(--radius-full); background: var(--color-bubble-agent-flat);
+  box-shadow: var(--color-border-secondary) 0 0 0 0.5px inset; color: var(--color-text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+}
+.gbo-viewer-pill:hover { color: var(--color-text-primary); background: var(--color-bg-secondary-hover); }
+.gbo-viewer-main { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: 0.5px solid var(--color-border-tertiary); }
+.gbo-viewer-loading { margin: auto; color: var(--color-text-tertiary); font-size: 13px; }
+.gbo-viewer-note { flex: none; padding: 8px 16px; color: var(--color-text-tertiary); font-size: 12px; line-height: 16px; }
+.gbo-viewer-panel { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 420px; padding: 24px; text-align: center; }
+.gbo-viewer-panel-tile { display: grid; place-items: center; width: 44px; height: 54px; margin-bottom: 6px; color: var(--color-text-quaternary); }
+.gbo-viewer-panel-tile svg { width: 44px; height: 54px; }
+.gbo-viewer-panel-tile:is(.is-file, .is-text) svg { width: 36px; height: 36px; }
+.gbo-viewer-panel-title { font-size: 15px; line-height: 22px; font-weight: 600; }
+.gbo-viewer-panel-text { color: var(--color-text-secondary); font-size: 13px; line-height: 19px; overflow-wrap: anywhere; }
+.gbo-viewer-panel-save { margin-top: 8px; }
+.gbo-viewer-text { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.gbo-viewer .gbo-file-preview { flex: 1 1 auto; max-height: none; min-height: 0; border-radius: 0; padding: 16px 20px; }
+.gbo-file-preview { overflow: auto; margin: 0; background: var(--color-code-block); color: var(--color-text-primary); }
 pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gbo-viewer-pdf { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: #FFFFFF; }
+.gbo-viewer-image { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; background: var(--color-code-block); }
+.gbo-viewer-image.is-zoomed { overflow: auto; }
+.gbo-viewer-image-hit { display: flex; align-items: center; justify-content: center; flex: 1 1 auto; min-width: 0; min-height: 0; padding: 16px; border: 0; background: none; cursor: zoom-in; }
+.gbo-viewer-image.is-zoomed .gbo-viewer-image-hit { flex: none; min-width: 100%; min-height: 100%; cursor: zoom-out; }
+.gbo-viewer-image-hit img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+.gbo-viewer-image.is-zoomed .gbo-viewer-image-hit img { max-width: none; max-height: none; }
+.gbo-viewer-image-hit:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: -2px; }
+/* Spreadsheets: a hint strip (the selected cell's full value when one is
+   picked), the grid (row numbers and the header row sticky; fixed-height
+   rows so only the visible ones are drawn), sheet tabs at the bottom. */
+.gbo-sheet { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.gbo-sheet-hint {
+  flex: none; display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 8px 0 16px; background: var(--color-sheet-head);
+  border-bottom: 0.5px solid var(--color-border-tertiary); color: var(--color-text-tertiary); font-size: 12px; line-height: 16px;
+}
+.gbo-sheet-hint-text { flex: 1 1 auto; min-width: 0; display: flex; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.gbo-sheet-ref { flex: none; color: var(--color-text-secondary); font-weight: 600; }
+.gbo-sheet-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-text-primary); }
+.gbo-sheet-hint.is-open { align-items: flex-start; padding-top: 8px; padding-bottom: 8px; }
+.gbo-sheet-hint.is-open .gbo-sheet-hint-text { white-space: normal; }
+.gbo-sheet-hint.is-open .gbo-sheet-value { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
+.gbo-sheet-cap { flex: none; color: var(--color-text-secondary); }
+.gbo-sheet-copied { flex: none; color: var(--color-text-secondary); font-weight: 500; }
+.gbo-sheet-copied:empty { display: none; }
+.gbo-sheet-expand {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-full);
+  background: transparent; color: var(--color-text-tertiary); cursor: pointer;
+}
+.gbo-sheet-expand svg { width: 14px; height: 14px; transition: transform 120ms var(--ease-out); }
+.gbo-sheet-expand[aria-expanded="true"] svg { transform: rotate(180deg); }
+.gbo-sheet-expand:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.gbo-sheet-scroll { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; outline: none; user-select: none; -webkit-user-select: none; }
+.gbo-sheet-table { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; color: var(--color-text-primary); }
+.gbo-sheet-table :is(td, th) {
+  box-sizing: border-box; height: var(--gbo-sheet-row); padding: 0 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  text-align: left; font-weight: 400; line-height: calc(var(--gbo-sheet-row) - 1px); vertical-align: middle;
+  border-bottom: 1px solid var(--color-sheet-grid); border-right: 1px solid var(--color-sheet-grid); background: var(--color-bg-elevated);
+}
+.gbo-sheet-table thead :is(td, th) { position: sticky; top: 0; z-index: 2; background: var(--color-sheet-head); font-weight: 500; }
+.gbo-sheet-table .gbo-sheet-num { position: sticky; left: 0; z-index: 1; padding: 0 6px; text-align: right; color: var(--color-text-tertiary); background: var(--color-sheet-head); font-variant-numeric: tabular-nums; }
+.gbo-sheet-table thead .gbo-sheet-num { z-index: 3; }
+.gbo-sheet-table .gbo-sheet-num.is-on { color: var(--color-text-primary); }
+.gbo-sheet-cell { cursor: cell; }
+.gbo-sheet-table .gbo-sheet-cell.is-sel { background: color-mix(in srgb, var(--color-sheet-focus) 10%, var(--color-bg-elevated)); }
+.gbo-sheet-table thead .gbo-sheet-cell.is-sel { background: color-mix(in srgb, var(--color-sheet-focus) 12%, var(--color-sheet-head)); }
+.gbo-sheet-table .gbo-sheet-cell.is-focus { box-shadow: var(--color-sheet-focus) 0 0 0 2px inset; }
+.gbo-sheet-spacer td { padding: 0; border: 0; background: none; height: auto; }
+.gbo-sheet-tabs { flex: none; display: flex; gap: 4px; padding: 6px 12px; overflow-x: auto; border-top: 0.5px solid var(--color-border-tertiary); background: var(--color-sheet-head); }
+.gbo-sheet-tab {
+  flex: none; height: 26px; padding: 0 12px; border: 0; border-radius: var(--radius-full); background: transparent; color: var(--color-text-secondary);
+  font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.gbo-sheet-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.gbo-sheet-tab.is-active { background: var(--color-bg-elevated); box-shadow: var(--color-border-secondary) 0 0 0 0.5px inset; color: var(--color-text-primary); font-weight: 500; }
 /* Fenced code blocks (ui/CodeBlock.tsx): the bubble's grey block with a
    header strip (language left, Copy pill right) so the pill never covers
    text; long lines wrap instead of running off the bubble; full height up

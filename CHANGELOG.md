@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Grokbot Override: click a file to preview it (2026-11-10)**: a file card now opens a large viewer over the
+  chat, like Grok Bot's: close X top left, the file name in a pill, the row count and a download button top right;
+  Escape closes it and puts focus back on the card. Spreadsheets (`.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`) show as
+  a grid with row numbers, a sticky header row and sheet tabs; click a cell to select it, move with the arrow keys,
+  extend with Shift, copy with ⌘C (tab-separated, pastes into a spreadsheet). Long cells end in "…" with the full
+  value in a tooltip and in the strip above the grid. Big files stay fast: only the visible rows are drawn, up to
+  the first 100,000 rows. PDFs open in the built-in PDF viewer, images fit the window (click to zoom), text and
+  markdown keep **Copy all**; other types, and files over 25 MB, offer **Download**. Cards now show a tile by type
+  (a green sheet for spreadsheets, PDF, image, document) and an always-visible download button. Spreadsheets are
+  read on your computer by the bundled SheetJS Community Edition 0.20.3 (Apache-2.0); nothing is fetched.
+  Works for local and remote bots, light and dark themes.
 - **Grokbot Override: the model sheet opens at once, with Effort and Speed (2026-11-10)**: the bot's **Model**
   sheet waited for the whole model catalogue (`model.options`, every provider, on the bot's own machine) before
   it drew anything, and asked for it again for every bot and every two minutes. It now draws at once with the

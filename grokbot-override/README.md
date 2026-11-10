@@ -19,8 +19,12 @@ seen when you open a chat. The sidebar footer shows your initials and name (this
 one Hermes gives plugins; "You" without it) and a round button that opens Hermes Settings. The transcript stays put
 while you scroll past live cards, and message actions float beside the message on hover. Code blocks in a bot's reply show in full (a
 long one folds behind **Show more**) with a **Copy** button. A file the bot sends (a `MEDIA:` line naming a
-document, not an image or a recording) is a card under its bubble: the name, its size, a download button on
-hover; clicking a text file (`.md`, `.txt`, `.json`, `.csv`, code) opens it with **Copy all** and **Download**. When a bot chooses not to reply
+document, not an image or a recording) is a card under its bubble: a tile by type (a green sheet for spreadsheets,
+PDF, image, document), the name, its size and a download button. Clicking the card opens a large viewer over the
+chat: spreadsheets (`.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`) as a grid with sheet tabs where you can select cells
+with the mouse or arrow keys (Shift extends) and copy them with ⌘C; PDFs in the built-in PDF viewer; images fit to
+the window (click to zoom); text and markdown with **Copy all**; anything else, or a file over 25 MB, with
+**Download**. Escape closes it. When a bot chooses not to reply
 (it answers with `[SILENT]` or `NO_REPLY`), nothing is shown: no bubble, no preview line, no unread dot.
 
 <p align="center">
