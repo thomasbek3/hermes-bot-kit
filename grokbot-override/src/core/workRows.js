@@ -15,6 +15,7 @@
 // preference is copied once (Bubble Mode's storage is only read).
 
 import { backgroundNoticeLabel } from './history.js'
+import { couldBeSilenceReply, isSilenceReply } from './silence.js'
 
 export const SHOW_WORK_KEY = 'showWork'
 export const LEGACY_SHOW_WORK_PLUGIN = 'bubble-mode'
@@ -32,10 +33,28 @@ export function loadShowWork(stored, legacy) {
   return { value: showWorkFrom(legacy), write: true }
 }
 
+/** A reply whose whole text is the silence sentinel ("[SILENT]") draws no
+ *  bubble; a streaming one waits while it could still become one. What it
+ *  thought (work rows) and its reactions stay. Display only. */
+export function withoutSilence(items) {
+  let changed = false
+  const out = []
+  for (const item of items) {
+    const text = item?.kind === 'assistant' ? item.text : ''
+    if (text && (isSilenceReply(text) || (item.streaming && couldBeSilenceReply(text)))) {
+      changed = true
+      if (item.reasoning || (Array.isArray(item.reactions) && item.reactions.length)) out.push({ ...item, text: '' })
+      continue
+    }
+    out.push(item)
+  }
+  return changed ? out : items
+}
+
 /** The transcript as drawn: with work rows hidden, tool groups go, a reply's
  *  reasoning goes, and a reply that was only reasoning goes too. */
 export function visibleItems(items, showWork) {
-  const list = Array.isArray(items) ? items : []
+  const list = withoutSilence(Array.isArray(items) ? items : [])
   if (showWork) return list
   const out = []
   for (const item of list) {

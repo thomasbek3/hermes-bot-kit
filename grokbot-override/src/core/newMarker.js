@@ -17,6 +17,8 @@
 // the user's own last message (an answer to what they just sent is not news
 // above their own words), and above the time divider that starts that reply.
 
+import { isSilenceReply } from './silence.js'
+
 export const SEEN_KEY = 'seenAt'
 export const MAX_SEEN = 200
 
@@ -68,7 +70,7 @@ export function firstUnreadId(items, seenAt) {
   }
   for (let i = start; i < list.length; i += 1) {
     const item = list[i]
-    if (item?.kind === 'assistant' && !item.streaming && Number(item.at || 0) > seenAt) return String(item.id)
+    if (item?.kind === 'assistant' && !item.streaming && item.text && !isSilenceReply(item.text) && Number(item.at || 0) > seenAt) return String(item.id)
   }
   return null
 }

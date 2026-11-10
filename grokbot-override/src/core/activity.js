@@ -13,6 +13,7 @@
 // toast. The bot on screen is refreshed instead of marked.
 
 import { rowKey } from './roster.js'
+import { isSilenceReply } from './silence.js'
 
 export function botActivitySession(bot) {
   const preferred = bot?.canonical_session
@@ -52,6 +53,9 @@ export function createActivityTracker(deps) {
         deps.refreshOpen?.(bot)
         continue
       }
+      // The newest message is the bot's silence sentinel: it chose not to
+      // reply, so nothing is unread and nothing toasts.
+      if (isSilenceReply(String(activity?.preview || ''))) continue
       const canonical = botCanonicalSessionId(bot)
       if (canonical) deps.markUnread?.(canonical, bot.name)
       if (deps.isHidden?.(bot)) continue

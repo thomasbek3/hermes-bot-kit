@@ -17,6 +17,7 @@ import { BACKGROUND_NOTICE_KINDS, backgroundNotice, toolLabel } from './history.
 import { approvalFromPayload, upsertApproval, cancelApprovals, settleApprovals } from './approvals.js'
 import { applyConnectionUpdate, inputRequestFrom, keepCardProgress } from './prompts.js'
 import { completeDetail, startDetail } from './tools.js'
+import { isSilenceReply } from './silence.js'
 
 export function emptyLive() {
   return { turnId: '', cursor: undefined, bubbleId: null, toolsId: null, reasoning: '', streamed: false, sealed: '' }
@@ -103,6 +104,17 @@ function lastAssistantText(state) {
     if (item.kind === 'assistant') return item
   }
   return null
+}
+
+/** The streamed bubble, when all it says is the silence sentinel, goes (its
+ *  reasoning, if any, stays as a reply with no text). */
+function dropSilentBubble(state) {
+  const bubble = findItem(state.items, state.live.bubbleId)
+  if (!bubble || !isSilenceReply(bubble.text)) return state
+  const items = bubble.reasoning
+    ? replaceItem(state.items, bubble.id, { text: '', streaming: false })
+    : state.items.filter(item => item.id !== bubble.id)
+  return { ...state, items, live: { ...state.live, bubbleId: null } }
 }
 
 export function finishTurn(state) {
@@ -252,9 +264,11 @@ export function applyEvent(state, event, now = Date.now()) {
     }
 
     case 'message.complete': {
-      const final = typeof payload.text === 'string' ? payload.text.trim() : ''
+      const raw = typeof payload.text === 'string' ? payload.text.trim() : ''
+      // The silence sentinel is "no reply": no bubble, not even an empty one.
+      const final = isSilenceReply(raw) ? '' : raw
       const failed = payload.status === 'error' || Boolean(payload.error)
-      let next = state
+      let next = dropSilentBubble(state)
       const bubble = findItem(next.items, next.live.bubbleId)
       if (final && !payload.response_reused) {
         if (bubble) {

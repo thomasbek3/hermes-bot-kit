@@ -9,6 +9,7 @@
 
 import { botRouteKey, resolveBotConnectionRoute } from './routing.js'
 import { sectionIdFor } from './sections.js'
+import { shownReplyText } from './silence.js'
 
 export const STOCK_ROSTER_KEY = ['hermes-bots', 'roster']
 export const STOCK_CACHE_MAX_AGE_MS = 20_000
@@ -181,7 +182,9 @@ export function handleOf(bot) {
 /** The roster preview: the canonical Bot Chat's preview, else the last session's. */
 export function previewOf(bot) {
   const session = bot?.canonical_session?.preview ? bot.canonical_session : bot?.last_session
-  const preview = typeof session?.preview === 'string' ? session.preview.replace(/\s+/g, ' ').trim() : ''
+  const text = typeof session?.preview === 'string' ? session.preview.replace(/\s+/g, ' ').trim() : ''
+  // The preview is the newest stored message: a silent reply shows nothing.
+  const preview = shownReplyText(text)
   const at = Number(bot?.canonical_session?.last_active || bot?.last_session?.last_active || 0)
   return { preview, at: at > 0 ? (at < 1e12 ? at * 1000 : at) : 0 }
 }

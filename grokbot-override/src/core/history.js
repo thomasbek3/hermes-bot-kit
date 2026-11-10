@@ -12,6 +12,7 @@
 //   tools     { id, at, tools: [{ id, name, label, status, summary, duration }] }
 //   notice    { id, text, at }
 
+import { shownReplyText } from './silence.js'
 import { argsText, clip } from './tools.js'
 
 export function toMillis(value) {
@@ -284,7 +285,8 @@ export function historyToItems(rows, { idPrefix = 'h:' } = {}) {
 
     if (role === 'assistant') {
       const calls = parseToolCalls(row)
-      const text = rowText(row).trim()
+      // A reply that is only the silence sentinel ("[SILENT]") is no reply.
+      const text = shownReplyText(rowText(row).trim())
       const reasoning = rowReasoning(row)
       if (text || reasoning) {
         flushTools()

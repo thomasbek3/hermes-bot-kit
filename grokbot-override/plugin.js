@@ -14505,6 +14505,37 @@ function expectHistory(summary) {
   return true;
 }
 
+// src/core/silence.js
+var SILENCE_MARKERS = Object.freeze(["[SILENT]", "SILENT", "NO_REPLY", "NO REPLY", "[静默]", "静默", "[沉默]", "沉默"]);
+var MARKERS = new Set(SILENCE_MARKERS);
+var MARKER_LENGTH_CAP = 64;
+var PUNCT = /\p{P}/u;
+var canonical = (text3) => text3.trim().toUpperCase().split(/\s+/).filter(Boolean).join(" ");
+var edgePunct = (ch) => ch !== "[" && ch !== "]" && PUNCT.test(ch);
+function stripEdgePunctuation(text3) {
+  const chars = Array.from(text3);
+  let start2 = 0;
+  let end = chars.length;
+  while (start2 < end && edgePunct(chars[start2])) start2 += 1;
+  while (end > start2 && edgePunct(chars[end - 1])) end -= 1;
+  return chars.slice(start2, end).join("").trim();
+}
+function candidates(text3) {
+  const stripped = typeof text3 === "string" ? text3.trim() : "";
+  if (!stripped || stripped.length > MARKER_LENGTH_CAP) return [];
+  const bare = stripEdgePunctuation(stripped);
+  return (bare === stripped ? [stripped] : [stripped, bare]).map(canonical);
+}
+function isSilenceReply(text3) {
+  return candidates(text3).some((c2) => MARKERS.has(c2));
+}
+function couldBeSilenceReply(text3) {
+  return candidates(text3).some((c2) => c2 && SILENCE_MARKERS.some((marker) => marker.startsWith(c2)));
+}
+function shownReplyText(text3) {
+  return isSilenceReply(text3) ? "" : text3;
+}
+
 // src/core/tools.js
 var TOOL_TEXT_MAX = 64e3;
 function clip(text3, max = TOOL_TEXT_MAX) {
@@ -14740,7 +14771,7 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
     }
     if (role === "assistant") {
       const calls = parseToolCalls(row);
-      const text3 = rowText(row).trim();
+      const text3 = shownReplyText(rowText(row).trim());
       const reasoning = rowReasoning(row);
       if (text3 || reasoning) {
         flushTools();
@@ -15108,7 +15139,8 @@ function handleOf(bot) {
 }
 function previewOf(bot) {
   const session = bot?.canonical_session?.preview ? bot.canonical_session : bot?.last_session;
-  const preview = typeof session?.preview === "string" ? session.preview.replace(/\s+/g, " ").trim() : "";
+  const text3 = typeof session?.preview === "string" ? session.preview.replace(/\s+/g, " ").trim() : "";
+  const preview = shownReplyText(text3);
   const at = Number(bot?.canonical_session?.last_active || bot?.last_session?.last_active || 0);
   return { preview, at: at > 0 ? at < 1e12 ? at * 1e3 : at : 0 };
 }
@@ -16153,6 +16185,12 @@ function lastAssistantText(state) {
   }
   return null;
 }
+function dropSilentBubble(state) {
+  const bubble = findItem(state.items, state.live.bubbleId);
+  if (!bubble || !isSilenceReply(bubble.text)) return state;
+  const items = bubble.reasoning ? replaceItem(state.items, bubble.id, { text: "", streaming: false }) : state.items.filter((item) => item.id !== bubble.id);
+  return { ...state, items, live: { ...state.live, bubbleId: null } };
+}
 function finishTurn(state) {
   const closed = closeBubble(state);
   const items = closed.items.map(
@@ -16279,9 +16317,10 @@ function applyEvent(state, event, now = Date.now()) {
       return { ...state, status: { kind: String(payload.kind || "status"), text: text3 } };
     }
     case "message.complete": {
-      const final = typeof payload.text === "string" ? payload.text.trim() : "";
+      const raw = typeof payload.text === "string" ? payload.text.trim() : "";
+      const final = isSilenceReply(raw) ? "" : raw;
       const failed = payload.status === "error" || Boolean(payload.error);
-      let next = state;
+      let next = dropSilentBubble(state);
       const bubble = findItem(next.items, next.live.bubbleId);
       if (final && !payload.response_reused) {
         if (bubble) {
@@ -16566,13 +16605,13 @@ var REATTACH_DELAYS_MS = [1e3, 5e3, 3e4];
 var RECONNECTING_NOTICE_MS = 1e4;
 var RESUME_KEYS = Object.freeze(["session_id", "profile", "omit_messages", "source"]);
 var SESSION_SOURCE = "desktop";
-function correctedResumeParams(error, params, canonical) {
+function correctedResumeParams(error, params, canonical2) {
   const { code, data, reason } = rpcErrorParts(error);
   if (reason === "invalid_params" && Array.isArray(data?.fields)) {
     return withoutRefusedParams(error, params, ["session_id", "profile"]);
   }
   if (code === 4007 || reason === "not_found" || code === 4001 && !reason) {
-    const other = canonicalIds(canonical).find((id) => id !== params.session_id);
+    const other = canonicalIds(canonical2).find((id) => id !== params.session_id);
     return other ? { ...params, session_id: other } : null;
   }
   return null;
@@ -16846,20 +16885,20 @@ function createChatController(bot, deps, options = {}) {
   async function open() {
     const mine = ++generation2;
     set({ phase: "resolving", error: null });
-    let canonical;
+    let canonical2;
     try {
-      canonical = await findCanonicalChat(deps.requestForBot, bot);
+      canonical2 = await findCanonicalChat(deps.requestForBot, bot);
     } catch (error) {
       if (mine === generation2) set({ phase: "error", error: String(error?.message || error) });
       return state;
     }
     if (mine !== generation2 || disposed) return state;
-    if (!canonical) {
+    if (!canonical2) {
       if (options.createIfMissing) return create();
       set({ phase: "no-chat", canonical: null });
       return state;
     }
-    return load(canonical, mine);
+    return load(canonical2, mine);
   }
   let creating = null;
   function create({ kickoff = false } = {}) {
@@ -16883,9 +16922,9 @@ function createChatController(bot, deps, options = {}) {
     })();
     return creating;
   }
-  async function load(canonical, mine) {
-    const storedId = openedSessionId(canonical);
-    set({ phase: "loading", canonical, storedId });
+  async function load(canonical2, mine) {
+    const storedId = openedSessionId(canonical2);
+    set({ phase: "loading", canonical: canonical2, storedId });
     let loaded = false;
     try {
       const rows = await readPage(0);
@@ -17401,10 +17440,10 @@ function createChatController(bot, deps, options = {}) {
   }
   async function followLineageTip() {
     try {
-      const canonical = await findCanonicalChat(deps.requestForBot, bot);
-      if (!canonical || disposed) return;
-      const tip = openedSessionId(canonical);
-      if (tip && tip !== state.storedId) set({ canonical, storedId: tip });
+      const canonical2 = await findCanonicalChat(deps.requestForBot, bot);
+      if (!canonical2 || disposed) return;
+      const tip = openedSessionId(canonical2);
+      if (tip && tip !== state.storedId) set({ canonical: canonical2, storedId: tip });
       const tail = await readPage(0);
       if (disposed) return;
       set((s) => ({
@@ -17978,9 +18017,9 @@ ${body}` : body);
         receipt = await submitOnce(runtimeId, clean, files, mark, payload, { exact });
       }
       const status = String(receipt?.status || "");
-      const canonical = !receipt?.legacyAccepted && Boolean(receipt?.submission_id || receipt?.admission_id);
+      const canonical2 = !receipt?.legacyAccepted && Boolean(receipt?.submission_id || receipt?.admission_id);
       if (status === "terminal" || status === "unknown") return settleReceipt(clientId, payload, status, files);
-      const startsNow = canonical && status === "queued" && !busyAtSubmit;
+      const startsNow = canonical2 && status === "queued" && !busyAtSubmit;
       const accepted = status === "streaming" || status === "started" || !status || startsNow;
       const label = startsNow ? "" : status;
       const fresh = turnSeq === turnBefore;
@@ -18518,8 +18557,22 @@ function loadShowWork(stored, legacy) {
   if (typeof stored === "boolean") return { value: stored, write: false };
   return { value: showWorkFrom(legacy), write: true };
 }
+function withoutSilence(items) {
+  let changed = false;
+  const out = [];
+  for (const item of items) {
+    const text3 = item?.kind === "assistant" ? item.text : "";
+    if (text3 && (isSilenceReply(text3) || item.streaming && couldBeSilenceReply(text3))) {
+      changed = true;
+      if (item.reasoning || Array.isArray(item.reactions) && item.reactions.length) out.push({ ...item, text: "" });
+      continue;
+    }
+    out.push(item);
+  }
+  return changed ? out : items;
+}
 function visibleItems(items, showWork) {
-  const list = Array.isArray(items) ? items : [];
+  const list = withoutSilence(Array.isArray(items) ? items : []);
   if (showWork) return list;
   const out = [];
   for (const item of list) {
@@ -18582,8 +18635,9 @@ function createActivityTracker(deps) {
         deps.refreshOpen?.(bot);
         continue;
       }
-      const canonical = botCanonicalSessionId(bot);
-      if (canonical) deps.markUnread?.(canonical, bot.name);
+      if (isSilenceReply(String(activity2?.preview || ""))) continue;
+      const canonical2 = botCanonicalSessionId(bot);
+      if (canonical2) deps.markUnread?.(canonical2, bot.name);
       if (deps.isHidden?.(bot)) continue;
       const preview = String(activity2?.preview || "").trim();
       if (lastToasted.get(key) === preview) continue;
@@ -18648,7 +18702,7 @@ function firstUnreadId(items, seenAt) {
   }
   for (let i = start2; i < list.length; i += 1) {
     const item = list[i];
-    if (item?.kind === "assistant" && !item.streaming && Number(item.at || 0) > seenAt) return String(item.id);
+    if (item?.kind === "assistant" && !item.streaming && item.text && !isSilenceReply(item.text) && Number(item.at || 0) > seenAt) return String(item.id);
   }
   return null;
 }
@@ -20159,8 +20213,8 @@ function setNewTabOpener(fn) {
 }
 async function openInNewTab(bot) {
   if (newTabOpener) return newTabOpener(bot);
-  const canonical = bot?.canonical_session;
-  const storedId = canonical?.resolved_id || canonical?.id;
+  const canonical2 = bot?.canonical_session;
+  const storedId = canonical2?.resolved_id || canonical2?.id;
   if (!storedId || typeof host2?.openSession !== "function") {
     notify("info", "This bot has no Bot Chat yet; open it here first.");
     return false;
@@ -22880,8 +22934,8 @@ function beginStockHandoff() {
 function chatTarget(bot) {
   const state = controller?.get?.();
   const target = freshBot(bot || state?.bot || findBot(app.selectedKey.get()));
-  const canonical = target && state && rowKey(state.bot) === rowKey(target) ? state.canonical : target?.canonical_session;
-  return { target, canonical, storedId: canonical?.id ? openedSessionId(canonical) : "" };
+  const canonical2 = target && state && rowKey(state.bot) === rowKey(target) ? state.canonical : target?.canonical_session;
+  return { target, canonical: canonical2, storedId: canonical2?.id ? openedSessionId(canonical2) : "" };
 }
 function stockHandoffProblem(bot) {
   if (!bot) return null;
@@ -22889,7 +22943,7 @@ function stockHandoffProblem(bot) {
   return target.ok ? null : target.reason;
 }
 async function openStoredChat(bot, reason) {
-  const { target, canonical, storedId } = chatTarget(bot);
+  const { target, canonical: canonical2, storedId } = chatTarget(bot);
   const open = target ? stockOpenTarget(target, activeConnectionId()) : null;
   if (open && !open.ok) {
     host2?.notify?.({ kind: "error", title: "Not opened in Hermes Bot Mode", message: `${open.reason}. Try again in a moment.` });
@@ -22900,13 +22954,13 @@ async function openStoredChat(bot, reason) {
     host2?.revealPane?.(STOCK_PANE_ID);
   } catch {
   }
-  if (!target || !open || !canonical?.id || typeof host2?.openSession !== "function") {
+  if (!target || !open || !canonical2?.id || typeof host2?.openSession !== "function") {
     if (reason) host2?.notify?.({ kind: "info", title: "Opened Hermes Bot Mode", message: reason });
     return "";
   }
   const ownerKey = botWorkspaceOwnerKey(target);
   try {
-    const ids = canonicalIds(canonical);
+    const ids = canonicalIds(canonical2);
     host2.focusOpenWorkspaceSession?.(
       ownerKey,
       (tile) => tile?.workspaceTabTitle === CANONICAL_CHAT_TITLE && !ids.includes(String(tile?.storedSessionId)),
@@ -22917,7 +22971,7 @@ async function openStoredChat(bot, reason) {
       profile: open.profile,
       intent: "in-place",
       awaitHydration: false,
-      expectHistory: expectHistory(canonical),
+      expectHistory: expectHistory(canonical2),
       forceResume: true,
       hydrationTimeoutMs: CANONICAL_HYDRATION_TIMEOUT_MS,
       keepAllProfilesScope: true,
@@ -23591,18 +23645,18 @@ async function selfCheck({ notify: notify2 = true } = {}) {
       if (target !== local && remoteOk) break;
       const where = { bot: target.name, connection: target.connectionId || "active" };
       try {
-        const canonical = await findCanonicalChat(requestForBot, target);
+        const canonical2 = await findCanonicalChat(requestForBot, target);
         step("canonical-lookup", true, {
           ...where,
-          found: Boolean(canonical),
-          matchesRoster: Boolean(canonical && target.canonical_session && canonical.id === target.canonical_session.id),
-          title: canonical?.title || canonical?.root_title || null,
-          messageCount: canonical?.message_count ?? null,
-          liveMessageCount: canonical?.live_message_count ?? null,
-          lineageTip: Boolean(canonical?.resolved_id && canonical.resolved_id !== canonical.id)
+          found: Boolean(canonical2),
+          matchesRoster: Boolean(canonical2 && target.canonical_session && canonical2.id === target.canonical_session.id),
+          title: canonical2?.title || canonical2?.root_title || null,
+          messageCount: canonical2?.message_count ?? null,
+          liveMessageCount: canonical2?.live_message_count ?? null,
+          lineageTip: Boolean(canonical2?.resolved_id && canonical2.resolved_id !== canonical2.id)
         });
-        if (canonical) {
-          const page = await readHistory(target, openedSessionId(canonical), { limit: 20, offset: 0 });
+        if (canonical2) {
+          const page = await readHistory(target, openedSessionId(canonical2), { limit: 20, offset: 0 });
           const msgs = Array.isArray(page?.messages) ? page.messages : [];
           const items = historyToItems(msgs);
           if (target !== local && msgs.length) remoteRead = true;
@@ -30436,7 +30490,7 @@ function RosterPane() {
     const items = chat.chat?.items || [];
     for (let i = items.length - 1; i >= 0; i -= 1) {
       const item = items[i];
-      if ((item.kind === "assistant" || item.kind === "user") && item.text) return item.text.replace(/\s+/g, " ").trim();
+      if ((item.kind === "assistant" || item.kind === "user") && item.text && !(item.kind === "assistant" && isSilenceReply(item.text))) return item.text.replace(/\s+/g, " ").trim();
     }
     return "";
   })();
