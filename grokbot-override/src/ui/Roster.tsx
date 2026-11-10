@@ -12,6 +12,7 @@ import { buildSections, displayName, handleOf, previewOf, rowKey, sourceUnreacha
 import { pinState, withoutPinned } from '../core/pins.js'
 import { deriveRosterView, unreachableSources } from '../core/rosterView.js'
 import { shortAge } from '../core/time.js'
+import { isSilenceReply } from '../core/silence.js'
 import { footerPerson } from '../core/person.js'
 import {
   app,
@@ -291,7 +292,7 @@ export function RosterPane() {
     const items = chat.chat?.items || []
     for (let i = items.length - 1; i >= 0; i -= 1) {
       const item = items[i]
-      if ((item.kind === 'assistant' || item.kind === 'user') && item.text) return item.text.replace(/\s+/g, ' ').trim()
+      if ((item.kind === 'assistant' || item.kind === 'user') && item.text && !(item.kind === 'assistant' && isSilenceReply(item.text))) return item.text.replace(/\s+/g, ' ').trim()
     }
     return ''
   })()

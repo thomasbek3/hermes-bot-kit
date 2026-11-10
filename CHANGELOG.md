@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Grokbot Override: code blocks you can copy (2026-11-10)**: a code block in a bot's reply was clipped to a
+  few lines behind a small chevron, with no way to copy it. Every code block now has a **Copy** button
+  (top-right; "Copied" for a moment) that copies exactly the block's text, shows in full up to 60 lines (a
+  normal handoff fits), and longer blocks fold behind **Show more** / **Show less**. Light and dark themes.
+- **Grokbot Override: "[SILENT]" is not a reply (2026-11-10)**: a bot that chose not to answer showed a
+  "[SILENT]" bubble. A reply that is only Hermes's silence sentinel (`[SILENT]`, `NO_REPLY` and the other
+  spellings Hermes uses) now draws nothing: no bubble, no roster preview, no unread dot or toast, no NEW line.
+  A reply that just mentions the word shows as usual.
+- **Grokbot Override: no raw background-process lines (2026-11-10)**: a grey line under a reply read
+  "Background Process Finished: " followed by the full path of the command. It is a work row now: hidden by
+  default, and with **show work rows** on it reads "Background task finished" (or failed / stopped), with the
+  command only in its tooltip. Errors and approvals still always show.
 - **Grokbot Override: questions come one at a time (2026-11-10)**: a question card with several questions
   showed them all stacked with one greyed **Answer** button that did nothing until every question had a
   pick, and nothing said so. It now pages like Grok Bot: one question per page with page dots, a click picks

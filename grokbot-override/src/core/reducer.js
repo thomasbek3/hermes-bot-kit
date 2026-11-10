@@ -13,10 +13,11 @@
 //   _append_inflight_delta), so a snapshot repair subtracts it (review r3 #4).
 
 import { admitSegmentDelta, admitSegmentSeal, segmentStamp } from './segments.js'
-import { toolLabel } from './history.js'
+import { BACKGROUND_NOTICE_KINDS, backgroundNotice, toolLabel } from './history.js'
 import { approvalFromPayload, upsertApproval, cancelApprovals, settleApprovals } from './approvals.js'
 import { applyConnectionUpdate, inputRequestFrom, keepCardProgress } from './prompts.js'
 import { completeDetail, startDetail } from './tools.js'
+import { isSilenceReply } from './silence.js'
 
 export function emptyLive() {
   return { turnId: '', cursor: undefined, bubbleId: null, toolsId: null, reasoning: '', streamed: false, sealed: '' }
@@ -105,6 +106,17 @@ function lastAssistantText(state) {
   return null
 }
 
+/** The streamed bubble, when all it says is the silence sentinel, goes (its
+ *  reasoning, if any, stays as a reply with no text). */
+function dropSilentBubble(state) {
+  const bubble = findItem(state.items, state.live.bubbleId)
+  if (!bubble || !isSilenceReply(bubble.text)) return state
+  const items = bubble.reasoning
+    ? replaceItem(state.items, bubble.id, { text: '', streaming: false })
+    : state.items.filter(item => item.id !== bubble.id)
+  return { ...state, items, live: { ...state.live, bubbleId: null } }
+}
+
 export function finishTurn(state) {
   const closed = closeBubble(state)
   const items = closed.items.map(item =>
@@ -127,7 +139,15 @@ export function applyEvent(state, event, now = Date.now()) {
       let next = closeBubble(state)
       next = { ...next, busy: true, status: null, live: { ...emptyLive(), turnId } }
       const card = typeof payload.display_text === 'string' && payload.display_text.trim()
-      if (card) next = { ...next, items: [...next.items, { kind: 'notice', id: liveId('n'), text: card.trim(), at: now }] }
+      if (card) {
+        // A producer card (background process / agent work finished) is a
+        // work row with a short label (history.js BACKGROUND_NOTICE_KINDS).
+        const kind = typeof payload.display_kind === 'string' ? payload.display_kind : ''
+        const notice = BACKGROUND_NOTICE_KINDS.has(kind)
+          ? backgroundNotice(kind, card, { id: liveId('n'), at: now })
+          : { kind: 'notice', id: liveId('n'), text: card.trim(), at: now }
+        next = { ...next, items: [...next.items, notice] }
+      }
       return next
     }
 
@@ -244,9 +264,11 @@ export function applyEvent(state, event, now = Date.now()) {
     }
 
     case 'message.complete': {
-      const final = typeof payload.text === 'string' ? payload.text.trim() : ''
+      const raw = typeof payload.text === 'string' ? payload.text.trim() : ''
+      // The silence sentinel is "no reply": no bubble, not even an empty one.
+      const final = isSilenceReply(raw) ? '' : raw
       const failed = payload.status === 'error' || Boolean(payload.error)
-      let next = state
+      let next = dropSilentBubble(state)
       const bubble = findItem(next.items, next.live.bubbleId)
       if (final && !payload.response_reused) {
         if (bubble) {

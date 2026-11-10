@@ -59,11 +59,18 @@ function ReactButton({ onReact }: { onReact: (emoji: string) => void }) {
   )
 }
 
-function copyText(text: string) {
+/** Text to the clipboard (the renderer's own clipboard API); resolves true
+ *  once written, false when there is none or it refused. */
+export function copyText(text: string): Promise<boolean> {
   try {
-    void (globalThis as any).navigator?.clipboard?.writeText?.(text)
+    const write = (globalThis as any).navigator?.clipboard?.writeText
+    if (typeof write !== 'function') return Promise.resolve(false)
+    return Promise.resolve(write.call((globalThis as any).navigator.clipboard, text)).then(
+      () => true,
+      () => false
+    )
   } catch {
-    /* clipboard unavailable */
+    return Promise.resolve(false)
   }
 }
 

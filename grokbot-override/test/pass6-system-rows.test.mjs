@@ -77,12 +77,13 @@ test('by display_kind only: the same words typed by a person or said by the bot 
   assert.deepEqual(visibleItems(items, false).map(i => i.kind), ['user', 'assistant'])
 })
 
-test('other timeline notices are not system metadata', () => {
+test('background-work cards are work rows (hidden by default), not system metadata', () => {
   const items = historyToItems([
-    { id: 1, role: 'user', content: 'x', display_kind: 'process_complete', display_metadata: { display_text: 'Background process finished' }, timestamp: 1 },
-    { id: 2, role: 'user', content: 'y', display_kind: 'async_delegation_complete', display_metadata: { display_text: '2 background agents finished' }, timestamp: 2 }
+    { id: 1, role: 'user', content: 'x', display_kind: 'process_complete', display_metadata: { display_text: 'Background Process Finished: make' }, timestamp: 1 },
+    { id: 2, role: 'user', content: 'y', display_kind: 'async_delegation_complete', display_metadata: { display_text: 'Subagent Task Completed: tidy' }, timestamp: 2 }
   ])
-  assert.deepEqual(visibleItems(items, false).map(i => i.text), ['Background process finished', '2 background agents finished'])
+  assert.deepEqual(visibleItems(items, false).map(i => i.text), [])
+  assert.deepEqual(visibleItems(items, true).map(i => i.text), ['Background task finished', 'Background agent work finished'])
   for (const kind of ['model_switch', 'personality_switch', 'failed_turn', 'auto_continue', 'internal_notification']) assert.ok(SYSTEM_NOTICE_KINDS.has(kind), kind)
   assert.ok(!SYSTEM_NOTICE_KINDS.has('process_complete') && !SYSTEM_NOTICE_KINDS.has('steer'))
 })

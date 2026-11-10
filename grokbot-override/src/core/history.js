@@ -12,6 +12,7 @@
 //   tools     { id, at, tools: [{ id, name, label, status, summary, duration }] }
 //   notice    { id, text, at }
 
+import { shownReplyText } from './silence.js'
 import { argsText, clip } from './tools.js'
 
 export function toMillis(value) {
@@ -169,6 +170,49 @@ function isSystemNotice(kind, role, text) {
   return !(kind === 'failed_turn' && role === 'assistant' && text === PARTIAL_FAILED_TURN_NOTICE)
 }
 
+/** Producer cards for background work finishing, by `display_kind`
+ *  (gateway/response_filters.py PRODUCER_NOTICE_DISPLAY_KINDS):
+ *   - process_complete: "Background Process Finished: <command>" and its
+ *     Failed / Terminated / Lost / "N Background Processes Finished" forms
+ *     (tools/process_registry_notifications.py
+ *     process_completion_display_text), whose command is often an absolute
+ *     path;
+ *   - async_delegation_complete: "Subagent Task Completed: <goal>"
+ *     (async_delegation_display_text).
+ *  Stock Desktop draws them as a background-result card
+ *  (lib/chat-messages hydration: asyncResult). Here they are work rows:
+ *  hidden by default, and when shown a short label with the full line in the
+ *  tooltip only, so a path is never printed in the chat. */
+export const BACKGROUND_NOTICE_KINDS = new Set(['process_complete', 'async_delegation_complete'])
+
+const PROCESS_OUTCOMES = [
+  [/^\s*(\d+) background processes finished/i, m => `${m[1]} background tasks finished`],
+  [/^\s*background process failed to start/i, () => 'Background task failed to start'],
+  [/^\s*background process failed/i, () => 'Background task failed'],
+  [/^\s*background process terminated/i, () => 'Background task stopped'],
+  [/^\s*background process lost/i, () => 'Background task lost'],
+  [/^\s*background process finished/i, () => 'Background task finished']
+]
+
+/** The short label a background card shows (never its command or path). */
+export function backgroundNoticeLabel(kind, text) {
+  if (kind === 'async_delegation_complete') return 'Background agent work finished'
+  const line = String(text || '')
+  for (const [re, label] of PROCESS_OUTCOMES) {
+    const m = re.exec(line)
+    if (m) return label(m)
+  }
+  return kind === 'process_complete' ? 'Background task finished' : 'Background task update'
+}
+
+const TITLE_MAX = 300
+
+/** A background card as a chat notice: label, full line as its tooltip. */
+export function backgroundNotice(kind, text, fields) {
+  const full = String(text || '').replace(/\s+/g, ' ').trim()
+  return { kind: 'notice', ...fields, text: backgroundNoticeLabel(kind, full), ...(full ? { title: full.length > TITLE_MAX ? `${full.slice(0, TITLE_MAX - 1)}…` : full } : {}), system: kind }
+}
+
 /** A failed turn's error text from its boundary row's display_metadata
  *  ({error, error_surface: {code, message, …}}), or ''. */
 function failedTurnError(meta) {
@@ -212,6 +256,11 @@ export function historyToItems(rows, { idPrefix = 'h:' } = {}) {
         items.push({ kind: 'error', id: `${rowId(row, index, idPrefix)}-error`, text: failure, at })
       }
       const text = (meta && typeof meta.display_text === 'string' && meta.display_text) || rowText(row)
+      if (BACKGROUND_NOTICE_KINDS.has(kind)) {
+        flushTools()
+        items.push(backgroundNotice(kind, text, { id: rowId(row, index, idPrefix), at }))
+        return
+      }
       if (text.trim()) {
         flushTools()
         items.push({ kind: 'notice', id: rowId(row, index, idPrefix), text: text.trim(), at, ...(isSystemNotice(kind, role, text.trim()) ? { system: kind } : {}) })
@@ -236,7 +285,8 @@ export function historyToItems(rows, { idPrefix = 'h:' } = {}) {
 
     if (role === 'assistant') {
       const calls = parseToolCalls(row)
-      const text = rowText(row).trim()
+      // A reply that is only the silence sentinel ("[SILENT]") is no reply.
+      const text = shownReplyText(rowText(row).trim())
       const reasoning = rowReasoning(row)
       if (text || reasoning) {
         flushTools()
