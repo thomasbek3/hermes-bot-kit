@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Grokbot Override: files a bot sends are cards (2026-11-10)**: a file named on a `MEDIA:` line showed as
+  a small chip inside the bubble. It is now a card of its own under the bubble, like Grok Bot's: a document
+  icon, the name (cut in the middle when long), the size, and a download button on hover. Clicking a text
+  file (`.md`, `.txt`, `.json`, `.csv`, code) opens it in a preview with **Copy all** and **Download**; other
+  files download. A file the bot's machine no longer has shows "Not available". Several files stack; images,
+  audio and video are unchanged. Light and dark themes. The agent-cards skill now tells the bot to send long
+  text you will copy (a handoff, a prompt, a spec) as a `.md` file instead of a giant code block.
 - **Grokbot Override: code blocks you can copy (2026-11-10)**: a code block in a bot's reply was clipped to a
   few lines behind a small chevron, with no way to copy it. Every code block now has a **Copy** button
   (top-right; "Copied" for a moment) that copies exactly the block's text, shows in full up to 60 lines (a

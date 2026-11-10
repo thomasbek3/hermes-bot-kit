@@ -15353,6 +15353,117 @@ function mediaReadRequest(path, scope) {
     ...scope?.profile ? { profile: scope.profile } : {}
   };
 }
+function formatBytes(bytes) {
+  const n = Math.max(0, Math.round(Number(bytes) || 0));
+  if (n < 1e3) return `${n} B`;
+  const units = ["kB", "MB", "GB", "TB"];
+  let value = n / 1e3;
+  let unit = 0;
+  for (; ; ) {
+    const shown = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
+    if (shown < 1e3 || unit === units.length - 1) return `${String(shown)}${units[unit]}`;
+    value /= 1e3;
+    unit += 1;
+  }
+}
+function middleTruncate(name, max = 14) {
+  const value = String(name || "");
+  if (value.length <= max) return value;
+  const dot = value.lastIndexOf(".");
+  const ext = dot > 0 && value.length - dot <= 8 ? value.slice(dot) : "";
+  const head = Math.max(1, max - ext.length - 1);
+  return `${value.slice(0, head)}…${ext}`;
+}
+var TEXT_EXT = /* @__PURE__ */ new Set([
+  "md",
+  "markdown",
+  "txt",
+  "text",
+  "log",
+  "json",
+  "jsonl",
+  "csv",
+  "tsv",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "xml",
+  "js",
+  "mjs",
+  "cjs",
+  "jsx",
+  "ts",
+  "tsx",
+  "py",
+  "rb",
+  "go",
+  "rs",
+  "java",
+  "kt",
+  "swift",
+  "c",
+  "h",
+  "cc",
+  "cpp",
+  "hpp",
+  "cs",
+  "php",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "sql",
+  "css",
+  "scss",
+  "html",
+  "htm",
+  "vue",
+  "svelte",
+  "lua",
+  "r",
+  "diff",
+  "patch"
+]);
+function previewKind(name) {
+  const ext = String(name || "").split(".").pop()?.toLowerCase() || "";
+  if (!String(name || "").includes(".")) return "";
+  if (ext === "md" || ext === "markdown") return "markdown";
+  return TEXT_EXT.has(ext) ? "text" : "";
+}
+function dataUrlParts(url) {
+  const value = String(url || "");
+  const comma = value.indexOf(",");
+  if (!value.startsWith("data:") || comma < 0) return null;
+  return { base64: /;base64$/i.test(value.slice(0, comma)), body: value.slice(comma + 1) };
+}
+function dataUrlBytes(url) {
+  const parts = dataUrlParts(url);
+  if (!parts) return null;
+  if (parts.base64) {
+    const clean = parts.body.replace(/\s+/g, "");
+    const pad = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+    return Math.max(0, Math.floor(clean.length * 3 / 4) - pad);
+  }
+  try {
+    return new TextEncoder().encode(decodeURIComponent(parts.body)).length;
+  } catch {
+    return parts.body.length;
+  }
+}
+function dataUrlText(url) {
+  const parts = dataUrlParts(url);
+  if (!parts) return "";
+  try {
+    if (!parts.base64) return decodeURIComponent(parts.body);
+    const binary = atob(parts.body.replace(/\s+/g, ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return "";
+  }
+}
 
 // src/core/directives.js
 var DIRECTIVE_NAMES = Object.freeze(["card", "preview"]);
@@ -21606,6 +21717,39 @@ var ADAPT_SRC = (
 /* Small images and emoji inside a line of text sit on the text. */
 .md .aui-md :is(p, li) > img { display: inline-block; height: 1.15em; width: auto; vertical-align: -0.2em; border-radius: 3px; }
 .gbo-media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+/* Files a bot sends (ui/Media.tsx FileCard): one card each under the
+   bubble, stacked 8px apart; a white rounded card with a soft ring and
+   shadow (a ring only in dark), a grey document tile, the name in medium
+   weight, the size small and grey; a round download button on hover. */
+.gbo-files { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 6px; max-width: 100%; }
+.gbo-file-card {
+  position: relative; display: flex; align-items: center; width: 220px; max-width: 100%; min-width: 0; border-radius: 16px;
+  background: var(--color-bg-elevated); color: var(--color-text-primary); box-shadow: var(--shadow-card);
+}
+.gbo-file-card-main {
+  display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; padding: 12px 14px; border: 0; border-radius: inherit;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.gbo-file-card-main:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+.gbo-file-card.is-error .gbo-file-card-main { cursor: default; }
+.gbo-file-card-icon {
+  flex: none; display: grid; place-items: center; width: 36px; height: 44px; border-radius: 8px;
+  background: var(--color-bg-subtle); box-shadow: var(--color-border-tertiary) 0 0 0 0.5px inset; color: var(--color-text-quaternary);
+}
+.gbo-file-card-icon svg { width: 24px; height: 24px; }
+.gbo-file-card-text { display: flex; flex-direction: column; min-width: 0; }
+.gbo-file-card-name { font-size: 14px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gbo-file-card-size { font-size: 12px; line-height: 16px; letter-spacing: 0.12px; color: var(--color-text-tertiary); }
+.gbo-file-card-save {
+  flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin-right: 12px; padding: 0; border: 0; border-radius: var(--radius-full);
+  background: transparent; color: var(--color-text-secondary); cursor: pointer; opacity: 0; transition: opacity 120ms var(--ease-out), background 120ms var(--ease-out);
+}
+.gbo-file-card-save svg { width: 18px; height: 18px; }
+.gbo-file-card:hover .gbo-file-card-save, .gbo-file-card:focus-within .gbo-file-card-save { opacity: 1; }
+.gbo-file-card-save:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.gbo-file-preview-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.gbo-file-preview { max-height: min(60vh, 560px); overflow: auto; margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--color-code-block); color: var(--color-text-primary); }
+pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Fenced code blocks (ui/CodeBlock.tsx): the bubble's grey block with a
    header strip (language left, Copy pill right) so the pill never covers
    text; long lines wrap instead of running off the bubble; full height up
@@ -24303,6 +24447,12 @@ var IconScreen = () => /* @__PURE__ */ jsxs3("svg", { ...base, children: [
   /* @__PURE__ */ jsx3("path", { d: "M9 20h6M12 16v4" })
 ] });
 var IconPin = () => /* @__PURE__ */ jsx3("svg", { ...base, children: /* @__PURE__ */ jsx3("path", { d: "M9 4.5h6l-1 5 3 3v1.5H7V12.5l3-3zM12 14v6" }) });
+var IconDocument = ({ lines = false }) => /* @__PURE__ */ jsxs3("svg", { ...base, strokeWidth: 1.6, children: [
+  /* @__PURE__ */ jsx3("path", { d: "M7 3.5h6.5L18 8v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1-1.5Z" }),
+  /* @__PURE__ */ jsx3("path", { d: "M13.5 3.5V8H18" }),
+  lines ? /* @__PURE__ */ jsx3("path", { d: "M9 12h6M9 15h6M9 18h4" }) : null
+] });
+var IconDownload = () => /* @__PURE__ */ jsx3("svg", { ...base, children: /* @__PURE__ */ jsx3("path", { d: "M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5 19.5h14" }) });
 
 // src/ui/Voice.tsx
 import * as React4 from "react";
@@ -25821,28 +25971,118 @@ function OwnerMedia({ bot, item }) {
   if ((item.kind === "audio" || item.kind === "video") && src) {
     return item.kind === "audio" ? /* @__PURE__ */ jsx11("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx11("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
   }
-  return /* @__PURE__ */ jsxs10(
-    "button",
+  return /* @__PURE__ */ jsx11(FileCard, { bot, item });
+}
+function FileCard({ bot, item }) {
+  const [state, setState] = React10.useState({ status: "idle" });
+  const [preview, setPreview] = React10.useState(null);
+  const live = React10.useRef(true);
+  React10.useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const kind = previewKind(item.name);
+  const read = () => readBotMedia(bot, item.path).then((url) => {
+    if (!url) throw new Error(`Could not read ${item.name}`);
+    if (live.current) setState({ status: "ready", size: dataUrlBytes(url) ?? void 0 });
+    return url;
+  }).catch((err2) => {
+    if (live.current) setState({ status: "error", error: String(err2?.message || err2) });
+    return null;
+  });
+  const peek = () => {
+    if (state.status !== "idle") return;
+    setState({ status: "loading" });
+    void read();
+  };
+  const save = () => {
+    void read().then((url) => {
+      if (url) saveDataUrl(url, item.name);
+    });
+  };
+  const open = () => {
+    if (state.status === "error") return;
+    if (!kind) return save();
+    void read().then((url) => {
+      if (url && live.current) setPreview(dataUrlText(url));
+    });
+  };
+  const missing = state.status === "error";
+  const meta = missing ? "Not available" : state.size !== void 0 ? formatBytes(state.size) : "";
+  return /* @__PURE__ */ jsxs10(Fragment6, { children: [
+    /* @__PURE__ */ jsxs10(
+      "div",
+      {
+        className: `gbo-file-card${missing ? " is-error" : ""}`,
+        "data-path": item.path,
+        onMouseEnter: peek,
+        onFocus: peek,
+        children: [
+          /* @__PURE__ */ jsxs10(
+            "button",
+            {
+              type: "button",
+              className: "gbo-file-card-main",
+              title: missing ? `${item.name}: ${state.error || "not available"}` : item.name,
+              "aria-label": missing ? `${item.name}, not available` : kind ? `Open ${item.name}` : `Save ${item.name}`,
+              "aria-disabled": missing || void 0,
+              onClick: open,
+              children: [
+                /* @__PURE__ */ jsx11("span", { className: "gbo-file-card-icon", children: /* @__PURE__ */ jsx11(IconDocument, { lines: kind !== "" }) }),
+                /* @__PURE__ */ jsxs10("span", { className: "gbo-file-card-text", children: [
+                  /* @__PURE__ */ jsx11("span", { className: "gbo-file-card-name", children: middleTruncate(item.name) }),
+                  /* @__PURE__ */ jsx11("span", { className: "gbo-file-card-size", children: meta || " " })
+                ] })
+              ]
+            }
+          ),
+          missing ? null : /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-file-card-save", "aria-label": `Download ${item.name}`, title: "Download", onClick: save, children: /* @__PURE__ */ jsx11(IconDownload, {}) })
+        ]
+      }
+    ),
+    preview !== null ? /* @__PURE__ */ jsx11(FilePreview, { name: item.name, text: preview, markdown: kind === "markdown", onSave: save, onClose: () => setPreview(null) }) : null
+  ] });
+}
+function FilePreview({ name, text: text3, markdown, onSave, onClose }) {
+  const [copied, setCopied] = React10.useState(false);
+  const timer = React10.useRef(null);
+  React10.useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = () => {
+    void copyText(text3).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+    });
+  };
+  return /* @__PURE__ */ jsx11(
+    Dialog,
     {
-      type: "button",
-      className: `gbo-media-file${error ? " is-error" : ""}`,
-      title: error || `Save ${item.name}`,
-      onClick: () => {
-        readBotMedia(bot, item.path).then(
-          (url) => saveDataUrl(url, item.name),
-          (err2) => setError(String(err2?.message || err2))
-        );
-      },
-      children: [
-        item.name,
-        error ? ": not available" : ""
-      ]
+      open: true,
+      wide: true,
+      label: `Preview of ${name}`,
+      title: /* @__PURE__ */ jsx11("span", { className: "gbo-file-preview-title", title: name, children: name }),
+      onClose,
+      footer: /* @__PURE__ */ jsxs10(Fragment6, { children: [
+        /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-ghost is-small", onClick: onClose, children: "Close" }),
+        /* @__PURE__ */ jsx11("span", { className: "gbo-spacer" }),
+        /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-small gbo-file-preview-save", onClick: onSave, children: "Download" }),
+        /* @__PURE__ */ jsx11("button", { type: "button", className: "gbo-btn is-primary is-small gbo-file-preview-copy", onClick: copy, children: copied ? "Copied" : "Copy all" })
+      ] }),
+      children: markdown ? /* @__PURE__ */ jsx11("div", { className: "md gbo-file-preview", children: /* @__PURE__ */ jsx11(Markdown, { text: text3 }) }) : /* @__PURE__ */ jsx11("pre", { className: "gbo-file-preview is-mono", children: text3 })
     }
   );
 }
+function FileCards({ bot, files }) {
+  if (!files.length) return null;
+  return /* @__PURE__ */ jsx11("div", { className: "gbo-files", children: files.map((item) => /* @__PURE__ */ jsx11(FileCard, { bot, item }, item.path)) });
+}
 function MediaStrip({ bot, media }) {
-  if (!media.length) return null;
-  return /* @__PURE__ */ jsx11("div", { className: "gbo-media", children: media.map((item) => /* @__PURE__ */ jsx11(OwnerMedia, { bot, item }, item.path)) });
+  const shown = media.filter((item) => item.kind !== "file");
+  if (!shown.length) return null;
+  return /* @__PURE__ */ jsx11("div", { className: "gbo-media", children: shown.map((item) => /* @__PURE__ */ jsx11(OwnerMedia, { bot, item }, item.path)) });
 }
 function BotText({ bot, text: text3 }) {
   const { text: clean, media } = React10.useMemo(() => extractMedia(text3), [text3]);
@@ -25852,6 +26092,18 @@ function BotText({ bot, text: text3 }) {
       (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx11(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx11(Markdown, { text: part.text }, index)
     ),
     /* @__PURE__ */ jsx11(MediaStrip, { bot, media })
+  ] });
+}
+function BotProse({ bot, text: text3, pos, time }) {
+  const { text: clean, media } = React10.useMemo(() => extractMedia(text3), [text3]);
+  const files = media.filter((item) => item.kind === "file");
+  const bubble = Boolean(clean) || media.length > files.length;
+  return /* @__PURE__ */ jsxs10(Fragment6, { children: [
+    bubble ? /* @__PURE__ */ jsxs10("div", { className: "bubble-wrap is-left", children: [
+      /* @__PURE__ */ jsx11("div", { className: `bubble is-agent${pos}`, children: /* @__PURE__ */ jsx11("div", { className: "md", children: /* @__PURE__ */ jsx11(BotText, { bot, text: text3 }) }) }),
+      time
+    ] }) : null,
+    /* @__PURE__ */ jsx11(FileCards, { bot, files })
   ] });
 }
 
@@ -29950,18 +30202,16 @@ function UserMeta({
 function AssistantBody({ item, bot, pos }) {
   const { segments, scope } = useDirectiveSegments(item.streaming ? "" : item.text);
   const time = item.at ? /* @__PURE__ */ jsx24("span", { className: "bubble__time", children: clock(item.at) }) : null;
-  if (item.streaming || !segments || !scope) {
+  if (item.streaming) {
     return /* @__PURE__ */ jsxs22("div", { className: "bubble-wrap is-left", children: [
-      /* @__PURE__ */ jsx24("div", { className: `bubble is-agent${pos}${item.streaming ? " is-streaming" : ""}`, children: item.streaming ? /* @__PURE__ */ jsx24("div", { className: "bubble__plain", children: item.text }) : /* @__PURE__ */ jsx24("div", { className: "md", children: /* @__PURE__ */ jsx24(BotText, { bot, text: item.text }) }) }),
+      /* @__PURE__ */ jsx24("div", { className: `bubble is-agent${pos} is-streaming`, children: /* @__PURE__ */ jsx24("div", { className: "bubble__plain", children: item.text }) }),
       time
     ] });
   }
+  if (!segments || !scope) return /* @__PURE__ */ jsx24(BotProse, { bot, text: item.text, pos, time });
   const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
   return /* @__PURE__ */ jsx24(Fragment13, { children: segments.map(
-    (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsxs22("div", { className: "bubble-wrap is-left", children: [
-      /* @__PURE__ */ jsx24("div", { className: `bubble is-agent${pos}`, children: /* @__PURE__ */ jsx24("div", { className: "md", children: /* @__PURE__ */ jsx24(BotText, { bot, text: segment.text }) }) }),
-      index === lastProse ? time : null
-    ] }, index) : /* @__PURE__ */ jsx24(DirectiveBlock, { segment, poll: scope.recent.has(item.id), scope }, index)
+    (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx24(BotProse, { bot, text: segment.text, pos, time: index === lastProse ? time : null }, index) : /* @__PURE__ */ jsx24(DirectiveBlock, { segment, poll: scope.recent.has(item.id), scope }, index)
   ) });
 }
 function Item({

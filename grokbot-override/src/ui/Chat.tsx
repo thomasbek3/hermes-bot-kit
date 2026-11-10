@@ -22,7 +22,7 @@ import { Composer } from './Composer'
 import { IconChevron, IconOpen, IconPanel, IconSidebar, IconX } from './icons'
 import { MenuButton } from './kit'
 import { DirectiveBlock, DirectiveContext, type DirectiveScope, useDirectiveSegments } from './Directives'
-import { BotText } from './Media'
+import { BotProse } from './Media'
 import { AssistantActions, Reactions, UserActions } from './MessageActions'
 import { ProfilePanel } from './Profile'
 import { OverlayScroll } from './OverlayScroll'
@@ -180,29 +180,23 @@ export function UserMeta({
 function AssistantBody({ item, bot, pos }: { item: any; bot: any; pos: string }) {
   const { segments, scope } = useDirectiveSegments(item.streaming ? '' : item.text)
   const time = item.at ? <span className="bubble__time">{clock(item.at)}</span> : null
-  if (item.streaming || !segments || !scope) {
+  if (item.streaming) {
     return (
       <div className="bubble-wrap is-left">
-        <div className={`bubble is-agent${pos}${item.streaming ? ' is-streaming' : ''}`}>
-          {item.streaming ? <div className="bubble__plain">{item.text}</div> : <div className="md"><BotText bot={bot} text={item.text} /></div>}
+        <div className={`bubble is-agent${pos} is-streaming`}>
+          <div className="bubble__plain">{item.text}</div>
         </div>
         {time}
       </div>
     )
   }
+  if (!segments || !scope) return <BotProse bot={bot} text={item.text} pos={pos} time={time} />
   const lastProse = segments.map((segment: any) => segment.kind).lastIndexOf('prose')
   return (
     <>
       {segments.map((segment: any, index: number) =>
         segment.kind === 'prose' ? (
-          <div key={index} className="bubble-wrap is-left">
-            <div className={`bubble is-agent${pos}`}>
-              <div className="md">
-                <BotText bot={bot} text={segment.text} />
-              </div>
-            </div>
-            {index === lastProse ? time : null}
-          </div>
+          <BotProse key={index} bot={bot} text={segment.text} pos={pos} time={index === lastProse ? time : null} />
         ) : (
           <DirectiveBlock key={index} segment={segment} poll={scope.recent.has(item.id)} scope={scope} />
         )
