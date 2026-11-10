@@ -163,17 +163,25 @@ const ADAPT_SRC = /* css */ `
   content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%;
   background: currentColor; opacity: 0.4; vertical-align: middle; animation: breathe 1s ease-in-out infinite;
 }
-/* Copy, react, edit, rewind, regenerate: a small pill that floats under the
-   message while it is pointed at, taking no room in the transcript. */
+/* Copy, react, edit, rewind, regenerate: a small pill that floats beside the
+   message (right of a bot message, left of yours), level with its last line,
+   while it is pointed at. Out of flow and the same box hovered or not, so it
+   never moves the transcript; beside the message, so it never covers the next
+   bubble's text (it used to float under the message, over the next bubble).
+   When the message is about as wide as the column (a narrow window), the
+   pill is kept on screen (cqw of .transcript__col, plus the transcript's side
+   padding): it then sits over the empty hover-time slot beside the bubble and
+   the bubble's own side padding, not over its text. */
+.transcript__col { container-type: inline-size; }
 .gbo-msg > .gbo-msg-actions {
-  position: absolute; top: calc(100% - 6px); z-index: 3; display: flex; align-items: center; gap: 2px; margin: 0; padding: 2px;
+  position: absolute; top: auto; bottom: 0; z-index: 3; display: flex; flex-wrap: nowrap; width: max-content; align-items: center; gap: 2px; margin: 0; padding: 2px;
   border-radius: var(--radius-full); background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); box-shadow: var(--shadow-pill);
   opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease-out);
 }
 .gbo-msg:hover > .gbo-msg-actions, .gbo-msg:focus-within > .gbo-msg-actions { opacity: 1; pointer-events: auto; }
-.gbo-msg.is-bot > .gbo-msg-actions { left: 8px; }
-.gbo-msg.is-user > .gbo-msg-actions { right: 8px; }
-.gbo-msg-actions .gbo-icon-btn { width: 24px; height: 24px; font-size: 13px; }
+.gbo-msg.is-bot > .gbo-msg-actions { left: min(calc(100% + 4px), calc(100cqw + 12px - 76px)); }
+.gbo-msg.is-user > .gbo-msg-actions { right: min(calc(100% + 4px), calc(100cqw + 12px - 100px)); }
+.gbo-msg-actions .gbo-icon-btn { width: 22px; height: 22px; font-size: 13px; }
 .gbo-msg-actions .gbo-icon-btn svg { width: 14px; height: 14px; }
 .gbo-msg-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; padding: 0 4px; font-size: 12px; line-height: 16px; letter-spacing: 0.12px; color: var(--color-text-tertiary); }
 .gbo-msg-failed { color: var(--color-danger-text); }

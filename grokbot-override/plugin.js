@@ -21195,17 +21195,25 @@ var ADAPT_SRC = (
   content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%;
   background: currentColor; opacity: 0.4; vertical-align: middle; animation: breathe 1s ease-in-out infinite;
 }
-/* Copy, react, edit, rewind, regenerate: a small pill that floats under the
-   message while it is pointed at, taking no room in the transcript. */
+/* Copy, react, edit, rewind, regenerate: a small pill that floats beside the
+   message (right of a bot message, left of yours), level with its last line,
+   while it is pointed at. Out of flow and the same box hovered or not, so it
+   never moves the transcript; beside the message, so it never covers the next
+   bubble's text (it used to float under the message, over the next bubble).
+   When the message is about as wide as the column (a narrow window), the
+   pill is kept on screen (cqw of .transcript__col, plus the transcript's side
+   padding): it then sits over the empty hover-time slot beside the bubble and
+   the bubble's own side padding, not over its text. */
+.transcript__col { container-type: inline-size; }
 .gbo-msg > .gbo-msg-actions {
-  position: absolute; top: calc(100% - 6px); z-index: 3; display: flex; align-items: center; gap: 2px; margin: 0; padding: 2px;
+  position: absolute; top: auto; bottom: 0; z-index: 3; display: flex; flex-wrap: nowrap; width: max-content; align-items: center; gap: 2px; margin: 0; padding: 2px;
   border-radius: var(--radius-full); background: var(--color-bg-pane); border: 0.5px solid var(--color-border-tertiary); box-shadow: var(--shadow-pill);
   opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease-out);
 }
 .gbo-msg:hover > .gbo-msg-actions, .gbo-msg:focus-within > .gbo-msg-actions { opacity: 1; pointer-events: auto; }
-.gbo-msg.is-bot > .gbo-msg-actions { left: 8px; }
-.gbo-msg.is-user > .gbo-msg-actions { right: 8px; }
-.gbo-msg-actions .gbo-icon-btn { width: 24px; height: 24px; font-size: 13px; }
+.gbo-msg.is-bot > .gbo-msg-actions { left: min(calc(100% + 4px), calc(100cqw + 12px - 76px)); }
+.gbo-msg.is-user > .gbo-msg-actions { right: min(calc(100% + 4px), calc(100cqw + 12px - 100px)); }
+.gbo-msg-actions .gbo-icon-btn { width: 22px; height: 22px; font-size: 13px; }
 .gbo-msg-actions .gbo-icon-btn svg { width: 14px; height: 14px; }
 .gbo-msg-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; padding: 0 4px; font-size: 12px; line-height: 16px; letter-spacing: 0.12px; color: var(--color-text-tertiary); }
 .gbo-msg-failed { color: var(--color-danger-text); }
@@ -24721,35 +24729,54 @@ var POLL_MAX_MS = 30 * 6e4;
 var CLICK_THROTTLE_MS = 1e3;
 var DirectiveContext = React7.createContext(null);
 var timers = () => globalThis;
+function readKeyFor(scope, rel) {
+  return rel ? `${rowKey(scope.bot)}
+${scope.sessionId}
+${rel}` : "";
+}
+function useLatest(value) {
+  const ref = React7.useRef(value);
+  ref.current = value;
+  return ref;
+}
 function useCardFile(scope, rel, poll) {
   const known = rel && scope.preload ? scope.preload[rel] : void 0;
-  const [payload, setPayload] = React7.useState(() => known ? cardFromRead(known) : null);
-  const { bot, sessionId } = scope;
+  const key = readKeyFor(scope, rel);
+  const [state, setState] = React7.useState(() => ({ key, raw: "", payload: known ? cardFromRead(known) : null }));
+  const latest = useLatest(scope);
+  const have = state.key === key ? state : null;
+  const settled = Boolean(have?.payload?.ok && isFinalCard(have.payload.card));
+  const loaded = Boolean(have?.payload);
   React7.useEffect(() => {
-    if (!rel || known) return void 0;
-    setPayload(null);
+    if (!rel || known || settled) return void 0;
+    if (loaded && !poll) return void 0;
     let alive = true;
     let timer = 0;
     const started = Date.now();
     const tick = async () => {
+      let raw = "";
       let next;
       try {
-        next = cardFromRead(await readBotWorkspaceText(bot, rel, sessionId));
+        const result = await readBotWorkspaceText(latest.current.bot, rel, latest.current.sessionId);
+        raw = JSON.stringify(result ?? null);
+        next = cardFromRead(result);
       } catch {
+        raw = "\0read";
         next = { ok: false, reason: "read" };
       }
       if (!alive) return;
-      setPayload(next);
+      setState((prev) => prev.key === key && prev.raw === raw ? prev : { key, raw, payload: next });
       if (!poll || next.ok && isFinalCard(next.card) || Date.now() - started > POLL_MAX_MS) return;
       timer = timers().setTimeout(tick, POLL_MS);
     };
-    void tick();
+    if (loaded) timer = timers().setTimeout(tick, POLL_MS);
+    else void tick();
     return () => {
       alive = false;
       timers().clearTimeout(timer);
     };
-  }, [bot, sessionId, rel, poll, known]);
-  return payload;
+  }, [key, rel, poll, known, settled]);
+  return have ? have.payload : null;
 }
 function Rows({ rows }) {
   if (!rows.length) return null;
@@ -24922,24 +24949,28 @@ function PreviewDirective({ attrs, source, scope }) {
   const rel = workspaceRelPath(attrs.file);
   const html = rel ? isHtmlFile(rel) : false;
   const known = rel && scope.preload ? scope.preload[rel] : void 0;
-  const [state, setState] = React7.useState(() => known ? { text: String(known.text || ""), error: known.text ? "" : "not available" } : null);
-  const { bot, sessionId } = scope;
+  const key = readKeyFor(scope, rel);
+  const [read, setRead] = React7.useState(() => ({
+    key,
+    value: known ? { text: String(known.text || ""), error: known.text ? "" : "not available" } : null
+  }));
+  const state = read.key === key ? read.value : null;
+  const latest = useLatest(scope);
   React7.useEffect(() => {
     if (!rel || !html || known) return void 0;
-    setState(null);
     let alive = true;
-    readBotWorkspaceText(bot, rel, sessionId).then(
+    readBotWorkspaceText(latest.current.bot, rel, latest.current.sessionId).then(
       (result) => {
         if (!alive) return;
-        if (!result || result.binary || typeof result.text !== "string" || result.truncated) setState({ text: "", error: "not available" });
-        else setState({ text: result.text, error: "" });
+        if (!result || result.binary || typeof result.text !== "string" || result.truncated) setRead({ key, value: { text: "", error: "not available" } });
+        else setRead({ key, value: { text: result.text, error: "" } });
       },
-      () => alive && setState({ text: "", error: "not available" })
+      () => alive && setRead({ key, value: { text: "", error: "not available" } })
     );
     return () => {
       alive = false;
     };
-  }, [bot, sessionId, rel, html, known]);
+  }, [key, rel, html, known]);
   const name = rel ? rel.split("/").pop() || rel : "Preview";
   if (rel && html && state === null) return /* @__PURE__ */ jsx8("div", { className: "gbo-preview is-loading", "aria-label": `Loading ${name}` });
   if (!rel || !html || state?.error) {
@@ -29241,22 +29272,27 @@ function Item({
       return null;
   }
 }
-var LOOK_PX = 16;
-function useStickToBottom(dep) {
+var STICK_PX = 16;
+function useStickToBottom(dep, mine) {
   const ref = React21.useRef(null);
   const stick = React21.useRef(true);
+  const lastMine = React21.useRef(mine);
   React21.useLayoutEffect(() => {
     const el = ref.current;
+    if (mine !== lastMine.current) {
+      lastMine.current = mine;
+      if (mine) stick.current = true;
+    }
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [dep]);
+  }, [dep, mine]);
   const onScroll = () => {
     const el = ref.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
   };
   const pin = () => {
     stick.current = true;
   };
-  return { ref, onScroll, pin };
+  return { ref, onScroll, pin, stick };
 }
 function lookingAt(el) {
   const doc = el?.ownerDocument;
@@ -29264,7 +29300,7 @@ function lookingAt(el) {
   if (doc.visibilityState === "hidden") return false;
   if (typeof doc.hasFocus === "function" && !doc.hasFocus()) return false;
   if (!el.clientHeight) return false;
-  return el.scrollHeight - el.scrollTop - el.clientHeight < LOOK_PX;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
 }
 function useNewLine(key, items, ready, ref) {
   const line = useStore(roster2.newLine);
@@ -29297,7 +29333,11 @@ var useController = () => React21.useContext(SlotContext).controller();
 function Transcript({ state, bot, meta, onPrefill }) {
   const items = state.chat.items;
   const showWork = useStore(app.showWork);
-  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items);
+  const mine = React21.useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === "user") return String(items[i].id);
+    return "";
+  }, [items]);
+  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items, mine);
   const newLine = useNewLine(rowKey(bot), items, state.phase === "ready", ref);
   const onScroll = () => {
     onStickScroll();

@@ -297,25 +297,35 @@ function Item({
   }
 }
 
-/** How close to the bottom counts as "at the bottom" for the NEW line's
- *  "the user is looking" (CSS px). */
-const LOOK_PX = 16
+/** How close to the bottom still counts as "at the bottom" (CSS px). Small on
+ *  purpose: a reader a few lines up is reading, and a transcript update must
+ *  not pull them down (it was 80px, three lines). */
+export const STICK_PX = 16
 
-function useStickToBottom(dep: unknown) {
+/** Follow new messages while the transcript is at its bottom. Once the user
+ *  scrolls up, nothing moves their position until they come back to the
+ *  bottom themselves or send a message (`mine`: the id of their newest
+ *  message; a new one pins). */
+function useStickToBottom(dep: unknown, mine: string) {
   const ref = React.useRef<HTMLDivElement | null>(null)
   const stick = React.useRef(true)
+  const lastMine = React.useRef(mine)
   React.useLayoutEffect(() => {
     const el = ref.current
+    if (mine !== lastMine.current) {
+      lastMine.current = mine
+      if (mine) stick.current = true
+    }
     if (el && stick.current) el.scrollTop = el.scrollHeight
-  }, [dep])
+  }, [dep, mine])
   const onScroll = () => {
     const el = ref.current
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
   }
   const pin = () => {
     stick.current = true
   }
-  return { ref, onScroll, pin }
+  return { ref, onScroll, pin, stick }
 }
 
 /** Whether the user is looking at this transcript's newest messages: the
@@ -327,7 +337,7 @@ function lookingAt(el: HTMLElement | null): boolean {
   if (doc.visibilityState === 'hidden') return false
   if (typeof doc.hasFocus === 'function' && !doc.hasFocus()) return false
   if (!el.clientHeight) return false
-  return el.scrollHeight - el.scrollTop - el.clientHeight < LOOK_PX
+  return el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
 }
 
 /** The NEW line: decided when the chat opens, kept while it is open, and fed
@@ -376,7 +386,11 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
   // Thought and tool rows are hidden unless the work-rows preference shows
   // them (core/workRows.js); display only, the chat keeps every item.
   const showWork = useStore(app.showWork)
-  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items)
+  const mine = React.useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === 'user') return String(items[i].id)
+    return ''
+  }, [items])
+  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items, mine)
   const newLine = useNewLine(rowKey(bot), items, state.phase === 'ready', ref)
   const onScroll = () => {
     onStickScroll()

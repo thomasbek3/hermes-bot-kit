@@ -29,6 +29,7 @@ import {
   workspaceRelPath
 } from '../core/directives.js'
 import { choiceLetter } from '../core/prompts.js'
+import { rowKey } from '../core/roster.js'
 import { readBotWorkspaceText } from './app'
 import { IconCheck } from './iconsRoster'
 
@@ -55,35 +56,68 @@ const timers = () => globalThis as any
 
 // ── card ──────────────────────────────────────────────────────────────────
 
+/** The file a directive reads, as one string: the bot's route key, the chat
+ *  and the path. The roster hands the transcript a fresh bot object on every
+ *  refresh (every 3 s); keying reads by that object restarted them, blanked
+ *  the card to its loading box and drew it again, so the transcript under it
+ *  jumped up and down while scrolling. Reads key by this string instead. */
+function readKeyFor(scope: DirectiveScope, rel: string | null) {
+  return rel ? `${rowKey(scope.bot)}\n${scope.sessionId}\n${rel}` : ''
+}
+
+/** The scope's newest bot, for a read that must not restart when only the
+ *  object (not the route) changed. */
+function useLatest<T>(value: T) {
+  const ref = React.useRef(value)
+  ref.current = value
+  return ref
+}
+
+/** A card's file, polled every 3 s while it can still change. A re-read that
+ *  returns the same text changes nothing (same state object, no render); a
+ *  card keeps what it shows while a re-read is in flight; a final card
+ *  (resolved, done, error) is never read again. */
 function useCardFile(scope: DirectiveScope, rel: string | null, poll: boolean) {
   const known = rel && scope.preload ? scope.preload[rel] : undefined
-  const [payload, setPayload] = React.useState<any>(() => (known ? cardFromRead(known) : null))
-  const { bot, sessionId } = scope
+  const key = readKeyFor(scope, rel)
+  const [state, setState] = React.useState<{ key: string; raw: string; payload: any }>(() => ({ key, raw: '', payload: known ? cardFromRead(known) : null }))
+  const latest = useLatest(scope)
+  const have = state.key === key ? state : null
+  const settled = Boolean(have?.payload?.ok && isFinalCard(have.payload.card))
+  const loaded = Boolean(have?.payload)
   React.useEffect(() => {
-    if (!rel || known) return undefined
-    setPayload(null)
+    if (!rel || known || settled) return undefined
+    // Already drawn and no longer polling (an older message): nothing to read.
+    if (loaded && !poll) return undefined
     let alive = true
     let timer: any = 0
     const started = Date.now()
     const tick = async () => {
+      let raw = ''
       let next: any
       try {
-        next = cardFromRead(await readBotWorkspaceText(bot, rel, sessionId))
+        const result = await readBotWorkspaceText(latest.current.bot, rel, latest.current.sessionId)
+        raw = JSON.stringify(result ?? null)
+        next = cardFromRead(result)
       } catch {
+        raw = '\u0000read'
         next = { ok: false, reason: 'read' }
       }
       if (!alive) return
-      setPayload(next)
+      setState(prev => (prev.key === key && prev.raw === raw ? prev : { key, raw, payload: next }))
       if (!poll || (next.ok && isFinalCard(next.card)) || Date.now() - started > POLL_MAX_MS) return
       timer = timers().setTimeout(tick, POLL_MS)
     }
-    void tick()
+    if (loaded) timer = timers().setTimeout(tick, POLL_MS)
+    else void tick()
     return () => {
       alive = false
       timers().clearTimeout(timer)
     }
-  }, [bot, sessionId, rel, poll, known])
-  return payload
+    // `loaded` only gates the first read: flipping it must not restart the loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, rel, poll, known, settled])
+  return have ? have.payload : null
 }
 
 function Rows({ rows }: { rows: [string, string][] }) {
@@ -316,24 +350,31 @@ function PreviewDirective({ attrs, source, scope }: { attrs: Record<string, stri
   const rel = workspaceRelPath(attrs.file)
   const html = rel ? isHtmlFile(rel) : false
   const known = rel && scope.preload ? scope.preload[rel] : undefined
-  const [state, setState] = React.useState<{ text: string; error: string } | null>(() => (known ? { text: String(known.text || ''), error: known.text ? '' : 'not available' } : null))
-  const { bot, sessionId } = scope
+  const key = readKeyFor(scope, rel)
+  const [read, setRead] = React.useState<{ key: string; value: { text: string; error: string } | null }>(() => ({
+    key,
+    value: known ? { text: String(known.text || ''), error: known.text ? '' : 'not available' } : null
+  }))
+  const state = read.key === key ? read.value : null
+  const latest = useLatest(scope)
+  // Read once per file (keyed like the card: a fresh bot object from a roster
+  // refresh neither re-reads nor remounts the frame).
   React.useEffect(() => {
     if (!rel || !html || known) return undefined
-    setState(null)
     let alive = true
-    readBotWorkspaceText(bot, rel, sessionId).then(
+    readBotWorkspaceText(latest.current.bot, rel, latest.current.sessionId).then(
       result => {
         if (!alive) return
-        if (!result || result.binary || typeof result.text !== 'string' || result.truncated) setState({ text: '', error: 'not available' })
-        else setState({ text: result.text, error: '' })
+        if (!result || result.binary || typeof result.text !== 'string' || result.truncated) setRead({ key, value: { text: '', error: 'not available' } })
+        else setRead({ key, value: { text: result.text, error: '' } })
       },
-      () => alive && setState({ text: '', error: 'not available' })
+      () => alive && setRead({ key, value: { text: '', error: 'not available' } })
     )
     return () => {
       alive = false
     }
-  }, [bot, sessionId, rel, html, known])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, rel, html, known])
   const name = rel ? rel.split('/').pop() || rel : 'Preview'
   if (rel && html && state === null) return <div className="gbo-preview is-loading" aria-label={`Loading ${name}`} />
   if (!rel || !html || state?.error) {
