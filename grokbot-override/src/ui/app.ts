@@ -36,7 +36,7 @@ import {
   SECTIONS_KEY,
   toggleSectionCollapsed
 } from '../core/sections.js'
-import { SHOW_WORK_KEY, SHOW_WORK_PLUGIN, showWorkFrom } from '../core/workRows.js'
+import { LEGACY_SHOW_WORK_KEY, LEGACY_SHOW_WORK_PLUGIN, loadShowWork, SHOW_WORK_KEY } from '../core/workRows.js'
 import { botCanonicalSessionId, createActivityTracker } from '../core/activity.js'
 import { looksUnsupported } from '../core/outcomes.js'
 import { resetMarker, SEEN_KEY, seenFrom, stepMarker } from '../core/newMarker.js'
@@ -118,7 +118,7 @@ export const app = {
   rooms: createStore<{ route: any; rooms: any[]; error: null | string; loaded: boolean }>({ route: null, rooms: [], error: null, loaded: false }),
   computerViewer: createStore<{ present: boolean; visible: boolean }>({ present: false, visible: false }),
   // Thought and tool rows in the Bot Chat (core/workRows.js): hidden unless
-  // Bubble Mode's "toggle work rows" preference says to show them.
+  // the override's "show work rows" setting is on.
   showWork: createStore<boolean>(false),
   // Bots pinned to the top of the sidebar (core/pins.js): route keys in pin
   // order, kept in the override's own plugin storage.
@@ -1162,7 +1162,6 @@ function enable() {
   const tick = () => {
     rosterTimer = setTimer(() => {
       refreshRoster()
-      refreshShowWork()
       tick()
     }, ROSTER_TICK_MS)
   }
@@ -1239,11 +1238,22 @@ export function setEnabled(value: boolean) {
   else disable()
 }
 
-/** Re-read Bubble Mode's work-rows preference (its palette command writes it
- *  in this window without an event, so the roster tick picks it up). */
-export function refreshShowWork() {
-  const next = showWorkFrom(readPluginStorage<unknown>(SHOW_WORK_PLUGIN, SHOW_WORK_KEY, false))
-  if (next !== app.showWork.get()) app.showWork.set(next)
+/** Load the work-rows setting; on the first run, copy Bubble Mode's old
+ *  "toggle work rows" preference once (its storage is only read). */
+function startShowWork() {
+  const { value, write } = loadShowWork(
+    storageGet<unknown>(SHOW_WORK_KEY, undefined),
+    readPluginStorage<unknown>(LEGACY_SHOW_WORK_PLUGIN, LEGACY_SHOW_WORK_KEY, false)
+  )
+  app.showWork.set(value)
+  if (write) storageSet(SHOW_WORK_KEY, value)
+}
+
+/** The palette's "show work rows": Thought and tool rows in the chat. */
+export function setShowWork(value: boolean) {
+  const next = Boolean(value)
+  app.showWork.set(next)
+  storageSet(SHOW_WORK_KEY, next)
 }
 
 // ── pinned bots ──────────────────────────────────────────────────────────
@@ -1280,7 +1290,7 @@ export function start(ctx: any) {
   app.ctx = ctx
   app.pinnedBots.set(pinsFrom(storageGet(PINS_KEY, [])))
   startSections()
-  refreshShowWork()
+  startShowWork()
   requestForBot = createBotRequester(host, { activeConnectionId })
   app.selectedKey.set(String(storageGet('selected', '') || ''))
   app.panelOpen.set(storageGet('panelOpen', true) !== false)

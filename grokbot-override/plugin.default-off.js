@@ -18385,10 +18385,15 @@ function withoutPinned(rows, state, keyOf) {
 }
 
 // src/core/workRows.js
-var SHOW_WORK_PLUGIN = "bubble-mode";
 var SHOW_WORK_KEY = "showWork";
+var LEGACY_SHOW_WORK_PLUGIN = "bubble-mode";
+var LEGACY_SHOW_WORK_KEY = "showWork";
 function showWorkFrom(value) {
   return value === true;
+}
+function loadShowWork(stored, legacy) {
+  if (typeof stored === "boolean") return { value: stored, write: false };
+  return { value: showWorkFrom(legacy), write: true };
 }
 function visibleItems(items, showWork) {
   const list = Array.isArray(items) ? items : [];
@@ -22329,7 +22334,7 @@ var app = {
   rooms: createStore({ route: null, rooms: [], error: null, loaded: false }),
   computerViewer: createStore({ present: false, visible: false }),
   // Thought and tool rows in the Bot Chat (core/workRows.js): hidden unless
-  // Bubble Mode's "toggle work rows" preference says to show them.
+  // the override's "show work rows" setting is on.
   showWork: createStore(false),
   // Bots pinned to the top of the sidebar (core/pins.js): route keys in pin
   // order, kept in the override's own plugin storage.
@@ -23142,7 +23147,6 @@ function enable() {
   const tick = () => {
     rosterTimer = setTimer(() => {
       refreshRoster();
-      refreshShowWork();
       tick();
     }, ROSTER_TICK_MS);
   };
@@ -23204,9 +23208,18 @@ function setEnabled(value) {
   if (next) enable();
   else disable();
 }
-function refreshShowWork() {
-  const next = showWorkFrom(readPluginStorage(SHOW_WORK_PLUGIN, SHOW_WORK_KEY, false));
-  if (next !== app.showWork.get()) app.showWork.set(next);
+function startShowWork() {
+  const { value, write } = loadShowWork(
+    storageGet(SHOW_WORK_KEY, void 0),
+    readPluginStorage(LEGACY_SHOW_WORK_PLUGIN, LEGACY_SHOW_WORK_KEY, false)
+  );
+  app.showWork.set(value);
+  if (write) storageSet2(SHOW_WORK_KEY, value);
+}
+function setShowWork(value) {
+  const next = Boolean(value);
+  app.showWork.set(next);
+  storageSet2(SHOW_WORK_KEY, next);
 }
 function isPinnedTop(bot) {
   return pinState(app.pinnedBots.get(), app.roster.get().rows, rowKey).shown.some((row) => rowKey(row) === rowKey(bot));
@@ -23232,7 +23245,7 @@ function start(ctx) {
   app.ctx = ctx;
   app.pinnedBots.set(pinsFrom(storageGet(PINS_KEY, [])));
   startSections();
-  refreshShowWork();
+  startShowWork();
   requestForBot = createBotRequester(host2, { activeConnectionId });
   app.selectedKey.set(String(storageGet("selected", "") || ""));
   app.panelOpen.set(storageGet("panelOpen", true) !== false);
@@ -30508,6 +30521,20 @@ var index_default = {
           detailVariant: "state",
           keepOpen: true,
           run: () => setEnabled(!app.enabled.get())
+        }
+      },
+      // Thought and tool rows in the chat (core/workRows.js), hidden by default.
+      {
+        id: "palette-show-work",
+        area: PALETTE_AREA2,
+        data: {
+          id: `${PLUGIN_ID}.show-work`,
+          label: "Grokbot Override: show work rows",
+          keywords: ["work", "tools", "thinking", "thought", "reasoning", "rows", "override"],
+          detail: () => app.showWork.get() ? "on" : "off",
+          detailVariant: "state",
+          keepOpen: true,
+          run: () => setShowWork(!app.showWork.get())
         }
       },
       {
