@@ -46468,6 +46468,154 @@ function groupMembershipPatch(meta, group, enabled) {
   return { groups, group: groups[0] || null };
 }
 
+// src/core/remoteAvatars.js
+var AVATAR_TTL_MS = 15 * 6e4;
+var AVATAR_RETRY_MS = 2 * 6e4;
+var AVATAR_LIST_TTL_MS = 5 * 6e4;
+var AVATAR_TIMEOUT_MS = 2e4;
+var AVATAR_MAX_CHARS = 3e6;
+var DATA_IMAGE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=\s]+$/;
+function isAvatarDataUrl(value) {
+  return typeof value === "string" && value.length <= AVATAR_MAX_CHARS && DATA_IMAGE.test(value);
+}
+function isBackfilledFacePng(dataUrl) {
+  const prefix = "data:image/png;base64,";
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith(prefix)) return false;
+  try {
+    const bin = atob(dataUrl.slice(prefix.length, prefix.length + 48));
+    if (bin.length < 24) return false;
+    const word = (at) => (bin.charCodeAt(at) << 24 | bin.charCodeAt(at + 1) << 16 | bin.charCodeAt(at + 2) << 8 | bin.charCodeAt(at + 3)) >>> 0;
+    return word(16) === 160 && word(20) === 160;
+  } catch {
+    return false;
+  }
+}
+function remoteAvatarRoute(bot) {
+  if (!bot || !bot.remoteSource || bot.ghost || bot.retained || bot.unserved || bot.sourceReachable === false) return null;
+  const route = resolveBotConnectionRoute(bot).route;
+  return route && route.mode === "remote" ? route : null;
+}
+function createRemoteAvatars({ request: request2, hasOwnImage = () => false, onChange = () => void 0, now = () => Date.now() } = {}) {
+  const entries = /* @__PURE__ */ new Map();
+  const inflight = /* @__PURE__ */ new Set();
+  const lists = /* @__PURE__ */ new Map();
+  const listing = /* @__PURE__ */ new Set();
+  let images = {};
+  let stopped = false;
+  let lastRows = [];
+  function publish() {
+    const next = {};
+    for (const [key, entry] of entries) if (entry.image) next[key] = entry.image;
+    const a2 = Object.keys(images);
+    const b2 = Object.keys(next);
+    if (a2.length === b2.length && b2.every((key) => images[key] === next[key])) return;
+    images = next;
+    onChange(images);
+  }
+  function forget(key) {
+    if (entries.delete(key)) publish();
+  }
+  function flagFor(bot, route) {
+    if (typeof bot.has_avatar === "boolean") return bot.has_avatar;
+    const list = lists.get(route.connectionId);
+    if (!list?.flags) return void 0;
+    return list.flags.get(route.targetProfile || route.profile) === true;
+  }
+  function listConnection(connectionId, carrier) {
+    const t = now();
+    const list = lists.get(connectionId);
+    if (listing.has(connectionId)) return;
+    if (list?.flags && t - list.at < AVATAR_LIST_TTL_MS) return;
+    if (list?.failedAt && t - list.failedAt < AVATAR_RETRY_MS) return;
+    listing.add(connectionId);
+    Promise.resolve().then(() => request2(carrier, "profiles.list", { include_sessions: false }, { timeoutMs: AVATAR_TIMEOUT_MS })).then((result) => {
+      const flags = /* @__PURE__ */ new Map();
+      for (const row of Array.isArray(result?.profiles) ? result.profiles : []) {
+        const name = String(row?.name || "").trim();
+        if (name) flags.set(name, row?.has_avatar === true);
+      }
+      lists.set(connectionId, { at: now(), failedAt: 0, flags });
+    }).catch(() => {
+      lists.set(connectionId, { ...lists.get(connectionId) || { at: 0, flags: null }, failedAt: now() });
+    }).finally(() => {
+      listing.delete(connectionId);
+      if (!stopped) sync(lastRows);
+    });
+  }
+  function fetchAvatar(bot, key, route) {
+    inflight.add(key);
+    Promise.resolve().then(() => request2(bot, "profiles.get_asset", { name: String(bot.name || route.profile), asset: "avatar" }, { timeoutMs: AVATAR_TIMEOUT_MS })).then((result) => {
+      if (stopped) return;
+      const data = result?.found ? result.data : null;
+      const image = isAvatarDataUrl(data) && !isBackfilledFacePng(data) ? data : null;
+      entries.set(key, { image, at: now(), failedAt: 0 });
+      publish();
+    }).catch(() => {
+      if (stopped) return;
+      const prev = entries.get(key);
+      entries.set(key, { image: prev?.image || null, at: prev?.at || 0, failedAt: now() });
+      publish();
+    }).finally(() => inflight.delete(key));
+  }
+  function sync(rows) {
+    if (stopped) return;
+    lastRows = Array.isArray(rows) ? rows : [];
+    const t = now();
+    const needList = /* @__PURE__ */ new Map();
+    const seen = /* @__PURE__ */ new Set();
+    for (const bot of lastRows) {
+      const route = remoteAvatarRoute(bot);
+      if (!route) continue;
+      const key = botRouteKey(route);
+      seen.add(key);
+      if (typeof bot.has_avatar !== "boolean") {
+        if (!needList.has(route.connectionId)) needList.set(route.connectionId, []);
+        needList.get(route.connectionId).push(bot);
+      }
+      const flag = flagFor(bot, route);
+      if (flag === void 0) continue;
+      if (!flag) {
+        forget(key);
+        continue;
+      }
+      if (inflight.has(key)) continue;
+      if (hasOwnImage(bot)) {
+        forget(key);
+        continue;
+      }
+      const entry = entries.get(key);
+      if (entry?.failedAt && t - entry.failedAt < AVATAR_RETRY_MS) continue;
+      if (entry && !entry.failedAt && t - entry.at < AVATAR_TTL_MS) continue;
+      fetchAvatar(bot, key, route);
+    }
+    for (const [connectionId, bots] of needList) listConnection(connectionId, carrierFor(bots));
+    let dropped = false;
+    for (const key of [...entries.keys()]) {
+      if (!seen.has(key)) {
+        entries.delete(key);
+        dropped = true;
+      }
+    }
+    if (dropped) publish();
+  }
+  return {
+    sync,
+    /** route key → data URL (only pictures to show). */
+    images: () => images,
+    stop() {
+      stopped = true;
+      entries.clear();
+      lists.clear();
+      lastRows = [];
+      images = {};
+    }
+  };
+}
+function carrierFor(bots) {
+  const sorted2 = [...bots].sort((a2, b2) => String(a2.name).localeCompare(String(b2.name)));
+  return sorted2.find((bot) => (bot.targetProfile || bot.name) === "default") || sorted2[0];
+}
+
 // src/core/attention.js
 var CLASSES = /* @__PURE__ */ new Set(["agent_blocked", "provider_auth_or_access", "provider_quota_limit", "missing_config"]);
 var HINTS = {
@@ -47495,7 +47643,10 @@ var roster2 = {
   /** The roster's own sections: the inline name field that is open (a new
    *  section, or renaming one), and the delete waiting for a confirm. */
   sectionEdit: createStore(null),
-  sectionDelete: createStore(null)
+  sectionDelete: createStore(null),
+  /** Server avatars of bots on other connections (core/remoteAvatars.js):
+   *  route key -> data URL, for the app session. */
+  remoteAvatars: createStore({})
 };
 function openDialog(state) {
   roster2.dialog.set(state);
@@ -50263,6 +50414,8 @@ var claimQueued = false;
 var stock = null;
 var observer = null;
 var rosterTimer = null;
+var remoteAvatars = null;
+var unwatchAvatars = null;
 var lastOwnFetch = 0;
 var liveNames = /* @__PURE__ */ new Map();
 var lastVerify = 0;
@@ -51039,6 +51192,30 @@ function watchVisibility() {
     unwatchComputer = cv.subscribe((visible2) => app.computerViewer.set((s) => ({ ...s, visible: Boolean(visible2) })));
   }
 }
+function startRemoteAvatars() {
+  stopRemoteAvatars();
+  const loader = createRemoteAvatars({
+    request: (bot, method, params, options) => {
+      if (!requestForBot) return Promise.reject(new Error("not started"));
+      return requestForBot(bot, method, params, options);
+    },
+    hasOwnImage: (bot) => {
+      const image = metaFor(bot)?.image;
+      return typeof image === "string" && image.length > 0;
+    },
+    onChange: (images) => roster2.remoteAvatars.set(images)
+  });
+  remoteAvatars = loader;
+  unwatchAvatars = app.roster.subscribe(() => loader.sync(app.roster.get().rows));
+  loader.sync(app.roster.get().rows);
+}
+function stopRemoteAvatars() {
+  unwatchAvatars?.();
+  unwatchAvatars = null;
+  remoteAvatars?.stop();
+  remoteAvatars = null;
+  roster2.remoteAvatars.set({});
+}
 function enable() {
   injectStyle();
   registerRosterPane();
@@ -51046,6 +51223,7 @@ function enable() {
   stock.setOn(true);
   startObserver();
   watchVisibility();
+  startRemoteAvatars();
   refreshRoster();
   startRosterParity();
   const tick = () => {
@@ -51067,6 +51245,7 @@ function disable() {
   for (const off of unwatchMain.splice(0)) off();
   rosterTimer?.();
   rosterTimer = null;
+  stopRemoteAvatars();
   unwatchPane?.();
   unwatchPane = null;
   unwatchComputer?.();
@@ -51970,8 +52149,13 @@ function BotAvatar({
 }) {
   const cls = `gbo-avatar${working ? " is-working" : ""}`;
   const style = { width: size, height: size };
+  const remote = useStore(roster2.remoteAvatars);
   if (typeof meta?.image === "string" && meta.image) {
     return /* @__PURE__ */ jsx2("span", { className: cls, style, "aria-hidden": true, children: /* @__PURE__ */ jsx2("img", { alt: "", src: meta.image }) });
+  }
+  const served = look !== "hermes" && shapeKey ? remote[shapeKey] : void 0;
+  if (served) {
+    return /* @__PURE__ */ jsx2("span", { className: cls, style, "aria-hidden": true, "data-avatar": "server", children: /* @__PURE__ */ jsx2("img", { alt: "", src: served }) });
   }
   if (look !== "hermes") {
     return /* @__PURE__ */ jsx2("span", { className: cls, style, "aria-hidden": true, children: /* @__PURE__ */ jsx2(ShapeFace, { shapeKey: shapeKey || String(name || "default"), ...swatchProps(botColor(name, meta)) }) });

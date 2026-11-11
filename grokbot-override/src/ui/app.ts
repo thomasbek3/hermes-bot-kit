@@ -44,6 +44,7 @@ import { createRoom, createRoomController, createRoomRequester, listRooms, ROOM_
 import { CANONICAL_HYDRATION_TIMEOUT_MS, host, queryClient, readPluginStorage, sdk } from './sdk'
 // ── roster-side parity (R6 R9 R11-R13 R15 P3 P4 P6 C21 C25) ──
 import { effectiveMeta } from '../core/botMeta.js'
+import { createRemoteAvatars } from '../core/remoteAvatars.js'
 import { startRosterParity, stopRosterParity } from './rosterActions'
 import { roster2 } from './rosterStores'
 // ── end roster-side parity imports ──
@@ -150,6 +151,9 @@ let claimQueued = false
 let stock: any = null
 let observer: MutationObserver | null = null
 let rosterTimer: null | (() => void) = null
+// Server avatars of bots on other connections (core/remoteAvatars.js).
+let remoteAvatars: null | ReturnType<typeof createRemoteAvatars> = null
+let unwatchAvatars: null | (() => void) = null
 let lastOwnFetch = 0
 // What each source listed on the last fresh read (core/roster.js liveRosterNames).
 let liveNames: Map<string, Set<string>> = new Map()
@@ -1149,6 +1153,37 @@ function watchVisibility() {
   }
 }
 
+// ── server avatars of remote bots ────────────────────────────────────────
+
+/** Fetch the server avatar of every bot on another connection whose gateway
+ *  has one (Bot Mode only does this for the active source), on each roster
+ *  change; the loader caches per route for the session (core/remoteAvatars.js). */
+function startRemoteAvatars() {
+  stopRemoteAvatars()
+  const loader = createRemoteAvatars({
+    request: (bot: any, method: string, params: any, options: any) => {
+      if (!requestForBot) return Promise.reject(new Error('not started'))
+      return requestForBot(bot, method, params, options)
+    },
+    hasOwnImage: (bot: any) => {
+      const image = metaFor(bot)?.image
+      return typeof image === 'string' && image.length > 0
+    },
+    onChange: (images: Record<string, string>) => roster2.remoteAvatars.set(images)
+  })
+  remoteAvatars = loader
+  unwatchAvatars = app.roster.subscribe(() => loader.sync(app.roster.get().rows))
+  loader.sync(app.roster.get().rows)
+}
+
+function stopRemoteAvatars() {
+  unwatchAvatars?.()
+  unwatchAvatars = null
+  remoteAvatars?.stop()
+  remoteAvatars = null
+  roster2.remoteAvatars.set({})
+}
+
 // ── toggle ───────────────────────────────────────────────────────────────
 
 function enable() {
@@ -1158,6 +1193,7 @@ function enable() {
   stock.setOn(true)
   startObserver()
   watchVisibility()
+  startRemoteAvatars()
   refreshRoster()
   startRosterParity()
   const tick = () => {
@@ -1185,6 +1221,7 @@ function disable() {
   for (const off of unwatchMain.splice(0)) off()
   rosterTimer?.()
   rosterTimer = null
+  stopRemoteAvatars()
   unwatchPane?.()
   unwatchPane = null
   unwatchComputer?.()
