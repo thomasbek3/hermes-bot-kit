@@ -83,6 +83,15 @@ export const CHAT_CSS = /* css */ `
 .gbo-command.is-error pre { color: var(--gbo-destructive); }
 .gbo-round.is-recording { color: var(--gbo-destructive); }
 
+/* ── failed turn card and the /undo note (core/turnError.js) ───────── */
+.gbo-turn-error { align-self: flex-start; max-width: 560px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--gbo-border); border-radius: 16px; padding: 10px 14px; background: var(--gbo-card); }
+.gbo-turn-error-title { font: var(--gbo-text-body); color: var(--gbo-fg); }
+.gbo-turn-error-actions { display: flex; align-items: center; gap: 8px; }
+.gbo-turn-error-toggle { padding: 0; color: var(--gbo-muted-fg); font-size: 12px; }
+.gbo-turn-error-detail { font: 12px/18px var(--gbo-mono); color: var(--gbo-muted-fg); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; }
+.gbo-turn-error-detail[hidden] { display: none; }
+.gbo-undo-note { opacity: 0.8; }
+
 /* ── C22 / C23 message actions and reactions ────────────────────────── */
 .gbo-msg-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity .12s; }
 .gbo-msg:hover .gbo-msg-actions, .gbo-msg:focus-within .gbo-msg-actions { opacity: 1; }
