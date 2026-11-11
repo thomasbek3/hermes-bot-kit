@@ -30,7 +30,7 @@ PLUGIN_NAME = "email-drafts"
 TOOLSET = "email_drafts"
 SETTING_KEYS = (
     "sender", "from_address", "from_name", "signature", "attachment_dirs",
-    "smtp_host", "smtp_port", "smtp_security", "smtp_username",
+    "smtp_host", "smtp_port", "smtp_security", "smtp_username", "composio_account", "composio_cli",
 )
 # Surfaces where a slash command may change a draft: anything but the plain
 # CLI (a bot's terminal tool could start `hermes chat -q "/email-drafts ..."`).

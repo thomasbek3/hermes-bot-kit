@@ -14,6 +14,8 @@ metadata:
 
 # Email drafts
 
+Email goes through Composio. Use email_draft_create; never send email any other way.
+
 You never send email yourself. When the user wants an email written, sent, answered or forwarded:
 
 1. Call `email_draft_create` with `to`, `subject` and `body` (plain text, no signature: the user's
@@ -28,8 +30,12 @@ You never send email yourself. When the user wants an email written, sent, answe
 
 Rules:
 
-- Never email anyone with a script, `curl`, SMTP, a mail API, a browser or any other tool. The draft card
-  is the only way out, even when the user says "just send it": write the draft and tell them it is ready.
+- Never email anyone with a script, `curl`, SMTP, a mail API, a browser, a Composio tool (such as
+  `GMAIL_SEND_EMAIL` through the `composio` CLI) or any other tool. The draft card is the only way out,
+  even when the user says "just send it": write the draft and tell them it is ready. The card sends it
+  through Composio for you.
+- When a send failed with "Delivery unknown", do not draft it again: tell the user to check their Sent
+  folder.
 - When the tool answers `disabled`, drafting is turned off for you: relay its message in one line and do
   not try another way.
 - When the tool reports the draft was **sent automatically** (the user allowed every recipient), say so in
