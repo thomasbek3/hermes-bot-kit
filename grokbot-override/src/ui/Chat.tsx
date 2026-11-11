@@ -16,8 +16,10 @@ import { clock, withDividers } from '../core/time.js'
 import { withNewMarker } from '../core/newMarker.js'
 import { activityLabel, visibleItems } from '../core/workRows.js'
 import { withEmailDrafts } from '../core/emailDrafts.js'
+import { FAILED_TITLE, STILL_FAILING_TITLE, withTurnCards } from '../core/turnError.js'
 import { app, canToggleSidebar, type ChatSlot, findBot, freshBot, mainSlot, metaFor, noteTranscript, openBotInNewTab, openInBotMode, resetPanelWidth, selectBot, setPanelOpen, startPanelResize, stockHandoffProblem, toggleSidebar } from './app'
 import { roster2 } from './rosterStores'
+import { newChatWith } from './rosterActions'
 import { BotAvatar, botColor } from './Avatar'
 import { Composer } from './Composer'
 import { IconChevron, IconOpen, IconPanel, IconSidebar, IconX } from './icons'
@@ -207,6 +209,53 @@ function AssistantBody({ item, bot, pos }: { item: any; bot: any; pos: string })
   )
 }
 
+/** A failed turn: one calm line, the raw error behind Details, and Try
+ *  again (the supported /retry, controller.retryTurn). A retry that fails
+ *  too offers a new chat with this bot instead (core/turnError.js). */
+export function TurnErrorCard({ item, bot, controller }: { item: any; bot: any; controller?: any }) {
+  const [open, setOpen] = React.useState(false)
+  const [starting, setStarting] = React.useState(false)
+  // A double click is one retry: the controller refuses a second one while
+  // the first runs, and the button is off from the first click on.
+  const pressed = React.useRef(false)
+  React.useEffect(() => {
+    if (!item.retrying) pressed.current = false
+  }, [item.retrying, item.id])
+  const retry = () => {
+    if (pressed.current || item.retrying || !item.canRetry || !controller?.retryTurn) return
+    pressed.current = true
+    setStarting(true)
+    void Promise.resolve(controller.retryTurn(item.id, item.prompt)).finally(() => setStarting(false))
+  }
+  const busy = item.retrying || starting
+  return (
+    <div className="gbo-turn-error" role="group" aria-label="Reply failed">
+      <div className="gbo-turn-error-title">{item.stillFailing ? `${STILL_FAILING_TITLE}.` : FAILED_TITLE}</div>
+      <div className="gbo-turn-error-actions">
+        {item.stillFailing ? (
+          <button type="button" className="gbo-pill-btn is-primary" onClick={() => newChatWith(bot)}>
+            Start a new chat
+          </button>
+        ) : (
+          <button type="button" className="gbo-pill-btn is-primary" disabled={busy || !item.canRetry} aria-busy={busy || undefined} onClick={retry}>
+            {busy ? 'Trying again…' : 'Try again'}
+          </button>
+        )}
+        {item.detail ? (
+          <button type="button" className="gbo-link-btn gbo-turn-error-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+            Details
+          </button>
+        ) : null}
+      </div>
+      {item.detail ? (
+        <div className="gbo-turn-error-detail" hidden={!open}>
+          {item.detail}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function Item({
   item,
   bot,
@@ -294,6 +343,14 @@ function Item({
       )
     case 'error':
       return <div className="notice is-error gbo-error">{item.text}</div>
+    case 'turn-error':
+      return <TurnErrorCard item={item} bot={bot} controller={controller} />
+    case 'undo-note':
+      return (
+        <div className="system-event gbo-notice gbo-undo-note" role="status">
+          {item.text}
+        </div>
+      )
     default:
       return null
   }
@@ -399,8 +456,11 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
     newLine.note()
   }
   const decorated = React.useMemo(
-    () => groupMessages(withNewMarker(withDividers(visibleItems(withEmailDrafts(items), showWork)), newLine.id)),
-    [items, showWork, newLine.id]
+    () =>
+      groupMessages(
+        withNewMarker(withDividers(withTurnCards(visibleItems(withEmailDrafts(items), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
+      ),
+    [items, showWork, newLine.id, state.chat.busy, state.turnRetry]
   )
   const controller = useController()
   const answer = (requestId: string, choice: string) => void controller?.respondApproval(requestId, choice)

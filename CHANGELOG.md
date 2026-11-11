@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
+  (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
+  now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did
+  not complete…" line; both stay readable behind **Details**. **Try again** is the supported `/retry`: the
+  canonical `session.rewind` of the failed user turn and the same message resubmitted (the gateway's own
+  `/retry` through `slash.exec` on an older gateway); one press, disabled while it runs, only on the newest
+  failed turn and never while a reply runs. If it fails again the card says "Still failing. Start a new chat"
+  with a button that opens a new chat with that bot. A typed `/undo` now shows one muted line, "Removed the
+  failed reply", instead of the monospace receipt. Hermes's error copy for a failed turn is no longer drawn
+  as a bot bubble (real partial reply text still is). Every bot, local and remote.
 - **grokbot-override: remote bots show their server avatar (2026-11-11)**: a bot on another connection whose
   own gateway holds a picture (`has_avatar`, set with `profiles.set_asset`) now shows it in the roster, pins,
   chat header and panel instead of its generated shape. Hermes Desktop only fetches these for the active

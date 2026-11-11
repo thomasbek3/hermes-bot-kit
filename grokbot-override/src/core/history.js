@@ -263,7 +263,7 @@ export function historyToItems(rows, { idPrefix = 'h:' } = {}) {
       }
       if (text.trim()) {
         flushTools()
-        items.push({ kind: 'notice', id: rowId(row, index, idPrefix), text: text.trim(), at, ...(isSystemNotice(kind, role, text.trim()) ? { system: kind } : {}) })
+        items.push({ kind: 'notice', id: rowId(row, index, idPrefix), text: text.trim(), at, ...(isSystemNotice(kind, role, text.trim()) ? { system: kind } : {}), ...(kind === 'failed_turn' && role === 'assistant' ? { failedTurn: true } : {}) })
       }
       return
     }

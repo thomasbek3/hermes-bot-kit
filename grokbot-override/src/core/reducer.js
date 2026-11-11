@@ -270,7 +270,12 @@ export function applyEvent(state, event, now = Date.now()) {
       const failed = payload.status === 'error' || Boolean(payload.error)
       let next = dropSilentBubble(state)
       const bubble = findItem(next.items, next.live.bubbleId)
-      if (final && !payload.response_reused) {
+      // A failed turn's text is Hermes's error copy unless the turn kept
+      // real reply text (`partial`, tui_gateway/prompt_turn.py
+      // _complete_turn_payload): the copy is the error card's detail, never a
+      // bot bubble. What streamed before the failure stays as it streamed.
+      const errorCopy = failed && !payload.partial
+      if (final && !payload.response_reused && !errorCopy) {
         if (bubble) {
           next = { ...next, items: replaceItem(next.items, bubble.id, { text: final }) }
         } else {

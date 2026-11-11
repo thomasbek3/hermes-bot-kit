@@ -223,6 +223,9 @@ export function createChatController(bot, deps, options = {}) {
     rows: [],
     receipt: null,
     stopError: null,
+    // A failed-turn card's Try again (retryTurn): { running, from, text,
+    // failed } of the newest one, or null (core/turnError.js).
+    turnRetry: null,
     chat: initialChatState()
   }
   const listeners = new Set()
@@ -1576,6 +1579,24 @@ export function createChatController(bot, deps, options = {}) {
     return { ok: sent.ok }
   }
 
+  /** A failed-turn card's Try again: exactly the supported /retry (rewind
+   *  the failed turn, resubmit the same user message; runRewindCommand on a
+   *  canonical gateway, the gateway's own /retry through slash.exec on a
+   *  legacy one). `fromId` is the card it started from. One at a time, never
+   *  while a turn runs. Resolves { ok }. */
+  async function retryTurn(fromId, text = '') {
+    if (disposed || state.turnRetry?.running || state.chat.busy) return { ok: false }
+    set({ turnRetry: { running: true, from: String(fromId || ''), text: String(text || '').trim(), failed: false } })
+    let result = { ok: false }
+    try {
+      result = (await runSlash('/retry')) || { ok: false }
+    } catch {
+      result = { ok: false }
+    }
+    if (!disposed) set(s => ({ turnRetry: { ...s.turnRetry, running: false, failed: !result.ok } }))
+    return { ok: Boolean(result.ok) }
+  }
+
   /** Rewind to before a user message, its text back in the composer once the
    *  rewind is confirmed (review override-v2-r1 #3). Canonical gateway: the
    *  selected durable row is the target. Legacy gateway: its own `/undo N`
@@ -2264,6 +2285,7 @@ export function createChatController(bot, deps, options = {}) {
     editMessage,
     regenerate,
     rewindTo,
+    retryTurn,
     laterTurns,
     react,
     runSlash,

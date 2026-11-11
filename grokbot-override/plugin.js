@@ -41807,7 +41807,7 @@ function historyToItems(rows, { idPrefix = "h:" } = {}) {
       }
       if (text3.trim()) {
         flushTools();
-        items.push({ kind: "notice", id: rowId(row, index, idPrefix), text: text3.trim(), at, ...isSystemNotice(kind, role, text3.trim()) ? { system: kind } : {} });
+        items.push({ kind: "notice", id: rowId(row, index, idPrefix), text: text3.trim(), at, ...isSystemNotice(kind, role, text3.trim()) ? { system: kind } : {}, ...kind === "failed_turn" && role === "assistant" ? { failedTurn: true } : {} });
       }
       return;
     }
@@ -43530,7 +43530,8 @@ function applyEvent(state, event, now = Date.now()) {
       const failed = payload.status === "error" || Boolean(payload.error);
       let next = dropSilentBubble(state);
       const bubble = findItem(next.items, next.live.bubbleId);
-      if (final && !payload.response_reused) {
+      const errorCopy = failed && !payload.partial;
+      if (final && !payload.response_reused && !errorCopy) {
         if (bubble) {
           next = { ...next, items: replaceItem(next.items, bubble.id, { text: final }) };
         } else {
@@ -43881,6 +43882,9 @@ function createChatController(bot, deps, options = {}) {
     rows: [],
     receipt: null,
     stopError: null,
+    // A failed-turn card's Try again (retryTurn): { running, from, text,
+    // failed } of the newest one, or null (core/turnError.js).
+    turnRetry: null,
     chat: initialChatState()
   };
   const listeners = /* @__PURE__ */ new Set();
@@ -44963,6 +44967,18 @@ ${body}` : body);
     const sent = await sendDraft(text3, []);
     return { ok: sent.ok };
   }
+  async function retryTurn(fromId, text3 = "") {
+    if (disposed || state.turnRetry?.running || state.chat.busy) return { ok: false };
+    set({ turnRetry: { running: true, from: String(fromId || ""), text: String(text3 || "").trim(), failed: false } });
+    let result = { ok: false };
+    try {
+      result = await runSlash("/retry") || { ok: false };
+    } catch {
+      result = { ok: false };
+    }
+    if (!disposed) set((s) => ({ turnRetry: { ...s.turnRetry, running: false, failed: !result.ok } }));
+    return { ok: Boolean(result.ok) };
+  }
   async function rewindTo(itemId) {
     const items = state.chat.items;
     const target = items.find((item) => item.id === itemId);
@@ -45516,6 +45532,7 @@ ${body}` : body);
     editMessage,
     regenerate,
     rewindTo,
+    retryTurn,
     laterTurns,
     react,
     runSlash,
@@ -49759,6 +49776,15 @@ var CHAT_CSS = (
 .gbo-command.is-error pre { color: var(--gbo-destructive); }
 .gbo-round.is-recording { color: var(--gbo-destructive); }
 
+/* ── failed turn card and the /undo note (core/turnError.js) ───────── */
+.gbo-turn-error { align-self: flex-start; max-width: 560px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--gbo-border); border-radius: 16px; padding: 10px 14px; background: var(--gbo-card); }
+.gbo-turn-error-title { font: var(--gbo-text-body); color: var(--gbo-fg); }
+.gbo-turn-error-actions { display: flex; align-items: center; gap: 8px; }
+.gbo-turn-error-toggle { padding: 0; color: var(--gbo-muted-fg); font-size: 12px; }
+.gbo-turn-error-detail { font: 12px/18px var(--gbo-mono); color: var(--gbo-muted-fg); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; }
+.gbo-turn-error-detail[hidden] { display: none; }
+.gbo-undo-note { opacity: 0.8; }
+
 /* ── C22 / C23 message actions and reactions ────────────────────────── */
 .gbo-msg-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity .12s; }
 .gbo-msg:hover .gbo-msg-actions, .gbo-msg:focus-within .gbo-msg-actions { opacity: 1; }
@@ -52023,6 +52049,64 @@ function isDirty(fields, draft) {
   const edits = editsFrom(fields);
   const same = (a2, b2) => JSON.stringify(a2 || []) === JSON.stringify(b2 || []);
   return !same(edits.to, draft.to) || !same(edits.cc, draft.cc) || edits.subject !== String(draft.subject || "") || edits.body !== String(draft.body || "");
+}
+
+// src/core/turnError.js
+var FAILED_TITLE = "That reply didn’t go through.";
+var STILL_FAILING_TITLE = "Still failing. Start a new chat";
+var UNDO_NOTE = "Removed the failed reply";
+var UNDO_COMMAND = /^\/undo(?:\s+\d+)?$/;
+var UNDO_RECEIPT = /^↶ Undid \d+ (?:turns?|messages?)\b/;
+function isUndoEcho(item) {
+  return item?.kind === "command" && !item.running && !item.error && UNDO_COMMAND.test(String(item.command || "").trim()) && UNDO_RECEIPT.test(String(item.output || "").trim());
+}
+function userTextBefore(list, index) {
+  for (let i = index - 1; i >= 0; i -= 1) if (list[i]?.kind === "user") return String(list[i].text || "");
+  return "";
+}
+function withTurnCards(items, { busy = false, retry = null } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const out = [];
+  let changed = false;
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    if (isUndoEcho(item)) {
+      changed = true;
+      out.push({ kind: "undo-note", id: item.id, at: item.at, text: UNDO_NOTE });
+      continue;
+    }
+    const boundary = item?.kind === "notice" && item.failedTurn && !item.system;
+    if (item?.kind !== "error" && !boundary) {
+      out.push(item);
+      continue;
+    }
+    changed = true;
+    const detail = [String(item.text || "").trim()];
+    if (item.kind === "error" && list[i + 1]?.kind === "notice" && list[i + 1].failedTurn) {
+      i += 1;
+      detail.push(String(list[i].text || "").trim());
+    }
+    out.push({ kind: "turn-error", id: item.id, at: item.at, detail: detail.filter(Boolean).join("\n") });
+  }
+  if (!changed) return items;
+  let last = -1;
+  for (let i = out.length - 1; i >= 0; i -= 1) {
+    if (out[i]?.kind === "user") break;
+    if (out[i]?.kind === "turn-error") {
+      last = i;
+      break;
+    }
+  }
+  return out.map((entry, index) => {
+    if (entry?.kind !== "turn-error") return entry;
+    const newest = index === last;
+    const from = retry?.from || "";
+    const prompt = userTextBefore(out, index);
+    const stillFailing = Boolean(
+      newest && retry && !retry.running && (retry.failed ? entry.id === from : entry.id !== from && prompt.trim() === retry.text)
+    );
+    return { ...entry, prompt, canRetry: newest && !busy, retrying: Boolean(newest && retry?.running), stillFailing };
+  });
 }
 
 // src/ui/avatarShapes.ts
@@ -58809,6 +58893,29 @@ function AssistantBody({ item, bot, pos }) {
     (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx27(BotProse, { bot, text: segment.text, pos, time: index === lastProse ? time : null }, index) : /* @__PURE__ */ jsx27(DirectiveBlock, { segment, poll: scope.recent.has(item.id), scope }, index)
   ) });
 }
+function TurnErrorCard({ item, bot, controller: controller2 }) {
+  const [open, setOpen] = React24.useState(false);
+  const [starting, setStarting] = React24.useState(false);
+  const pressed = React24.useRef(false);
+  React24.useEffect(() => {
+    if (!item.retrying) pressed.current = false;
+  }, [item.retrying, item.id]);
+  const retry = () => {
+    if (pressed.current || item.retrying || !item.canRetry || !controller2?.retryTurn) return;
+    pressed.current = true;
+    setStarting(true);
+    void Promise.resolve(controller2.retryTurn(item.id, item.prompt)).finally(() => setStarting(false));
+  };
+  const busy = item.retrying || starting;
+  return /* @__PURE__ */ jsxs25("div", { className: "gbo-turn-error", role: "group", "aria-label": "Reply failed", children: [
+    /* @__PURE__ */ jsx27("div", { className: "gbo-turn-error-title", children: item.stillFailing ? `${STILL_FAILING_TITLE}.` : FAILED_TITLE }),
+    /* @__PURE__ */ jsxs25("div", { className: "gbo-turn-error-actions", children: [
+      item.stillFailing ? /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => newChatWith(bot), children: "Start a new chat" }) : /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !item.canRetry, "aria-busy": busy || void 0, onClick: retry, children: busy ? "Trying again…" : "Try again" }),
+      item.detail ? /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-link-btn gbo-turn-error-toggle", "aria-expanded": open, onClick: () => setOpen(!open), children: "Details" }) : null
+    ] }),
+    item.detail ? /* @__PURE__ */ jsx27("div", { className: "gbo-turn-error-detail", hidden: !open, children: item.detail }) : null
+  ] });
+}
 function Item({
   item,
   bot,
@@ -58862,6 +58969,10 @@ function Item({
       ] });
     case "error":
       return /* @__PURE__ */ jsx27("div", { className: "notice is-error gbo-error", children: item.text });
+    case "turn-error":
+      return /* @__PURE__ */ jsx27(TurnErrorCard, { item, bot, controller: controller2 });
+    case "undo-note":
+      return /* @__PURE__ */ jsx27("div", { className: "system-event gbo-notice gbo-undo-note", role: "status", children: item.text });
     default:
       return null;
   }
@@ -58938,8 +59049,10 @@ function Transcript({ state, bot, meta, onPrefill }) {
     newLine.note();
   };
   const decorated = React24.useMemo(
-    () => groupMessages(withNewMarker(withDividers(visibleItems(withEmailDrafts(items), showWork)), newLine.id)),
-    [items, showWork, newLine.id]
+    () => groupMessages(
+      withNewMarker(withDividers(withTurnCards(visibleItems(withEmailDrafts(items), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
+    ),
+    [items, showWork, newLine.id, state.chat.busy, state.turnRetry]
   );
   const controller2 = useController();
   const answer = (requestId, choice) => void controller2?.respondApproval(requestId, choice);
