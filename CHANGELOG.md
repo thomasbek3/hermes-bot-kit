@@ -9,6 +9,8 @@
   session (re-checked every 15 minutes); when a row cannot say `has_avatar`, one `profiles.list` per
   connection answers for all of its bots. The shape stays while loading and after an error (retried after
   2 minutes). Bot Mode's 160 px face rasters, non-image data and local bots are left alone; read-only.
+  This covers bots on an SSH machine that Hermes dials on demand (its source reports `connect-on-demand`,
+  which is available, not down).
 - **email-drafts: email goes through Composio by default (2026-11-10)**: a new `composio` sender, now the
   default **Send with** (Gmail OAuth and SMTP stay as options). **Send** runs the `composio` CLI that is
   installed and logged in on the bot's own machine: `composio execute GMAIL_GET_PROFILE` (read only) to

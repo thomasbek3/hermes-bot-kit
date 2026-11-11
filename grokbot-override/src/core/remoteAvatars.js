@@ -8,9 +8,13 @@
 // read-only, through each bot's own route (core/routing.js requestForBot),
 // and keeps them for the app session.
 //
-// - Which rows: `remoteSource` rows with a resolved remote route that their
-//   source still serves. Rows of the active source (local bots included) are
-//   left to Bot Mode, which already puts their picture in its meta.
+// - Which rows: `remoteSource` rows with a resolved remote route whose source
+//   is available as Bot Mode paints it (core/roster.js botSourceStatus). An
+//   SSH source that is not the live gateway reports `connect-on-demand` with
+//   sourceReachable false: it is available (it dials on the first request),
+//   and is exactly how every SSH machine's bots arrive, so it is asked. Rows
+//   of the active source (local bots included) are left to Bot Mode, which
+//   already puts their picture in its meta.
 // - has_avatar: the union roster carries it when the source's /api/profiles
 //   reports it. When a row cannot say (older backends do not), one
 //   `profiles.list` per connection (on one of its rows' routes) answers for
@@ -24,6 +28,7 @@
 //   isBackfilledFacePng), pushed only for inter-agent notices: not shown,
 //   like stock.
 
+import { botSourceStatus } from './roster.js'
 import { botRouteKey, resolveBotConnectionRoute } from './routing.js'
 
 export const AVATAR_TTL_MS = 15 * 60_000
@@ -56,7 +61,7 @@ export function isBackfilledFacePng(dataUrl) {
 
 /** The remote route of a row the override fetches an avatar for, or null. */
 export function remoteAvatarRoute(bot) {
-  if (!bot || !bot.remoteSource || bot.ghost || bot.retained || bot.unserved || bot.sourceReachable === false) return null
+  if (!bot || !bot.remoteSource || bot.ghost || bot.retained || !botSourceStatus(bot).available) return null
   const route = resolveBotConnectionRoute(bot).route
   return route && route.mode === 'remote' ? route : null
 }

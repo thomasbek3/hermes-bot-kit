@@ -15,6 +15,7 @@ import {
   isBackfilledFacePng,
   remoteAvatarRoute
 } from '../src/core/remoteAvatars.js'
+import { annotateSources } from '../src/core/roster.js'
 import { createBotRequester } from '../src/core/routing.js'
 import { pngDataUrl } from './fixtures/avatar-png.mjs'
 
@@ -197,6 +198,34 @@ test('local bots, active-source rows and rows a source does not serve are never 
   assert.deepEqual(h.loader.images(), {})
   assert.equal(remoteAvatarRoute(local('x')), null)
   assert.equal(remoteAvatarRoute(remote('x')).connectionId, 'mini')
+})
+
+test('connect-on-demand SSH rows (every SSH machine that is not the live gateway) are asked', async () => {
+  // Live shape: host.agents reports an undialed SSH source as reachable with
+  // error 'connect-on-demand', annotateSources turns that into
+  // sourceReachable:false + sourceError, and SSH sources carry no
+  // has_avatar. These rows were skipped, so no SSH bot ever got its picture.
+  const sources = [{ connectionId: 'mini', reachable: true, error: 'connect-on-demand' }]
+  const rows = annotateSources([remote('default'), remote('artist'), remote('scout'), remote('helper')], sources)
+  assert.equal(rows[1].sourceReachable, false)
+  assert.equal(rows[1].sourceError, 'connect-on-demand')
+  assert.equal(remoteAvatarRoute(rows[1])?.connectionId, 'mini')
+  const h = harness({
+    answers: {
+      'profiles.list': () => ({
+        profiles: [{ name: 'default', has_avatar: false }, { name: 'artist', has_avatar: true }, { name: 'scout', has_avatar: true }, { name: 'helper', has_avatar: false }]
+      }),
+      'profiles.get_asset': () => ({ found: true, mime: 'image/png', data: PICTURE })
+    }
+  })
+  h.loader.sync(rows)
+  await flush(12)
+  assert.deepEqual(h.lists().map(c => c.via), ['mini::default'])
+  assert.deepEqual(h.assets().map(c => c.via).sort(), ['mini::artist', 'mini::scout'])
+  assert.deepEqual(h.loader.images(), { 'mini::artist': PICTURE, 'mini::scout': PICTURE })
+  // A source that is really down still is not asked.
+  const down = annotateSources([remote('planner', { has_avatar: true })], [{ connectionId: 'mini', reachable: false, error: 'ssh: connect timed out' }])
+  assert.equal(remoteAvatarRoute(down[0]), null)
 })
 
 test('has_avatar:false and a row that already shows its own picture are not fetched', async () => {

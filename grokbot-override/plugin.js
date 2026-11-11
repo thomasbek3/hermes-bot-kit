@@ -46491,7 +46491,7 @@ function isBackfilledFacePng(dataUrl) {
   }
 }
 function remoteAvatarRoute(bot) {
-  if (!bot || !bot.remoteSource || bot.ghost || bot.retained || bot.unserved || bot.sourceReachable === false) return null;
+  if (!bot || !bot.remoteSource || bot.ghost || bot.retained || !botSourceStatus(bot).available) return null;
   const route = resolveBotConnectionRoute(bot).route;
   return route && route.mode === "remote" ? route : null;
 }
