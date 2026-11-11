@@ -2,22 +2,30 @@ manifest_version: 2
 api_version: 1
 name: email-drafts
 version: 1.0.0
-description: Bots write email as drafts; you send them from a card in the chat (Gmail or SMTP), with per-bot allowed-recipient rules
+description: Bots write email as drafts; you send them from a card in the chat (through Composio by default, or Gmail or SMTP), with per-bot allowed-recipient rules
 requires_hermes: ">=0.23.0"
 author: Thomas Bekkers
 license: MIT
 homepage: https://github.com/thomasbek3/hermes-bot-kit
-tags: [email, drafts, approval, gmail, smtp, desktop]
+tags: [email, drafts, approval, composio, gmail, smtp, desktop]
 provides_tools:
   - email_draft_create
   - email_draft_update
   - email_draft_status
-# The Gmail client is the user's own Google Cloud "Desktop app" OAuth client.
+# Composio (the default sender) runs the `composio` CLI that is installed and
+# logged in on the bot's machine; the CLI keeps its own login. A Composio user
+# API key is optional and, when set for the profile, is read with
+# agent.secret_scope.get_secret and passed only to that child process.
+# The Gmail sender's client is the user's own Google Cloud "Desktop app" OAuth client.
 # Hermes runs the sign-in (`hermes auth add email-drafts:google`), stores and
 # refreshes the grant, and attaches it to requests made through
 # credentialed_provider_request. gmail.send is the only scope: the plugin can
 # send mail as the signed-in account and cannot read the mailbox.
 optional_env:
+  - name: COMPOSIO_USER_API_KEY
+    description: "Optional Composio user API key for this profile (the composio CLI's own login is used when unset)"
+    url: "https://platform.composio.dev"
+    secret: true
   - name: EMAIL_DRAFTS_GOOGLE_CLIENT_ID
     description: "Client ID of your own Google Cloud OAuth client (Desktop app) for Gmail sending"
     url: "https://console.cloud.google.com/apis/credentials"
@@ -40,15 +48,15 @@ oauth:
 config_schema:
   sender:
     type: str
-    choices: [gmail, smtp]
-    default: gmail
+    choices: [composio, gmail, smtp]
+    default: composio
     label: "Send with"
-    description: "gmail: the Google account signed in with `hermes auth add email-drafts:google`. smtp: the server below."
+    description: "composio (default): the Gmail account connected in Composio, through the composio CLI logged in on the bot's machine. gmail: the Google account signed in with `hermes auth add email-drafts:google`. smtp: the server below."
   from_address:
     type: str
     default: ""
     label: "From address"
-    description: "The address drafts are sent from (for Gmail, the signed-in account or one of its verified send-as addresses)."
+    description: "The address drafts are sent from. With Composio it must be the connected Gmail account's address (checked before every send). With gmail, the signed-in account or one of its verified send-as addresses."
   from_name:
     type: str
     default: ""
@@ -64,6 +72,21 @@ config_schema:
     default: []
     label: "Extra attachment folders"
     description: "Absolute folders whose files may be attached, besides the bot's working directory (which never counts when it is your home folder)."
+  composio_account:
+    type: str
+    default: ""
+    label: "Composio account"
+    description: "Which Gmail account connected in Composio this bot sends from: its alias, word id or connected-account id (see `composio connections list --toolkit gmail`). Empty: the CLI's default Gmail account."
+  composio_cli:
+    type: str
+    default: ""
+    label: "Composio CLI"
+    description: "Absolute path of the composio CLI on the bot's machine. Empty: `composio` on PATH, then ~/.local/bin/composio and ~/.composio/composio."
+  composio_user_api_key:
+    type: secret
+    env: COMPOSIO_USER_API_KEY
+    label: "Composio user API key (optional)"
+    description: "Only when this profile should use a different Composio login than the CLI's. Read with the profile's secret scope and passed to the composio CLI it runs."
   google_client_id:
     type: secret
     env: EMAIL_DRAFTS_GOOGLE_CLIENT_ID

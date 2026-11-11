@@ -33,8 +33,9 @@ _ATTACHMENTS = {
 EMAIL_DRAFT_CREATE = {
     "name": "email_draft_create",
     "description": (
-        "Write an email as a DRAFT for the user to review. This is the only way to email anyone: never send "
-        "email with a script, SMTP, an API, a browser or another tool. The draft appears as a card in the "
+        "Write an email as a DRAFT for the user to review. Email goes through Composio, and this is the only "
+        "way to email anyone: never send email with a script, SMTP, an API, a Composio tool, a browser or "
+        "another tool. The draft appears as a card in the "
         "user's Hermes Desktop chat with you; the user edits it and clicks Send (or it sends on its own only "
         "when the user has allowed every recipient). After calling this, reply with one short line (for "
         "example: \"Draft to Sam is ready on the card above.\"); do not paste the email text again. Returns "

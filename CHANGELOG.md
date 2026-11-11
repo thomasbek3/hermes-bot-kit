@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **email-drafts: email goes through Composio by default (2026-11-10)**: a new `composio` sender, now the
+  default **Send with** (Gmail OAuth and SMTP stay as options). **Send** runs the `composio` CLI that is
+  installed and logged in on the bot's own machine: `composio execute GMAIL_GET_PROFILE` (read only) to
+  confirm the chosen account is the bot's **From address**, then `composio execute GMAIL_SEND_EMAIL` (or
+  `GMAIL_REPLY_TO_THREAD` for a reply with a Gmail thread id), with `--account <alias|word id|id>` from the
+  new per-bot **Composio account** setting and the email as JSON on stdin (`-d -`). No shell, a minimal
+  environment, a 90-second limit that kills the CLI, and Composio's approval prompts turned into a clear
+  refusal instead of a wait. To, Cc, Bcc, subject, the plain-text body with the bot's signature, and
+  attachments (local paths the CLI uploads; 20 MB in total) all go through. Not logged in, no connected
+  Gmail, an expired connection, rate limits and refused input show a clear error with **Retry**; a timeout,
+  a crash or a dropped connection mid-send is "Delivery unknown: check the Sent folder" and is never retried.
+  An optional Composio user API key is read with the profile's secret scope only. The bot instructions now
+  say: "Email goes through Composio. Use email_draft_create; never send email any other way." Tests use a
+  fake `composio` executable.
 - **email-drafts: bots write email as drafts you send from the chat (2026-11-10)**: a new per-profile agent
   plugin, [`email-drafts`](email-drafts/README.md). A bot gets `email_draft_create`, `email_draft_update` and
   `email_draft_status`, and **no send tool**. Its draft shows in the Grokbot Override chat as a card like Grok

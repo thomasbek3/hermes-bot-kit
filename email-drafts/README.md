@@ -3,7 +3,9 @@
 Bots never send email on their own. A bot writes a **draft**; it shows up as a card in its Grokbot
 Override chat, like Grok Bot's: subject, From, "In reply to", editable To and Cc, the editable body with
 your signature under it, attachments as file cards (click one to preview it), and **Discard** / **Send**. You click **Send**, and only
-then does it go out through Gmail or your SMTP server. The card then says "Sent · 3:42 PM" and is read-only;
+then does it go out: **through Composio** (the default: the Gmail account you connected in Composio, sent
+by the `composio` CLI on the bot's machine), or, optionally, through Gmail with your own Google OAuth client
+or your SMTP server. The card then says "Sent · 3:42 PM" and is read-only;
 a failure shows the error with **Retry**.
 
 The card's footer has the bot's rules menu:
@@ -33,7 +35,8 @@ to answer with one short line. The plugin also registers the skill `email-drafts
 bot's standing instructions, add this to its `SOUL.md`:
 
 ```text
-Email: never send email yourself (no scripts, SMTP, mail APIs or browsers). Write it with
+Email goes through Composio. Use email_draft_create; never send email any other way.
+Email: never send email yourself (no scripts, SMTP, mail APIs, Composio tools or browsers). Write it with
 email_draft_create; the user sends it from the draft card. Then reply with one short line
 ("Draft to Sam is ready on the card above."), not the email text. Change a draft with
 email_draft_update, never by creating a second one.
@@ -45,8 +48,10 @@ refused; hidden files and folders (`.ssh`, `.env`, `.hermes` …) are refused ev
 just before sending. The home folder and `/` never count as a workspace on their own: a bot whose working
 directory is your home folder can attach files only from the folders you list.
 
-**Replies** thread: `in_reply_to.message_id` becomes `In-Reply-To` and `References`, and
-`in_reply_to.thread_id` is sent as Gmail's `threadId`.
+**Replies** thread: with Composio, a draft whose `in_reply_to.thread_id` is set goes out with
+`GMAIL_REPLY_TO_THREAD` into that Gmail thread (Gmail keeps the thread's subject and quotes the last message
+under your text). With the Gmail and SMTP senders, `in_reply_to.message_id` becomes `In-Reply-To` and
+`References`, and `in_reply_to.thread_id` is sent as Gmail's `threadId`.
 
 **Scheduled runs** (cron, a gateway with no one watching) only create drafts and return at once; nothing ever
 waits for a person. A draft whose recipients are all allowed still sends under the allow rule. Type
@@ -58,7 +63,8 @@ A draft goes `pending → sending → sent | failed`. The step to `sending` is t
 click, a second window or a repeated request finds the draft already `sending` or `sent` and sends nothing.
 **Send** carries the card's revision: if the bot changed the draft after the card showed it, nothing is sent
 and the card asks you to look again. An error the plugin cannot classify (the connection dropped after the
-message was handed over) marks the draft "Delivery unknown: check your Sent folder" and offers no Retry. The
+message was handed over, or the Composio CLI timed out, crashed or lost the network mid-send) marks the draft
+"Delivery unknown: check your Sent folder" and offers no Retry. The
 card itself keeps one action in flight and never repeats a send whose answer was lost.
 
 ## Approval and the audit log
@@ -87,7 +93,51 @@ Then restart that bot's backend (or the app) so it loads, and turn on the **Emai
 bot if your profile lists toolsets explicitly. Set the bot's **From address** (and optionally **From name**,
 **Signature**, **Extra attachment folders**) under **Settings → Plugins → Email drafts**.
 
-### Gmail
+### Composio (default)
+
+Composio is the connector for almost everything, email included, so it is the default **Send with**. The
+plugin runs the [Composio CLI](https://docs.composio.dev) that is installed and logged in **on the machine
+that runs the bot** (a remote bot's mail is sent by the remote machine's CLI). It is the same CLI the catalog
+plugin `composio-connections` manages accounts with.
+
+On each bot machine, once:
+
+1. Install the `composio` CLI and run `composio login` in a terminal.
+2. Connect the Gmail account in Composio (for example from the `composio-connections` plugin in Hermes
+   Desktop). `composio connections list --toolkit gmail` lists the connected Gmail accounts with their alias
+   and word id.
+3. In the bot's **Settings → Plugins → Email drafts**: **Send with** `composio`, **From address** = that Gmail
+   account's address, and **Composio account** = its alias, word id or connected-account id (empty uses the
+   CLI's default Gmail account, fine when there is only one). **Composio CLI** is only needed when the CLI is
+   not on the gateway's PATH, `~/.local/bin/composio` or `~/.composio/composio`.
+
+What a send runs (no shell; the arguments go in as a list, the email as JSON on stdin, never on the command
+line; a minimal environment; a 90-second limit):
+
+```bash
+composio execute GMAIL_GET_PROFILE [--account <account>] -d -     # read only: which mailbox is this?
+composio execute GMAIL_SEND_EMAIL  [--account <account>] -d -     # or GMAIL_REPLY_TO_THREAD for a reply
+```
+
+- **From:** the profile check comes first. When the account's address is not the bot's **From address**,
+  nothing is sent and the card says which address the account has. (Gmail "send as" aliases are not checked
+  against Composio; use the `gmail` sender for those.) If Composio ever reports a different From after a
+  send, the card shows it as a failure without Retry.
+- **Body:** plain text, the bot's **Signature** under it, exactly as on the card (Composio's own Gmail
+  signature is turned off with `include_signature: false`).
+- **Attachments:** the files' paths go in the tool's `attachment` field and the CLI uploads them to Composio
+  for that send; at most 20 MB in total (the Gmail tools' limit).
+- **Errors:** not logged in, no connected Gmail matching the account, an expired or revoked connection, rate
+  limits, input Gmail refuses, and Composio's own approval controls (which cannot prompt anyone from a
+  gateway, so they refuse) each show a clear message with **Retry**; nothing was sent. A timeout, a crash, a
+  dropped connection mid-send or output the plugin cannot read is "Delivery unknown" (no Retry).
+- **Key:** the CLI's own login is used. A **Composio user API key** for the profile is optional; when set,
+  it is read with `agent.secret_scope.get_secret("COMPOSIO_USER_API_KEY")` and given only to that `composio`
+  child process. The plugin never reads the CLI's credential files.
+
+### Gmail (optional)
+
+Set **Send with** to `gmail`, then:
 
 1. In your own Google Cloud project, enable the Gmail API and create an OAuth client of type **Desktop app**.
 2. Put its id and secret in the bot's settings: **Settings → Plugins → Email drafts → Google OAuth client
@@ -104,7 +154,7 @@ read the mailbox. Hermes stores and refreshes the token and attaches it to reque
 `gmail.googleapis.com`; the plugin never sees it. `hermes auth status|logout email-drafts:google` shows or
 removes it.
 
-### SMTP
+### SMTP (optional)
 
 Set **Send with** to `smtp`, then **SMTP host**, **port**, **security** (`starttls` on 587 or `ssl` on 465;
 plain-text SMTP is not offered) and **username**, and the **SMTP password** field (stored by Hermes like a
@@ -112,11 +162,17 @@ provider key as `EMAIL_DRAFTS_SMTP_PASSWORD`, read with the profile's secret sco
 
 ## What it touches (disclosure)
 
-- **Network:** only when a draft is sent: `https://gmail.googleapis.com` (through Hermes's
-  `credentialed_provider_request`) or your SMTP server over TLS.
+- **Network:** only when a draft is sent. Composio (default): the `composio` CLI on the bot's machine talks
+  to Composio's servers (`backend.composio.dev`), uploads the draft's attachments there and has Composio send
+  through your connected Gmail. Gmail: `https://gmail.googleapis.com` (through Hermes's
+  `credentialed_provider_request`). SMTP: your server over TLS.
+- **Programs it runs:** with Composio, the `composio` CLI (two runs per send: the read-only profile check and
+  the send), with no shell, a minimal environment and a timeout that kills it. The CLI keeps its own login and
+  may keep its own local history of the tool calls it ran.
 - **Files it reads:** the attachments you or the bot named, inside the allowed folders.
 - **Files it writes:** `<HERMES_HOME>/plugin-data/email-drafts/` (drafts, rules, audit log).
-- **Credentials:** none of its own. The Gmail grant lives in Hermes; the SMTP password is read through
+- **Credentials:** none of its own. Composio's login stays in its CLI (an optional profile key is read with
+  `agent.secret_scope.get_secret`); the Gmail grant lives in Hermes; the SMTP password is read through
   `agent.secret_scope.get_secret`.
 - No background processes, no telemetry.
 
@@ -130,6 +186,6 @@ by the remote machine): `plugin.email-drafts.api` (plugin RPC) where the gateway
 ## Tests
 
 ```bash
-python3 -m unittest discover -s email-drafts/tests -p 'test_*.py'   # fake Gmail and SMTP; no email is sent
+python3 -m unittest discover -s email-drafts/tests -p 'test_*.py'   # fake composio CLI, Gmail and SMTP; no email is sent
 hermes plugins validate email-drafts
 ```

@@ -59,7 +59,7 @@ jobs:
       - name: Texting-style tests
         run: python3 -m unittest discover -s texting-style/tests -p 'test_*.py'
 
-      # Fake Gmail and SMTP backends: no email is sent.
+      # A fake composio CLI and fake Gmail and SMTP backends: no email is sent.
       - name: Email-drafts tests
         run: python3 -m unittest discover -s email-drafts/tests -p 'test_*.py'
 

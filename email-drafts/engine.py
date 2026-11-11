@@ -25,7 +25,7 @@ from .store import DraftError, Store, clean_body, clean_subject, normalize_addre
 logger = logging.getLogger(__name__)
 
 SETTINGS_DEFAULTS = {
-    "sender": "gmail",
+    "sender": "composio",
     "from_address": "",
     "from_name": "",
     "signature": "",
@@ -34,6 +34,8 @@ SETTINGS_DEFAULTS = {
     "smtp_port": 587,
     "smtp_security": "starttls",
     "smtp_username": "",
+    "composio_account": "",
+    "composio_cli": "",
 }
 
 DISABLED_MESSAGE = (
@@ -222,6 +224,8 @@ class Engine:
             sent = result.get("draft") or {}
             if sent.get("status") == "sent":
                 message = f"{verb} and sent automatically: every recipient is on this bot's allowed list."
+            elif sent.get("delivery_unknown"):
+                message = f"{verb}; sending it automatically had an unclear result: {sent.get('error') or result.get('error')} Do not draft it again; tell the user to check their Sent folder."
             else:
                 message = f"{verb}; sending it automatically failed: {sent.get('error') or result.get('error')}. It waits on the card for Retry."
             return {"ok": True, "email_draft": self._summary(self.store.load(draft["id"])), "message": message}
@@ -304,6 +308,17 @@ class Engine:
         try:
             files = att.recheck(draft.get("attachments", []), draft.get("roots") or self._roots(self._workspace()))
             receipt = self._deliver(draft, settings, files)
+        except senders.DeliveryUnknown as exc:  # it may have gone out: never again from here
+            error = str(exc) or "Delivery unknown: check the Sent folder; it will not be sent again from here."
+            self.store.audit("send_unknown", id=draft_id, actor=actor, surface=surface, error=error[:300])
+
+            def maybe(d: dict) -> None:
+                d["status"] = "failed"
+                d["error"] = error
+                d["delivery_unknown"] = True
+                d["failed_at"] = now()
+
+            return {"ok": False, "error": error, "draft": self.view(self.store.mutate(draft_id, maybe))}
         except (senders.SendError, DraftError, OSError) as exc:
             error = str(exc) or type(exc).__name__
             self.store.audit("send_failed", id=draft_id, actor=actor, surface=surface, error=error[:300])

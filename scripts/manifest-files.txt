@@ -13,6 +13,7 @@ texting-style/__init__.py
 email-drafts/plugin.yaml
 email-drafts/__init__.py
 email-drafts/attachments.py
+email-drafts/composio_sender.py
 email-drafts/engine.py
 email-drafts/schemas.py
 email-drafts/senders.py

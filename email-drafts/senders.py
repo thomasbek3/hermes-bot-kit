@@ -1,4 +1,7 @@
-"""Build the message and hand it to Gmail or SMTP.
+"""Hand a draft to its sender: Composio (the default), Gmail or SMTP.
+
+Composio runs the ``composio`` CLI logged in on the bot's machine and its Gmail
+tools (``composio_sender``); it takes the draft's fields, not a MIME message.
 
 Gmail goes through Hermes: ``credentialed_provider_request("google", ...)``
 attaches the token from the user's own OAuth client declared under ``oauth:``
@@ -8,7 +11,7 @@ stores or refreshes the token.
 SMTP reads its password with ``agent.secret_scope.get_secret`` (the profile's
 secret scope), and only over TLS (STARTTLS or implicit SSL).
 
-Both are looked up through ``SENDERS`` so tests swap in fakes.
+Gmail and SMTP are looked up through ``SENDERS`` so tests swap in fakes.
 """
 
 from __future__ import annotations
@@ -27,8 +30,17 @@ GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 SEND_TIMEOUT_S = 60.0
 
 
+DEFAULT_SENDER = "composio"
+SENDER_NAMES = ("composio", "gmail", "smtp")
+
+
 class SendError(Exception):
-    """The backend refused or failed; the text is safe to show."""
+    """The backend refused or failed; nothing was sent. The text is safe to show."""
+
+
+class DeliveryUnknown(Exception):
+    """The backend may or may not have sent it (a timeout mid-send). The draft
+    is marked delivery-unknown and never retried. The text is safe to show."""
 
 
 def signed_body(body: str, signature: str) -> str:
@@ -167,11 +179,15 @@ SENDERS: dict[str, Callable[..., dict]] = {"gmail": send_gmail, "smtp": send_smt
 
 
 def deliver(draft: dict, settings: dict, attachments: list[dict]) -> dict:
-    backend = str(settings.get("sender") or "gmail")
-    sender = SENDERS.get(backend)
-    if sender is None:
-        raise SendError(f"Unknown sender {backend!r} (gmail or smtp)")
+    backend = str(settings.get("sender") or DEFAULT_SENDER)
+    if backend not in SENDER_NAMES:
+        raise SendError(f"Unknown sender {backend!r} (composio, gmail or smtp)")
     if not draft.get("to"):
         raise DraftError("Add at least one To address")
+    if backend == "composio":
+        from .composio_sender import send_composio
+
+        return send_composio(draft, settings, attachments)
+    sender = SENDERS[backend]
     msg = build_message(draft, settings, attachments)
     return sender(msg, draft, settings)
