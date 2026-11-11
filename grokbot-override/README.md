@@ -52,6 +52,9 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
   stock tab.
 - Rows on an SSH connection that is not the live gateway (`connect-on-demand`) are available, as in
   Bot Mode; only a source Bot Mode marks unavailable or removed is dimmed.
+- A bot on another connection shows the avatar its own gateway holds (`has_avatar`), which stock Bot
+  Mode only does for the active connection's bots. It is read once per app session over the bot's own
+  route (re-checked every 15 minutes); the generated shape shows until it arrives or if it cannot be read.
 - **Pin to top** (row menu) puts up to four bots as big avatars above the roster; the pins live in the
   override's own plugin storage and never touch Bot Mode's data.
 - **Sections.** **+ → New section…** adds a named section (an emoji in the name is just text). Right-click a

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **grokbot-override: remote bots show their server avatar (2026-11-11)**: a bot on another connection whose
+  own gateway holds a picture (`has_avatar`, set with `profiles.set_asset`) now shows it in the roster, pins,
+  chat header and panel instead of its generated shape. Hermes Desktop only fetches these for the active
+  connection's bots. The override reads `profiles.get_asset` on each such bot's own route, once per app
+  session (re-checked every 15 minutes); when a row cannot say `has_avatar`, one `profiles.list` per
+  connection answers for all of its bots. The shape stays while loading and after an error (retried after
+  2 minutes). Bot Mode's 160 px face rasters, non-image data and local bots are left alone; read-only.
 - **email-drafts: email goes through Composio by default (2026-11-10)**: a new `composio` sender, now the
   default **Send with** (Gmail OAuth and SMTP stay as options). **Send** runs the `composio` CLI that is
   installed and logged in on the bot's own machine: `composio execute GMAIL_GET_PROFILE` (read only) to

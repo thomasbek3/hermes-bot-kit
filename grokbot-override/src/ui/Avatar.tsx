@@ -1,4 +1,6 @@
-// A bot's face. A real photo (`meta.image`) always wins, clipped round.
+// A bot's face. A real photo (`meta.image`) always wins, clipped round;
+// next, for a bot on another connection, the picture its own gateway holds
+// (core/remoteAvatars.js, keyed by the exact route key `shapeKey`).
 // Otherwise the override draws a silhouette (avatarShapes.ts),
 // chosen from the bot's exact route key, filled with the bot's swatch colour
 // (core/colors.js botSwatch). The bot editor's previews (`look="hermes"`)
@@ -8,7 +10,9 @@
 
 import { botSwatch } from '../core/colors.js'
 import { avatarShapeFor } from './avatarShapes'
+import { roster2 } from './rosterStores'
 import { blobatarMarkup, profileColor } from './sdk'
+import { useStore } from './store'
 
 const BLOB_KIND_TRAIT: Record<string, number> = {
   round: 0.11,
@@ -68,11 +72,23 @@ export function BotAvatar({
 }) {
   const cls = `gbo-avatar${working ? ' is-working' : ''}`
   const style = { width: size, height: size }
+  const remote = useStore(roster2.remoteAvatars)
 
   if (typeof meta?.image === 'string' && meta.image) {
     return (
       <span className={cls} style={style} aria-hidden>
         <img alt="" src={meta.image} />
+      </span>
+    )
+  }
+
+  // The bot editor's previews (`look="hermes"`) show what Bot Mode saves, so
+  // only the roster's own faces take the server picture.
+  const served = look !== 'hermes' && shapeKey ? remote[shapeKey] : undefined
+  if (served) {
+    return (
+      <span className={cls} style={style} aria-hidden data-avatar="server">
+        <img alt="" src={served} />
       </span>
     )
   }

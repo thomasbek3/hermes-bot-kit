@@ -66,7 +66,10 @@ export const roster2 = {
   /** The roster's own sections: the inline name field that is open (a new
    *  section, or renaming one), and the delete waiting for a confirm. */
   sectionEdit: createStore<null | { kind: 'new' } | { kind: 'rename'; id: string }>(null),
-  sectionDelete: createStore<null | { id: string; name: string; count: number }>(null)
+  sectionDelete: createStore<null | { id: string; name: string; count: number }>(null),
+  /** Server avatars of bots on other connections (core/remoteAvatars.js):
+   *  route key -> data URL, for the app session. */
+  remoteAvatars: createStore<Record<string, string>>({})
 }
 
 export function openDialog(state: DialogState) {
