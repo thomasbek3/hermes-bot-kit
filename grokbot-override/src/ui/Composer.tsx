@@ -180,6 +180,10 @@ export function Composer({
   // it clears itself once the chat confirms the message, and on the next send
   // or a bot switch.
   const [unknownId, setUnknownId] = React.useState('')
+  // Shown: an explicit current note (a validation error, a refusal's
+  // recovery) first, else the followed send's delivery status. Every send
+  // clears the note before it awaits, so a stale one never hides that status
+  // (DU-R2-01).
   const [options, setOptions] = React.useState<Completion[]>([])
   const [active, setActive] = React.useState(0)
   const [caret, setCaret] = React.useState(0)
@@ -557,7 +561,7 @@ export function Composer({
           )}
         </div>
       </div>
-      <ComposerNote mentionNames={mentionNames} blocked={blocked} stopError={stopError} note={deliveryNote(items, unknownId) || note} onOpen={stockHandoffProblem(bot) ? undefined : () => void openInBotMode(bot)} />
+      <ComposerNote mentionNames={mentionNames} blocked={blocked} stopError={stopError} note={note || deliveryNote(items, unknownId)} onOpen={stockHandoffProblem(bot) ? undefined : () => void openInBotMode(bot)} />
     </div>
   )
 }

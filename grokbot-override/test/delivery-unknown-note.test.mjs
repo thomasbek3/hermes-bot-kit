@@ -118,7 +118,7 @@ async function setup(t) {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true })
   const w = dom.window
   const set = (key, value) => Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
-  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLTextAreaElement', 'Element', 'Node', 'Text', 'Event', 'KeyboardEvent', 'MouseEvent', 'MutationObserver', 'getComputedStyle']) {
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLTextAreaElement', 'Element', 'Node', 'Text', 'Event', 'KeyboardEvent', 'MouseEvent', 'MutationObserver', 'getComputedStyle', 'File', 'FileReader', 'Blob']) {
     set(key, key === 'getComputedStyle' ? w.getComputedStyle.bind(w) : w[key])
   }
   set('IS_REACT_ACT_ENVIRONMENT', false)
@@ -327,4 +327,56 @@ test('DU-R1-02 control: a send to a different bot leaves this bot’s note alone
   assert.equal(first.note(), CHECKING_DELIVERY_NOTE)
   await other.send('to security')
   assert.equal(first.note(), CHECKING_DELIVERY_NOTE)
+})
+
+// ── review round 2 (DU-R2-01): a newer validation error shows over the status ──
+
+async function withUnknown(t) {
+  const c = await mountComposer(t)
+  c.sends.next.push(UNKNOWN_A)
+  await c.send('message A')
+  c.render({ items: [itemA()] })
+  assert.equal(c.note(), CHECKING_DELIVERY_NOTE)
+  return c
+}
+
+async function pick(c, files) {
+  const input = c.container.querySelector('input[type="file"]')
+  Object.defineProperty(input, 'files', { value: files, configurable: true })
+  input.dispatchEvent(new window.Event('change', { bubbles: true }))
+  for (let i = 0; i < 5; i += 1) await settle()
+}
+
+test('DU-R2-01: unknown bubble, then an oversized file: the size error shows', { skip }, async t => {
+  const c = await withUnknown(t)
+  await pick(c, [{ name: 'too-large.bin', size: 26 * 1024 * 1024, type: 'application/octet-stream' }])
+  assert.equal(c.note(), 'too-large.bin is larger than 25 MB.')
+})
+
+test('DU-R2-01: unknown bubble, then a slash command with an attachment: the command error shows', { skip }, async t => {
+  const c = await withUnknown(t)
+  await pick(c, [new window.File(['hello'], 'notes.txt', { type: 'text/plain' })])
+  assert.ok(c.container.textContent.includes('notes.txt'), 'the attachment chip is there')
+  await c.send('/help')
+  assert.equal(c.note(), 'A command can’t carry attachments: remove them, or send the text without the leading /.')
+  assert.deepEqual(c.sends.slice(), ['message A'], 'nothing sent')
+})
+
+test('DU-R2-01: unknown bubble, then a clarify answer with an attachment: the answer error shows', { skip }, async t => {
+  const answers = []
+  const c = await withUnknown(t)
+  c.render({ answering: true, onAnswer: async text => (answers.push(text), { ok: true }) }) // a question arrived
+  await pick(c, [new window.File(['hello'], 'notes.txt', { type: 'text/plain' })])
+  await c.send('my answer')
+  assert.equal(c.note(), 'An answer can’t carry attachments: remove them, or answer first and send them after.')
+  assert.deepEqual(answers, [], 'not answered')
+})
+
+test('DU-R2-01 control: after the error, the next send clears it and a new unknown status shows again', { skip }, async t => {
+  const c = await withUnknown(t)
+  await pick(c, [{ name: 'too-large.bin', size: 26 * 1024 * 1024, type: 'application/octet-stream' }])
+  c.sends.next.push({ ok: false, delivery: 'unknown', error: 'connection closed', clientId: 'local:B' })
+  await c.send('message B')
+  c.render({ items: [itemA(), itemB()] })
+  assert.equal(c.note(), CHECKING_DELIVERY_NOTE, 'the stale error does not hide the new status')
 })

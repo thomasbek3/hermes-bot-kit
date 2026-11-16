@@ -54783,7 +54783,7 @@ ${value}`);
             busy && !canSend ? /* @__PURE__ */ jsx5("button", { type: "button", className: "composer__cta gbo-round is-stop", title: "Stop", "aria-label": "Stop", onClick: onStop, children: /* @__PURE__ */ jsx5(IconStop, {}) }) : /* @__PURE__ */ jsx5("button", { type: "button", className: "composer__cta gbo-round is-send", title: "Send (Enter)", "aria-label": "Send", disabled: !canSend, onClick: () => void submit(), children: /* @__PURE__ */ jsx5(IconArrowUp, {}) })
           ] })
         ] }),
-        /* @__PURE__ */ jsx5(ComposerNote, { mentionNames, blocked, stopError, note: deliveryNote(items, unknownId) || note, onOpen: stockHandoffProblem(bot) ? void 0 : () => void openInBotMode(bot) })
+        /* @__PURE__ */ jsx5(ComposerNote, { mentionNames, blocked, stopError, note: note || deliveryNote(items, unknownId), onOpen: stockHandoffProblem(bot) ? void 0 : () => void openInBotMode(bot) })
       ]
     }
   );
