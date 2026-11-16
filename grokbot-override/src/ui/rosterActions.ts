@@ -22,10 +22,11 @@ import {
   newBotLook,
   requestOnTarget
 } from '../core/profileOps.js'
-import { rowKey } from '../core/roster.js'
+import { createSeen, nativeNotifications } from '../core/nativeNotify.js'
+import { displayName, rowKey } from '../core/roster.js'
 import { botRestScope, botWorkspaceOwnerKey, createBotRequester, resolveBotConnectionRoute, stockOpenTarget } from '../core/routing.js'
 import { mergeUsage, usageFromEvent } from '../core/usage.js'
-import { activeConnection, app, backToOverride, beginStockHandoff, loadCron, reloadRoster, selectBot } from './app'
+import { activeConnection, app, backToOverride, beginStockHandoff, loadCron, metaFor, reloadRoster, selectBot } from './app'
 import { roster2, type BotModel, type BotModelSettings } from './rosterStores'
 import { host, queryClient } from './sdk'
 
@@ -740,7 +741,64 @@ async function readUsage(bot: any, runtimeId: string, key: string) {
   }
 }
 
+// T7: native OS notifications for the open chat (core/nativeNotify.js), sent
+// through the public plugin door `ctx.os.notify`. Hermes only fires its own
+// for sessions its message stream owns, which the override's never is.
+const notifySeen = createSeen()
+let notifyPrev: any = null
+
+function windowFocused(): boolean {
+  try {
+    if (typeof document === 'undefined') return true
+    if (document.hidden) return false
+    return typeof document.hasFocus === 'function' ? document.hasFocus() : true
+  } catch {
+    return true
+  }
+}
+
+function sendNativeNotifications(state: any) {
+  const prev = notifyPrev
+  notifyPrev = state
+  const os = app.ctx?.os
+  if (typeof os?.notify !== 'function') return
+  const bot = state?.bot
+  let list: any[] = []
+  try {
+    const name = bot ? displayName(bot, metaFor(bot)) : ''
+    list = nativeNotifications(prev, state, { focused: windowFocused(), seen: notifySeen, name, keyOf: rowKey })
+  } catch {
+    return
+  }
+  for (const n of list) {
+    try {
+      os.notify({
+        title: n.title,
+        body: n.body,
+        onActivate: () => {
+          try {
+            selectBot(bot)
+            backToOverride()
+          } catch {
+            /* best-effort */
+          }
+        }
+      })
+    } catch {
+      /* the OS door is best-effort */
+    }
+  }
+}
+
+/** Test seam: what the notifier last saw (reset between tests). */
+export function _resetNativeNotify() {
+  notifyPrev = null
+  notifySeen.ids.clear()
+  notifySeen.base.clear()
+}
+
 function onChatState(state: any) {
+  sendNativeNotifications(state)
   const key = state?.bot ? rowKey(state.bot) : ''
   const runtimeId = String(state?.runtimeId || '')
   const cur = roster2.usage.get()
@@ -799,6 +857,7 @@ export function stopRosterParity() {
   offEvents = null
   offChat?.()
   offChat = null
+  notifyPrev = null
   usageRuntime = ''
   roster2.dialog.set(null)
 }

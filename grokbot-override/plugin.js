@@ -47455,6 +47455,100 @@ function newBotChat(host3, bot, ownerKey) {
   return true;
 }
 
+// src/core/nativeNotify.js
+var INPUT_BODY = {
+  clarify: "Has a question for you.",
+  connection: "Needs a connection approved."
+};
+var INPUT_DEFAULT = "Needs your input.";
+var BODIES = Object.freeze({ done: "Replied.", approval: "Needs your approval.", input: INPUT_DEFAULT });
+var SEEN_CAP = 500;
+function createSeen() {
+  return { ids: /* @__PURE__ */ new Set(), base: /* @__PURE__ */ new Map() };
+}
+function remember(seen, id) {
+  if (seen.ids.has(id)) return false;
+  seen.ids.add(id);
+  if (seen.ids.size > SEEN_CAP) seen.ids.delete(seen.ids.values().next().value);
+  return true;
+}
+var chatOf = (state) => state && state.chat && typeof state.chat === "object" ? state.chat : null;
+var itemsOf = (state) => Array.isArray(chatOf(state)?.items) ? chatOf(state).items : [];
+function chatIdentity(state, keyOf = (bot) => String(bot?.name || "")) {
+  if (!state?.bot) return "";
+  return `${keyOf(state.bot)}\0${String(state.runtimeId || "")}`;
+}
+function finishedReply(items) {
+  let lastUser = -1;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (items[i]?.kind === "user") {
+      lastUser = i;
+      break;
+    }
+  }
+  const turn = items.slice(lastUser + 1);
+  if (turn.some((item) => item?.kind === "error" || item?.kind === "turn-error" || item?.failedTurn)) return null;
+  for (let i = turn.length - 1; i >= 0; i -= 1) {
+    const item = turn[i];
+    if (item?.kind !== "assistant") continue;
+    if (item.streaming) return null;
+    const text3 = String(item.text || "").trim();
+    if (!text3 || isSilenceReply(text3)) return null;
+    return item;
+  }
+  return null;
+}
+var pendingApprovals = (items) => items.filter((item) => item?.kind === "approval" && item.status === "pending");
+function inputKey(waiting) {
+  if (!waiting || typeof waiting !== "object") return "";
+  return `input:${String(waiting.kind || "")}:${String(waiting.id || waiting.opId || "")}`;
+}
+function markSeen(state, seen) {
+  const items = itemsOf(state);
+  for (const item of pendingApprovals(items)) remember(seen, `approval:${item.id}`);
+  const reply = finishedReply(items);
+  if (reply) remember(seen, `done:${reply.id}`);
+  const key = inputKey(chatOf(state)?.waiting);
+  if (key) remember(seen, key);
+}
+function nativeNotifications(prev, next, { focused, seen, name = "", keyOf } = {}) {
+  if (!seen || !next?.bot || !chatOf(next)) return [];
+  const same = prev && chatIdentity(prev, keyOf) === chatIdentity(next, keyOf);
+  if (!same || focused) {
+    markSeen(next, seen);
+    return [];
+  }
+  const title = String(name || next.bot?.name || "Bot").trim() || "Bot";
+  const out = [];
+  const items = itemsOf(next);
+  const identity = chatIdentity(next, keyOf);
+  if (!chatOf(prev)?.busy && chatOf(next).busy) {
+    const before = finishedReply(itemsOf(prev));
+    seen.base.set(identity, before ? String(before.text || "").trim() : "");
+    if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value);
+  }
+  if (chatOf(prev)?.busy && !chatOf(next).busy) {
+    const reply = finishedReply(items);
+    const base4 = seen.base.get(identity);
+    seen.base.delete(identity);
+    const fresh = reply && !(base4 && base4 === String(reply.text || "").trim());
+    if (fresh && remember(seen, `done:${reply.id}`)) out.push({ id: `done:${reply.id}`, kind: "done", title, body: BODIES.done });
+    else if (reply) remember(seen, `done:${reply.id}`);
+  }
+  let approvals = 0;
+  for (const item of pendingApprovals(items)) {
+    const id = `approval:${item.id}`;
+    if (remember(seen, id) && approvals === 0) {
+      approvals += 1;
+      out.push({ id, kind: "approval", title, body: BODIES.approval });
+    }
+  }
+  const waiting = chatOf(next).waiting;
+  const key = inputKey(waiting);
+  if (key && remember(seen, key)) out.push({ id: key, kind: "input", title, body: INPUT_BODY[waiting.kind] || INPUT_DEFAULT });
+  return out;
+}
+
 // src/core/usage.js
 function compactNumber(n) {
   const v = Number(n) || 0;
@@ -48179,7 +48273,49 @@ async function readUsage(bot, runtimeId, key) {
     if (cur.key === key && cur.runtimeId === runtimeId) roster2.usage.set({ ...cur, error: String(error?.message || error) });
   }
 }
+var notifySeen = createSeen();
+var notifyPrev = null;
+function windowFocused() {
+  try {
+    if (typeof document === "undefined") return true;
+    if (document.hidden) return false;
+    return typeof document.hasFocus === "function" ? document.hasFocus() : true;
+  } catch {
+    return true;
+  }
+}
+function sendNativeNotifications(state) {
+  const prev = notifyPrev;
+  notifyPrev = state;
+  const os = app.ctx?.os;
+  if (typeof os?.notify !== "function") return;
+  const bot = state?.bot;
+  let list = [];
+  try {
+    const name = bot ? displayName(bot, metaFor(bot)) : "";
+    list = nativeNotifications(prev, state, { focused: windowFocused(), seen: notifySeen, name, keyOf: rowKey });
+  } catch {
+    return;
+  }
+  for (const n of list) {
+    try {
+      os.notify({
+        title: n.title,
+        body: n.body,
+        onActivate: () => {
+          try {
+            selectBot(bot);
+            backToOverride();
+          } catch {
+          }
+        }
+      });
+    } catch {
+    }
+  }
+}
 function onChatState(state) {
+  sendNativeNotifications(state);
   const key = state?.bot ? rowKey(state.bot) : "";
   const runtimeId = String(state?.runtimeId || "");
   const cur = roster2.usage.get();
@@ -48232,6 +48368,7 @@ function stopRosterParity() {
   offEvents = null;
   offChat?.();
   offChat = null;
+  notifyPrev = null;
   usageRuntime = "";
   roster2.dialog.set(null);
 }

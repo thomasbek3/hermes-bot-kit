@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **grokbot-override: native notifications from override chats (T7, 2026-11-15)**: Hermes only fires its OS
+  notifications for sessions its own message stream owns, so a reply or an approval in an override chat made
+  none while Hermes was in the background. The open chat now sends them through the plugin door
+  `ctx.os.notify`: reply finished, approval waiting, input needed (clarify, sudo, secret, vault, connection).
+  Only while the Hermes window is not focused, once per reply / card / prompt, never for a silent reply or a
+  failed turn, and with generic bodies only. Clicking one opens that bot. Needs a live check.
 - **grokbot-override: replies are formatted live while they stream (2026-11-15)**: a bot reply no longer
   types as plain text and then snaps into formatting when it finishes. It renders through the same markdown
   path as a finished reply from the first token: bold, lists, headings, links, inline code and code blocks
