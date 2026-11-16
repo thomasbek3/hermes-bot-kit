@@ -44,7 +44,7 @@ import { botCanonicalSessionId, createActivityTracker } from '../core/activity.j
 import { looksUnsupported } from '../core/outcomes.js'
 import { resetMarker, SEEN_KEY, seenFrom, stepMarker } from '../core/newMarker.js'
 import { createRoom, createRoomController, createRoomRequester, listRooms, ROOM_LIST_MS, roomRoute } from '../core/rooms.js'
-import { createBackgroundPolls, refreshInTurn } from '../core/backgroundPolls.js'
+import { createBackgroundPolls, createIdleRotation } from '../core/backgroundPolls.js'
 import { CANONICAL_HYDRATION_TIMEOUT_MS, host, queryClient, readPluginStorage, sdk } from './sdk'
 // ── roster-side parity (R6 R9 R11-R13 R15 P3 P4 P6 C21 C25) ──
 import { effectiveMeta } from '../core/botMeta.js'
@@ -207,16 +207,29 @@ function botLane(bot: any) {
   if (bot?.connectionId) return String(bot.connectionId)
   return isLocalBot(bot, activeConnectionId()) ? 'local' : activeLane()
 }
-/** Every other lane the union roster (host.agents) touches: Electron lists
- *  each registered connection, reading `/api/profiles` from every non-SSH
- *  source (an SSH source answers from an inventory probe, not its gateway).
- *  Known from the last union answer; before the first one only the active
- *  lane is claimed. */
-function unionLanes(): string[] {
+/** The union roster (host.agents) is read by Electron from EVERY registered
+ *  connection, reading `/api/profiles` from each non-SSH one, including
+ *  connections the plugin has not seen yet; the plugin cannot list the
+ *  registry, so that read is a `global` background run: it waits until no
+ *  other background poll runs anywhere and holds every lane while it runs,
+ *  except the lanes known to be SSH sources (they answer from an inventory
+ *  probe, not their gateway): from the last union answer, the roster rows
+ *  and the open chats. */
+function sshLanes(): string[] {
   const ids = new Set<string>()
+  const add = (id: any, kind: any) => {
+    const lane = String(id || '').trim()
+    if (lane && String(kind || '') === 'ssh') ids.add(lane)
+  }
+  for (const source of app.roster.get().sources || []) add(source?.connectionId, source?.kind)
+  for (const row of app.roster.get().rows || []) add(row?.route?.connectionId || row?.connectionId, row?.connectionKind)
+  for (const chats of idleChatsByLane().values()) for (const chat of chats) {
+    const bot = chat?.get?.()?.bot
+    add(botLane(bot), bot?.connectionKind)
+  }
+  // A lane listed as SSH by one record and as a gateway by another is held.
   for (const source of app.roster.get().sources || []) {
-    const id = String(source?.connectionId || '').trim()
-    if (id && String(source?.kind || '') !== 'ssh') ids.add(id)
+    if (String(source?.kind || '') !== 'ssh') ids.delete(String(source?.connectionId || '').trim())
   }
   return [...ids]
 }
@@ -343,6 +356,9 @@ async function fetchOwnRoster({ foreground = false, live = () => true }: { foreg
   try {
     const active = activeConnectionId()
     const local = await host.request('profiles.list', { ...OWN_ROSTER_PARAMS })
+    // Between the two reads: a stopped plugin, a newer read, a run past its
+    // deadline, or (background) a hidden window starts no union read.
+    if (!fresh() || (!foreground && !isVisible())) return true
     let union: any = null
     let unionOk = true
     if (typeof host.agents === 'function') {
@@ -464,9 +480,11 @@ export function refreshRoster() {
 
 let ownReadWanted = true
 let lastSeenVisible = true
+const idleRotation = createIdleRotation()
 
-/** The window came back (visibilitychange, or the tick noticing it when the
- *  event never came): every poll is due once, backoff aside. */
+/** Both sides of every visibility change, from the visibilitychange event
+ *  and from the 3 s tick (a missed event): on hidden -> visible, however
+ *  short the hide, every poll is due once, backoff aside. */
 function noteVisibility() {
   const visible = isVisible()
   if (visible && !lastSeenVisible) polls.resume()
@@ -481,15 +499,15 @@ function pumpPolls() {
       if (r?.ran && epoch === pollEpoch) pumpPolls()
     })
   const lane = activeLane()
-  const lanes = unionLanes()
+  const global = { except: sshLanes() }
   if (ownReadWanted) {
-    after(polls.run(lane, 'roster', OWN_FETCH_MIN_MS, live => fetchOwnRoster({ live }), { lanes, resumeMinMs: OWN_FETCH_MIN_MS }))
+    after(polls.run(lane, 'roster', OWN_FETCH_MIN_MS, live => fetchOwnRoster({ live }), { global, resumeMinMs: OWN_FETCH_MIN_MS }))
   } else {
-    after(polls.run(lane, 'verify', OWN_VERIFY_MS, live => verifySources(live), { lanes }))
+    after(polls.run(lane, 'verify', OWN_VERIFY_MS, live => verifySources(live), { global }))
   }
   after(polls.run(lane, 'rooms', ROOM_LIST_MS, live => listRoomsNow(live)))
   for (const [chatLane, chats] of idleChatsByLane()) {
-    after(polls.run(chatLane, 'idle', IDLE_REFRESH_MS, live => refreshInTurn(chats, live, isVisible)))
+    after(polls.run(chatLane, 'idle', IDLE_REFRESH_MS, live => idleRotation.pass(chatLane, chats, live, isVisible)))
   }
 }
 
@@ -1098,8 +1116,11 @@ async function listRoomsNow(live: () => boolean = () => true): Promise<boolean> 
   const epoch = pollEpoch
   const fresh = () => seq === roomSeq && epoch === pollEpoch && live()
   requestRoom ??= createRoomRequester(host)
+  // A paged list starts no further page once it is stale (stopped, newer list,
+  // past its deadline).
+  const request = (...args: any[]) => (fresh() ? requestRoom(...args) : Promise.reject(new Error('room list superseded')))
   try {
-    const rooms = await listRooms(requestRoom, route)
+    const rooms = await listRooms(request, route)
     if (fresh()) app.rooms.set({ route, rooms, error: null, loaded: true })
     return true
   } catch (error: any) {
@@ -1582,7 +1603,9 @@ function watchVisibility() {
 // background poll starts (core/backgroundPolls.js checks isVisible).
 let unwatchDocument: null | (() => void) = null
 
+/** The visibilitychange handler (both directions). */
 export function onDocumentVisible() {
+  noteVisibility()
   if (!app.enabled.get() || !isVisible()) return
   refreshRoster()
 }
@@ -1676,6 +1699,7 @@ function disable() {
   // follow-up read (LR1-10); a foreground read in flight is dropped too.
   pollEpoch += 1
   polls.reset()
+  idleRotation.reset()
   rosterGen += 1
   rosterFgGen += 1
   roomSeq += 1

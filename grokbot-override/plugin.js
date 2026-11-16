@@ -46599,11 +46599,14 @@ function createBackgroundPolls(deps = {}) {
   };
   let generation2 = 0;
   const owners = /* @__PURE__ */ new Map();
+  let globalJob = null;
   const polls2 = /* @__PURE__ */ new Map();
+  const unsettled = /* @__PURE__ */ new Set();
   const laneId = (key) => String(key || "local");
-  function pollOf(key, type, baseMs) {
-    const id = `${laneId(key)}
+  const pollKey = (key, type) => `${laneId(key)}
 ${type}`;
+  function pollOf(key, type, baseMs) {
+    const id = pollKey(key, type);
     let poll = polls2.get(id);
     if (!poll) {
       poll = { base: 0, interval: 0, last: -Infinity, resume: false };
@@ -46621,17 +46624,20 @@ ${type}`;
   const backoff = (poll) => Math.min(Math.max(poll.interval, poll.base, 1) * 2, POLL_BACKOFF_MAX_MS);
   const expired = (run2) => now() - run2.start >= POLL_DEADLINE_MS;
   const isLive = (run2) => !run2.done && !run2.retired && run2.generation === generation2 && !expired(run2);
+  function release(run2) {
+    for (const id of run2.lanes) if (owners.get(id) === run2) owners.delete(id);
+    if (globalJob === run2) globalJob = null;
+  }
   function retire(run2) {
     if (run2.retired || run2.done) return;
     run2.retired = true;
     run2.poll.interval = backoff(run2.poll);
-    for (const id of run2.lanes) if (owners.get(id) === run2) owners.delete(id);
+    release(run2);
   }
-  function holder(id) {
-    const run2 = owners.get(id);
+  function current(run2) {
     if (!run2) return null;
-    if (run2.generation !== generation2) {
-      owners.delete(id);
+    if (run2.generation !== generation2 || run2.retired || run2.done) {
+      if (run2.generation !== generation2) release(run2);
       return null;
     }
     if (expired(run2)) {
@@ -46640,20 +46646,39 @@ ${type}`;
     }
     return run2;
   }
+  function holder(id) {
+    const own2 = current(owners.get(id));
+    if (own2) return own2;
+    if (owners.has(id)) owners.delete(id);
+    const all = current(globalJob);
+    return all && !all.except.has(id) ? all : null;
+  }
+  function globalBlocked(except) {
+    if (current(globalJob)) return true;
+    for (const id of [...owners.keys()]) if (!except.has(id) && holder(id)) return true;
+    return false;
+  }
   function waitOf(poll, resumeMinMs = 0) {
     const gap = poll.resume ? Math.max(0, Number(resumeMinMs) || 0) : poll.interval;
     return Math.max(0, poll.last + gap - now());
   }
-  async function run(key, type, baseMs, fn, { force = false, lanes = [], resumeMinMs = 0 } = {}) {
+  async function run(key, type, baseMs, fn, { force = false, lanes = [], global = null, resumeMinMs = 0 } = {}) {
     const main = laneId(key);
     const ids = [.../* @__PURE__ */ new Set([main, ...lanes.map(laneId)])];
+    const except = global ? new Set((global.except || []).map(laneId).filter((id2) => id2 !== main)) : null;
     const poll = pollOf(main, type, baseMs);
+    const id = pollKey(main, type);
     if (!visible2()) return { ran: false, hidden: true, nextMs: waitOf(poll, resumeMinMs) };
-    if (ids.some((id) => holder(id))) return { ran: false, busy: true, nextMs: Math.max(1, Math.min(poll.interval, poll.base)) };
+    if (unsettled.has(id)) return { ran: false, busy: true, pending: true, nextMs: Math.max(1, poll.base) };
+    if (ids.some((lane) => holder(lane)) || except && globalBlocked(except)) {
+      return { ran: false, busy: true, nextMs: Math.max(1, Math.min(poll.interval, poll.base)) };
+    }
     const wait = waitOf(poll, resumeMinMs);
     if (!force && wait > 0) return { ran: false, nextMs: wait };
-    const job = { type, poll, lanes: ids, start: now(), generation: generation2, done: false, retired: false };
-    for (const id of ids) owners.set(id, job);
+    const job = { type, poll, lanes: ids, except: except || /* @__PURE__ */ new Set(), start: now(), generation: generation2, done: false, retired: false };
+    for (const lane of ids) owners.set(lane, job);
+    if (except) globalJob = job;
+    unsettled.add(id);
     poll.last = job.start;
     poll.resume = false;
     let ok = true;
@@ -46661,11 +46686,14 @@ ${type}`;
       ok = await fn(() => isLive(job)) !== false;
     } catch {
       ok = false;
+    } finally {
+      unsettled.delete(id);
     }
     const stale = !isLive(job);
-    for (const id of ids) if (owners.get(id) === job) owners.delete(id);
+    release(job);
+    const sameGeneration = job.generation === generation2;
     if (stale) {
-      if (!job.retired && job.generation === generation2) poll.interval = backoff(poll);
+      if (!job.retired && sameGeneration) poll.interval = backoff(poll);
       job.done = true;
       return { ran: true, ok: false, stale: true, nextMs: poll.interval };
     }
@@ -46683,11 +46711,12 @@ ${type}`;
   function reset() {
     generation2 += 1;
     owners.clear();
+    globalJob = null;
     polls2.clear();
   }
   function due(key, type, baseMs, { lanes = [], resumeMinMs = 0 } = {}) {
     const ids = [laneId(key), ...lanes.map(laneId)];
-    return visible2() && !ids.some((id) => holder(id)) && waitOf(pollOf(key, type, baseMs), resumeMinMs) === 0;
+    return visible2() && !unsettled.has(pollKey(key, type)) && !ids.some((id) => holder(id)) && waitOf(pollOf(key, type, baseMs), resumeMinMs) === 0;
   }
   function interval(key, type, baseMs) {
     return pollOf(key, type, baseMs).interval;
@@ -46695,15 +46724,26 @@ ${type}`;
   function busy(key) {
     return holder(laneId(key))?.type || "";
   }
-  return { run, resume, want, reset, due, interval, busy };
-}
-async function refreshInTurn(chats, live, isVisible2 = () => true) {
-  let ok = true;
-  for (const chat of Array.isArray(chats) ? chats : []) {
-    if (!live() || !isVisible2()) break;
-    if (await chat.idleRefresh(live) === false) ok = false;
+  function pending(key, type) {
+    return unsettled.has(pollKey(key, type));
   }
-  return ok;
+  return { run, resume, want, reset, due, interval, busy, pending };
+}
+function createIdleRotation() {
+  const served = /* @__PURE__ */ new Map();
+  async function pass(lane, chats, live, isVisible2 = () => true) {
+    const list = Array.isArray(chats) ? chats.filter(Boolean) : [];
+    const start2 = list.indexOf(served.get(lane)) + 1;
+    let ok = true;
+    for (let i = 0; i < list.length; i += 1) {
+      if (!live() || !isVisible2()) break;
+      const chat = list[(start2 + i) % list.length];
+      if (await chat.idleRefresh(live) === false) ok = false;
+      if (live()) served.set(lane, chat);
+    }
+    return ok;
+  }
+  return { pass, reset: () => served.clear() };
 }
 
 // src/ui/sdk.ts
@@ -51102,11 +51142,20 @@ function botLane(bot) {
   if (bot?.connectionId) return String(bot.connectionId);
   return isLocalBot(bot, activeConnectionId()) ? "local" : activeLane();
 }
-function unionLanes() {
+function sshLanes() {
   const ids = /* @__PURE__ */ new Set();
+  const add2 = (id, kind) => {
+    const lane = String(id || "").trim();
+    if (lane && String(kind || "") === "ssh") ids.add(lane);
+  };
+  for (const source of app.roster.get().sources || []) add2(source?.connectionId, source?.kind);
+  for (const row of app.roster.get().rows || []) add2(row?.route?.connectionId || row?.connectionId, row?.connectionKind);
+  for (const chats of idleChatsByLane().values()) for (const chat of chats) {
+    const bot = chat?.get?.()?.bot;
+    add2(botLane(bot), bot?.connectionKind);
+  }
   for (const source of app.roster.get().sources || []) {
-    const id = String(source?.connectionId || "").trim();
-    if (id && String(source?.kind || "") !== "ssh") ids.add(id);
+    if (String(source?.kind || "") !== "ssh") ids.delete(String(source?.connectionId || "").trim());
   }
   return [...ids];
 }
@@ -51200,6 +51249,7 @@ async function fetchOwnRoster({ foreground = false, live = () => true } = {}) {
   try {
     const active = activeConnectionId();
     const local = await host2.request("profiles.list", { ...OWN_ROSTER_PARAMS });
+    if (!fresh() || !foreground && !isVisible()) return true;
     let union = null;
     let unionOk = true;
     if (typeof host2.agents === "function") {
@@ -51292,6 +51342,7 @@ function refreshRoster() {
 }
 var ownReadWanted = true;
 var lastSeenVisible = true;
+var idleRotation = createIdleRotation();
 function noteVisibility() {
   const visible2 = isVisible();
   if (visible2 && !lastSeenVisible) polls.resume();
@@ -51304,15 +51355,15 @@ function pumpPolls() {
     if (r?.ran && epoch === pollEpoch) pumpPolls();
   });
   const lane = activeLane();
-  const lanes = unionLanes();
+  const global = { except: sshLanes() };
   if (ownReadWanted) {
-    after(polls.run(lane, "roster", OWN_FETCH_MIN_MS, (live) => fetchOwnRoster({ live }), { lanes, resumeMinMs: OWN_FETCH_MIN_MS }));
+    after(polls.run(lane, "roster", OWN_FETCH_MIN_MS, (live) => fetchOwnRoster({ live }), { global, resumeMinMs: OWN_FETCH_MIN_MS }));
   } else {
-    after(polls.run(lane, "verify", OWN_VERIFY_MS, (live) => verifySources(live), { lanes }));
+    after(polls.run(lane, "verify", OWN_VERIFY_MS, (live) => verifySources(live), { global }));
   }
   after(polls.run(lane, "rooms", ROOM_LIST_MS, (live) => listRoomsNow(live)));
   for (const [chatLane, chats] of idleChatsByLane()) {
-    after(polls.run(chatLane, "idle", IDLE_REFRESH_MS, (live) => refreshInTurn(chats, live, isVisible)));
+    after(polls.run(chatLane, "idle", IDLE_REFRESH_MS, (live) => idleRotation.pass(chatLane, chats, live, isVisible)));
   }
 }
 function idleChatsByLane() {
@@ -51756,8 +51807,9 @@ async function listRoomsNow(live = () => true) {
   const epoch = pollEpoch;
   const fresh = () => seq === roomSeq && epoch === pollEpoch && live();
   requestRoom ??= createRoomRequester(host2);
+  const request2 = (...args) => fresh() ? requestRoom(...args) : Promise.reject(new Error("room list superseded"));
   try {
-    const rooms = await listRooms(requestRoom, route);
+    const rooms = await listRooms(request2, route);
     if (fresh()) app.rooms.set({ route, rooms, error: null, loaded: true });
     return true;
   } catch (error) {
@@ -52128,6 +52180,7 @@ function watchVisibility() {
 }
 var unwatchDocument = null;
 function onDocumentVisible() {
+  noteVisibility();
   if (!app.enabled.get() || !isVisible()) return;
   refreshRoster();
 }
@@ -52202,6 +52255,7 @@ function disable() {
   unwatchDocument = null;
   pollEpoch += 1;
   polls.reset();
+  idleRotation.reset();
   rosterGen += 1;
   rosterFgGen += 1;
   roomSeq += 1;

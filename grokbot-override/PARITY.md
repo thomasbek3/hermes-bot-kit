@@ -290,24 +290,33 @@ across polls, so a slow connection never holds another one's):
 
 - **Lanes, one per connection.** The roster read, the source re-list, the room list and the idle refresh never run at
   once on one connection; a poll whose lanes are busy waits for a later tick. The union roster (`host.agents()`)
-  reads `/api/profiles` from every registered non-SSH source, so that read claims the lane of every such source it
-  knows of (from its last answer), all or nothing; an SSH source answers from an inventory probe and is not claimed.
+  reads `/api/profiles` from every registered non-SSH connection, also ones the plugin has not seen yet, and a plugin
+  cannot list the registry: so that read waits until no other background poll runs anywhere and holds every lane
+  while it runs, except lanes known to be SSH sources (from the last union answer, roster rows and open chats; they
+  answer from an inventory probe, not their gateway).
 - **Idle refresh is one pass per connection:** every open chat on it (main chat and extra tabs) has its tail re-read in
-  turn every 15 s, so side-by-side chats all stay current; a streaming chat skips only its own read. The chat
+  turn every 15 s, starting after the last chat whose read was applied, so a slow pass that runs past its deadline
+  still reaches every chat over the next passes; a streaming chat skips only its own read. The chat
   controllers keep no idle timer of their own (`idleByHost`). Activity on the open chat (the unread/toast tracker's
   "refresh the open chat") marks that pass due once instead of reading directly; unread marks and toasts are still
   kept while the window is hidden.
 - **Backoff and deadline.** Per connection and poll type the interval doubles after a run that failed or took more
   than 2 s (cap 5 min) and resets after a fast success. A roster read counts as failed when its union roster failed
-  or a non-SSH source in it reported an error (what did answer is still painted). A run older than 30 s no longer
-  holds its lanes (it is backed off), and its late answer is dropped.
-- **Hidden window.** Nothing starts while `document.hidden`. When the window is visible again (`visibilitychange`,
-  or the 3 s tick noticing it if that event never comes) every poll is due once whatever its backoff, the full roster
-  read keeping its 60 s minimum since the last one.
+  or a non-SSH source in it reported an error (what did answer is still painted). A run older than 30 s is backed
+  off, lets the other poll types on its lanes go on, starts no further request (the roster read checks between
+  `profiles.list` and `host.agents()`, a paged room list between pages) and its late answer is dropped; the same poll
+  on that connection is not started again until the old request settles, because a plugin cannot cancel a Desktop
+  request: this relies on the Desktop's own transport timeouts (its REST bridge aborts a fetch after 30 s, gateway
+  RPCs time out). Until then the other chats' idle reads on that connection wait too.
+- **Hidden window.** Nothing starts while `document.hidden`, and a background roster read hidden between its two
+  requests starts no union read. Both directions of `visibilitychange` are recorded, and the 3 s tick checks too (a
+  missed event); on any hidden -> visible change, however short, every poll is due once whatever its backoff, the full
+  roster read keeping its 60 s minimum since the last one.
 - **Fresh answers only.** Own roster reads and source re-lists share one freshness order: a background answer is
   dropped once any later read started, and a foreground read (a write's re-read, Retry) is superseded only by a later
   foreground read. Room lists are numbered the same way. Switching the override off or stopping it retires every
-  background run: no late answer is painted and no follow-up read starts.
+  background run: no late answer is painted and no follow-up read starts (a run that was waiting for its first answer
+  starts no second request), and a restarted plugin does not issue a read its stopped instance still has pending.
 - **Foreground calls** (switch bot, open a chat and its `session.list`, send, a write's roster re-read, Retry,
   creating or disbanding a room, which re-lists rooms at once even while a background list is pending) never go
   through the lanes and are never delayed.

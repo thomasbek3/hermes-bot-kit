@@ -5,10 +5,12 @@
 - **grokbot-override: light background polling on a struggling remote gateway (2026-11-16)**: the own roster read
   (`profiles.list` with session summaries + `host.agents()`) runs at most once per 60 s instead of every ~15 s. All
   background polls (roster, source re-list, room list, one idle-refresh pass per connection over every open chat) go
-  through one scheduler: never two at once on a connection (the union roster also waits for every non-SSH source it
-  reads), a failure, a failed source or a > 2 s answer doubles the interval (cap 5 min) and a fast success resets it,
-  a run past 30 s frees its connection and its late answer is dropped, nothing polls while the window is hidden, and
-  every poll is due once when it is visible again (also when the visibility event never arrives). Older background
+  through one scheduler: never two at once on a connection (the union roster, which reads every registered non-SSH
+  connection, waits until no other background poll runs and holds them all), a failure, a failed source or a > 2 s
+  answer doubles the interval (cap 5 min) and a fast success resets it, a run past 30 s lets other polls go on, starts
+  no further request and has its late answer dropped (the same read is not reissued until it settles), the idle pass
+  rotates so a slow connection still reaches every open chat, nothing polls while the window is hidden, and every
+  poll is due once when it is visible again (however short the hide, also when the visibility event never arrives). Older background
   answers never overwrite a newer foreground read; stopping the plugin drops late answers and follow-ups. Foreground
   calls (switch bot, open a chat, send, a write's re-read, Retry, create/disband a room) are never delayed. The full
   `profiles.list` stays because previews, unread dots, activity toasts and the Bot Chat a click opens come only from
