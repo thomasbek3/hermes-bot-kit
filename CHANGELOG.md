@@ -12,6 +12,12 @@
   or `::card{…}` directive waits until it is complete (a card still streaming shows a quiet skeleton line,
   never raw directive text). Re-renders are throttled to one per 60 ms; the finished reply uses its full text
   untouched. Silence markers still never show.
+  Review round 1 hardening: an inline `MEDIA:` tag (spaced, quoted or Unicode path) is held until its path is
+  terminated, so no partial path is drawn or read; a combined closer (`**a *b***`) closes every run; fences in
+  blockquotes and list items close with their container prefix and code is never repaired; a temporary
+  inline-code closer never merges with a literal backtick; a table ending in a complete row or separator shows
+  whole; a card completing never remounts the prose before it; markdown re-renders only on throttled ticks; a
+  streaming preview reserves its own height; StrictMode effect replay no longer freezes the stream.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

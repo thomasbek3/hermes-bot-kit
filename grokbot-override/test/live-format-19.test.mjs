@@ -67,7 +67,7 @@ test('streamSafe: inline emphasis and code close temporarily; a bare trailing de
 })
 
 test('streamSafe: links, images, MEDIA lines and directives on their way are held back', () => {
-  assert.deepEqual(streamSafeParts('see [lin'), { text: 'see ', held: '[lin', directive: false })
+  assert.deepEqual(streamSafeParts('see [lin'), { text: 'see ', held: '[lin', directive: false, pending: null })
   assert.equal(streamSafe('see [link]'), 'see ')
   assert.equal(streamSafe('see [link](https://exa'), 'see ')
   assert.equal(streamSafe('see ![alt](/tmp/x.p'), 'see ')
@@ -78,8 +78,8 @@ test('streamSafe: links, images, MEDIA lines and directives on their way are hel
   }
   assert.equal(streamSafe('look MEDIA:/tmp/a.pn'), 'look ', 'an inline tag')
   assert.equal(streamSafe('ok\nMEDIA: /tmp/a.png\nmore'), 'ok\nMEDIA: /tmp/a.png\nmore', 'a complete line passes (extractMedia lifts it)')
-  assert.deepEqual(streamSafeParts('See ::card{id="c-1" file="cards/c'), { text: 'See ', held: '::card{id="c-1" file="cards/c', directive: true })
-  assert.deepEqual(streamSafeParts('See ::prev'), { text: 'See ', held: '::prev', directive: false })
+  assert.deepEqual(streamSafeParts('See ::card{id="c-1" file="cards/c'), { text: 'See ', held: '::card{id="c-1" file="cards/c', directive: true, pending: { name: 'card', attrs: { id: 'c-1' } } })
+  assert.deepEqual(streamSafeParts('See ::prev'), { text: 'See ', held: '::prev', directive: false, pending: null })
   assert.equal(streamSafe('See ::card{id="c-1"} done'), 'See ::card{id="c-1"} done')
   assert.equal(streamSafe('time 10:'), 'time 10:', 'a colon after a word is text')
   assert.equal(streamSafe('code `::card{x'), 'code `::card{x`', 'inside inline code it is text')

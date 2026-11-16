@@ -55,7 +55,11 @@ function inline(text: string): any[] {
   })
 }
 
+/** How many times the markdown renderer ran (live-format render-count tests). */
+export const markdownRenders = { count: 0 }
+
 export function MessageTextContent({ text, media, previewOnly }: { text: string; media?: boolean; previewOnly?: boolean }) {
+  markdownRenders.count += 1
   const blocks = String(text).split(/\n{2,}/)
   return React.createElement(
     'div',
