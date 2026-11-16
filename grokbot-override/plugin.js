@@ -43891,8 +43891,19 @@ var IDEMPOTENT_EVENTS = /* @__PURE__ */ new Set([
 ]);
 var TURN_EVENTS = /* @__PURE__ */ new Set(["message.start", "message.complete", "error"]);
 var TEXT_EVENTS = /* @__PURE__ */ new Set(["message.delta", "message.interim", "reasoning.delta", "thinking.delta", "reasoning.available"]);
+function chatSeed(seed) {
+  const storedId = String(seed?.storedId || "");
+  if (!storedId || !seed?.canonical || !Array.isArray(seed?.rows)) return null;
+  return { storedId, canonical: seed.canonical, rows: seed.rows, hasMore: Boolean(seed.hasMore) };
+}
+function seedFromState(state) {
+  if (state?.phase !== "ready" || !state?.storedId || !state?.canonical || !Array.isArray(state?.rows)) return null;
+  return { storedId: state.storedId, canonical: state.canonical, rows: state.rows, hasMore: Boolean(state.hasMore) };
+}
 function createChatController(bot, deps, options = {}) {
   const attachOnOpen = options.attachOnOpen !== false;
+  const seed = chatSeed(options.seed);
+  let seeded = Boolean(seed);
   const now = deps.now || (() => Date.now());
   const setTimer2 = deps.setTimer || ((fn, ms) => {
     const id = setTimeout(fn, ms);
@@ -43909,10 +43920,10 @@ function createChatController(bot, deps, options = {}) {
   let retiring2 = false;
   let state = {
     bot,
-    phase: "idle",
+    phase: seed ? "ready" : "idle",
     error: null,
-    canonical: null,
-    storedId: "",
+    canonical: seed ? seed.canonical : null,
+    storedId: seed ? seed.storedId : "",
     runtimeId: "",
     attaching: false,
     attachError: null,
@@ -43921,16 +43932,16 @@ function createChatController(bot, deps, options = {}) {
     reconnecting: false,
     leaseError: null,
     sendBlocked: null,
-    hasMore: false,
+    hasMore: seed ? seed.hasMore : false,
     loadingMore: false,
-    loadedCount: 0,
-    rows: [],
+    loadedCount: seed ? seed.rows.length : 0,
+    rows: seed ? seed.rows : [],
     receipt: null,
     stopError: null,
     // A failed-turn card's Try again (retryTurn): { running, from, text,
     // failed } of the newest one, or null (core/turnError.js).
     turnRetry: null,
-    chat: initialChatState()
+    chat: initialChatState(seed ? rowsToItems(seed.rows) : [])
   };
   const listeners = /* @__PURE__ */ new Set();
   let attachFlight = null;
@@ -44141,7 +44152,9 @@ function createChatController(bot, deps, options = {}) {
   }
   async function open() {
     const mine = ++generation2;
-    set({ phase: "resolving", error: null });
+    const quiet = seeded && state.phase === "ready";
+    seeded = false;
+    if (!quiet) set({ phase: "resolving", error: null });
     let canonical2;
     try {
       canonical2 = await findCanonicalChat(deps.requestForBot, bot);
@@ -44155,7 +44168,7 @@ function createChatController(bot, deps, options = {}) {
       set({ phase: "no-chat", canonical: null });
       return state;
     }
-    return load(canonical2, mine);
+    return load(canonical2, mine, { quiet: quiet && openedSessionId(canonical2) === state.storedId });
   }
   let creating = null;
   function create({ kickoff = false } = {}) {
@@ -44179,9 +44192,9 @@ function createChatController(bot, deps, options = {}) {
     })();
     return creating;
   }
-  async function load(canonical2, mine) {
+  async function load(canonical2, mine, { quiet = false } = {}) {
     const storedId = openedSessionId(canonical2);
-    set({ phase: "loading", canonical: canonical2, storedId });
+    set(quiet ? { canonical: canonical2, storedId } : { phase: "loading", canonical: canonical2, storedId });
     let loaded = false;
     try {
       const rows = await readPage(0);
@@ -50774,6 +50787,35 @@ function isVisible() {
 function chatDeps() {
   return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible };
 }
+var SEED_MAX = 8;
+var chatSeeds = /* @__PURE__ */ new Map();
+var cronSeeds = /* @__PURE__ */ new Map();
+var screenSeeds = /* @__PURE__ */ new Map();
+function remember(map, key, value) {
+  if (!key) return;
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > SEED_MAX) map.delete(map.keys().next().value);
+}
+function rememberChat(key, chat) {
+  const seed = seedFromState(chat?.get?.());
+  if (seed) remember(chatSeeds, key, seed);
+}
+function seedFor(bot, key) {
+  const seed = chatSeeds.get(key);
+  if (!seed) return null;
+  const listed = canonicalIds(bot?.canonical_session);
+  if (listed.length && !listed.some((id) => canonicalIds(seed.canonical).includes(id))) {
+    chatSeeds.delete(key);
+    return null;
+  }
+  return seed;
+}
+function clearSeeds() {
+  chatSeeds.clear();
+  cronSeeds.clear();
+  screenSeeds.clear();
+}
 function disposeController({ hard = false } = {}) {
   offController?.();
   offController = null;
@@ -50783,12 +50825,14 @@ function disposeController({ hard = false } = {}) {
   controllerKey = "";
   app.chat.set(null);
   if (current) {
+    if (!hard) rememberChat(key, current);
     if (hard) current.dispose();
     else if (current.retire()) retiring.set(key, current);
   }
   if (hard) {
     for (const chat of retiring.values()) chat.dispose();
     retiring.clear();
+    clearSeeds();
   }
 }
 function adopt(next, key) {
@@ -50823,8 +50867,13 @@ function selectBot(bot, { openWorkspace = true } = {}) {
       // click path does (openBotCanonicalChat -> createCanonicalChat, C3); a
       // chat tab restoring the remembered bot never mints one.
       createIfMissing: openWorkspace,
+      // The transcript this bot showed last, on screen at once (T9).
+      seed: seedFor(bot, key),
       onDispose: () => {
-        if (retiring.get(key) === next) retiring.delete(key);
+        if (retiring.get(key) === next) {
+          retiring.delete(key);
+          rememberChat(key, next);
+        }
       }
     });
     adopt(next, key);
@@ -50848,13 +50897,15 @@ var cronGeneration = 0;
 async function loadCron(bot) {
   const key = rowKey(bot);
   const mine = ++cronGeneration;
-  app.cron.set((s) => ({ ...s, key, loading: true, error: null, ...s.key === key ? {} : { jobs: [], busy: {} } }));
+  app.cron.set((s) => ({ ...s, key, loading: true, error: null, ...s.key === key ? {} : { jobs: cronSeeds.get(key) || [], busy: {} } }));
   const current = () => mine === cronGeneration && app.cron.get().key === key;
   try {
     const res = await requestForBot(bot, "cron.manage", cronListParams(bot));
     if (!current()) return;
     if (res?.error) throw new Error(res.error);
-    app.cron.set((s) => ({ ...s, loading: false, jobs: sortJobs(res?.jobs) }));
+    const jobs = sortJobs(res?.jobs);
+    remember(cronSeeds, key, jobs);
+    app.cron.set((s) => ({ ...s, loading: false, jobs }));
   } catch (error) {
     if (current()) app.cron.set((s) => ({ ...s, loading: false, error: String(error?.message || error) }));
   }
@@ -50883,9 +50934,10 @@ async function toggleCron(bot, job) {
 }
 async function loadScreen(bot) {
   const key = rowKey(bot);
-  app.screen.set({ key, status: null });
+  if (app.screen.get().key !== key) app.screen.set({ key, status: screenSeeds.get(key) ?? null });
   try {
     const status = await requestForBot(bot, "display.status", { profile: String(bot.name) });
+    if (status && !status.error) remember(screenSeeds, key, status);
     if (app.screen.get().key === key) app.screen.set({ key, status });
   } catch {
     if (app.screen.get().key === key) app.screen.set({ key, status: { error: true } });

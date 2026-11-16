@@ -23,7 +23,7 @@ import { cronListParams, cronToggleParams, jobActive, sortJobs } from '../core/c
 import { filePath, mediaReadRequest } from '../core/media.js'
 import { workspaceReadRequest } from '../core/directives.js'
 import { transcribeRequest } from '../core/voice.js'
-import { createChatController } from '../core/session.js'
+import { createChatController, seedFromState } from '../core/session.js'
 import { createStockController, OVERRIDE_ROSTER_PANE_ID, STOCK_PANE_ID } from '../core/stock.js'
 import { dragPanelWidth, PANEL_WIDTH, PANEL_WIDTH_KEY, storedPanelWidth } from '../core/panelWidth.js'
 import { PINS_KEY, pinsFrom, pinState, togglePin } from '../core/pins.js'
@@ -513,6 +513,46 @@ export function chatDeps() {
   return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible }
 }
 
+// ── bot switch without the flash (T9) ────────────────────────────────────
+// The last few bots' transcripts, cron jobs and screen status, by row key:
+// a switch back shows them at once while the real reads run (stale while
+// revalidate). In memory only; rows are what the chat already showed.
+const SEED_MAX = 8
+const chatSeeds = new Map<string, any>()
+const cronSeeds = new Map<string, any[]>()
+const screenSeeds = new Map<string, any>()
+
+function remember<T>(map: Map<string, T>, key: string, value: T) {
+  if (!key) return
+  map.delete(key)
+  map.set(key, value)
+  while (map.size > SEED_MAX) map.delete(map.keys().next().value as string)
+}
+
+function rememberChat(key: string, chat: any) {
+  const seed = seedFromState(chat?.get?.())
+  if (seed) remember(chatSeeds, key, seed)
+}
+
+/** The remembered transcript for this bot, unless the roster already names
+ *  a different Bot Chat for it. */
+function seedFor(bot: any, key: string) {
+  const seed = chatSeeds.get(key)
+  if (!seed) return null
+  const listed = canonicalIds(bot?.canonical_session)
+  if (listed.length && !listed.some(id => canonicalIds(seed.canonical).includes(id))) {
+    chatSeeds.delete(key)
+    return null
+  }
+  return seed
+}
+
+function clearSeeds() {
+  chatSeeds.clear()
+  cronSeeds.clear()
+  screenSeeds.clear()
+}
+
 /** Detach the open chat from the screen. By default it retires: an idle chat
  *  is disposed now (lease, listener, refresh), one with a send or a turn in
  *  flight finishes in the background, bounded. `hard`: dispose everything
@@ -526,12 +566,14 @@ function disposeController({ hard = false } = {}) {
   controllerKey = ''
   app.chat.set(null)
   if (current) {
+    if (!hard) rememberChat(key, current)
     if (hard) current.dispose()
     else if (current.retire()) retiring.set(key, current)
   }
   if (hard) {
     for (const chat of retiring.values()) chat.dispose()
     retiring.clear()
+    clearSeeds()
   }
 }
 
@@ -564,13 +606,19 @@ export function selectBot(bot: any, { openWorkspace = true } = {}) {
     // Came back before its background turn finished: same chat, same stream.
     adopt(parked, key)
   } else {
-    const next = createChatController(bot, chatDeps(), {
+    const next: any = createChatController(bot, chatDeps(), {
       // A roster click on a bot without a Bot Chat creates it, as Bot Mode's
       // click path does (openBotCanonicalChat -> createCanonicalChat, C3); a
       // chat tab restoring the remembered bot never mints one.
       createIfMissing: openWorkspace,
+      // The transcript this bot showed last, on screen at once (T9).
+      seed: seedFor(bot, key),
       onDispose: () => {
-        if (retiring.get(key) === next) retiring.delete(key)
+        // A chat that finished its turn in the background leaves its last state.
+        if (retiring.get(key) === next) {
+          retiring.delete(key)
+          rememberChat(key, next)
+        }
       }
     })
     adopt(next, key)
@@ -607,13 +655,16 @@ let cronGeneration = 0
 export async function loadCron(bot: any) {
   const key = rowKey(bot)
   const mine = ++cronGeneration
-  app.cron.set(s => ({ ...s, key, loading: true, error: null, ...(s.key === key ? {} : { jobs: [], busy: {} }) }))
+  // Another bot's panel shows this bot's last known jobs while they load (T9).
+  app.cron.set(s => ({ ...s, key, loading: true, error: null, ...(s.key === key ? {} : { jobs: cronSeeds.get(key) || [], busy: {} }) }))
   const current = () => mine === cronGeneration && app.cron.get().key === key
   try {
     const res = await requestForBot(bot, 'cron.manage', cronListParams(bot))
     if (!current()) return
     if (res?.error) throw new Error(res.error)
-    app.cron.set(s => ({ ...s, loading: false, jobs: sortJobs(res?.jobs) }))
+    const jobs = sortJobs(res?.jobs)
+    remember(cronSeeds, key, jobs)
+    app.cron.set(s => ({ ...s, loading: false, jobs }))
   } catch (error: any) {
     if (current()) app.cron.set(s => ({ ...s, loading: false, error: String(error?.message || error) }))
   }
@@ -646,9 +697,11 @@ export async function toggleCron(bot: any, job: any) {
 
 export async function loadScreen(bot: any) {
   const key = rowKey(bot)
-  app.screen.set({ key, status: null })
+  // The last known status shows while it is re-read (T9).
+  if (app.screen.get().key !== key) app.screen.set({ key, status: screenSeeds.get(key) ?? null })
   try {
     const status = await requestForBot(bot, 'display.status', { profile: String(bot.name) })
+    if (status && !status.error) remember(screenSeeds, key, status)
     if (app.screen.get().key === key) app.screen.set({ key, status })
   } catch {
     if (app.screen.get().key === key) app.screen.set({ key, status: { error: true } })

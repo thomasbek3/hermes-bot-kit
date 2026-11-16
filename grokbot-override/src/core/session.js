@@ -186,8 +186,26 @@ const IDEMPOTENT_EVENTS = new Set([
 const TURN_EVENTS = new Set(['message.start', 'message.complete', 'error'])
 const TEXT_EVENTS = new Set(['message.delta', 'message.interim', 'reasoning.delta', 'thinking.delta', 'reasoning.available'])
 
+/** A transcript remembered from this bot's last open chat (T9): shown at
+ *  once on the way back while open() re-checks it. Null when unusable. */
+export function chatSeed(seed) {
+  const storedId = String(seed?.storedId || '')
+  if (!storedId || !seed?.canonical || !Array.isArray(seed?.rows)) return null
+  return { storedId, canonical: seed.canonical, rows: seed.rows, hasMore: Boolean(seed.hasMore) }
+}
+
+/** What a chat's state leaves behind for chatSeed, or null (not loaded). */
+export function seedFromState(state) {
+  if (state?.phase !== 'ready' || !state?.storedId || !state?.canonical || !Array.isArray(state?.rows)) return null
+  return { storedId: state.storedId, canonical: state.canonical, rows: state.rows, hasMore: Boolean(state.hasMore) }
+}
+
 export function createChatController(bot, deps, options = {}) {
   const attachOnOpen = options.attachOnOpen !== false
+  // Stale-while-revalidate (T9): a seeded chat starts 'ready' with the
+  // remembered transcript; the first open() re-checks it in the background.
+  const seed = chatSeed(options.seed)
+  let seeded = Boolean(seed)
   const now = deps.now || (() => Date.now())
   const setTimer = deps.setTimer || ((fn, ms) => {
     const id = setTimeout(fn, ms)
@@ -205,10 +223,10 @@ export function createChatController(bot, deps, options = {}) {
   let retiring = false
   let state = {
     bot,
-    phase: 'idle',
+    phase: seed ? 'ready' : 'idle',
     error: null,
-    canonical: null,
-    storedId: '',
+    canonical: seed ? seed.canonical : null,
+    storedId: seed ? seed.storedId : '',
     runtimeId: '',
     attaching: false,
     attachError: null,
@@ -217,16 +235,16 @@ export function createChatController(bot, deps, options = {}) {
     reconnecting: false,
     leaseError: null,
     sendBlocked: null,
-    hasMore: false,
+    hasMore: seed ? seed.hasMore : false,
     loadingMore: false,
-    loadedCount: 0,
-    rows: [],
+    loadedCount: seed ? seed.rows.length : 0,
+    rows: seed ? seed.rows : [],
     receipt: null,
     stopError: null,
     // A failed-turn card's Try again (retryTurn): { running, from, text,
     // failed } of the newest one, or null (core/turnError.js).
     turnRetry: null,
-    chat: initialChatState()
+    chat: initialChatState(seed ? rowsToItems(seed.rows) : [])
   }
   const listeners = new Set()
   let attachFlight = null
@@ -496,7 +514,10 @@ export function createChatController(bot, deps, options = {}) {
 
   async function open() {
     const mine = ++generation
-    set({ phase: 'resolving', error: null })
+    // Seeded: the remembered transcript stays on screen while this re-checks.
+    const quiet = seeded && state.phase === 'ready'
+    seeded = false
+    if (!quiet) set({ phase: 'resolving', error: null })
     let canonical
     try {
       canonical = await findCanonicalChat(deps.requestForBot, bot)
@@ -510,7 +531,9 @@ export function createChatController(bot, deps, options = {}) {
       set({ phase: 'no-chat', canonical: null })
       return state
     }
-    return load(canonical, mine)
+    // A seed for another stored session (the chat was replaced) is dropped:
+    // the normal path, "Opening…" and all.
+    return load(canonical, mine, { quiet: quiet && openedSessionId(canonical) === state.storedId })
   }
 
   let creating = null
@@ -542,9 +565,9 @@ export function createChatController(bot, deps, options = {}) {
     return creating
   }
 
-  async function load(canonical, mine) {
+  async function load(canonical, mine, { quiet = false } = {}) {
     const storedId = openedSessionId(canonical)
-    set({ phase: 'loading', canonical, storedId })
+    set(quiet ? { canonical, storedId } : { phase: 'loading', canonical, storedId })
 
     let loaded = false
     try {

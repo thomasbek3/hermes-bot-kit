@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **grokbot-override: switching back to a bot shows its chat at once (T9, 2026-11-15)**: every bot switch went
+  through the centred "Opening …'s chat" card and then popped in the transcript, and the profile panel blanked its
+  jobs and computer status. The last eight bots' transcripts, scheduled jobs and screen status are now kept in
+  memory: going back shows them straight away while the Bot Chat registry, history, jobs and status are re-read in
+  the background. If the bot's Bot Chat changed meanwhile, the remembered transcript is dropped and the chat opens
+  the normal way.
 - **grokbot-override: Hermes's own session views work again (T3, 2026-11-15)**: the override claimed the main
   pane back on every session focus, so session search, a notification click, a cron run's "open", ⌘N and artifact
   links were undone at once. Start-up and reload still land on the override's chat tab. After that (the first
