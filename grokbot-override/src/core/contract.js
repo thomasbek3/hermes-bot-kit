@@ -58,8 +58,18 @@ export const CONTRACT_EVENTS = Object.freeze([
   'message.reaction',
   'session.usage',
   'session.info',
-  'session.reclaimed'
+  'session.reclaimed',
+  'session.replay_gap',
+  'gateway.ready',
+  'display.lease',
+  'display.status',
+  'display.install.log',
+  'display.install.done'
 ])
+
+/** Event-name prefixes the override acts on as a family (rooms.js re-reads a
+ *  group chat on any `room.*` / `group*` frame). */
+export const CONTRACT_EVENT_PREFIXES = Object.freeze(['room.', 'group'])
 
 const selector = (id, sel, used, required) => ({ id, kind: 'selector', target: sel, used, required })
 
@@ -71,6 +81,9 @@ export const CONTRACT = Object.freeze([
   selector('dom.stock-bots-tab', `[${TAB_ATTRS[0]}="${STOCK_PANE_ID}"]`, 'stock.js: the tab that is hidden (Bot Mode registered)', false),
   selector('dom.top-header', CHROME_ANCHORS.topHeader, 'stock.js: top tab strips hidden, header band kept as drag region', true),
   selector('dom.zone-tabstrip', '[data-zone-tabstrip]', 'stock.js: top tab strip rule', false),
+  selector('dom.panel-page-header', '[data-panel-page-header]', 'stock.js: top page header hidden with the strip (only on some panes)', false),
+  selector('dom.tab-vertical', '[data-vertical]', 'stock.js: a vertical (rail) stock tab is not the shown one (only with a rail)', false),
+  selector('dom.tab-active', '[data-active]', 'stock.js / app.ts: which stock tab is active', false),
   selector('dom.window-drag-handle', '[data-window-drag-handle]', 'stock.js: drag handle widened', false),
   selector('dom.titlebar-cluster', CHROME_ANCHORS.titlebarCluster, 'stock.js: titlebar icon clusters made invisible and click-through', true),
   selector('dom.statusbar', CHROME_ANCHORS.statusbar, 'stock.js: status bar hidden (absent when the user turned it off)', false),
@@ -88,19 +101,23 @@ export const CONTRACT = Object.freeze([
   { id: 'bridge.getMachineProfile', kind: 'bridge', target: 'getMachineProfile', used: 'app.ts: the user\'s name for the roster', required: false },
   { id: 'bridge.requestMicrophoneAccess', kind: 'bridge', target: 'requestMicrophoneAccess', used: 'Voice.tsx: the microphone prompt', required: false },
   // Gateway events.
-  ...CONTRACT_EVENTS.map(name => ({ id: `event.${name}`, kind: 'event', target: name, used: 'session.js / rosterActions.ts / Screen.tsx event tap', required: false }))
+  ...CONTRACT_EVENTS.map(name => ({ id: `event.${name}`, kind: 'event', target: name, used: 'session.js / reducer.js / rosterActions.ts / Screen.tsx event tap', required: false })),
+  ...CONTRACT_EVENT_PREFIXES.map(prefix => ({ id: `event.${prefix}*`, kind: 'event-prefix', target: prefix, used: 'rooms.js: group chat re-read', required: false }))
 ])
 
 /** Counts of contract event names seen this app session (fed by the tap). */
-export function createEventLog(names = CONTRACT_EVENTS) {
+export function createEventLog(names = CONTRACT_EVENTS, prefixes = CONTRACT_EVENT_PREFIXES) {
   const wanted = new Set(names)
   const counts = new Map()
+  const prefixCounts = new Map()
   return {
     note(type) {
       const name = String(type || '')
       if (wanted.has(name)) counts.set(name, (counts.get(name) || 0) + 1)
+      for (const prefix of prefixes) if (name.startsWith(prefix)) prefixCounts.set(prefix, (prefixCounts.get(prefix) || 0) + 1)
     },
-    count: name => counts.get(name) || 0
+    count: name => counts.get(name) || 0,
+    prefixCount: prefix => prefixCounts.get(prefix) || 0
   }
 }
 
@@ -128,6 +145,8 @@ function probeEntry(entry, env) {
         return typeof env.bridge?.[entry.target] === 'function' ? 'ok' : null
       case 'event':
         return env.events ? (env.events.count(entry.target) > 0 ? 'seen' : 'unseen') : 'unprobed'
+      case 'event-prefix':
+        return env.events?.prefixCount ? (env.events.prefixCount(entry.target) > 0 ? 'seen' : 'unseen') : 'unprobed'
       default:
         return 'unprobed'
     }
