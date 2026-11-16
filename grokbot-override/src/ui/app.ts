@@ -4,6 +4,7 @@ import { canonicalIds, CANONICAL_CHAT_TITLE, expectHistory, findCanonicalChat, o
 import { historyToItems } from '../core/history.js'
 import {
   annotateSources,
+  botForSession,
   keepRows,
   sameData,
   dropDeadRows,
@@ -654,9 +655,11 @@ export async function loadScreen(bot: any) {
   }
 }
 
+const COMPUTER_VIEWER_PANE_ID = 'computer-viewer:pane'
+
 export function openComputerViewer() {
   try {
-    host?.revealPane?.('computer-viewer:pane')
+    host?.revealPane?.(COMPUTER_VIEWER_PANE_ID)
   } catch {
     /* not loaded */
   }
@@ -1063,6 +1066,13 @@ export function ensureWorkspace(title = 'Chat') {
 // (store/layout.ts:798). So: on every such change, unless the user handed a
 // chat to Hermes Bot Mode on purpose (a peek, which also swaps the sidebar to
 // stock), the override's tab is opened again or fronted.
+//
+// Route, don't block (T3): once the start-up restore is over, a session the
+// user opens through Hermes (session search, a notification, a cron run, ⌘N,
+// an artifact link) is not undone. A roster bot's Bot Chat opens in the
+// override (that bot is selected and its tab fronted); any other session, or
+// a new draft, stays in Hermes's own view until the user comes back to the
+// override's tab or roster.
 
 export const MAIN_PANE_ID = `plugin-workspace:${WORKSPACE_ID}`
 const STOCK_CHAT_PANES = /^(?:workspace|session-tile:.*|route-tile:.*)$/
@@ -1087,11 +1097,72 @@ function stockChatShown(): boolean {
   return false
 }
 
+// How long after the override turns on a session focus is still Hermes's own
+// restore (cold start, View → Reload) rather than the user's choice. The
+// first pointer or key press ends it early.
+export const STARTUP_GRACE_MS = 10_000
+let startupGrace = false
+let endGrace: null | (() => void) = null
+// The session the user opened in Hermes's own view ('' = a new draft); null
+// while the main pane is the override's to claim.
+let hermesView: null | string = null
+let lastFocused: unknown = undefined
+
+function beginStartupGrace() {
+  endGrace?.()
+  startupGrace = true
+  let stopTimer: null | (() => void) = null
+  const end = () => {
+    startupGrace = false
+    stopTimer?.()
+    stopTimer = null
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('pointerdown', end, true)
+      document.removeEventListener('keydown', end, true)
+    }
+    endGrace = null
+  }
+  endGrace = end
+  stopTimer = setTimer(end, STARTUP_GRACE_MS)
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('pointerdown', end, true)
+    document.addEventListener('keydown', end, true)
+  }
+}
+
+/** Hermes focused a stored session (or a new draft: null). */
+function onSessionFocus(value: unknown) {
+  const first = lastFocused === undefined
+  const changed = !first && value !== lastFocused
+  lastFocused = value
+  if (first || !changed || startupGrace || !app.enabled.get() || isSecondaryWindow() || stock?.isPeeking?.()) {
+    scheduleClaim()
+    return
+  }
+  const id = String(value ?? '')
+  const state = controller?.get?.()
+  const bot = botForSession(app.roster.get().rows, id, state ? { bot: state.bot, canonical: state.canonical } : null)
+  if (!bot) {
+    // Not a Bot Chat: Hermes's view stays on screen.
+    hermesView = id
+    return
+  }
+  hermesView = null
+  selectBot(bot)
+  try {
+    host?.revealPane?.(MAIN_PANE_ID)
+  } catch {
+    /* fronted by selectBot already */
+  }
+}
+
 /** Open or front the override's chat tab when Hermes's own session view has
- *  the main pane. Idempotent; never while off, in the HUD, or during a
- *  deliberate hand-off to Hermes Bot Mode. */
+ *  the main pane. Idempotent; never while off, in the HUD, during a
+ *  deliberate hand-off to Hermes Bot Mode, or while the user is in a Hermes
+ *  session view they opened (T3). */
 export function claimMainPane(): boolean {
   if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return false
+  if (hermesView !== null) return false
   if (!closeWorkspace) {
     const bot = findBot(app.selectedKey.get())
     ensureWorkspace(bot ? chatTabTitle(bot) : 'Chat')
@@ -1106,13 +1177,19 @@ export function claimMainPane(): boolean {
   return true
 }
 
+// After start-up a pane change waits this long before it is claimed, so the
+// session focus that comes with a user's open (T3) is seen first.
+const CLAIM_SETTLE_MS = 300
+
 function scheduleClaim() {
-  if (claimQueued) return
+  if (claimQueued || !app.enabled.get()) return
   claimQueued = true
-  queueMicrotask(() => {
+  const run = () => {
     claimQueued = false
     claimMainPane()
-  })
+  }
+  if (startupGrace) queueMicrotask(run)
+  else setTimer(run, CLAIM_SETTLE_MS)
 }
 
 function watchMainPane() {
@@ -1129,10 +1206,22 @@ function watchMainPane() {
   }
   const pane = (id: string) => (typeof host?.paneVisibility === 'function' ? host.paneVisibility(id) : null)
   watch(pane('workspace'), (shown: boolean) => shown && scheduleClaim())
-  watch(pane(MAIN_PANE_ID), (shown: boolean) => !shown && scheduleClaim())
-  // A restored or opened session (a session tile fronted).
-  watch(host?.state?.focusedStoredSessionId, () => scheduleClaim())
-  watch(host?.state?.activeSessionId, () => scheduleClaim())
+  watch(pane(MAIN_PANE_ID), (shown: boolean) => {
+    // Back on the override's tab: it owns the main pane again.
+    if (shown) hermesView = null
+    else scheduleClaim()
+  })
+  // A restored or opened session (a session tile fronted): routed (T3).
+  const focused = host?.state?.focusedStoredSessionId
+  lastFocused = undefined
+  if (focused && typeof focused.subscribe === 'function') {
+    watch(focused, onSessionFocus)
+    // The runtime id moves with it; only the start-up restore claims on it.
+    watch(host?.state?.activeSessionId, () => startupGrace && scheduleClaim())
+  } else {
+    // An older desktop without the stored-session atom: claim as before.
+    watch(host?.state?.activeSessionId, () => scheduleClaim())
+  }
 }
 
 // ── style + DOM watch ────────────────────────────────────────────────────
@@ -1166,7 +1255,9 @@ function scheduleSync() {
     raf = 0
     stock?.sync()
     if (closeWorkspace && !visible(MAIN_PANE_ID)) claimMainPane()
-    const present = Boolean(document.querySelector('[data-tree-tab="computer-viewer:pane"]'))
+    // On screen (the SDK's own read) means present; only a hidden pane needs
+    // the layout tree's tab to say it exists (the SDK has no such read).
+    const present = visible(COMPUTER_VIEWER_PANE_ID) || Boolean(document.querySelector(`[data-tree-tab="${COMPUTER_VIEWER_PANE_ID}"]`))
     if (present !== app.computerViewer.get().present) app.computerViewer.set(s => ({ ...s, present }))
   })
 }
@@ -1190,9 +1281,11 @@ function watchVisibility() {
       scheduleSync()
     })
   }
-  const cv = typeof host?.paneVisibility === 'function' ? host.paneVisibility('computer-viewer:pane') : null
+  const cv = typeof host?.paneVisibility === 'function' ? host.paneVisibility(COMPUTER_VIEWER_PANE_ID) : null
   if (cv && typeof cv.subscribe === 'function') {
-    unwatchComputer = cv.subscribe((visible: boolean) => app.computerViewer.set(s => ({ ...s, visible: Boolean(visible) })))
+    unwatchComputer = cv.subscribe((visible: boolean) =>
+      app.computerViewer.set(s => (s.visible === Boolean(visible) && (!visible || s.present) ? s : { ...s, visible: Boolean(visible), present: s.present || Boolean(visible) }))
+    )
   }
 }
 
@@ -1255,6 +1348,8 @@ function enable() {
   // renderer reload, a plugin reload): the remembered bot's chat, or "Pick a
   // bot". Its chat (and route lease) opens when the tab shows it
   // (ChatWorkspace), never headless (review r2 #5).
+  hermesView = null
+  beginStartupGrace()
   watchMainPane()
   claimMainPane()
   scheduleSync()
@@ -1262,6 +1357,8 @@ function enable() {
 
 function disable() {
   for (const off of unwatchMain.splice(0)) off()
+  endGrace?.()
+  hermesView = null
   rosterTimer?.()
   rosterTimer = null
   stopRemoteAvatars()

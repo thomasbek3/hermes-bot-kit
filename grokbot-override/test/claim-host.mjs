@@ -90,5 +90,11 @@ export function mainPaneModel(initial = 'workspace') {
       return openSession(id, ...rest)
     }
   }
-  return { state, tweak, front, restoreSession, setFocused: v => (focused = v) }
+  /** ⌘N: a new draft in Hermes's own view (no stored session focused). */
+  const newDraft = () => {
+    focused = null
+    front('workspace')
+    for (const fn of [...focusedSubs]) fn(focused)
+  }
+  return { state, tweak, front, restoreSession, newDraft, setFocused: v => (focused = v) }
 }

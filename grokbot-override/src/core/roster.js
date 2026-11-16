@@ -338,3 +338,17 @@ export function connectionLabel(bot) {
   if (!bot?.remoteSource && (!bot?.connectionKind || bot.connectionKind === 'local')) return 'This device'
   return String(bot?.connectionLabel || bot?.connectionId || 'Remote')
 }
+
+/** The roster bot whose Bot Chat is this stored session (its registry id or
+ *  its compression-lineage tip), or null. `open` is the open chat's bot and
+ *  canonical row, which can be newer than the roster's. */
+export function botForSession(rows, storedId, open = null) {
+  const id = String(storedId || '').trim()
+  if (!id) return null
+  const ids = row => [row?.id, row?.resolved_id].filter(Boolean).map(String)
+  if (open?.bot && ids(open.canonical).includes(id)) {
+    const key = rowKey(open.bot)
+    return (Array.isArray(rows) ? rows : []).find(row => rowKey(row) === key) || open.bot
+  }
+  return (Array.isArray(rows) ? rows : []).find(row => ids(row?.canonical_session).includes(id)) || null
+}

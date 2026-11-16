@@ -42312,6 +42312,16 @@ function connectionLabel(bot) {
   if (!bot?.remoteSource && (!bot?.connectionKind || bot.connectionKind === "local")) return "This device";
   return String(bot?.connectionLabel || bot?.connectionId || "Remote");
 }
+function botForSession(rows, storedId, open = null) {
+  const id = String(storedId || "").trim();
+  if (!id) return null;
+  const ids = (row) => [row?.id, row?.resolved_id].filter(Boolean).map(String);
+  if (open?.bot && ids(open.canonical).includes(id)) {
+    const key = rowKey(open.bot);
+    return (Array.isArray(rows) ? rows : []).find((row) => rowKey(row) === key) || open.bot;
+  }
+  return (Array.isArray(rows) ? rows : []).find((row) => ids(row?.canonical_session).includes(id)) || null;
+}
 
 // src/core/cron.js
 function jobActive(job) {
@@ -50881,9 +50891,10 @@ async function loadScreen(bot) {
     if (app.screen.get().key === key) app.screen.set({ key, status: { error: true } });
   }
 }
+var COMPUTER_VIEWER_PANE_ID = "computer-viewer:pane";
 function openComputerViewer() {
   try {
-    host2?.revealPane?.("computer-viewer:pane");
+    host2?.revealPane?.(COMPUTER_VIEWER_PANE_ID);
   } catch {
   }
 }
@@ -51204,8 +51215,57 @@ function stockChatShown() {
   }
   return false;
 }
+var STARTUP_GRACE_MS = 1e4;
+var startupGrace = false;
+var endGrace = null;
+var hermesView = null;
+var lastFocused = void 0;
+function beginStartupGrace() {
+  endGrace?.();
+  startupGrace = true;
+  let stopTimer = null;
+  const end = () => {
+    startupGrace = false;
+    stopTimer?.();
+    stopTimer = null;
+    if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+      document.removeEventListener("pointerdown", end, true);
+      document.removeEventListener("keydown", end, true);
+    }
+    endGrace = null;
+  };
+  endGrace = end;
+  stopTimer = setTimer(end, STARTUP_GRACE_MS);
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("pointerdown", end, true);
+    document.addEventListener("keydown", end, true);
+  }
+}
+function onSessionFocus(value) {
+  const first = lastFocused === void 0;
+  const changed = !first && value !== lastFocused;
+  lastFocused = value;
+  if (first || !changed || startupGrace || !app.enabled.get() || isSecondaryWindow() || stock?.isPeeking?.()) {
+    scheduleClaim();
+    return;
+  }
+  const id = String(value ?? "");
+  const state = controller?.get?.();
+  const bot = botForSession(app.roster.get().rows, id, state ? { bot: state.bot, canonical: state.canonical } : null);
+  if (!bot) {
+    hermesView = id;
+    return;
+  }
+  hermesView = null;
+  selectBot(bot);
+  try {
+    host2?.revealPane?.(MAIN_PANE_ID);
+  } catch {
+  }
+}
 function claimMainPane() {
   if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return false;
+  if (hermesView !== null) return false;
   if (!closeWorkspace) {
     const bot = findBot(app.selectedKey.get());
     ensureWorkspace(bot ? chatTabTitle(bot) : "Chat");
@@ -51219,13 +51279,16 @@ function claimMainPane() {
   }
   return true;
 }
+var CLAIM_SETTLE_MS = 300;
 function scheduleClaim() {
-  if (claimQueued) return;
+  if (claimQueued || !app.enabled.get()) return;
   claimQueued = true;
-  queueMicrotask(() => {
+  const run = () => {
     claimQueued = false;
     claimMainPane();
-  });
+  };
+  if (startupGrace) queueMicrotask(run);
+  else setTimer(run, CLAIM_SETTLE_MS);
 }
 function watchMainPane() {
   if (unwatchMain.length) return;
@@ -51240,9 +51303,18 @@ function watchMainPane() {
   };
   const pane = (id) => typeof host2?.paneVisibility === "function" ? host2.paneVisibility(id) : null;
   watch(pane("workspace"), (shown) => shown && scheduleClaim());
-  watch(pane(MAIN_PANE_ID), (shown) => !shown && scheduleClaim());
-  watch(host2?.state?.focusedStoredSessionId, () => scheduleClaim());
-  watch(host2?.state?.activeSessionId, () => scheduleClaim());
+  watch(pane(MAIN_PANE_ID), (shown) => {
+    if (shown) hermesView = null;
+    else scheduleClaim();
+  });
+  const focused = host2?.state?.focusedStoredSessionId;
+  lastFocused = void 0;
+  if (focused && typeof focused.subscribe === "function") {
+    watch(focused, onSessionFocus);
+    watch(host2?.state?.activeSessionId, () => startupGrace && scheduleClaim());
+  } else {
+    watch(host2?.state?.activeSessionId, () => scheduleClaim());
+  }
 }
 function injectStyle() {
   if (typeof document === "undefined") return;
@@ -51270,7 +51342,7 @@ function scheduleSync() {
     raf = 0;
     stock?.sync();
     if (closeWorkspace && !visible(MAIN_PANE_ID)) claimMainPane();
-    const present = Boolean(document.querySelector('[data-tree-tab="computer-viewer:pane"]'));
+    const present = visible(COMPUTER_VIEWER_PANE_ID) || Boolean(document.querySelector(`[data-tree-tab="${COMPUTER_VIEWER_PANE_ID}"]`));
     if (present !== app.computerViewer.get().present) app.computerViewer.set((s) => ({ ...s, present }));
   });
 }
@@ -51292,9 +51364,11 @@ function watchVisibility() {
       scheduleSync();
     });
   }
-  const cv = typeof host2?.paneVisibility === "function" ? host2.paneVisibility("computer-viewer:pane") : null;
+  const cv = typeof host2?.paneVisibility === "function" ? host2.paneVisibility(COMPUTER_VIEWER_PANE_ID) : null;
   if (cv && typeof cv.subscribe === "function") {
-    unwatchComputer = cv.subscribe((visible2) => app.computerViewer.set((s) => ({ ...s, visible: Boolean(visible2) })));
+    unwatchComputer = cv.subscribe(
+      (visible2) => app.computerViewer.set((s) => s.visible === Boolean(visible2) && (!visible2 || s.present) ? s : { ...s, visible: Boolean(visible2), present: s.present || Boolean(visible2) })
+    );
   }
 }
 function startRemoteAvatars() {
@@ -51342,12 +51416,16 @@ function enable() {
     host2?.revealPane?.(OVERRIDE_ROSTER_PANE_ID);
   } catch {
   }
+  hermesView = null;
+  beginStartupGrace();
   watchMainPane();
   claimMainPane();
   scheduleSync();
 }
 function disable() {
   for (const off of unwatchMain.splice(0)) off();
+  endGrace?.();
+  hermesView = null;
   rosterTimer?.();
   rosterTimer = null;
   stopRemoteAvatars();

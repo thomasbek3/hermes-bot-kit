@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **grokbot-override: Hermes's own session views work again (T3, 2026-11-15)**: the override claimed the main
+  pane back on every session focus, so session search, a notification click, a cron run's "open", ⌘N and artifact
+  links were undone at once. Start-up and reload still land on the override's chat tab. After that (the first
+  click or key press, or 10 s), a session that is a roster bot's Bot Chat opens in the override with that bot
+  selected; any other session, or a new draft, stays in Hermes's own view until you go back to the override. The
+  computer-viewer status now reads the SDK's `paneVisibility` first; the layout-tree query remains only to tell
+  that a hidden viewer pane exists.
 - **grokbot-override: the roster tick no longer re-renders the open chat (T2, 2026-11-15)**: the 3 s roster
   refresh used to hand the store new row objects and a re-parsed Bot Mode meta on every tick, so the open chat
   re-rendered its whole transcript every 3 s. Rows equal to the last read now keep their objects (and the list
