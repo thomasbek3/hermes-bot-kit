@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **grokbot-override: replies are formatted live while they stream (2026-11-15)**: a bot reply no longer
+  types as plain text and then snaps into formatting when it finishes. It renders through the same markdown
+  path as a finished reply from the first token: bold, lists, headings, links, inline code and code blocks
+  (with Copy) appear as it types, and the bubble's markup is the same while streaming and when done, so
+  completion changes nothing but the caret and the hover actions. A new pure `streamSafe` step keeps each
+  tick render-stable: an open code fence is closed temporarily (the block grows), a trailing unmatched
+  `**`/`*`/`_`/backtick is closed or held, and a half link, table row, list or heading marker, `MEDIA:` line
+  or `::card{…}` directive waits until it is complete (a card still streaming shows a quiet skeleton line,
+  never raw directive text). Re-renders are throttled to one per 60 ms; the finished reply uses its full text
+  untouched. Silence markers still never show.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

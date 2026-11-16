@@ -234,8 +234,22 @@ export function BotText({ bot, text }: { bot: any; text: string }) {
 
 /** A bot message's prose as its bubble, with the files it sends as cards
  *  under the bubble (not inside it). A message that is only a file skips the
- *  empty bubble. */
-export function BotProse({ bot, text, pos, time }: { bot: any; text: string; pos: string; time?: React.ReactNode }) {
+ *  empty bubble. A streaming reply uses this same markup (Chat.tsx
+ *  AssistantBody), so finishing it never reflows the bubble. */
+export function BotProse({
+  bot,
+  text,
+  pos,
+  time,
+  streaming = false
+}: {
+  bot: any
+  text: string
+  pos: string
+  time?: React.ReactNode
+  /** Still streaming: the same markup, plus the bubble's live caret. */
+  streaming?: boolean
+}) {
   const { text: clean, media } = React.useMemo(() => extractMedia(text), [text])
   const files = media.filter(item => item.kind === 'file')
   const bubble = Boolean(clean) || media.length > files.length
@@ -243,7 +257,7 @@ export function BotProse({ bot, text, pos, time }: { bot: any; text: string; pos
     <>
       {bubble ? (
         <div className="bubble-wrap is-left">
-          <div className={`bubble is-agent${pos}`}>
+          <div className={`bubble is-agent${pos}${streaming ? ' is-streaming' : ''}`}>
             <div className="md">
               <BotText bot={bot} text={text} />
             </div>

@@ -15,6 +15,7 @@ import { cornerClass, groupMessages } from '../core/groups.js'
 import { clock, withDividers } from '../core/time.js'
 import { withNewMarker } from '../core/newMarker.js'
 import { activityLabel, visibleItems } from '../core/workRows.js'
+import { streamSafeParts } from '../core/streamSafe.js'
 import { withEmailDrafts } from '../core/emailDrafts.js'
 import { FAILED_TITLE, STILL_FAILING_TITLE, withTurnCards } from '../core/turnError.js'
 import { app, canToggleSidebar, type ChatSlot, findBot, freshBot, mainSlot, metaFor, noteTranscript, openBotInNewTab, openInBotMode, resetPanelWidth, selectBot, setPanelOpen, startPanelResize, stockHandoffProblem, toggleSidebar } from './app'
@@ -179,32 +180,77 @@ export function UserMeta({
   return null
 }
 
-/** An assistant message: one bubble, or, in the open chat, bubbles with its
- *  live `::card` / `::preview` directives between them (Directives.tsx). */
-function AssistantBody({ item, bot, pos }: { item: any; bot: any; pos: string }) {
-  const { segments, scope } = useDirectiveSegments(item.streaming ? '' : item.text)
-  const time = item.at ? <span className="bubble__time">{clock(item.at)}</span> : null
-  if (item.streaming) {
-    return (
-      <div className="bubble-wrap is-left">
-        <div className={`bubble is-agent${pos} is-streaming`}>
-          <div className="bubble__plain">{item.text}</div>
-        </div>
-        {time}
+/** How often a streaming reply re-renders at most (core/streamSafe.js). */
+export const STREAM_RENDER_MS = 60
+
+/** The streamed text, re-rendered at most every STREAM_RENDER_MS while it
+ *  streams (a long reply never locks the UI); the full text at once when done. */
+function useStreamText(text: string, streaming: boolean): string {
+  const [shown, setShown] = React.useState(text)
+  const latest = React.useRef(text)
+  const timer = React.useRef<any>(null)
+  latest.current = text
+  React.useEffect(() => {
+    if (!streaming || timer.current) return
+    timer.current = setTimeout(() => {
+      timer.current = null
+      setShown(latest.current)
+    }, STREAM_RENDER_MS)
+  }, [text, streaming])
+  React.useEffect(() => () => clearTimeout(timer.current), [])
+  return streaming ? shown : text
+}
+
+/** Where a directive still streaming will be: the card's loading shell with
+ *  a skeleton line, never the raw `::card{…` text. */
+function DirectivePlaceholder() {
+  return (
+    <div className="gbo-directive is-pending" aria-hidden="true">
+      <div className="gbo-dcard is-loading is-pending">
+        <span className="gbo-dcard-skeleton" />
       </div>
+    </div>
+  )
+}
+
+/** An assistant message: one bubble, or, in the open chat, bubbles with its
+ *  live `::card` / `::preview` directives between them (Directives.tsx).
+ *  A streaming reply renders through the same prose path as a finished one
+ *  (live formatting), on its render-stable prefix (core/streamSafe.js), so
+ *  the switch to done changes nothing but the caret and the hover actions. */
+function AssistantBody({ item, bot, pos }: { item: any; bot: any; pos: string }) {
+  const streaming = Boolean(item.streaming)
+  const shown = useStreamText(item.text, streaming)
+  const safe = React.useMemo(() => (streaming ? streamSafeParts(shown) : null), [streaming, shown])
+  const { segments, scope } = useDirectiveSegments(safe ? safe.text : item.text)
+  const time = item.at ? <span className="bubble__time">{clock(item.at)}</span> : null
+  const pending = safe?.directive && scope ? <DirectivePlaceholder /> : null
+  if (!segments || !scope) {
+    return (
+      <>
+        <BotProse bot={bot} text={safe ? safe.text : item.text} pos={pos} time={time} streaming={streaming} />
+        {pending}
+      </>
     )
   }
-  if (!segments || !scope) return <BotProse bot={bot} text={item.text} pos={pos} time={time} />
   const lastProse = segments.map((segment: any) => segment.kind).lastIndexOf('prose')
   return (
     <>
       {segments.map((segment: any, index: number) =>
         segment.kind === 'prose' ? (
-          <BotProse key={index} bot={bot} text={segment.text} pos={pos} time={index === lastProse ? time : null} />
+          <BotProse
+            key={index}
+            bot={bot}
+            text={segment.text}
+            pos={pos}
+            time={index === lastProse ? time : null}
+            streaming={streaming && index === lastProse}
+          />
         ) : (
           <DirectiveBlock key={index} segment={segment} poll={scope.recent.has(item.id)} scope={scope} />
         )
       )}
+      {pending}
     </>
   )
 }

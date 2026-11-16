@@ -49163,7 +49163,14 @@ var ADAPT_SRC = (
 .bubble.is-user { color: var(--gbo-tint-fg, #FFFFFF); }
 .bubble.is-user a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .bubble.is-user code { background: #FFFFFF2E; border-radius: 4px; padding: 1px 4px; font-family: var(--font-mono-stack); font-size: 13px; }
-.bubble.is-streaming > .bubble__plain::after {
+/* The live caret of a streaming reply (it renders formatted as it types,
+   core/streamSafe.js): after the last line of text, inline, so it never adds
+   a line and finishing the reply moves nothing. Not on the reference's
+   ".md > :last-child" box, which would sit on a line of its own. */
+.bubble.is-streaming .md > :last-child::after { content: none; }
+.bubble.is-streaming .md > :last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.bubble.is-streaming .md > :last-child > :is(ul, ol):last-child > li:last-child::after,
+.bubble.is-streaming .md > .gbo-plain:last-child::after {
   content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%;
   background: currentColor; opacity: 0.4; vertical-align: middle; animation: breathe 1s ease-in-out infinite;
 }
@@ -49522,6 +49529,11 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
   background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
 }
 .gbo-dcard.is-loading { width: 300px; min-height: 84px; opacity: 0.6; }
+/* A directive still streaming: the loading card's shell with one quiet
+   skeleton line, never the raw "::card{…" text. */
+.gbo-dcard.is-pending { justify-content: center; padding: 14px 16px; }
+.gbo-dcard-skeleton { display: block; width: 60%; height: 10px; border-radius: 999px; background: var(--color-text-tertiary); opacity: 0.35; animation: breathe 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .gbo-dcard-skeleton { animation: none; } }
 .gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 0 8px; }
 .gbo-dcard-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; text-transform: none; }
 .gbo-dcard.is-unavailable .gbo-dcard-title { padding: 0 8px; text-transform: capitalize; }
@@ -51895,6 +51907,183 @@ function withDividers(items, nowMs = Date.now(), locale) {
   return out;
 }
 
+// src/core/streamSafe.js
+var OPEN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+var BLOCK_START = /^ {0,3}(?:[-*+] |\d{1,9}[.)] |#{1,6} |> ?|\|)/;
+var PIPE_LINE = /^ {0,3}\|/;
+var HOLD_MAX = 500;
+var DIRECTIVE_BODY_MAX = 2048;
+var isSpace = (ch) => ch === void 0 || /\s/.test(ch);
+var isWord = (ch) => ch !== void 0 && /[\p{L}\p{N}]/u.test(ch);
+var oddBackticks = (s) => (s.match(/`/g) || []).length % 2 === 1;
+function holdLastLine(line) {
+  if (!line) return { at: -1, directive: false };
+  if (/^ {0,3}(?:`{3}|~{3})/.test(line)) return { at: 0, directive: false };
+  if (/^ {0,3}(?:`{1,2}|~{1,2})$/.test(line)) return { at: 0, directive: false };
+  if (/^[\t ]*[`"']?(?:M|ME|MED|MEDI|MEDIA|MEDIA:.*)$/.test(line)) return { at: 0, directive: false };
+  if (/^ {0,3}#{1,6}\s*$/.test(line)) return { at: 0, directive: false };
+  if (/^\s*(?:[-*+]|\d{1,9}[.)]?)\s*$/.test(line)) return { at: 0, directive: false };
+  if (/^ {0,3}([-=*_])(?:\s*\1)*\s*$/.test(line)) return { at: 0, directive: false };
+  if (PIPE_LINE.test(line)) return { at: 0, directive: false };
+  const dir = new RegExp(String.raw`(^|\s)::(?:card|preview)\{[^{}\n]{0,${DIRECTIVE_BODY_MAX}}$`).exec(line);
+  if (dir) {
+    const at2 = dir.index + dir[1].length;
+    if (!oddBackticks(line.slice(0, at2))) return { at: at2, directive: true };
+  }
+  const head = /(^|\s)(::?[a-z]{0,7})$/.exec(line);
+  if (head) {
+    const word = head[2].replace(/^::?/, "");
+    const at2 = head.index + head[1].length;
+    if ((head[2] === ":" || "card".startsWith(word) || "preview".startsWith(word)) && !oddBackticks(line.slice(0, at2))) {
+      return { at: at2, directive: false };
+    }
+  }
+  let at = -1;
+  const pick = (index) => {
+    if (index >= 0 && (at < 0 || index < at)) at = index;
+  };
+  const tag = /[`"']?MEDIA:\S*$/.exec(line);
+  if (tag) pick(tag.index);
+  const tagHead = /(^|\s)[`"']?(?:M|ME|MED|MEDI|MEDIA)$/.exec(line);
+  if (tagHead) pick(tagHead.index + tagHead[1].length);
+  const link = new RegExp(String.raw`!?\[[^\[\]\n]{0,${HOLD_MAX}}(?:\](?:\([^)\n]{0,${HOLD_MAX}})?)?$`).exec(line);
+  if (link && !oddBackticks(line.slice(0, link.index))) pick(link.index);
+  return { at, directive: false };
+}
+function inlineTail(tail) {
+  const stack = [];
+  let code = null;
+  let cut2 = -1;
+  let i = 0;
+  let lineStart = true;
+  while (i < tail.length) {
+    const ch = tail[i];
+    if (lineStart) {
+      lineStart = false;
+      if (BLOCK_START.test(tail.slice(i, i + 16))) {
+        stack.length = 0;
+        code = null;
+      }
+    }
+    if (ch === "\n") {
+      lineStart = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "`") {
+      let j = i;
+      while (tail[j] === "`") j += 1;
+      const len = j - i;
+      if (!code) {
+        if (j >= tail.length) {
+          cut2 = i;
+          break;
+        }
+        code = { len, at: i };
+      } else if (len === code.len) code = null;
+      i = j;
+      continue;
+    }
+    if (code) {
+      i += 1;
+      continue;
+    }
+    if (ch === "*" || ch === "_") {
+      let j = i;
+      while (tail[j] === ch) j += 1;
+      const len = j - i;
+      const prev = tail[i - 1];
+      const next = tail[j];
+      const top = stack[stack.length - 1];
+      if (next === void 0) {
+        if (top && top.ch === ch && len >= top.len && !isSpace(prev)) stack.pop();
+        else cut2 = i;
+        break;
+      }
+      if (ch === "_" && isWord(prev) && isWord(next)) {
+        i = j;
+        continue;
+      }
+      if (!isSpace(prev) && top && top.ch === ch) {
+        if (len < top.len) top.len -= len;
+        else stack.pop();
+      } else if (!isSpace(next)) {
+        stack.push({ ch, len: Math.min(len, 3) });
+      }
+      i = j;
+      continue;
+    }
+    i += 1;
+  }
+  let closers = "";
+  if (code && cut2 < 0) closers += "`".repeat(code.len);
+  for (let k = stack.length - 1; k >= 0; k -= 1) closers += stack[k].ch.repeat(stack[k].len);
+  return { cut: cut2, closers, code: Boolean(code && cut2 < 0) };
+}
+function streamSafeParts(input) {
+  const source = String(input ?? "");
+  if (!source) return { text: "", held: "", directive: false };
+  const lastStart = source.lastIndexOf("\n") + 1;
+  let fence = null;
+  let blockStart = 0;
+  let offset = 0;
+  let pipeRun = 0;
+  let pipeStart = 0;
+  while (offset < lastStart) {
+    const end = source.indexOf("\n", offset);
+    const line = source.slice(offset, end);
+    if (fence) {
+      if (fence.close.test(line)) {
+        fence = null;
+        blockStart = end + 1;
+      }
+      pipeRun = 0;
+    } else {
+      const m = OPEN.exec(line);
+      if (m && !(m[2][0] === "`" && m[3].includes("`"))) {
+        fence = { mark: m[2][0].repeat(m[2].length), close: new RegExp(`^ {0,3}${m[2][0] === "`" ? "`" : "~"}{${m[2].length},}\\s*$`) };
+        pipeRun = 0;
+      } else if (!line.trim()) {
+        blockStart = end + 1;
+        pipeRun = 0;
+      } else if (PIPE_LINE.test(line)) {
+        if (!pipeRun) pipeStart = offset;
+        pipeRun += 1;
+      } else pipeRun = 0;
+    }
+    offset = end + 1;
+  }
+  const lastLine = source.slice(lastStart);
+  if (fence) {
+    let cut3 = source.length;
+    const mark = fence.mark[0] === "`" ? /^ {0,3}`+\s*$/ : /^ {0,3}~+\s*$/;
+    if (lastLine && (mark.test(lastLine) || /^[\t ]*[`"']?(?:M|ME|MED|MEDI|MEDIA|MEDIA:.*)$/.test(lastLine))) cut3 = lastStart;
+    const safe2 = source.slice(0, cut3);
+    return { text: `${safe2}${safe2.endsWith("\n") ? "" : "\n"}${fence.mark}`, held: source.slice(cut3), directive: false };
+  }
+  let cut2 = source.length;
+  const hold = holdLastLine(lastLine);
+  if (hold.at >= 0) cut2 = lastStart + hold.at;
+  if (pipeRun === 1 && (!lastLine || PIPE_LINE.test(lastLine))) cut2 = Math.min(cut2, pipeStart);
+  const directive = hold.directive && cut2 === lastStart + hold.at;
+  let safe = source.slice(0, cut2);
+  let closers = "";
+  for (let pass = 0; pass < 8 && blockStart < safe.length; pass += 1) {
+    const inline = inlineTail(safe.slice(blockStart));
+    if (inline.cut < 0) {
+      closers = inline.closers;
+      if (closers && !inline.code) safe = safe.replace(/\s+$/, "");
+      break;
+    }
+    safe = safe.slice(0, blockStart + inline.cut);
+  }
+  return { text: safe + closers, held: source.slice(safe.length), directive };
+}
+
 // src/core/emailDrafts.js
 var DRAFT_PLUGIN = "email-drafts";
 var DRAFT_RPC = `plugin.${DRAFT_PLUGIN}.api`;
@@ -53644,7 +53833,7 @@ import * as React11 from "react";
 // src/core/fences.js
 var CODE_FOLD_LINES = 60;
 var CODE_FOLDED_LINES = 40;
-var OPEN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+var OPEN2 = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 function splitFences(text3) {
   const source = String(text3 ?? "");
   if (!source.includes("```") && !source.includes("~~~")) return source.trim() ? [{ kind: "text", text: source }] : [];
@@ -53657,7 +53846,7 @@ function splitFences(text3) {
     prose = [];
   };
   for (let i = 0; i < lines.length; i += 1) {
-    const m = OPEN.exec(lines[i]);
+    const m = OPEN2.exec(lines[i]);
     if (!m || m[2][0] === "`" && m[3].includes("`")) {
       prose.push(lines[i]);
       continue;
@@ -54486,13 +54675,19 @@ function BotText({ bot, text: text3 }) {
     /* @__PURE__ */ jsx13(MediaStrip, { bot, media })
   ] });
 }
-function BotProse({ bot, text: text3, pos, time }) {
+function BotProse({
+  bot,
+  text: text3,
+  pos,
+  time,
+  streaming = false
+}) {
   const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
   const files = media.filter((item) => item.kind === "file");
   const bubble = Boolean(clean) || media.length > files.length;
   return /* @__PURE__ */ jsxs12(Fragment8, { children: [
     bubble ? /* @__PURE__ */ jsxs12("div", { className: "bubble-wrap is-left", children: [
-      /* @__PURE__ */ jsx13("div", { className: `bubble is-agent${pos}`, children: /* @__PURE__ */ jsx13("div", { className: "md", children: /* @__PURE__ */ jsx13(BotText, { bot, text: text3 }) }) }),
+      /* @__PURE__ */ jsx13("div", { className: `bubble is-agent${pos}${streaming ? " is-streaming" : ""}`, children: /* @__PURE__ */ jsx13("div", { className: "md", children: /* @__PURE__ */ jsx13(BotText, { bot, text: text3 }) }) }),
       time
     ] }) : null,
     /* @__PURE__ */ jsx13(FileCards, { bot, files })
@@ -58878,20 +59073,55 @@ function UserMeta({
   }
   return null;
 }
+var STREAM_RENDER_MS = 60;
+function useStreamText(text3, streaming) {
+  const [shown, setShown] = React24.useState(text3);
+  const latest = React24.useRef(text3);
+  const timer = React24.useRef(null);
+  latest.current = text3;
+  React24.useEffect(() => {
+    if (!streaming || timer.current) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setShown(latest.current);
+    }, STREAM_RENDER_MS);
+  }, [text3, streaming]);
+  React24.useEffect(() => () => clearTimeout(timer.current), []);
+  return streaming ? shown : text3;
+}
+function DirectivePlaceholder() {
+  return /* @__PURE__ */ jsx27("div", { className: "gbo-directive is-pending", "aria-hidden": "true", children: /* @__PURE__ */ jsx27("div", { className: "gbo-dcard is-loading is-pending", children: /* @__PURE__ */ jsx27("span", { className: "gbo-dcard-skeleton" }) }) });
+}
 function AssistantBody({ item, bot, pos }) {
-  const { segments, scope } = useDirectiveSegments(item.streaming ? "" : item.text);
+  const streaming = Boolean(item.streaming);
+  const shown = useStreamText(item.text, streaming);
+  const safe = React24.useMemo(() => streaming ? streamSafeParts(shown) : null, [streaming, shown]);
+  const { segments, scope } = useDirectiveSegments(safe ? safe.text : item.text);
   const time = item.at ? /* @__PURE__ */ jsx27("span", { className: "bubble__time", children: clock(item.at) }) : null;
-  if (item.streaming) {
-    return /* @__PURE__ */ jsxs25("div", { className: "bubble-wrap is-left", children: [
-      /* @__PURE__ */ jsx27("div", { className: `bubble is-agent${pos} is-streaming`, children: /* @__PURE__ */ jsx27("div", { className: "bubble__plain", children: item.text }) }),
-      time
+  const pending = safe?.directive && scope ? /* @__PURE__ */ jsx27(DirectivePlaceholder, {}) : null;
+  if (!segments || !scope) {
+    return /* @__PURE__ */ jsxs25(Fragment16, { children: [
+      /* @__PURE__ */ jsx27(BotProse, { bot, text: safe ? safe.text : item.text, pos, time, streaming }),
+      pending
     ] });
   }
-  if (!segments || !scope) return /* @__PURE__ */ jsx27(BotProse, { bot, text: item.text, pos, time });
   const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
-  return /* @__PURE__ */ jsx27(Fragment16, { children: segments.map(
-    (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx27(BotProse, { bot, text: segment.text, pos, time: index === lastProse ? time : null }, index) : /* @__PURE__ */ jsx27(DirectiveBlock, { segment, poll: scope.recent.has(item.id), scope }, index)
-  ) });
+  return /* @__PURE__ */ jsxs25(Fragment16, { children: [
+    segments.map(
+      (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx27(
+        BotProse,
+        {
+          bot,
+          text: segment.text,
+          pos,
+          time: index === lastProse ? time : null,
+          streaming: streaming && index === lastProse
+        },
+        index
+      ) : /* @__PURE__ */ jsx27(DirectiveBlock, { segment, poll: scope.recent.has(item.id), scope }, index)
+    ),
+    pending
+  ] });
 }
 function TurnErrorCard({ item, bot, controller: controller2 }) {
   const [open, setOpen] = React24.useState(false);

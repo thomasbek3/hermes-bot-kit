@@ -89,6 +89,10 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
   "Not supported by this model"); **Default** removes the setting; one Save writes all four to the bot's own
   Hermes profile. The model lists load in the background, once per machine. The open chat's context and cost
   meter is in the status bar.
+- Replies are **formatted live while they stream**: bold, lists, headings, links, inline code and code blocks
+  (with Copy) appear as the bot types, through the same renderer as a finished reply, so nothing jumps when it
+  completes. A half-typed `**`, link, table row, `MEDIA:` line or list marker waits a moment until it is
+  complete; an open code block shows and grows; a card still streaming shows a quiet placeholder line.
 - Bot Chats opened here are **desktop sessions** (as in stock Desktop), so the bot knows markdown, files and
   cards render. A chat whose session started before you installed or updated the override keeps its old mode
   until that session restarts.

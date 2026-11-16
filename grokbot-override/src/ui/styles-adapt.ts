@@ -177,7 +177,14 @@ const ADAPT_SRC = /* css */ `
 .bubble.is-user { color: var(--gbo-tint-fg, #FFFFFF); }
 .bubble.is-user a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .bubble.is-user code { background: #FFFFFF2E; border-radius: 4px; padding: 1px 4px; font-family: var(--font-mono-stack); font-size: 13px; }
-.bubble.is-streaming > .bubble__plain::after {
+/* The live caret of a streaming reply (it renders formatted as it types,
+   core/streamSafe.js): after the last line of text, inline, so it never adds
+   a line and finishing the reply moves nothing. Not on the reference's
+   ".md > :last-child" box, which would sit on a line of its own. */
+.bubble.is-streaming .md > :last-child::after { content: none; }
+.bubble.is-streaming .md > :last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.bubble.is-streaming .md > :last-child > :is(ul, ol):last-child > li:last-child::after,
+.bubble.is-streaming .md > .gbo-plain:last-child::after {
   content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%;
   background: currentColor; opacity: 0.4; vertical-align: middle; animation: breathe 1s ease-in-out infinite;
 }
@@ -536,6 +543,11 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
   background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
 }
 .gbo-dcard.is-loading { width: 300px; min-height: 84px; opacity: 0.6; }
+/* A directive still streaming: the loading card's shell with one quiet
+   skeleton line, never the raw "::card{…" text. */
+.gbo-dcard.is-pending { justify-content: center; padding: 14px 16px; }
+.gbo-dcard-skeleton { display: block; width: 60%; height: 10px; border-radius: 999px; background: var(--color-text-tertiary); opacity: 0.35; animation: breathe 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .gbo-dcard-skeleton { animation: none; } }
 .gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 0 8px; }
 .gbo-dcard-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; text-transform: none; }
 .gbo-dcard.is-unavailable .gbo-dcard-title { padding: 0 8px; text-transform: capitalize; }
