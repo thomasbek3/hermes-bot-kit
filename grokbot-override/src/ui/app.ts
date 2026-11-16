@@ -1183,7 +1183,26 @@ function beginStartupGrace() {
   }
 }
 
-/** Hermes focused a stored session (or a new draft: null). */
+/** The roster bot whose Bot Chat this stored session is, or null. */
+function botForFocus(value: unknown) {
+  const state = controller?.get?.()
+  return botForSession(app.roster.get().rows, String(value ?? ''), state ? { bot: state.bot, canonical: state.canonical } : null)
+}
+
+/** A Bot Chat opened through Hermes: shown in the override instead. */
+function routeToBot(bot: any) {
+  hermesView = null
+  selectBot(bot)
+  try {
+    host?.revealPane?.(MAIN_PANE_ID)
+  } catch {
+    /* fronted by selectBot already */
+  }
+}
+
+/** Hermes focused a stored session (or a new draft: null). A change after
+ *  start-up routes at once; everything else is decided when the pane
+ *  settles (settleMainPane), since the focused id need not change at all. */
 function onSessionFocus(value: unknown) {
   const first = lastFocused === undefined
   const changed = !first && value !== lastFocused
@@ -1192,21 +1211,35 @@ function onSessionFocus(value: unknown) {
     scheduleClaim()
     return
   }
-  const id = String(value ?? '')
-  const state = controller?.get?.()
-  const bot = botForSession(app.roster.get().rows, id, state ? { bot: state.bot, canonical: state.canonical } : null)
-  if (!bot) {
-    // Not a Bot Chat: Hermes's view stays on screen.
-    hermesView = id
+  const bot = botForFocus(value)
+  if (bot) return routeToBot(bot)
+  // Not a Bot Chat: Hermes's view stays, once it is the one on screen.
+  if (!visible(MAIN_PANE_ID)) hermesView = String(value ?? '')
+  else scheduleClaim()
+}
+
+/** After start-up, a Hermes session view on the main pane is the user's
+ *  open (session search, a notification, a cron run, ⌘N, an artifact link,
+ *  re-opening the same session tab): the session Hermes says is focused now
+ *  decides, whether or not its id changed (review tighter-b r1 #3). A Bot
+ *  Chat routes into the override; anything else stays in Hermes's view. A
+ *  closed override tab is still reopened. */
+function settleMainPane() {
+  if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return
+  if (!closeWorkspace) {
+    if (hermesView === null) claimMainPane()
     return
   }
-  hermesView = null
-  selectBot(bot)
-  try {
-    host?.revealPane?.(MAIN_PANE_ID)
-  } catch {
-    /* fronted by selectBot already */
+  if (hermesView !== null || visible(MAIN_PANE_ID) || !stockChatShown()) return
+  const focused = host?.state?.focusedStoredSessionId
+  if (!focused || typeof focused.get !== 'function') {
+    claimMainPane()
+    return
   }
+  const value = focused.get()
+  const bot = botForFocus(value)
+  if (bot) routeToBot(bot)
+  else hermesView = String(value ?? '')
 }
 
 /** Open or front the override's chat tab when Hermes's own session view has
@@ -1239,7 +1272,8 @@ function scheduleClaim() {
   claimQueued = true
   const run = () => {
     claimQueued = false
-    claimMainPane()
+    if (startupGrace) claimMainPane()
+    else settleMainPane()
   }
   if (startupGrace) queueMicrotask(run)
   else setTimer(run, CLAIM_SETTLE_MS)
@@ -1307,7 +1341,7 @@ function scheduleSync() {
   raf = requestAnimationFrame(() => {
     raf = 0
     stock?.sync()
-    if (closeWorkspace && !visible(MAIN_PANE_ID)) claimMainPane()
+    if (closeWorkspace && !visible(MAIN_PANE_ID)) scheduleClaim()
     // On screen (the SDK's own read) means present; only a hidden pane needs
     // the layout tree's tab to say it exists (the SDK has no such read).
     const present = visible(COMPUTER_VIEWER_PANE_ID) || Boolean(document.querySelector(`[data-tree-tab="${COMPUTER_VIEWER_PANE_ID}"]`))

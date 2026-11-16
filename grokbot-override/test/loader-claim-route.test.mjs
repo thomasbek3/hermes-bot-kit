@@ -72,8 +72,8 @@ test('loader: after start-up, a non-bot session stays in Hermes and a Bot Chat o
   await waitFor(() => model.state.pane === MAIN, 'Security’s Bot Chat routes back')
   assert.equal(internals.app.selectedKey.get(), 'local::security')
 
-  // Back on the override, Hermes's 'workspace' pane fronting by itself (no
-  // session focus change, e.g. the onboarding exit) is claimed again.
+  // Hermes's 'workspace' pane fronting with Security's Bot Chat still the
+  // focused session: routed into the override again.
   model.front('workspace')
   await waitFor(() => model.state.pane === MAIN, 'claimed again')
 

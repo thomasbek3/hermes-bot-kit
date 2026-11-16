@@ -43904,6 +43904,19 @@ function createChatController(bot, deps, options = {}) {
   const attachOnOpen = options.attachOnOpen !== false;
   const seed = chatSeed(options.seed);
   let seeded = Boolean(seed);
+  let releaseValidation = null;
+  let validation = seed ? new Promise((resolve) => releaseValidation = resolve) : null;
+  let openStarted = false;
+  const endValidation = () => {
+    validation = null;
+    releaseValidation?.();
+    releaseValidation = null;
+  };
+  const gated = (fn) => (...args) => {
+    if (!validation) return fn(...args);
+    if (!openStarted) void open();
+    return (validation || Promise.resolve()).then(() => fn(...args));
+  };
   const now = deps.now || (() => Date.now());
   const setTimer2 = deps.setTimer || ((fn, ms) => {
     const id = setTimeout(fn, ms);
@@ -44151,6 +44164,15 @@ function createChatController(bot, deps, options = {}) {
     return (Array.isArray(items) ? items : []).filter((item) => isOpenSend(item) && keep(item));
   }
   async function open() {
+    openStarted = true;
+    if (!validation) return openChecked();
+    try {
+      return await openChecked();
+    } finally {
+      endValidation();
+    }
+  }
+  async function openChecked() {
     const mine = ++generation2;
     const quiet = seeded && state.phase === "ready";
     seeded = false;
@@ -44199,13 +44221,17 @@ function createChatController(bot, deps, options = {}) {
     try {
       const rows = await readPage(0);
       if (mine !== generation2 || disposed) return state;
-      set({
-        phase: "ready",
-        rows,
-        loadedCount: rows.length,
-        hasMore: rows.length >= HISTORY_PAGE,
-        chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
-      });
+      if (quiet) {
+        mergeTail(rows, keepLocal);
+      } else {
+        set({
+          phase: "ready",
+          rows,
+          loadedCount: rows.length,
+          hasMore: rows.length >= HISTORY_PAGE,
+          chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
+        });
+      }
       loaded = true;
     } catch (error) {
       if (!attachOnOpen) {
@@ -45540,6 +45566,7 @@ ${body}` : body);
     stopReconnectNotice();
     retireCancel?.();
     retireCancel = null;
+    endValidation();
     for (const cancel of deliveryChecks.values()) cancel();
     deliveryChecks.clear();
     payloads.clear();
@@ -45575,34 +45602,34 @@ ${body}` : body);
     },
     open,
     create,
-    attach,
-    loadEarlier,
-    refresh,
-    reconcile,
-    send,
-    sendDraft,
-    retry,
-    recheck,
+    attach: gated(attach),
+    loadEarlier: gated(loadEarlier),
+    refresh: gated(refresh),
+    reconcile: gated(reconcile),
+    send: gated(send),
+    sendDraft: gated(sendDraft),
+    retry: gated(retry),
+    recheck: gated(recheck),
     dropFailed,
-    discardStaged,
-    interrupt,
-    respondApproval,
-    editMessage,
-    regenerate,
-    rewindTo,
-    retryTurn,
+    discardStaged: gated(discardStaged),
+    interrupt: gated(interrupt),
+    respondApproval: gated(respondApproval),
+    editMessage: gated(editMessage),
+    regenerate: gated(regenerate),
+    rewindTo: gated(rewindTo),
+    retryTurn: gated(retryTurn),
     laterTurns,
-    react,
-    runSlash,
-    completeSlash,
-    pluginRequest,
-    sendIntent,
-    answerPrompt,
+    react: gated(react),
+    runSlash: gated(runSlash),
+    completeSlash: gated(completeSlash),
+    pluginRequest: gated(pluginRequest),
+    sendIntent: gated(sendIntent),
+    answerPrompt: gated(answerPrompt),
     pickClarify,
     pageClarify,
-    answerClarifyText,
-    respondConnection,
-    pollApprovals,
+    answerClarifyText: gated(answerClarifyText),
+    respondConnection: gated(respondConnection),
+    pollApprovals: gated(pollApprovals),
     hasPendingApproval: () => hasPendingApproval(state.chat.items),
     retire,
     revive,
@@ -51293,6 +51320,18 @@ function beginStartupGrace() {
     document.addEventListener("keydown", end, true);
   }
 }
+function botForFocus(value) {
+  const state = controller?.get?.();
+  return botForSession(app.roster.get().rows, String(value ?? ""), state ? { bot: state.bot, canonical: state.canonical } : null);
+}
+function routeToBot(bot) {
+  hermesView = null;
+  selectBot(bot);
+  try {
+    host2?.revealPane?.(MAIN_PANE_ID);
+  } catch {
+  }
+}
 function onSessionFocus(value) {
   const first = lastFocused === void 0;
   const changed = !first && value !== lastFocused;
@@ -51301,19 +51340,27 @@ function onSessionFocus(value) {
     scheduleClaim();
     return;
   }
-  const id = String(value ?? "");
-  const state = controller?.get?.();
-  const bot = botForSession(app.roster.get().rows, id, state ? { bot: state.bot, canonical: state.canonical } : null);
-  if (!bot) {
-    hermesView = id;
+  const bot = botForFocus(value);
+  if (bot) return routeToBot(bot);
+  if (!visible(MAIN_PANE_ID)) hermesView = String(value ?? "");
+  else scheduleClaim();
+}
+function settleMainPane() {
+  if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return;
+  if (!closeWorkspace) {
+    if (hermesView === null) claimMainPane();
     return;
   }
-  hermesView = null;
-  selectBot(bot);
-  try {
-    host2?.revealPane?.(MAIN_PANE_ID);
-  } catch {
+  if (hermesView !== null || visible(MAIN_PANE_ID) || !stockChatShown()) return;
+  const focused = host2?.state?.focusedStoredSessionId;
+  if (!focused || typeof focused.get !== "function") {
+    claimMainPane();
+    return;
   }
+  const value = focused.get();
+  const bot = botForFocus(value);
+  if (bot) routeToBot(bot);
+  else hermesView = String(value ?? "");
 }
 function claimMainPane() {
   if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return false;
@@ -51337,7 +51384,8 @@ function scheduleClaim() {
   claimQueued = true;
   const run = () => {
     claimQueued = false;
-    claimMainPane();
+    if (startupGrace) claimMainPane();
+    else settleMainPane();
   };
   if (startupGrace) queueMicrotask(run);
   else setTimer(run, CLAIM_SETTLE_MS);
@@ -51393,7 +51441,7 @@ function scheduleSync() {
   raf = requestAnimationFrame(() => {
     raf = 0;
     stock?.sync();
-    if (closeWorkspace && !visible(MAIN_PANE_ID)) claimMainPane();
+    if (closeWorkspace && !visible(MAIN_PANE_ID)) scheduleClaim();
     const present = visible(COMPUTER_VIEWER_PANE_ID) || Boolean(document.querySelector(`[data-tree-tab="${COMPUTER_VIEWER_PANE_ID}"]`));
     if (present !== app.computerViewer.get().present) app.computerViewer.set((s) => ({ ...s, present }));
   });
