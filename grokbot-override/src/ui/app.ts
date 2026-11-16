@@ -4,6 +4,9 @@ import { canonicalIds, CANONICAL_CHAT_TITLE, expectHistory, findCanonicalChat, o
 import { historyToItems } from '../core/history.js'
 import {
   annotateSources,
+  botForSession,
+  keepRows,
+  sameData,
   dropDeadRows,
   liveRosterNames,
   botMeta,
@@ -20,7 +23,7 @@ import { cronListParams, cronToggleParams, jobActive, sortJobs } from '../core/c
 import { filePath, mediaReadRequest } from '../core/media.js'
 import { workspaceReadRequest } from '../core/directives.js'
 import { transcribeRequest } from '../core/voice.js'
-import { createChatController } from '../core/session.js'
+import { createChatController, seedFromState } from '../core/session.js'
 import { createStockController, OVERRIDE_ROSTER_PANE_ID, STOCK_PANE_ID } from '../core/stock.js'
 import { dragPanelWidth, PANEL_WIDTH, PANEL_WIDTH_KEY, storedPanelWidth } from '../core/panelWidth.js'
 import { PINS_KEY, pinsFrom, pinState, togglePin } from '../core/pins.js'
@@ -155,6 +158,8 @@ let rosterTimer: null | (() => void) = null
 let remoteAvatars: null | ReturnType<typeof createRemoteAvatars> = null
 let unwatchAvatars: null | (() => void) = null
 let lastOwnFetch = 0
+// When the own read last answered (it may have changed nothing).
+let lastOwnRead = 0
 // What each source listed on the last fresh read (core/roster.js liveRosterNames).
 let liveNames: Map<string, Set<string>> = new Map()
 let lastVerify = 0
@@ -214,9 +219,42 @@ function activeConnectionId(): null | string {
   }
 }
 
+// Bot Mode's local meta, parsed again only when its stored text changes, so
+// a roster tick hands the store the same object (T2).
+const LOCAL_META_KEY = 'hermes.plugin.hermes-bots.bot-meta-v2'
+let sideRaw: null | string | undefined = undefined
+let sideMeta: Record<string, any> = {}
+
 function readSideData() {
-  const localMeta = readPluginStorage<Record<string, any>>('hermes-bots', 'bot-meta-v2', {}) || {}
-  return { localMeta: localMeta && typeof localMeta === 'object' ? localMeta : {} }
+  let raw: null | string = null
+  try {
+    raw = globalThis.localStorage?.getItem(LOCAL_META_KEY) ?? null
+  } catch {
+    raw = null
+  }
+  if (raw !== sideRaw) {
+    sideRaw = raw
+    const localMeta = readPluginStorage<Record<string, any>>('hermes-bots', 'bot-meta-v2', {}) || {}
+    sideMeta = localMeta && typeof localMeta === 'object' ? localMeta : {}
+  }
+  return { localMeta: sideMeta }
+}
+
+/** The roster state with only what changed replaced; `s` itself when
+ *  nothing did (store.ts skips an identical value, so nobody re-renders).
+ *  A new `updatedAt` alone is not a change. */
+function mergeRosterState(s: RosterState, patch: Partial<RosterState>): RosterState {
+  let changed = false
+  const next: any = { ...s }
+  for (const [key, value] of Object.entries(patch)) {
+    const old = (s as any)[key]
+    let kept = value
+    if (key === 'rows') kept = keepRows(old, value as any[])
+    else if (key === 'sources' && sameData(old, value)) kept = old
+    if (key !== 'updatedAt' && !Object.is(kept, old)) changed = true
+    next[key] = kept
+  }
+  return changed ? next : s
 }
 
 async function fetchOwnRoster() {
@@ -236,10 +274,15 @@ async function fetchOwnRoster() {
     }
     if (union) liveNames = liveRosterNames(union)
     const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames)
-    app.roster.set(s => ({ ...s, rows, sources: union?.sources || [], origin: 'own', error: null, updatedAt: Date.now(), protocolInjected: Boolean(local?.bot_mode_protocol) }))
+    lastOwnRead = Date.now()
+    app.roster.set(s => {
+      // updatedAt moves only with a real change; lastOwnRead says how fresh it is.
+      return mergeRosterState(s, { rows, sources: union?.sources || [], origin: 'own', error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) })
+    })
     trackActivity()
   } catch (error: any) {
-    app.roster.set(s => ({ ...s, error: String(error?.message || error) }))
+    const message = String(error?.message || error)
+    app.roster.set(s => (s.error === message ? s : { ...s, error: message }))
   } finally {
     ownFetchInFlight = false
   }
@@ -298,22 +341,23 @@ export function refreshRoster() {
   // An own read newer than the stock snapshot wins (a Retry, or a stock
   // roster that stopped refreshing while its pane is off screen).
   const own = app.roster.get()
-  if (cached && cached.profiles.length && !(own.origin === 'own' && own.updatedAt > cached.updatedAt)) {
+  if (cached && cached.profiles.length && !(own.origin === 'own' && Math.max(own.updatedAt, lastOwnRead) > cached.updatedAt)) {
     // A stock snapshot taken while the union roster failed has no sources
     // (data.ts keeps its rows painted as unreachable and the pane falls back
     // to its remembered sources): annotate with the last sources known here.
     const sources = cached.sources.length ? cached.sources : own.sources
-    app.roster.set(s => ({
-      ...s,
-      ...side,
-      rows: dropDeadRows(annotateSources(cached.profiles, sources), liveNames),
-      sources,
-      origin: 'stock',
-      error: null,
-      updatedAt: cached.updatedAt
-    }))
+    app.roster.set(s =>
+      mergeRosterState(s, {
+        ...side,
+        rows: dropDeadRows(annotateSources(cached.profiles, sources), liveNames),
+        sources,
+        origin: 'stock',
+        error: null,
+        updatedAt: cached.updatedAt
+      })
+    )
   } else {
-    app.roster.set(s => ({ ...s, ...side }))
+    app.roster.set(s => mergeRosterState(s, side))
   }
   trackActivity()
   void refreshRooms()
@@ -469,6 +513,46 @@ export function chatDeps() {
   return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible }
 }
 
+// ── bot switch without the flash (T9) ────────────────────────────────────
+// The last few bots' transcripts, cron jobs and screen status, by row key:
+// a switch back shows them at once while the real reads run (stale while
+// revalidate). In memory only; rows are what the chat already showed.
+const SEED_MAX = 8
+const chatSeeds = new Map<string, any>()
+const cronSeeds = new Map<string, any[]>()
+const screenSeeds = new Map<string, any>()
+
+function remember<T>(map: Map<string, T>, key: string, value: T) {
+  if (!key) return
+  map.delete(key)
+  map.set(key, value)
+  while (map.size > SEED_MAX) map.delete(map.keys().next().value as string)
+}
+
+function rememberChat(key: string, chat: any) {
+  const seed = seedFromState(chat?.get?.())
+  if (seed) remember(chatSeeds, key, seed)
+}
+
+/** The remembered transcript for this bot, unless the roster already names
+ *  a different Bot Chat for it. */
+function seedFor(bot: any, key: string) {
+  const seed = chatSeeds.get(key)
+  if (!seed) return null
+  const listed = canonicalIds(bot?.canonical_session)
+  if (listed.length && !listed.some(id => canonicalIds(seed.canonical).includes(id))) {
+    chatSeeds.delete(key)
+    return null
+  }
+  return seed
+}
+
+function clearSeeds() {
+  chatSeeds.clear()
+  cronSeeds.clear()
+  screenSeeds.clear()
+}
+
 /** Detach the open chat from the screen. By default it retires: an idle chat
  *  is disposed now (lease, listener, refresh), one with a send or a turn in
  *  flight finishes in the background, bounded. `hard`: dispose everything
@@ -482,12 +566,16 @@ function disposeController({ hard = false } = {}) {
   controllerKey = ''
   app.chat.set(null)
   if (current) {
+    if (!hard) rememberChat(key, current)
     if (hard) current.dispose()
     else if (current.retire()) retiring.set(key, current)
   }
   if (hard) {
     for (const chat of retiring.values()) chat.dispose()
     retiring.clear()
+    for (const chat of orphanedChats) chat.dispose()
+    orphanedChats.clear()
+    clearSeeds()
   }
 }
 
@@ -498,7 +586,20 @@ function adopt(next: any, key: string) {
   app.chat.set(next.get())
 }
 
-export function selectBot(bot: any, { openWorkspace = true } = {}) {
+/** Whether a chat controller holds another Bot Chat than `storedId` (a
+ *  replacement opened through Hermes): it may not be reused for it (review
+ *  tighter-b r3 #1). No requested session: any. */
+function holdsOtherChat(chat: any, storedId: string) {
+  if (!storedId) return false
+  const state = chat?.get?.()
+  return !canonicalIds(state?.canonical).includes(storedId)
+}
+
+// Retiring chats of a Bot Chat that was replaced while they finish: kept so
+// turning the override off still disposes them.
+const orphanedChats = new Set<any>()
+
+export function selectBot(bot: any, { openWorkspace = true, session = '' }: { openWorkspace?: boolean; session?: string } = {}) {
   const key = rowKey(bot)
   if (key !== app.selectedKey.get()) app.drawerOpen.set(false)
   app.selectedKey.set(key)
@@ -507,26 +608,44 @@ export function selectBot(bot: any, { openWorkspace = true } = {}) {
   ackBot(bot)
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot))
   else retitleWorkspace(chatTabTitle(bot))
-  if (controllerKey === key && controller) {
+  if (controllerKey === key && controller && !holdsOtherChat(controller, session)) {
     const phase = controller.get().phase
     if (phase === 'no-chat' && openWorkspace) void controller.create()
     else if (phase === 'error' || phase === 'no-chat') void controller.open()
     return
   }
   disposeController()
-  const parked = retiring.get(key)
+  let parked = retiring.get(key)
   retiring.delete(key)
+  if (parked && holdsOtherChat(parked, session)) {
+    // It finishes its own turn on the old chat; never revived for the new one.
+    for (const chat of orphanedChats) if (chat.isDisposed?.()) orphanedChats.delete(chat)
+    orphanedChats.add(parked)
+    parked = null
+  }
+  // A remembered transcript of another Bot Chat is not shown for this one.
+  let seed = seedFor(bot, key)
+  if (seed && session && !canonicalIds(seed.canonical).includes(session)) {
+    chatSeeds.delete(key)
+    seed = null
+  }
   if (parked && parked.revive()) {
     // Came back before its background turn finished: same chat, same stream.
     adopt(parked, key)
   } else {
-    const next = createChatController(bot, chatDeps(), {
+    const next: any = createChatController(bot, chatDeps(), {
       // A roster click on a bot without a Bot Chat creates it, as Bot Mode's
       // click path does (openBotCanonicalChat -> createCanonicalChat, C3); a
       // chat tab restoring the remembered bot never mints one.
       createIfMissing: openWorkspace,
+      // The transcript this bot showed last, on screen at once (T9).
+      seed,
       onDispose: () => {
-        if (retiring.get(key) === next) retiring.delete(key)
+        // A chat that finished its turn in the background leaves its last state.
+        if (retiring.get(key) === next) {
+          retiring.delete(key)
+          rememberChat(key, next)
+        }
       }
     })
     adopt(next, key)
@@ -563,13 +682,16 @@ let cronGeneration = 0
 export async function loadCron(bot: any) {
   const key = rowKey(bot)
   const mine = ++cronGeneration
-  app.cron.set(s => ({ ...s, key, loading: true, error: null, ...(s.key === key ? {} : { jobs: [], busy: {} }) }))
+  // Another bot's panel shows this bot's last known jobs while they load (T9).
+  app.cron.set(s => ({ ...s, key, loading: true, error: null, ...(s.key === key ? {} : { jobs: cronSeeds.get(key) || [], busy: {} }) }))
   const current = () => mine === cronGeneration && app.cron.get().key === key
   try {
     const res = await requestForBot(bot, 'cron.manage', cronListParams(bot))
     if (!current()) return
     if (res?.error) throw new Error(res.error)
-    app.cron.set(s => ({ ...s, loading: false, jobs: sortJobs(res?.jobs) }))
+    const jobs = sortJobs(res?.jobs)
+    remember(cronSeeds, key, jobs)
+    app.cron.set(s => ({ ...s, loading: false, jobs }))
   } catch (error: any) {
     if (current()) app.cron.set(s => ({ ...s, loading: false, error: String(error?.message || error) }))
   }
@@ -602,18 +724,22 @@ export async function toggleCron(bot: any, job: any) {
 
 export async function loadScreen(bot: any) {
   const key = rowKey(bot)
-  app.screen.set({ key, status: null })
+  // The last known status shows while it is re-read (T9).
+  if (app.screen.get().key !== key) app.screen.set({ key, status: screenSeeds.get(key) ?? null })
   try {
     const status = await requestForBot(bot, 'display.status', { profile: String(bot.name) })
+    if (status && !status.error) remember(screenSeeds, key, status)
     if (app.screen.get().key === key) app.screen.set({ key, status })
   } catch {
     if (app.screen.get().key === key) app.screen.set({ key, status: { error: true } })
   }
 }
 
+const COMPUTER_VIEWER_PANE_ID = 'computer-viewer:pane'
+
 export function openComputerViewer() {
   try {
-    host?.revealPane?.('computer-viewer:pane')
+    host?.revealPane?.(COMPUTER_VIEWER_PANE_ID)
   } catch {
     /* not loaded */
   }
@@ -1020,6 +1146,13 @@ export function ensureWorkspace(title = 'Chat') {
 // (store/layout.ts:798). So: on every such change, unless the user handed a
 // chat to Hermes Bot Mode on purpose (a peek, which also swaps the sidebar to
 // stock), the override's tab is opened again or fronted.
+//
+// Route, don't block (T3): once the start-up restore is over, a session the
+// user opens through Hermes (session search, a notification, a cron run, ⌘N,
+// an artifact link) is not undone. A roster bot's Bot Chat opens in the
+// override (that bot is selected and its tab fronted); any other session, or
+// a new draft, stays in Hermes's own view until the user comes back to the
+// override's tab or roster.
 
 export const MAIN_PANE_ID = `plugin-workspace:${WORKSPACE_ID}`
 const STOCK_CHAT_PANES = /^(?:workspace|session-tile:.*|route-tile:.*)$/
@@ -1044,11 +1177,107 @@ function stockChatShown(): boolean {
   return false
 }
 
+// How long after the override turns on a session focus is still Hermes's own
+// restore (cold start, View → Reload) rather than the user's choice. The
+// first pointer or key press ends it early.
+export const STARTUP_GRACE_MS = 10_000
+let startupGrace = false
+let endGrace: null | (() => void) = null
+// The session the user opened in Hermes's own view ('' = a new draft); null
+// while the main pane is the override's to claim.
+let hermesView: null | string = null
+let lastFocused: unknown = undefined
+
+function beginStartupGrace() {
+  endGrace?.()
+  startupGrace = true
+  let stopTimer: null | (() => void) = null
+  const end = () => {
+    startupGrace = false
+    stopTimer?.()
+    stopTimer = null
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('pointerdown', end, true)
+      document.removeEventListener('keydown', end, true)
+    }
+    endGrace = null
+  }
+  endGrace = end
+  stopTimer = setTimer(end, STARTUP_GRACE_MS)
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('pointerdown', end, true)
+    document.addEventListener('keydown', end, true)
+  }
+}
+
+/** The roster bot whose Bot Chat this stored session is, or null. */
+function botForFocus(value: unknown) {
+  const state = controller?.get?.()
+  return botForSession(app.roster.get().rows, String(value ?? ''), state ? { bot: state.bot, canonical: state.canonical } : null)
+}
+
+/** A Bot Chat opened through Hermes: shown in the override instead. */
+function routeToBot(bot: any, storedId: string) {
+  hermesView = null
+  // The very Bot Chat that was opened: a controller on an older one is not
+  // reused for it (review tighter-b r3 #1).
+  selectBot(bot, { session: storedId })
+  try {
+    host?.revealPane?.(MAIN_PANE_ID)
+  } catch {
+    /* fronted by selectBot already */
+  }
+}
+
+/** Hermes focused a stored session (or a new draft: null). A change after
+ *  start-up routes at once; everything else is decided when the pane
+ *  settles (settleMainPane), since the focused id need not change at all. */
+function onSessionFocus(value: unknown) {
+  const first = lastFocused === undefined
+  const changed = !first && value !== lastFocused
+  lastFocused = value
+  if (first || !changed || startupGrace || !app.enabled.get() || isSecondaryWindow() || stock?.isPeeking?.()) {
+    scheduleClaim()
+    return
+  }
+  const bot = botForFocus(value)
+  if (bot) return routeToBot(bot, String(value ?? ''))
+  // Not a Bot Chat: Hermes's view stays, once it is the one on screen.
+  if (!visible(MAIN_PANE_ID)) hermesView = String(value ?? '')
+  else scheduleClaim()
+}
+
+/** After start-up, a Hermes session view on the main pane is the user's
+ *  open (session search, a notification, a cron run, ⌘N, an artifact link,
+ *  re-opening the same session tab): the session Hermes says is focused now
+ *  decides, whether or not its id changed (review tighter-b r1 #3). A Bot
+ *  Chat routes into the override; anything else stays in Hermes's view. A
+ *  closed override tab is still reopened. */
+function settleMainPane() {
+  if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return
+  if (!closeWorkspace) {
+    if (hermesView === null) claimMainPane()
+    return
+  }
+  if (hermesView !== null || visible(MAIN_PANE_ID) || !stockChatShown()) return
+  const focused = host?.state?.focusedStoredSessionId
+  if (!focused || typeof focused.get !== 'function') {
+    claimMainPane()
+    return
+  }
+  const value = focused.get()
+  const bot = botForFocus(value)
+  if (bot) routeToBot(bot, String(value ?? ''))
+  else hermesView = String(value ?? '')
+}
+
 /** Open or front the override's chat tab when Hermes's own session view has
- *  the main pane. Idempotent; never while off, in the HUD, or during a
- *  deliberate hand-off to Hermes Bot Mode. */
+ *  the main pane. Idempotent; never while off, in the HUD, during a
+ *  deliberate hand-off to Hermes Bot Mode, or while the user is in a Hermes
+ *  session view they opened (T3). */
 export function claimMainPane(): boolean {
   if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return false
+  if (hermesView !== null) return false
   if (!closeWorkspace) {
     const bot = findBot(app.selectedKey.get())
     ensureWorkspace(bot ? chatTabTitle(bot) : 'Chat')
@@ -1063,13 +1292,20 @@ export function claimMainPane(): boolean {
   return true
 }
 
+// After start-up a pane change waits this long before it is claimed, so the
+// session focus that comes with a user's open (T3) is seen first.
+const CLAIM_SETTLE_MS = 300
+
 function scheduleClaim() {
-  if (claimQueued) return
+  if (claimQueued || !app.enabled.get()) return
   claimQueued = true
-  queueMicrotask(() => {
+  const run = () => {
     claimQueued = false
-    claimMainPane()
-  })
+    if (startupGrace) claimMainPane()
+    else settleMainPane()
+  }
+  if (startupGrace) queueMicrotask(run)
+  else setTimer(run, CLAIM_SETTLE_MS)
 }
 
 function watchMainPane() {
@@ -1086,10 +1322,22 @@ function watchMainPane() {
   }
   const pane = (id: string) => (typeof host?.paneVisibility === 'function' ? host.paneVisibility(id) : null)
   watch(pane('workspace'), (shown: boolean) => shown && scheduleClaim())
-  watch(pane(MAIN_PANE_ID), (shown: boolean) => !shown && scheduleClaim())
-  // A restored or opened session (a session tile fronted).
-  watch(host?.state?.focusedStoredSessionId, () => scheduleClaim())
-  watch(host?.state?.activeSessionId, () => scheduleClaim())
+  watch(pane(MAIN_PANE_ID), (shown: boolean) => {
+    // Back on the override's tab: it owns the main pane again.
+    if (shown) hermesView = null
+    else scheduleClaim()
+  })
+  // A restored or opened session (a session tile fronted): routed (T3).
+  const focused = host?.state?.focusedStoredSessionId
+  lastFocused = undefined
+  if (focused && typeof focused.subscribe === 'function') {
+    watch(focused, onSessionFocus)
+    // The runtime id moves with it; only the start-up restore claims on it.
+    watch(host?.state?.activeSessionId, () => startupGrace && scheduleClaim())
+  } else {
+    // An older desktop without the stored-session atom: claim as before.
+    watch(host?.state?.activeSessionId, () => scheduleClaim())
+  }
 }
 
 // ── style + DOM watch ────────────────────────────────────────────────────
@@ -1122,8 +1370,10 @@ function scheduleSync() {
   raf = requestAnimationFrame(() => {
     raf = 0
     stock?.sync()
-    if (closeWorkspace && !visible(MAIN_PANE_ID)) claimMainPane()
-    const present = Boolean(document.querySelector('[data-tree-tab="computer-viewer:pane"]'))
+    if (closeWorkspace && !visible(MAIN_PANE_ID)) scheduleClaim()
+    // On screen (the SDK's own read) means present; only a hidden pane needs
+    // the layout tree's tab to say it exists (the SDK has no such read).
+    const present = visible(COMPUTER_VIEWER_PANE_ID) || Boolean(document.querySelector(`[data-tree-tab="${COMPUTER_VIEWER_PANE_ID}"]`))
     if (present !== app.computerViewer.get().present) app.computerViewer.set(s => ({ ...s, present }))
   })
 }
@@ -1147,9 +1397,11 @@ function watchVisibility() {
       scheduleSync()
     })
   }
-  const cv = typeof host?.paneVisibility === 'function' ? host.paneVisibility('computer-viewer:pane') : null
+  const cv = typeof host?.paneVisibility === 'function' ? host.paneVisibility(COMPUTER_VIEWER_PANE_ID) : null
   if (cv && typeof cv.subscribe === 'function') {
-    unwatchComputer = cv.subscribe((visible: boolean) => app.computerViewer.set(s => ({ ...s, visible: Boolean(visible) })))
+    unwatchComputer = cv.subscribe((visible: boolean) =>
+      app.computerViewer.set(s => (s.visible === Boolean(visible) && (!visible || s.present) ? s : { ...s, visible: Boolean(visible), present: s.present || Boolean(visible) }))
+    )
   }
 }
 
@@ -1212,6 +1464,8 @@ function enable() {
   // renderer reload, a plugin reload): the remembered bot's chat, or "Pick a
   // bot". Its chat (and route lease) opens when the tab shows it
   // (ChatWorkspace), never headless (review r2 #5).
+  hermesView = null
+  beginStartupGrace()
   watchMainPane()
   claimMainPane()
   scheduleSync()
@@ -1219,6 +1473,8 @@ function enable() {
 
 function disable() {
   for (const off of unwatchMain.splice(0)) off()
+  endGrace?.()
+  hermesView = null
   rosterTimer?.()
   rosterTimer = null
   stopRemoteAvatars()
@@ -1583,7 +1839,7 @@ export async function selfCheck({ notify = true } = {}) {
       await fetchOwnRoster()
       rows = app.roster.get().rows
     } else {
-      app.roster.set(s => ({ ...s, ...readSideData(), rows: annotateSources(cached!.profiles, cached!.sources), origin: 'stock' }))
+      app.roster.set(s => mergeRosterState(s, { ...readSideData(), rows: annotateSources(cached!.profiles, cached!.sources), origin: 'stock' }))
     }
     const secs = sections()
     step('roster', rows.length > 0, {

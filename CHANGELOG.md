@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **grokbot-override: switching back to a bot shows its chat at once (T9, 2026-11-15)**: every bot switch went
+  through the centred "Opening …'s chat" card and then popped in the transcript, and the profile panel blanked its
+  jobs and computer status. The last eight bots' transcripts, scheduled jobs and screen status are now kept in
+  memory: going back shows them straight away while the Bot Chat registry, history, jobs and status are re-read in
+  the background. If the bot's Bot Chat changed meanwhile, the remembered transcript is dropped and the chat opens
+  the normal way. The remembered transcript is only a picture: until the registry check and history read are done
+  the composer is disabled (as on any open) and any action is refused at once, never queued; a failed check shows
+  the usual error and forgets the remembered chat, so nothing can reach a replaced Bot Chat. The fresh read merges
+  into the remembered rows, keeping earlier pages. A chat whose history came from the `session.resume` fallback (no
+  REST history bridge) is remembered too. Opening a replacement of the open bot's Bot Chat through Hermes opens
+  the replacement, never the old chat still on screen.
+- **grokbot-override: Hermes's own session views work again (T3, 2026-11-15)**: the override claimed the main
+  pane back on every session focus, so session search, a notification click, a cron run's "open", ⌘N and artifact
+  links were undone at once. Start-up and reload still land on the override's chat tab. After that (the first
+  click or key press, or 10 s), a session that is a roster bot's Bot Chat opens in the override with that bot
+  selected; any other session, or a new draft, stays in Hermes's own view until you go back to the override. This
+  is decided by the session Hermes has focused when its view comes up, so ⌘N with nothing open and re-opening the
+  same session work too; closing the override's tab still reopens it. The
+  computer-viewer status now reads the SDK's `paneVisibility` first; the layout-tree query remains only to tell
+  that a hidden viewer pane exists.
+- **grokbot-override: the roster tick no longer re-renders the open chat (T2, 2026-11-15)**: the 3 s roster
+  refresh used to hand the store new row objects and a re-parsed Bot Mode meta on every tick, so the open chat
+  re-rendered its whole transcript every 3 s. Rows equal to the last read now keep their objects (and the list
+  its array), Bot Mode's local meta is re-parsed only when its stored text changes, and a tick that changed
+  nothing leaves the roster state untouched.
 - **grokbot-override: images and recordings keep their size, and streaming no longer re-renders old messages
   (2026-11-15)**: an image from the bot's machine is decoded before it shows and drawn with its width and height
   (clamped to 360 px wide), instead of a fixed 160×110 box that then jumped to the image's size; the size and the

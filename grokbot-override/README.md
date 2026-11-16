@@ -41,6 +41,11 @@ widgets, edit / regenerate / rewind, reactions, voice input, chats side by side,
 group chats. The palette toggle is the escape hatch back to stock; **Open in
 Hermes Bot Mode** shows up only in error states. The full capability list is in [PARITY.md](PARITY.md).
 
+The main pane is the override's chat tab at start-up and after a reload. After that, a session you open through
+Hermes (session search, a notification, a cron run, ⌘N, an artifact link) is not undone: a bot's Bot Chat opens
+in the override with that bot selected, and any other session or new chat stays in Hermes's own view until you
+go back to the override's tab or roster.
+
 ## Use
 
 - Command palette → **Grokbot Override: toggle**. On: the override's **Bots** tab replaces the stock

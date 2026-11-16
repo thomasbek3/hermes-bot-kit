@@ -42260,7 +42260,42 @@ function annotateSources(rows, sources) {
     const source = byId.get(String(row?.connectionId || ""));
     if (!source) return row;
     const reachable = source.reachable === false || source.error ? false : source.reachable ?? null;
-    return { ...row, sourceReachable: reachable, sourceError: source.error || null };
+    const error = source.error || null;
+    if (row?.sourceReachable === reachable && (row?.sourceError ?? null) === error) return row;
+    return { ...row, sourceReachable: reachable, sourceError: error };
+  });
+}
+function sameData(a2, b2) {
+  if (Object.is(a2, b2)) return true;
+  if (!a2 || !b2 || typeof a2 !== "object" || typeof b2 !== "object") return false;
+  if (Array.isArray(a2) !== Array.isArray(b2)) return false;
+  if (Array.isArray(a2)) {
+    if (a2.length !== b2.length) return false;
+    for (let i = 0; i < a2.length; i++) if (!sameData(a2[i], b2[i])) return false;
+    return true;
+  }
+  const keys2 = Object.keys(a2);
+  if (keys2.length !== Object.keys(b2).length) return false;
+  for (const key of keys2) {
+    if (!Object.prototype.hasOwnProperty.call(b2, key) || !sameData(a2[key], b2[key])) return false;
+  }
+  return true;
+}
+function sameRows(a2, b2) {
+  if (a2 === b2) return true;
+  if (!Array.isArray(a2) || !Array.isArray(b2) || a2.length !== b2.length) return false;
+  for (let i = 0; i < a2.length; i++) {
+    if (rowKey(a2[i]) !== rowKey(b2[i]) || !sameData(a2[i], b2[i])) return false;
+  }
+  return true;
+}
+function keepRows(prev, next) {
+  if (!Array.isArray(prev) || !Array.isArray(next)) return next;
+  if (sameRows(prev, next)) return prev;
+  const byKey = new Map(prev.map((row) => [rowKey(row), row]));
+  return next.map((row) => {
+    const old = byKey.get(rowKey(row));
+    return old && sameData(old, row) ? old : row;
   });
 }
 function rowKey(bot) {
@@ -42359,6 +42394,16 @@ function defaultSections(visible2, metaFor2, order) {
 function connectionLabel(bot) {
   if (!bot?.remoteSource && (!bot?.connectionKind || bot.connectionKind === "local")) return "This device";
   return String(bot?.connectionLabel || bot?.connectionId || "Remote");
+}
+function botForSession(rows, storedId, open = null) {
+  const id = String(storedId || "").trim();
+  if (!id) return null;
+  const ids = (row) => [row?.id, row?.resolved_id].filter(Boolean).map(String);
+  if (open?.bot && ids(open.canonical).includes(id)) {
+    const key = rowKey(open.bot);
+    return (Array.isArray(rows) ? rows : []).find((row) => rowKey(row) === key) || open.bot;
+  }
+  return (Array.isArray(rows) ? rows : []).find((row) => ids(row?.canonical_session).includes(id)) || null;
 }
 
 // src/core/cron.js
@@ -43888,6 +43933,7 @@ var HELP_TEXT = [
 
 // src/core/session.js
 var HISTORY_PAGE = 120;
+var CHECKING_TEXT = "this chat is still being checked, try again in a moment";
 var RESUME_TIMEOUT_MS = 18e4;
 var APPROVAL_POLL_MS = 2e3;
 var IDLE_REFRESH_MS = 15e3;
@@ -43929,8 +43975,33 @@ var IDEMPOTENT_EVENTS = /* @__PURE__ */ new Set([
 ]);
 var TURN_EVENTS = /* @__PURE__ */ new Set(["message.start", "message.complete", "error"]);
 var TEXT_EVENTS = /* @__PURE__ */ new Set(["message.delta", "message.interim", "reasoning.delta", "thinking.delta", "reasoning.available"]);
+function chatSeed(seed) {
+  const storedId = String(seed?.storedId || "");
+  if (!storedId || !seed?.canonical || !Array.isArray(seed?.rows)) return null;
+  const items = Array.isArray(seed.items) ? seed.items : [];
+  return { storedId, canonical: seed.canonical, rows: seed.rows, items, hasMore: Boolean(seed.hasMore) };
+}
+var STORED_ITEM = /^(?:h|r):/;
+function seedFromState(state) {
+  if (state?.phase !== "ready" || !state?.storedId || !state?.canonical || !Array.isArray(state?.rows)) return null;
+  const items = state.rows.length ? [] : (state.chat?.items || []).filter((item) => STORED_ITEM.test(String(item?.id || "")));
+  return { storedId: state.storedId, canonical: state.canonical, rows: state.rows, items, hasMore: Boolean(state.hasMore) };
+}
+function seedItems(seed) {
+  return seed.rows.length ? rowsToItems(seed.rows) : seed.items;
+}
 function createChatController(bot, deps, options = {}) {
   const attachOnOpen = options.attachOnOpen !== false;
+  const seed = chatSeed(options.seed);
+  let seeded = Boolean(seed);
+  let trusted = !seed;
+  let opensInFlight = 0;
+  let validatedGen = -1;
+  const guard = (fn, refuse) => (...args) => trusted ? fn(...args) : refuse();
+  const notSent = () => Promise.resolve({ ok: false, delivery: "not-sent", error: CHECKING_TEXT });
+  const notDone = () => Promise.resolve({ ok: false, error: CHECKING_TEXT });
+  const nothing = () => Promise.resolve(false);
+  const rejected = () => Promise.reject(new Error(CHECKING_TEXT));
   const now = deps.now || (() => Date.now());
   const setTimer2 = deps.setTimer || ((fn, ms) => {
     const id = setTimeout(fn, ms);
@@ -43947,10 +44018,10 @@ function createChatController(bot, deps, options = {}) {
   let retiring2 = false;
   let state = {
     bot,
-    phase: "idle",
+    phase: seed ? "ready" : "idle",
     error: null,
-    canonical: null,
-    storedId: "",
+    canonical: seed ? seed.canonical : null,
+    storedId: seed ? seed.storedId : "",
     runtimeId: "",
     attaching: false,
     attachError: null,
@@ -43959,16 +44030,18 @@ function createChatController(bot, deps, options = {}) {
     reconnecting: false,
     leaseError: null,
     sendBlocked: null,
-    hasMore: false,
+    hasMore: seed ? seed.hasMore : false,
     loadingMore: false,
-    loadedCount: 0,
-    rows: [],
+    loadedCount: seed ? seed.rows.length : 0,
+    rows: seed ? seed.rows : [],
     receipt: null,
     stopError: null,
     // A failed-turn card's Try again (retryTurn): { running, from, text,
     // failed } of the newest one, or null (core/turnError.js).
     turnRetry: null,
-    chat: initialChatState()
+    // A remembered transcript that is still being checked (T9).
+    checking: Boolean(seed),
+    chat: initialChatState(seed ? seedItems(seed) : [])
   };
   const listeners = /* @__PURE__ */ new Set();
   let attachFlight = null;
@@ -44178,8 +44251,34 @@ function createChatController(bot, deps, options = {}) {
     return (Array.isArray(items) ? items : []).filter((item) => isOpenSend(item) && keep(item));
   }
   async function open() {
+    if (trusted) return openChecked();
+    opensInFlight += 1;
+    try {
+      return await openChecked();
+    } finally {
+      opensInFlight -= 1;
+      concludeCheck();
+    }
+  }
+  function concludeCheck() {
+    if (trusted || disposed || opensInFlight > 0) return;
+    if (validatedGen === generation2 && state.phase === "ready" && state.storedId) {
+      trusted = true;
+      set({ checking: false });
+      return;
+    }
+    set((s) => ({
+      checking: false,
+      storedId: "",
+      canonical: null,
+      ...s.phase === "ready" ? { phase: "error", error: "Could not check this Bot Chat. Try again." } : {}
+    }));
+  }
+  async function openChecked() {
     const mine = ++generation2;
-    set({ phase: "resolving", error: null });
+    const quiet = seeded && state.phase === "ready";
+    seeded = false;
+    if (!quiet) set({ phase: "resolving", error: null });
     let canonical2;
     try {
       canonical2 = await findCanonicalChat(deps.requestForBot, bot);
@@ -44193,7 +44292,7 @@ function createChatController(bot, deps, options = {}) {
       set({ phase: "no-chat", canonical: null });
       return state;
     }
-    return load(canonical2, mine);
+    return load(canonical2, mine, { quiet: quiet && openedSessionId(canonical2) === state.storedId });
   }
   let creating = null;
   function create({ kickoff = false } = {}) {
@@ -44217,20 +44316,24 @@ function createChatController(bot, deps, options = {}) {
     })();
     return creating;
   }
-  async function load(canonical2, mine) {
+  async function load(canonical2, mine, { quiet = false } = {}) {
     const storedId = openedSessionId(canonical2);
-    set({ phase: "loading", canonical: canonical2, storedId });
+    set(quiet ? { canonical: canonical2, storedId } : { phase: "loading", canonical: canonical2, storedId });
     let loaded = false;
     try {
       const rows = await readPage(0);
       if (mine !== generation2 || disposed) return state;
-      set({
-        phase: "ready",
-        rows,
-        loadedCount: rows.length,
-        hasMore: rows.length >= HISTORY_PAGE,
-        chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
-      });
+      if (quiet) {
+        mergeTail(rows, keepLocal);
+      } else {
+        set({
+          phase: "ready",
+          rows,
+          loadedCount: rows.length,
+          hasMore: rows.length >= HISTORY_PAGE,
+          chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
+        });
+      }
       loaded = true;
     } catch (error) {
       if (!attachOnOpen) {
@@ -44248,6 +44351,10 @@ function createChatController(bot, deps, options = {}) {
           scheduleReattach();
         }
       }
+    }
+    if (mine === generation2 && !disposed && state.phase === "ready" && canonicalIds(canonical2).includes(state.storedId)) {
+      validatedGen = mine;
+      if (!trusted && opensInFlight === 0) concludeCheck();
     }
     if (state.phase === "ready" && !retiring2) scheduleIdleRefresh();
     return state;
@@ -45600,34 +45707,34 @@ ${body}` : body);
     },
     open,
     create,
-    attach,
-    loadEarlier,
-    refresh,
-    reconcile,
-    send,
-    sendDraft,
-    retry,
-    recheck,
+    attach: guard(attach, rejected),
+    loadEarlier: guard(loadEarlier, nothing),
+    refresh: guard(refresh, nothing),
+    reconcile: guard(reconcile, nothing),
+    send: guard(send, () => Promise.resolve(false)),
+    sendDraft: guard(sendDraft, notSent),
+    retry: guard(retry, notSent),
+    recheck: guard(recheck, nothing),
     dropFailed,
-    discardStaged,
-    interrupt,
-    respondApproval,
-    editMessage,
-    regenerate,
-    rewindTo,
-    retryTurn,
+    discardStaged: guard(discardStaged, nothing),
+    interrupt: guard(interrupt, nothing),
+    respondApproval: guard(respondApproval, nothing),
+    editMessage: guard(editMessage, notSent),
+    regenerate: guard(regenerate, notSent),
+    rewindTo: guard(rewindTo, notDone),
+    retryTurn: guard(retryTurn, notDone),
     laterTurns,
-    react,
-    runSlash,
-    completeSlash,
-    pluginRequest,
-    sendIntent,
-    answerPrompt,
+    react: guard(react, nothing),
+    runSlash: guard(runSlash, notDone),
+    completeSlash: guard(completeSlash, () => Promise.resolve({ items: [], replaceFrom: 0 })),
+    pluginRequest: guard(pluginRequest, rejected),
+    sendIntent: guard(sendIntent, notDone),
+    answerPrompt: guard(answerPrompt, notDone),
     pickClarify,
     pageClarify,
-    answerClarifyText,
-    respondConnection,
-    pollApprovals,
+    answerClarifyText: guard(answerClarifyText, notDone),
+    respondConnection: guard(respondConnection, notDone),
+    pollApprovals: guard(pollApprovals, nothing),
     hasPendingApproval: () => hasPendingApproval(state.chat.items),
     retire,
     revive,
@@ -50541,6 +50648,7 @@ var rosterTimer = null;
 var remoteAvatars = null;
 var unwatchAvatars = null;
 var lastOwnFetch = 0;
+var lastOwnRead = 0;
 var liveNames = /* @__PURE__ */ new Map();
 var lastVerify = 0;
 var verifyInFlight = false;
@@ -50585,9 +50693,35 @@ function activeConnectionId() {
     return null;
   }
 }
+var LOCAL_META_KEY = "hermes.plugin.hermes-bots.bot-meta-v2";
+var sideRaw = void 0;
+var sideMeta = {};
 function readSideData() {
-  const localMeta = readPluginStorage("hermes-bots", "bot-meta-v2", {}) || {};
-  return { localMeta: localMeta && typeof localMeta === "object" ? localMeta : {} };
+  let raw = null;
+  try {
+    raw = globalThis.localStorage?.getItem(LOCAL_META_KEY) ?? null;
+  } catch {
+    raw = null;
+  }
+  if (raw !== sideRaw) {
+    sideRaw = raw;
+    const localMeta = readPluginStorage("hermes-bots", "bot-meta-v2", {}) || {};
+    sideMeta = localMeta && typeof localMeta === "object" ? localMeta : {};
+  }
+  return { localMeta: sideMeta };
+}
+function mergeRosterState(s, patch) {
+  let changed = false;
+  const next = { ...s };
+  for (const [key, value] of Object.entries(patch)) {
+    const old = s[key];
+    let kept = value;
+    if (key === "rows") kept = keepRows(old, value);
+    else if (key === "sources" && sameData(old, value)) kept = old;
+    if (key !== "updatedAt" && !Object.is(kept, old)) changed = true;
+    next[key] = kept;
+  }
+  return changed ? next : s;
 }
 async function fetchOwnRoster() {
   if (ownFetchInFlight) return;
@@ -50606,10 +50740,14 @@ async function fetchOwnRoster() {
     }
     if (union) liveNames = liveRosterNames(union);
     const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames);
-    app.roster.set((s) => ({ ...s, rows, sources: union?.sources || [], origin: "own", error: null, updatedAt: Date.now(), protocolInjected: Boolean(local?.bot_mode_protocol) }));
+    lastOwnRead = Date.now();
+    app.roster.set((s) => {
+      return mergeRosterState(s, { rows, sources: union?.sources || [], origin: "own", error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) });
+    });
     trackActivity();
   } catch (error) {
-    app.roster.set((s) => ({ ...s, error: String(error?.message || error) }));
+    const message = String(error?.message || error);
+    app.roster.set((s) => s.error === message ? s : { ...s, error: message });
   } finally {
     ownFetchInFlight = false;
   }
@@ -50655,19 +50793,20 @@ function refreshRoster() {
   const side = readSideData();
   const cached2 = readStockRoster(queryClient2(), activeConnectionId());
   const own2 = app.roster.get();
-  if (cached2 && cached2.profiles.length && !(own2.origin === "own" && own2.updatedAt > cached2.updatedAt)) {
+  if (cached2 && cached2.profiles.length && !(own2.origin === "own" && Math.max(own2.updatedAt, lastOwnRead) > cached2.updatedAt)) {
     const sources = cached2.sources.length ? cached2.sources : own2.sources;
-    app.roster.set((s) => ({
-      ...s,
-      ...side,
-      rows: dropDeadRows(annotateSources(cached2.profiles, sources), liveNames),
-      sources,
-      origin: "stock",
-      error: null,
-      updatedAt: cached2.updatedAt
-    }));
+    app.roster.set(
+      (s) => mergeRosterState(s, {
+        ...side,
+        rows: dropDeadRows(annotateSources(cached2.profiles, sources), liveNames),
+        sources,
+        origin: "stock",
+        error: null,
+        updatedAt: cached2.updatedAt
+      })
+    );
   } else {
-    app.roster.set((s) => ({ ...s, ...side }));
+    app.roster.set((s) => mergeRosterState(s, side));
   }
   trackActivity();
   void refreshRooms();
@@ -50783,6 +50922,35 @@ function isVisible() {
 function chatDeps() {
   return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible };
 }
+var SEED_MAX = 8;
+var chatSeeds = /* @__PURE__ */ new Map();
+var cronSeeds = /* @__PURE__ */ new Map();
+var screenSeeds = /* @__PURE__ */ new Map();
+function remember(map, key, value) {
+  if (!key) return;
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > SEED_MAX) map.delete(map.keys().next().value);
+}
+function rememberChat(key, chat) {
+  const seed = seedFromState(chat?.get?.());
+  if (seed) remember(chatSeeds, key, seed);
+}
+function seedFor(bot, key) {
+  const seed = chatSeeds.get(key);
+  if (!seed) return null;
+  const listed = canonicalIds(bot?.canonical_session);
+  if (listed.length && !listed.some((id) => canonicalIds(seed.canonical).includes(id))) {
+    chatSeeds.delete(key);
+    return null;
+  }
+  return seed;
+}
+function clearSeeds() {
+  chatSeeds.clear();
+  cronSeeds.clear();
+  screenSeeds.clear();
+}
 function disposeController({ hard = false } = {}) {
   offController?.();
   offController = null;
@@ -50792,12 +50960,16 @@ function disposeController({ hard = false } = {}) {
   controllerKey = "";
   app.chat.set(null);
   if (current) {
+    if (!hard) rememberChat(key, current);
     if (hard) current.dispose();
     else if (current.retire()) retiring.set(key, current);
   }
   if (hard) {
     for (const chat of retiring.values()) chat.dispose();
     retiring.clear();
+    for (const chat of orphanedChats) chat.dispose();
+    orphanedChats.clear();
+    clearSeeds();
   }
 }
 function adopt(next, key) {
@@ -50806,7 +50978,13 @@ function adopt(next, key) {
   offController = next.subscribe((state) => app.chat.set(state));
   app.chat.set(next.get());
 }
-function selectBot(bot, { openWorkspace = true } = {}) {
+function holdsOtherChat(chat, storedId) {
+  if (!storedId) return false;
+  const state = chat?.get?.();
+  return !canonicalIds(state?.canonical).includes(storedId);
+}
+var orphanedChats = /* @__PURE__ */ new Set();
+function selectBot(bot, { openWorkspace = true, session = "" } = {}) {
   const key = rowKey(bot);
   if (key !== app.selectedKey.get()) app.drawerOpen.set(false);
   app.selectedKey.set(key);
@@ -50815,15 +50993,25 @@ function selectBot(bot, { openWorkspace = true } = {}) {
   ackBot(bot);
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot));
   else retitleWorkspace(chatTabTitle(bot));
-  if (controllerKey === key && controller) {
+  if (controllerKey === key && controller && !holdsOtherChat(controller, session)) {
     const phase = controller.get().phase;
     if (phase === "no-chat" && openWorkspace) void controller.create();
     else if (phase === "error" || phase === "no-chat") void controller.open();
     return;
   }
   disposeController();
-  const parked = retiring.get(key);
+  let parked = retiring.get(key);
   retiring.delete(key);
+  if (parked && holdsOtherChat(parked, session)) {
+    for (const chat of orphanedChats) if (chat.isDisposed?.()) orphanedChats.delete(chat);
+    orphanedChats.add(parked);
+    parked = null;
+  }
+  let seed = seedFor(bot, key);
+  if (seed && session && !canonicalIds(seed.canonical).includes(session)) {
+    chatSeeds.delete(key);
+    seed = null;
+  }
   if (parked && parked.revive()) {
     adopt(parked, key);
   } else {
@@ -50832,8 +51020,13 @@ function selectBot(bot, { openWorkspace = true } = {}) {
       // click path does (openBotCanonicalChat -> createCanonicalChat, C3); a
       // chat tab restoring the remembered bot never mints one.
       createIfMissing: openWorkspace,
+      // The transcript this bot showed last, on screen at once (T9).
+      seed,
       onDispose: () => {
-        if (retiring.get(key) === next) retiring.delete(key);
+        if (retiring.get(key) === next) {
+          retiring.delete(key);
+          rememberChat(key, next);
+        }
       }
     });
     adopt(next, key);
@@ -50857,13 +51050,15 @@ var cronGeneration = 0;
 async function loadCron(bot) {
   const key = rowKey(bot);
   const mine = ++cronGeneration;
-  app.cron.set((s) => ({ ...s, key, loading: true, error: null, ...s.key === key ? {} : { jobs: [], busy: {} } }));
+  app.cron.set((s) => ({ ...s, key, loading: true, error: null, ...s.key === key ? {} : { jobs: cronSeeds.get(key) || [], busy: {} } }));
   const current = () => mine === cronGeneration && app.cron.get().key === key;
   try {
     const res = await requestForBot(bot, "cron.manage", cronListParams(bot));
     if (!current()) return;
     if (res?.error) throw new Error(res.error);
-    app.cron.set((s) => ({ ...s, loading: false, jobs: sortJobs(res?.jobs) }));
+    const jobs = sortJobs(res?.jobs);
+    remember(cronSeeds, key, jobs);
+    app.cron.set((s) => ({ ...s, loading: false, jobs }));
   } catch (error) {
     if (current()) app.cron.set((s) => ({ ...s, loading: false, error: String(error?.message || error) }));
   }
@@ -50892,17 +51087,19 @@ async function toggleCron(bot, job) {
 }
 async function loadScreen(bot) {
   const key = rowKey(bot);
-  app.screen.set({ key, status: null });
+  if (app.screen.get().key !== key) app.screen.set({ key, status: screenSeeds.get(key) ?? null });
   try {
     const status = await requestForBot(bot, "display.status", { profile: String(bot.name) });
+    if (status && !status.error) remember(screenSeeds, key, status);
     if (app.screen.get().key === key) app.screen.set({ key, status });
   } catch {
     if (app.screen.get().key === key) app.screen.set({ key, status: { error: true } });
   }
 }
+var COMPUTER_VIEWER_PANE_ID = "computer-viewer:pane";
 function openComputerViewer() {
   try {
-    host2?.revealPane?.("computer-viewer:pane");
+    host2?.revealPane?.(COMPUTER_VIEWER_PANE_ID);
   } catch {
   }
 }
@@ -51223,8 +51420,77 @@ function stockChatShown() {
   }
   return false;
 }
+var STARTUP_GRACE_MS = 1e4;
+var startupGrace = false;
+var endGrace = null;
+var hermesView = null;
+var lastFocused = void 0;
+function beginStartupGrace() {
+  endGrace?.();
+  startupGrace = true;
+  let stopTimer = null;
+  const end = () => {
+    startupGrace = false;
+    stopTimer?.();
+    stopTimer = null;
+    if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+      document.removeEventListener("pointerdown", end, true);
+      document.removeEventListener("keydown", end, true);
+    }
+    endGrace = null;
+  };
+  endGrace = end;
+  stopTimer = setTimer(end, STARTUP_GRACE_MS);
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("pointerdown", end, true);
+    document.addEventListener("keydown", end, true);
+  }
+}
+function botForFocus(value) {
+  const state = controller?.get?.();
+  return botForSession(app.roster.get().rows, String(value ?? ""), state ? { bot: state.bot, canonical: state.canonical } : null);
+}
+function routeToBot(bot, storedId) {
+  hermesView = null;
+  selectBot(bot, { session: storedId });
+  try {
+    host2?.revealPane?.(MAIN_PANE_ID);
+  } catch {
+  }
+}
+function onSessionFocus(value) {
+  const first = lastFocused === void 0;
+  const changed = !first && value !== lastFocused;
+  lastFocused = value;
+  if (first || !changed || startupGrace || !app.enabled.get() || isSecondaryWindow() || stock?.isPeeking?.()) {
+    scheduleClaim();
+    return;
+  }
+  const bot = botForFocus(value);
+  if (bot) return routeToBot(bot, String(value ?? ""));
+  if (!visible(MAIN_PANE_ID)) hermesView = String(value ?? "");
+  else scheduleClaim();
+}
+function settleMainPane() {
+  if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return;
+  if (!closeWorkspace) {
+    if (hermesView === null) claimMainPane();
+    return;
+  }
+  if (hermesView !== null || visible(MAIN_PANE_ID) || !stockChatShown()) return;
+  const focused = host2?.state?.focusedStoredSessionId;
+  if (!focused || typeof focused.get !== "function") {
+    claimMainPane();
+    return;
+  }
+  const value = focused.get();
+  const bot = botForFocus(value);
+  if (bot) routeToBot(bot, String(value ?? ""));
+  else hermesView = String(value ?? "");
+}
 function claimMainPane() {
   if (!app.enabled.get() || isSecondaryWindow() || closingQuietly || stock?.isPeeking?.()) return false;
+  if (hermesView !== null) return false;
   if (!closeWorkspace) {
     const bot = findBot(app.selectedKey.get());
     ensureWorkspace(bot ? chatTabTitle(bot) : "Chat");
@@ -51238,13 +51504,17 @@ function claimMainPane() {
   }
   return true;
 }
+var CLAIM_SETTLE_MS = 300;
 function scheduleClaim() {
-  if (claimQueued) return;
+  if (claimQueued || !app.enabled.get()) return;
   claimQueued = true;
-  queueMicrotask(() => {
+  const run = () => {
     claimQueued = false;
-    claimMainPane();
-  });
+    if (startupGrace) claimMainPane();
+    else settleMainPane();
+  };
+  if (startupGrace) queueMicrotask(run);
+  else setTimer(run, CLAIM_SETTLE_MS);
 }
 function watchMainPane() {
   if (unwatchMain.length) return;
@@ -51259,9 +51529,18 @@ function watchMainPane() {
   };
   const pane = (id) => typeof host2?.paneVisibility === "function" ? host2.paneVisibility(id) : null;
   watch(pane("workspace"), (shown) => shown && scheduleClaim());
-  watch(pane(MAIN_PANE_ID), (shown) => !shown && scheduleClaim());
-  watch(host2?.state?.focusedStoredSessionId, () => scheduleClaim());
-  watch(host2?.state?.activeSessionId, () => scheduleClaim());
+  watch(pane(MAIN_PANE_ID), (shown) => {
+    if (shown) hermesView = null;
+    else scheduleClaim();
+  });
+  const focused = host2?.state?.focusedStoredSessionId;
+  lastFocused = void 0;
+  if (focused && typeof focused.subscribe === "function") {
+    watch(focused, onSessionFocus);
+    watch(host2?.state?.activeSessionId, () => startupGrace && scheduleClaim());
+  } else {
+    watch(host2?.state?.activeSessionId, () => scheduleClaim());
+  }
 }
 function injectStyle() {
   if (typeof document === "undefined") return;
@@ -51288,8 +51567,8 @@ function scheduleSync() {
   raf = requestAnimationFrame(() => {
     raf = 0;
     stock?.sync();
-    if (closeWorkspace && !visible(MAIN_PANE_ID)) claimMainPane();
-    const present = Boolean(document.querySelector('[data-tree-tab="computer-viewer:pane"]'));
+    if (closeWorkspace && !visible(MAIN_PANE_ID)) scheduleClaim();
+    const present = visible(COMPUTER_VIEWER_PANE_ID) || Boolean(document.querySelector(`[data-tree-tab="${COMPUTER_VIEWER_PANE_ID}"]`));
     if (present !== app.computerViewer.get().present) app.computerViewer.set((s) => ({ ...s, present }));
   });
 }
@@ -51311,9 +51590,11 @@ function watchVisibility() {
       scheduleSync();
     });
   }
-  const cv = typeof host2?.paneVisibility === "function" ? host2.paneVisibility("computer-viewer:pane") : null;
+  const cv = typeof host2?.paneVisibility === "function" ? host2.paneVisibility(COMPUTER_VIEWER_PANE_ID) : null;
   if (cv && typeof cv.subscribe === "function") {
-    unwatchComputer = cv.subscribe((visible2) => app.computerViewer.set((s) => ({ ...s, visible: Boolean(visible2) })));
+    unwatchComputer = cv.subscribe(
+      (visible2) => app.computerViewer.set((s) => s.visible === Boolean(visible2) && (!visible2 || s.present) ? s : { ...s, visible: Boolean(visible2), present: s.present || Boolean(visible2) })
+    );
   }
 }
 function startRemoteAvatars() {
@@ -51361,12 +51642,16 @@ function enable() {
     host2?.revealPane?.(OVERRIDE_ROSTER_PANE_ID);
   } catch {
   }
+  hermesView = null;
+  beginStartupGrace();
   watchMainPane();
   claimMainPane();
   scheduleSync();
 }
 function disable() {
   for (const off of unwatchMain.splice(0)) off();
+  endGrace?.();
+  hermesView = null;
   rosterTimer?.();
   rosterTimer = null;
   stopRemoteAvatars();
@@ -51640,7 +51925,7 @@ async function selfCheck({ notify: notify2 = true } = {}) {
       await fetchOwnRoster();
       rows = app.roster.get().rows;
     } else {
-      app.roster.set((s) => ({ ...s, ...readSideData(), rows: annotateSources(cached2.profiles, cached2.sources), origin: "stock" }));
+      app.roster.set((s) => mergeRosterState(s, { ...readSideData(), rows: annotateSources(cached2.profiles, cached2.sources), origin: "stock" }));
     }
     const secs = sections();
     step("roster", rows.length > 0, {
@@ -60429,7 +60714,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
           bot,
           name,
           busy: Boolean(state.chat.busy),
-          disabled: !ready,
+          disabled: !ready || Boolean(state.checking),
           roster: roster.rows,
           stopError: state.stopError,
           blocked: state.sendBlocked,

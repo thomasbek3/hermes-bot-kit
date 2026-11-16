@@ -112,6 +112,8 @@ import {
 } from './approvals.js'
 
 export const HISTORY_PAGE = 120
+// Why an action on a remembered chat (T9) is refused while it is checked.
+export const CHECKING_TEXT = 'this chat is still being checked, try again in a moment'
 const RESUME_TIMEOUT_MS = 180_000
 const APPROVAL_POLL_MS = 2_000
 const IDLE_REFRESH_MS = 15_000
@@ -186,8 +188,53 @@ const IDEMPOTENT_EVENTS = new Set([
 const TURN_EVENTS = new Set(['message.start', 'message.complete', 'error'])
 const TEXT_EVENTS = new Set(['message.delta', 'message.interim', 'reasoning.delta', 'thinking.delta', 'reasoning.available'])
 
+/** A transcript remembered from this bot's last open chat (T9): shown at
+ *  once on the way back while open() re-checks it. Null when unusable. */
+export function chatSeed(seed) {
+  const storedId = String(seed?.storedId || '')
+  if (!storedId || !seed?.canonical || !Array.isArray(seed?.rows)) return null
+  const items = Array.isArray(seed.items) ? seed.items : []
+  return { storedId, canonical: seed.canonical, rows: seed.rows, items, hasMore: Boolean(seed.hasMore) }
+}
+
+// Stored transcript items: from REST pages ('h:') or from a session.resume
+// history fallback ('r:'); never live, local or in-flight ones.
+const STORED_ITEM = /^(?:h|r):/
+
+/** What a chat's state leaves behind for chatSeed, or null (not loaded). A
+ *  chat whose history came from the session.resume fallback (no REST rows)
+ *  keeps its stored items instead (review tighter-b r3 #2). */
+export function seedFromState(state) {
+  if (state?.phase !== 'ready' || !state?.storedId || !state?.canonical || !Array.isArray(state?.rows)) return null
+  const items = state.rows.length ? [] : (state.chat?.items || []).filter(item => STORED_ITEM.test(String(item?.id || '')))
+  return { storedId: state.storedId, canonical: state.canonical, rows: state.rows, items, hasMore: Boolean(state.hasMore) }
+}
+
+/** The items a seed paints: its REST rows, else its fallback items. */
+function seedItems(seed) {
+  return seed.rows.length ? rowsToItems(seed.rows) : seed.items
+}
+
 export function createChatController(bot, deps, options = {}) {
   const attachOnOpen = options.attachOnOpen !== false
+  // Stale-while-revalidate (T9): a seeded chat starts 'ready' with the
+  // remembered transcript; the first open() re-checks it in the background.
+  const seed = chatSeed(options.seed)
+  let seeded = Boolean(seed)
+  // A seed is only a picture (review tighter-b r1 #1 #2, r2 #1 #2): until
+  // the newest open() has confirmed the Bot Chat in the registry and loaded
+  // it, `checking` is set (the composer is disabled, as on any open) and
+  // every action is refused at once: nothing is attached, sent or written,
+  // and nothing waits, so nothing can be released late onto a stale chat or
+  // lost with a closed one. A failed check forgets the remembered stored id.
+  let trusted = !seed
+  let opensInFlight = 0
+  let validatedGen = -1
+  const guard = (fn, refuse) => (...args) => (trusted ? fn(...args) : refuse())
+  const notSent = () => Promise.resolve({ ok: false, delivery: 'not-sent', error: CHECKING_TEXT })
+  const notDone = () => Promise.resolve({ ok: false, error: CHECKING_TEXT })
+  const nothing = () => Promise.resolve(false)
+  const rejected = () => Promise.reject(new Error(CHECKING_TEXT))
   const now = deps.now || (() => Date.now())
   const setTimer = deps.setTimer || ((fn, ms) => {
     const id = setTimeout(fn, ms)
@@ -205,10 +252,10 @@ export function createChatController(bot, deps, options = {}) {
   let retiring = false
   let state = {
     bot,
-    phase: 'idle',
+    phase: seed ? 'ready' : 'idle',
     error: null,
-    canonical: null,
-    storedId: '',
+    canonical: seed ? seed.canonical : null,
+    storedId: seed ? seed.storedId : '',
     runtimeId: '',
     attaching: false,
     attachError: null,
@@ -217,16 +264,18 @@ export function createChatController(bot, deps, options = {}) {
     reconnecting: false,
     leaseError: null,
     sendBlocked: null,
-    hasMore: false,
+    hasMore: seed ? seed.hasMore : false,
     loadingMore: false,
-    loadedCount: 0,
-    rows: [],
+    loadedCount: seed ? seed.rows.length : 0,
+    rows: seed ? seed.rows : [],
     receipt: null,
     stopError: null,
     // A failed-turn card's Try again (retryTurn): { running, from, text,
     // failed } of the newest one, or null (core/turnError.js).
     turnRetry: null,
-    chat: initialChatState()
+    // A remembered transcript that is still being checked (T9).
+    checking: Boolean(seed),
+    chat: initialChatState(seed ? seedItems(seed) : [])
   }
   const listeners = new Set()
   let attachFlight = null
@@ -495,8 +544,39 @@ export function createChatController(bot, deps, options = {}) {
   }
 
   async function open() {
+    if (trusted) return openChecked()
+    opensInFlight += 1
+    try {
+      return await openChecked()
+    } finally {
+      opensInFlight -= 1
+      concludeCheck()
+    }
+  }
+
+  /** Once no open() is running: trusted only if the newest one loaded the
+   *  Bot Chat it confirmed; otherwise fail closed. */
+  function concludeCheck() {
+    if (trusted || disposed || opensInFlight > 0) return
+    if (validatedGen === generation && state.phase === 'ready' && state.storedId) {
+      trusted = true
+      set({ checking: false })
+      return
+    }
+    set(s => ({
+      checking: false,
+      storedId: '',
+      canonical: null,
+      ...(s.phase === 'ready' ? { phase: 'error', error: 'Could not check this Bot Chat. Try again.' } : {})
+    }))
+  }
+
+  async function openChecked() {
     const mine = ++generation
-    set({ phase: 'resolving', error: null })
+    // Seeded: the remembered transcript stays on screen while this re-checks.
+    const quiet = seeded && state.phase === 'ready'
+    seeded = false
+    if (!quiet) set({ phase: 'resolving', error: null })
     let canonical
     try {
       canonical = await findCanonicalChat(deps.requestForBot, bot)
@@ -510,7 +590,9 @@ export function createChatController(bot, deps, options = {}) {
       set({ phase: 'no-chat', canonical: null })
       return state
     }
-    return load(canonical, mine)
+    // A seed for another stored session (the chat was replaced) is dropped:
+    // the normal path, "Opening…" and all.
+    return load(canonical, mine, { quiet: quiet && openedSessionId(canonical) === state.storedId })
   }
 
   let creating = null
@@ -542,21 +624,27 @@ export function createChatController(bot, deps, options = {}) {
     return creating
   }
 
-  async function load(canonical, mine) {
+  async function load(canonical, mine, { quiet = false } = {}) {
     const storedId = openedSessionId(canonical)
-    set({ phase: 'loading', canonical, storedId })
+    set(quiet ? { canonical, storedId } : { phase: 'loading', canonical, storedId })
 
     let loaded = false
     try {
       const rows = await readPage(0)
       if (mine !== generation || disposed) return state
-      set({
-        phase: 'ready',
-        rows,
-        loadedCount: rows.length,
-        hasMore: rows.length >= HISTORY_PAGE,
-        chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
-      })
+      if (quiet) {
+        // The same Bot Chat as the seed: the fresh tail merges into the
+        // remembered rows, earlier pages and all (review tighter-b r1 #4).
+        mergeTail(rows, keepLocal)
+      } else {
+        set({
+          phase: 'ready',
+          rows,
+          loadedCount: rows.length,
+          hasMore: rows.length >= HISTORY_PAGE,
+          chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
+        })
+      }
       loaded = true
     } catch (error) {
       if (!attachOnOpen) {
@@ -577,6 +665,11 @@ export function createChatController(bot, deps, options = {}) {
           scheduleReattach()
         }
       }
+    }
+    if (mine === generation && !disposed && state.phase === 'ready' && canonicalIds(canonical).includes(state.storedId)) {
+      validatedGen = mine
+      // A load not started by open() (create) concludes the check itself.
+      if (!trusted && opensInFlight === 0) concludeCheck()
     }
     if (state.phase === 'ready' && !retiring) scheduleIdleRefresh()
     return state
@@ -2270,34 +2363,34 @@ export function createChatController(bot, deps, options = {}) {
     },
     open,
     create,
-    attach,
-    loadEarlier,
-    refresh,
-    reconcile,
-    send,
-    sendDraft,
-    retry,
-    recheck,
+    attach: guard(attach, rejected),
+    loadEarlier: guard(loadEarlier, nothing),
+    refresh: guard(refresh, nothing),
+    reconcile: guard(reconcile, nothing),
+    send: guard(send, () => Promise.resolve(false)),
+    sendDraft: guard(sendDraft, notSent),
+    retry: guard(retry, notSent),
+    recheck: guard(recheck, nothing),
     dropFailed,
-    discardStaged,
-    interrupt,
-    respondApproval,
-    editMessage,
-    regenerate,
-    rewindTo,
-    retryTurn,
+    discardStaged: guard(discardStaged, nothing),
+    interrupt: guard(interrupt, nothing),
+    respondApproval: guard(respondApproval, nothing),
+    editMessage: guard(editMessage, notSent),
+    regenerate: guard(regenerate, notSent),
+    rewindTo: guard(rewindTo, notDone),
+    retryTurn: guard(retryTurn, notDone),
     laterTurns,
-    react,
-    runSlash,
-    completeSlash,
-    pluginRequest,
-    sendIntent,
-    answerPrompt,
+    react: guard(react, nothing),
+    runSlash: guard(runSlash, notDone),
+    completeSlash: guard(completeSlash, () => Promise.resolve({ items: [], replaceFrom: 0 })),
+    pluginRequest: guard(pluginRequest, rejected),
+    sendIntent: guard(sendIntent, notDone),
+    answerPrompt: guard(answerPrompt, notDone),
     pickClarify,
     pageClarify,
-    answerClarifyText,
-    respondConnection,
-    pollApprovals,
+    answerClarifyText: guard(answerClarifyText, notDone),
+    respondConnection: guard(respondConnection, notDone),
+    pollApprovals: guard(pollApprovals, nothing),
     hasPendingApproval: () => hasPendingApproval(state.chat.items),
     retire,
     revive,
