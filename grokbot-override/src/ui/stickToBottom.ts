@@ -1,12 +1,14 @@
 // Stick-to-bottom for the transcript. The view follows new messages while the
 // reader is at the bottom, and keeps following when content grows after it
 // rendered (an image decodes, a card or preview frame sizes itself, a code
-// block lays out): OverlayScroll reports every content resize and a pinned
-// view goes back to the bottom before paint. Once the reader scrolls up
-// nothing moves them until they come back down, send a message, or press the
-// jump-to-latest button, which shows when a newer message arrives while they
-// are away. "Show earlier messages" keeps their place: the distance from the
-// bottom is recorded before the older page loads and restored after it lands.
+// block lays out, the live reply streams): OverlayScroll reports every
+// content resize and a pinned view goes back to the bottom before paint.
+// Once the reader scrolls up nothing moves them until they come back down,
+// send a message, or press the jump-to-latest button, which shows when a
+// newer message arrives while they are away. "Show earlier messages" keeps
+// their place: a row they can see is recorded with its position in the
+// viewport, and only that row's displacement (older rows landing above it)
+// is undone; growth below it (a streaming reply) moves nothing.
 
 import * as React from 'react'
 
@@ -15,7 +17,54 @@ import * as React from 'react'
  *  not pull them down (it was 80px, three lines). */
 export const STICK_PX = 16
 
+/** Longest a jump-to-latest animation may take before it is settled. */
+export const JUMP_MAX_MS = 1200
+
+/** Marks a transcript row with a key that survives an older page landing
+ *  (a group's LAST item: older bubbles can join a group at its front). */
+export const ANCHOR_ATTR = 'data-gbo-last'
+
 const fromBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight
+
+function reducedMotion(): boolean {
+  try {
+    const mm = (globalThis as any).window?.matchMedia ?? (globalThis as any).matchMedia
+    return typeof mm === 'function' && Boolean(mm('(prefers-reduced-motion: reduce)')?.matches)
+  } catch {
+    return false
+  }
+}
+
+type Anchor = { el: Element; key: string | null; bottom: number }
+
+/** The rows of the transcript column (its direct children). */
+function rowsOf(scroller: HTMLElement): Element[] {
+  const column = scroller.firstElementChild
+  return column ? Array.from(column.children) : []
+}
+
+/** The first row whose bottom edge is inside the viewport, with that edge's
+ *  distance from the viewport top. The bottom edge, not the top: older
+ *  bubbles joining the row's group grow it at its top. */
+function captureAnchor(scroller: HTMLElement): Anchor | null {
+  const top = scroller.getBoundingClientRect().top
+  for (const row of rowsOf(scroller)) {
+    // The "Show earlier messages" button stays first: it is no reading place.
+    if (row.classList.contains('gbo-more')) continue
+    const bottom = row.getBoundingClientRect().bottom - top
+    if (bottom > 0) return { el: row, key: row.getAttribute(ANCHOR_ATTR), bottom }
+  }
+  return null
+}
+
+/** Where the anchor row is now (the same element, or the row now carrying
+ *  its key when its group was re-created), relative to the viewport top. */
+function anchorBottom(scroller: HTMLElement, anchor: Anchor): number | null {
+  let row: Element | null = anchor.el.isConnected ? anchor.el : null
+  if (!row && anchor.key !== null) row = rowsOf(scroller).find(r => r.getAttribute(ANCHOR_ATTR) === anchor.key) || null
+  if (!row) return null
+  return row.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top
+}
 
 /** `dep`: what changes when the transcript changes (its items). `mine`: the id
  *  of the reader's newest message (a new one pins). `latest`: the id of the
@@ -25,10 +74,57 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
   const stick = React.useRef(true)
   const lastMine = React.useRef(mine)
   const lastLatest = React.useRef(latest)
-  // Distance from the scroll top to the content end, recorded before an older
-  // page is prepended; null when nothing is being restored.
-  const keep = React.useRef<number | null>(null)
+  // While an older page loads: the row the reader sees and where. null when
+  // nothing is being restored.
+  const keep = React.useRef<Anchor | null>(null)
+  // The scrollTop this hook last set itself: a scroll event elsewhere is the
+  // reader moving.
+  const wrote = React.useRef<number | null>(null)
+  // A jump-to-latest in flight (smooth scrolling): its progress events do not
+  // unpin, growth re-targets it, and the reader's own input cancels it.
+  const jumping = React.useRef<null | { timer: any }>(null)
   const [unseen, setUnseen] = React.useState(false)
+
+  const setTop = (el: HTMLElement, top: number) => {
+    el.scrollTop = top
+    wrote.current = el.scrollTop
+  }
+
+  /** Put the anchor row back where the reader saw it. */
+  const restore = () => {
+    const el = ref.current
+    const anchor = keep.current
+    if (!el || !anchor) return
+    const now = anchorBottom(el, anchor)
+    if (now === null) return
+    const shift = now - anchor.bottom
+    if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift)
+  }
+
+  const scrollToBottom = (el: HTMLElement, smooth: boolean) => {
+    const top = el.scrollHeight
+    if (smooth && typeof el.scrollTo === 'function') {
+      try {
+        el.scrollTo({ top, behavior: 'smooth' })
+        return
+      } catch {
+        /* fall through */
+      }
+    }
+    setTop(el, top)
+  }
+
+  const endJump = () => {
+    const run = jumping.current
+    if (!run) return
+    jumping.current = null
+    clearTimeout(run.timer)
+    const el = ref.current
+    if (!el) return
+    stick.current = fromBottom(el) < STICK_PX
+    // Interrupted before the bottom: the newest message is still unseen.
+    setUnseen(!stick.current && Boolean(lastLatest.current))
+  }
 
   React.useLayoutEffect(() => {
     const el = ref.current
@@ -39,31 +135,70 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
     const newer = latest !== lastLatest.current
     lastLatest.current = latest
     if (!el) return
-    if (keep.current !== null) {
-      el.scrollTop = el.scrollHeight - keep.current
+    if (keep.current) {
+      restore()
       return
     }
-    if (stick.current) el.scrollTop = el.scrollHeight
+    if (jumping.current) scrollToBottom(el, !reducedMotion())
+    else if (stick.current) setTop(el, el.scrollHeight)
     else if (newer && latest) setUnseen(true)
   }, [dep, mine, latest])
 
   React.useLayoutEffect(() => {
-    if (stick.current && unseen) setUnseen(false)
+    if (stick.current && unseen && !jumping.current) setUnseen(false)
   })
+
+  // The reader's own input ends a jump in flight (they took over).
+  React.useEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    const cancel = () => {
+      if (!jumping.current) return
+      endJump()
+    }
+    const onKey = (event: any) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event?.key)) cancel()
+    }
+    el.addEventListener('wheel', cancel, { passive: true } as any)
+    el.addEventListener('touchstart', cancel, { passive: true } as any)
+    el.addEventListener('pointerdown', cancel)
+    el.addEventListener('keydown', onKey)
+    return () => {
+      el.removeEventListener('wheel', cancel)
+      el.removeEventListener('touchstart', cancel)
+      el.removeEventListener('pointerdown', cancel)
+      el.removeEventListener('keydown', onKey)
+      if (jumping.current) clearTimeout(jumping.current.timer)
+    }
+  }, [])
 
   const onScroll = () => {
     const el = ref.current
     if (!el) return
+    const ours = wrote.current !== null && Math.abs(el.scrollTop - wrote.current) < 1
+    wrote.current = null
+    if (jumping.current) {
+      // Progress of our own animation: stay pinned; arriving ends it.
+      if (fromBottom(el) < STICK_PX) endJump()
+      return
+    }
+    if (keep.current && !ours) {
+      // The reader moved while the older page loads: keep what they see now.
+      keep.current = captureAnchor(el) || keep.current
+    }
     stick.current = fromBottom(el) < STICK_PX
     if (stick.current) setUnseen(false)
   }
 
-  /** Content grew or shrank after it rendered: a pinned view stays pinned. */
+  /** Content grew or shrank after it rendered: a pinned view stays pinned,
+   *  a jump in flight re-targets the new bottom, a loading older page keeps
+   *  the reader's row in place. */
   const onContentResize = React.useCallback(() => {
     const el = ref.current
     if (!el) return
-    if (keep.current !== null) el.scrollTop = el.scrollHeight - keep.current
-    else if (stick.current) el.scrollTop = el.scrollHeight
+    if (keep.current) restore()
+    else if (jumping.current) scrollToBottom(el, !reducedMotion())
+    else if (stick.current) setTop(el, el.scrollHeight)
   }, [])
 
   const pin = () => {
@@ -71,17 +206,13 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
   }
 
   /** Run `load` (it prepends older rows) keeping what the reader sees in
-   *  place: the first message they could see stays at the same offset. */
+   *  place: the first row they can see stays at the same offset. */
   const keepPlace = async (load: () => Promise<unknown> | unknown) => {
     const el = ref.current
-    if (el) keep.current = el.scrollHeight - el.scrollTop
+    if (el) keep.current = captureAnchor(el)
     try {
       await load()
     } finally {
-      const restore = () => {
-        const target = ref.current
-        if (target && keep.current !== null) target.scrollTop = target.scrollHeight - keep.current
-      }
       restore()
       // The store's update may commit after this await resolves: keep the
       // anchor one more frame so the layout effect of that commit restores
@@ -98,19 +229,17 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
     }
   }
 
-  /** The jump button: scroll smoothly to the newest message and pin. */
+  /** The jump button: scroll to the newest message (smoothly unless the
+   *  reader asked for reduced motion) and pin. */
   const jump = () => {
     const el = ref.current
     stick.current = true
     setUnseen(false)
     if (!el) return
-    const top = el.scrollHeight
-    try {
-      if (typeof el.scrollTo === 'function') el.scrollTo({ top, behavior: 'smooth' })
-      else el.scrollTop = top
-    } catch {
-      el.scrollTop = top
-    }
+    const smooth = !reducedMotion() && typeof el.scrollTo === 'function'
+    if (jumping.current) clearTimeout(jumping.current.timer)
+    jumping.current = smooth ? { timer: setTimeout(endJump, JUMP_MAX_MS) } : null
+    scrollToBottom(el, smooth)
   }
 
   return { ref, onScroll, onContentResize, pin, stick, keepPlace, jump, unseen }

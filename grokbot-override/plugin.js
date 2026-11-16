@@ -41918,22 +41918,26 @@ function carryKeys(current, next) {
   if (!before.length || !list.length) return list;
   const shown = new Map(before.map((item) => [item.id, item]));
   const nextIds = new Set(list.map((item) => item.id));
-  const dropped = { assistant: [], user: [] };
-  for (const item of before) {
-    if (nextIds.has(item.id) || isPersistedItem(item)) continue;
-    if (item.kind === "assistant" || item.kind === "user") dropped[item.kind].push(item);
-  }
-  const used = /* @__PURE__ */ new Set();
-  const take = (item) => {
-    const pool = dropped[item.kind];
-    if (!pool || !pool.length) return null;
-    let hit = pool.find((old) => !used.has(old) && sameText(old.text, item.text));
-    if (!hit && item.kind === "user") hit = pool.find((old) => !used.has(old));
-    if (hit) used.add(hit);
-    return hit || null;
+  const dropped = before.map((item, order) => ({ item, order })).filter(({ item }) => !nextIds.has(item.id) && !isPersistedItem(item) && (item.kind === "assistant" || item.kind === "user")).reverse();
+  const fresh = list.map((item, index) => ({ item, index })).filter(({ item }) => !shown.has(item.id) && isPersistedItem(item) && (item.kind === "assistant" || item.kind === "user")).reverse();
+  const keys2 = /* @__PURE__ */ new Map();
+  const pairs = [];
+  const fits = (order, index) => pairs.every((p) => p.order < order === p.index < index);
+  const pair = (exact, kind) => {
+    for (const old of dropped) {
+      if (old.used || kind && old.item.kind !== kind) continue;
+      const hit = fresh.find((row) => !row.used && row.item.kind === old.item.kind && (!exact || sameText(row.item.text, old.item.text)) && fits(old.order, row.index));
+      if (!hit) continue;
+      old.used = true;
+      hit.used = true;
+      pairs.push({ order: old.order, index: hit.index });
+      keys2.set(hit.index, keyOf(old.item));
+    }
   };
+  pair(true);
+  pair(false, "user");
   let changed = false;
-  const out = list.map((item) => {
+  const out = list.map((item, index) => {
     const prev = shown.get(item.id);
     if (prev) {
       if (prev.renderKey && item.renderKey !== prev.renderKey) {
@@ -41942,11 +41946,9 @@ function carryKeys(current, next) {
       }
       return item;
     }
-    if (!isPersistedItem(item)) return item;
-    const old = take(item);
-    if (!old) return item;
+    if (!keys2.has(index)) return item;
     changed = true;
-    return { ...item, renderKey: keyOf(old) };
+    return { ...item, renderKey: keys2.get(index) };
   });
   return changed ? out : list;
 }
@@ -55050,14 +55052,79 @@ function EmailDraftCard({ item, bot, controller: controller2 }) {
 // src/ui/stickToBottom.ts
 import * as React13 from "react";
 var STICK_PX = 16;
+var JUMP_MAX_MS = 1200;
+var ANCHOR_ATTR = "data-gbo-last";
 var fromBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight;
+function reducedMotion() {
+  try {
+    const mm = globalThis.window?.matchMedia ?? globalThis.matchMedia;
+    return typeof mm === "function" && Boolean(mm("(prefers-reduced-motion: reduce)")?.matches);
+  } catch {
+    return false;
+  }
+}
+function rowsOf(scroller) {
+  const column = scroller.firstElementChild;
+  return column ? Array.from(column.children) : [];
+}
+function captureAnchor(scroller) {
+  const top = scroller.getBoundingClientRect().top;
+  for (const row of rowsOf(scroller)) {
+    if (row.classList.contains("gbo-more")) continue;
+    const bottom = row.getBoundingClientRect().bottom - top;
+    if (bottom > 0) return { el: row, key: row.getAttribute(ANCHOR_ATTR), bottom };
+  }
+  return null;
+}
+function anchorBottom(scroller, anchor) {
+  let row = anchor.el.isConnected ? anchor.el : null;
+  if (!row && anchor.key !== null) row = rowsOf(scroller).find((r) => r.getAttribute(ANCHOR_ATTR) === anchor.key) || null;
+  if (!row) return null;
+  return row.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top;
+}
 function useStickToBottom(dep, mine, latest = "") {
   const ref = React13.useRef(null);
   const stick = React13.useRef(true);
   const lastMine = React13.useRef(mine);
   const lastLatest = React13.useRef(latest);
   const keep = React13.useRef(null);
+  const wrote = React13.useRef(null);
+  const jumping = React13.useRef(null);
   const [unseen, setUnseen] = React13.useState(false);
+  const setTop = (el, top) => {
+    el.scrollTop = top;
+    wrote.current = el.scrollTop;
+  };
+  const restore = () => {
+    const el = ref.current;
+    const anchor = keep.current;
+    if (!el || !anchor) return;
+    const now = anchorBottom(el, anchor);
+    if (now === null) return;
+    const shift = now - anchor.bottom;
+    if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift);
+  };
+  const scrollToBottom = (el, smooth) => {
+    const top = el.scrollHeight;
+    if (smooth && typeof el.scrollTo === "function") {
+      try {
+        el.scrollTo({ top, behavior: "smooth" });
+        return;
+      } catch {
+      }
+    }
+    setTop(el, top);
+  };
+  const endJump = () => {
+    const run = jumping.current;
+    if (!run) return;
+    jumping.current = null;
+    clearTimeout(run.timer);
+    const el = ref.current;
+    if (!el) return;
+    stick.current = fromBottom(el) < STICK_PX;
+    setUnseen(!stick.current && Boolean(lastLatest.current));
+  };
   React13.useLayoutEffect(() => {
     const el = ref.current;
     if (mine !== lastMine.current) {
@@ -55067,41 +55134,70 @@ function useStickToBottom(dep, mine, latest = "") {
     const newer = latest !== lastLatest.current;
     lastLatest.current = latest;
     if (!el) return;
-    if (keep.current !== null) {
-      el.scrollTop = el.scrollHeight - keep.current;
+    if (keep.current) {
+      restore();
       return;
     }
-    if (stick.current) el.scrollTop = el.scrollHeight;
+    if (jumping.current) scrollToBottom(el, !reducedMotion());
+    else if (stick.current) setTop(el, el.scrollHeight);
     else if (newer && latest) setUnseen(true);
   }, [dep, mine, latest]);
   React13.useLayoutEffect(() => {
-    if (stick.current && unseen) setUnseen(false);
+    if (stick.current && unseen && !jumping.current) setUnseen(false);
   });
+  React13.useEffect(() => {
+    const el = ref.current;
+    if (!el) return void 0;
+    const cancel = () => {
+      if (!jumping.current) return;
+      endJump();
+    };
+    const onKey = (event) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event?.key)) cancel();
+    };
+    el.addEventListener("wheel", cancel, { passive: true });
+    el.addEventListener("touchstart", cancel, { passive: true });
+    el.addEventListener("pointerdown", cancel);
+    el.addEventListener("keydown", onKey);
+    return () => {
+      el.removeEventListener("wheel", cancel);
+      el.removeEventListener("touchstart", cancel);
+      el.removeEventListener("pointerdown", cancel);
+      el.removeEventListener("keydown", onKey);
+      if (jumping.current) clearTimeout(jumping.current.timer);
+    };
+  }, []);
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
+    const ours = wrote.current !== null && Math.abs(el.scrollTop - wrote.current) < 1;
+    wrote.current = null;
+    if (jumping.current) {
+      if (fromBottom(el) < STICK_PX) endJump();
+      return;
+    }
+    if (keep.current && !ours) {
+      keep.current = captureAnchor(el) || keep.current;
+    }
     stick.current = fromBottom(el) < STICK_PX;
     if (stick.current) setUnseen(false);
   };
   const onContentResize = React13.useCallback(() => {
     const el = ref.current;
     if (!el) return;
-    if (keep.current !== null) el.scrollTop = el.scrollHeight - keep.current;
-    else if (stick.current) el.scrollTop = el.scrollHeight;
+    if (keep.current) restore();
+    else if (jumping.current) scrollToBottom(el, !reducedMotion());
+    else if (stick.current) setTop(el, el.scrollHeight);
   }, []);
   const pin = () => {
     stick.current = true;
   };
   const keepPlace = async (load) => {
     const el = ref.current;
-    if (el) keep.current = el.scrollHeight - el.scrollTop;
+    if (el) keep.current = captureAnchor(el);
     try {
       await load();
     } finally {
-      const restore = () => {
-        const target = ref.current;
-        if (target && keep.current !== null) target.scrollTop = target.scrollHeight - keep.current;
-      };
       restore();
       const done = () => {
         restore();
@@ -55119,13 +55215,10 @@ function useStickToBottom(dep, mine, latest = "") {
     stick.current = true;
     setUnseen(false);
     if (!el) return;
-    const top = el.scrollHeight;
-    try {
-      if (typeof el.scrollTo === "function") el.scrollTo({ top, behavior: "smooth" });
-      else el.scrollTop = top;
-    } catch {
-      el.scrollTop = top;
-    }
+    const smooth = !reducedMotion() && typeof el.scrollTo === "function";
+    if (jumping.current) clearTimeout(jumping.current.timer);
+    jumping.current = smooth ? { timer: setTimeout(endJump, JUMP_MAX_MS) } : null;
+    scrollToBottom(el, smooth);
   };
   return { ref, onScroll, onContentResize, pin, stick, keepPlace, jump, unseen };
 }
@@ -59536,7 +59629,8 @@ function Transcript({ state, bot, meta, onPrefill }) {
           const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
           if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.renderKey ?? entry.id);
           const bubbles = entry.items.filter((item) => item.text);
-          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.renderKey ?? item.id)) }, entry.id);
+          const last = entry.items[entry.items.length - 1];
+          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, ...{ [ANCHOR_ATTR]: String(last?.renderKey ?? last?.id ?? "") }, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.renderKey ?? item.id)) }, entry.id);
         }),
         state.chat.waiting ? /* @__PURE__ */ jsx27(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
         activity2 ? /* @__PURE__ */ jsxs25("div", { className: "activity-line gbo-activity", role: "status", children: [

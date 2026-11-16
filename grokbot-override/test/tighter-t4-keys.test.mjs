@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { groupMessages } from '../src/core/groups.js'
-import { carryKeys, isPersistedItem, rebuildItems, rowsToItems } from '../src/core/history.js'
+import { carryKeys, confirmedSends, isPersistedItem, rebuildItems, rowsToItems } from '../src/core/history.js'
 import { bootPlugin, LOCAL, READY, waitFor } from './loader-boot.mjs'
 
 const t0 = 1762560000
@@ -63,6 +63,52 @@ test('carryKeys: different text does not match an assistant; a user bubble falls
   assert.equal(out[2].renderKey, undefined, 'no match, no key')
   const same = [{ kind: 'assistant', id: 'h:9', text: 'x' }]
   assert.equal(carryKeys([{ kind: 'assistant', id: 'h:9', text: 'x' }], same), same, 'nothing carried: the same array')
+})
+
+test('r1-01: rows another surface stored in between never take the keys; the real copies do', () => {
+  const t1 = 1762560000
+  const loaded = [{ id: 1, role: 'user', content: 'old question', timestamp: t1 }]
+  const current = [
+    ...rowsToItems(loaded),
+    { kind: 'user', id: 'local:mine', text: 'my question', at: (t1 + 30) * 1000 },
+    { kind: 'assistant', id: 'live:mine', text: 'Done.', at: (t1 + 31) * 1000 }
+  ]
+  const rows = [
+    ...loaded,
+    { id: 2, role: 'user', content: 'other surface question', timestamp: t1 + 10 },
+    { id: 3, role: 'assistant', content: 'Done.', timestamp: t1 + 11 },
+    { id: 4, role: 'user', content: 'my question', timestamp: t1 + 30 },
+    { id: 5, role: 'assistant', content: 'Done.', timestamp: t1 + 31 }
+  ]
+  const done = confirmedSends([{ id: 'local:mine', text: 'my question', submitted: 'my question', known: new Set(['id:1']), byOrder: true }], rows)
+  assert.ok(done.has('local:mine'))
+  const keep = item => item.kind === 'user' && !item.id.startsWith('h:') && !done.has(item.id)
+  const next = rebuildItems(current, rowsToItems(rows), keep)
+  const key = id => next.find(item => item.id === id)?.renderKey
+  assert.deepEqual(next.map(item => item.id), ['h:1', 'h:2', 'h:3', 'h:4', 'h:5'])
+  assert.equal(key('h:2'), undefined, 'the other surface question keeps its own identity')
+  assert.equal(key('h:3'), undefined, 'an older identical reply does not take the live key')
+  assert.equal(key('h:4'), 'local:mine', 'my stored question takes my bubble')
+  assert.equal(key('h:5'), 'live:mine', 'my stored reply takes the live reply')
+  // Rendered identity: the groups of my turn keep their keys.
+  const groups = groupMessages(next)
+  assert.ok(groups.some(g => g.id === 'group:local:mine' && g.items[0].id === 'h:4'))
+  assert.ok(groups.some(g => g.id === 'group:live:mine' && g.items[0].id === 'h:5'))
+  assert.equal(new Set(groups.map(g => g.id)).size, groups.length, 'no duplicate React keys')
+})
+
+test('r1-01: an exact match is reserved before the order fallback', () => {
+  const current = [
+    { kind: 'user', id: 'local:skill', text: '/weekly' },
+    { kind: 'user', id: 'local:plain', text: 'thanks' }
+  ]
+  const next = [
+    { kind: 'user', id: 'h:7', text: 'Run the weekly skill: ...' },
+    { kind: 'user', id: 'h:8', text: 'thanks' }
+  ]
+  const out = carryKeys(current, next)
+  assert.equal(out[1].renderKey, 'local:plain', 'exact text first')
+  assert.equal(out[0].renderKey, 'local:skill', 'the expanded skill row by order')
 })
 
 const CARD = {

@@ -28,7 +28,7 @@ import { MenuButton } from './kit'
 import { DirectiveBlock, DirectiveContext, type DirectiveScope, useDirectiveSegments } from './Directives'
 import { EmailDraftCard } from './EmailDraft'
 import { BotProse } from './Media'
-import { STICK_PX, useStickToBottom } from './stickToBottom'
+import { ANCHOR_ATTR, STICK_PX, useStickToBottom } from './stickToBottom'
 import { AssistantActions, Reactions, UserActions } from './MessageActions'
 import { ProfilePanel } from './Profile'
 import { OverlayScroll } from './OverlayScroll'
@@ -559,8 +559,12 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
           // Tail corners count the group's bubbles only (a reasoning-only
           // reply draws none).
           const bubbles = entry.items.filter((item: any) => item.text)
+          // Its last item's key: an older page can join bubbles at the
+          // group's front (a new group key), never at its end, so "Show
+          // earlier messages" finds the reader's row again (stickToBottom.ts).
+          const last = entry.items[entry.items.length - 1]
           return (
-            <div key={entry.id} className={`group is-${entry.side}`}>
+            <div key={entry.id} className={`group is-${entry.side}`} {...{ [ANCHOR_ATTR]: String(last?.renderKey ?? last?.id ?? '') }}>
               {entry.items.map((item: any) => (
                 <Item key={item.renderKey ?? item.id} item={item} {...props} pos={item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : ''} />
               ))}

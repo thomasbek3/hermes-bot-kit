@@ -84,6 +84,40 @@ async function setup(t) {
     get() { return tops.get(this) || 0 },
     set(v) { tops.set(this, Math.max(0, Math.min(Number(v) || 0, this.scrollHeight - this.clientHeight))) }
   })
+  // Row geometry: row i starts at i * ROW; the last row also holds `extra`
+  // (the live reply or an image growing at the tail). The scroller's
+  // viewport starts at 0.
+  Object.defineProperty(proto, 'getBoundingClientRect', {
+    configurable: true,
+    value() {
+      if (this.classList.contains('transcript')) return { top: 0, bottom: VIEW, height: VIEW, left: 0, right: 0, width: 0 }
+      const scroller = this.closest('.transcript')
+      if (!scroller || !this.hasAttribute('data-id')) return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0 }
+      const all = [...this.parentElement.children]
+      const index = all.indexOf(this)
+      const height = ROW + (index === all.length - 1 ? layout.extra : 0)
+      const top = index * ROW - scroller.scrollTop
+      return { top, bottom: top + height, height, left: 0, right: 0, width: 0 }
+    }
+  })
+  // Element.scrollTo: an instant jump by default (one scroll event); with
+  // layout.manualSmooth the test plays the animation's progress itself.
+  layout.scrollCalls = []
+  Object.defineProperty(proto, 'scrollTo', {
+    configurable: true,
+    value(options) {
+      layout.scrollCalls.push(options)
+      if (layout.manualSmooth && options?.behavior === 'smooth') {
+        layout.target = options.top
+        return
+      }
+      this.scrollTop = options?.top ?? 0
+      this.dispatchEvent(new w.Event('scroll'))
+    }
+  })
+  // prefers-reduced-motion, switched by the test.
+  layout.reduced = false
+  w.matchMedia = query => ({ matches: /prefers-reduced-motion: reduce/.test(query) ? layout.reduced : false, media: query, addEventListener() {}, removeEventListener() {} })
   // ResizeObserver: the test fires it (a browser does after layout).
   const observers = new Set()
   set('ResizeObserver', class {
@@ -153,6 +187,7 @@ test('pinned: a late-growing image keeps the view at the bottom; scrolled up: it
 test('a newer message while scrolled up shows jump-to-latest; a click goes to the bottom and re-pins', { skip }, async t => {
   const e = await setup(t)
   e.layout.extra = 0
+  e.layout.manualSmooth = false
   const view = mount(e, rows(30))
   await settle()
   assert.equal(view.container.querySelector('.jump-btn'), null, 'no button at the bottom')
@@ -202,4 +237,153 @@ test('Show earlier: 50 prepended rows leave the first visible row at the same of
 test('STICK_PX stays small (Chat.tsx re-exports it: look9-card-scroll)', { skip }, async t => {
   const e = await setup(t)
   assert.ok(e.m.STICK_PX <= 24)
+})
+
+// ---- review r1 regressions ----
+
+test('r1-02: a smooth jump keeps following while the live reply grows; its progress events never unpin', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.reduced = false
+  e.layout.manualSmooth = true
+  const view = mount(e, rows(30))
+  await settle()
+  const el = view.scroller()
+  view.scrollTo(100)
+  await settle()
+  view.draw([...view.items(), { id: 'live1' }])
+  await settle()
+  const btn = view.container.querySelector('.jump-btn')
+  assert.ok(btn, 'jump offered')
+  e.layout.scrollCalls.length = 0
+  btn.click()
+  await settle()
+  assert.equal(e.layout.scrollCalls.at(-1)?.behavior, 'smooth')
+  assert.equal(e.layout.target, 31 * ROW, 'aims at the bottom')
+  // Animation progress: well above the bottom.
+  el.scrollTop = 300
+  el.dispatchEvent(new window.Event('scroll'))
+  await settle()
+  // The same live reply grows by 300px mid-animation: the jump re-targets.
+  e.layout.extra = 300
+  e.fireResize()
+  assert.equal(e.layout.target, 31 * ROW + 300, 're-targeted at the new bottom')
+  assert.equal(el.scrollTop, 300, 'still smooth: no instant snap')
+  // The animation arrives.
+  el.scrollTop = e.layout.target
+  el.dispatchEvent(new window.Event('scroll'))
+  await settle()
+  assert.equal(el.scrollHeight - el.scrollTop - el.clientHeight, 0, 'at the bottom')
+  assert.equal(view.container.querySelector('.jump-btn'), null)
+  // Pinned again: more growth follows.
+  e.layout.extra = 500
+  e.fireResize()
+  assert.equal(el.scrollHeight - el.scrollTop - el.clientHeight, 0, 'still following')
+  view.unmount()
+})
+
+test('r1-02: the reader taking over (wheel) ends a jump in flight; the button comes back', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.manualSmooth = true
+  const view = mount(e, rows(30))
+  await settle()
+  const el = view.scroller()
+  view.scrollTo(100)
+  await settle()
+  view.draw([...view.items(), { id: 'live2' }])
+  await settle()
+  view.container.querySelector('.jump-btn').click()
+  await settle()
+  el.scrollTop = 200
+  el.dispatchEvent(new window.Event('scroll'))
+  el.dispatchEvent(new window.Event('wheel'))
+  await settle()
+  e.layout.extra = 200
+  e.fireResize()
+  assert.equal(el.scrollTop, 200, 'no longer followed: the reader is in charge')
+  assert.ok(view.container.querySelector('.jump-btn'), 'the newest message is still unseen')
+  view.unmount()
+})
+
+test('r1-04: Jump to latest honours prefers-reduced-motion', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.manualSmooth = true
+  e.layout.reduced = true
+  t.after(() => (e.layout.reduced = false))
+  const view = mount(e, rows(30))
+  await settle()
+  view.scrollTo(100)
+  await settle()
+  view.draw([...view.items(), { id: 'n3' }])
+  await settle()
+  e.layout.scrollCalls.length = 0
+  view.container.querySelector('.jump-btn').click()
+  await settle()
+  assert.ok(e.layout.scrollCalls.every(c => c?.behavior !== 'smooth'), 'no smooth scroll requested')
+  const el = view.scroller()
+  assert.equal(el.scrollHeight - el.scrollTop - el.clientHeight, 0, 'at the bottom at once')
+  assert.equal(view.container.querySelector('.jump-btn'), null)
+  view.unmount()
+})
+
+test('r1-03: Show earlier during a live reply: growth below the reader moves nothing; the prepend keeps the row', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.manualSmooth = false
+  const view = mount(e, rows(30, 100))
+  await settle()
+  const el = view.scroller()
+  view.scrollTo(100)
+  await settle()
+  const rowOffset = id => {
+    const node = view.container.querySelector(`[data-id="${id}"]`)
+    return node.getBoundingClientRect().top
+  }
+  // r102 starts at 80 - 100 = -20: r103 is the first fully visible row.
+  const before = rowOffset('r103')
+  let release
+  const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
+  await settle()
+  // The live reply at the tail grows by 300px while the page loads.
+  e.layout.extra = 300
+  e.fireResize()
+  assert.equal(el.scrollTop, 100, 'growth below the reader does not move the view')
+  assert.equal(rowOffset('r103'), before)
+  // The older page lands.
+  view.draw([...rows(50, 50), ...view.items()])
+  await settle(2)
+  assert.equal(rowOffset('r103'), before, 'same row, same offset after the prepend')
+  release()
+  await pending
+  await settle()
+  assert.equal(rowOffset('r103'), before, 'and after the load settles')
+  // More tail growth afterwards: still not moved (the reader is scrolled up).
+  e.layout.extra = 600
+  e.fireResize()
+  assert.equal(rowOffset('r103'), before)
+  view.unmount()
+})
+
+test('r1-03: the reader scrolling while the older page loads keeps what they scrolled to', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  const view = mount(e, rows(30, 100))
+  await settle()
+  view.scrollTo(100)
+  await settle()
+  let release
+  const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
+  await settle()
+  view.scrollTo(220) // the reader moves down three rows
+  await settle()
+  const at = view.container.querySelector('[data-id="r106"]').getBoundingClientRect().top
+  view.draw([...rows(50, 50), ...view.items()])
+  await settle(2)
+  release()
+  await pending
+  await settle()
+  assert.equal(view.container.querySelector('[data-id="r106"]').getBoundingClientRect().top, at)
+  view.unmount()
 })

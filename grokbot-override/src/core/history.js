@@ -429,34 +429,49 @@ const sameText = (a, b) => String(a || '').trim() === String(b || '').trim()
  *  already shown keeps the `renderKey` it had. The durable `id` never
  *  changes (reactions, edit and rewind address the stored row).
  *
- *  `current`: the items on screen; `next`: the rebuilt items. An assistant
- *  item matches a dropped one of the same text; a user item matches a
- *  dropped user bubble of the same text, else the oldest one left (the
- *  gateway may store an expanded skill or an @mention note). Each dropped
- *  item is used once. Returns `next`, with new objects only where a key was
- *  carried. */
+ *  `current`: the items on screen; `next`: the rebuilt items. The replaced
+ *  items are the newest this view drew, so they are matched against the
+ *  newly stored rows newest first: another surface's rows that arrived in
+ *  between (older) never take their keys. Exact matches are reserved first
+ *  (an assistant by its text, a user bubble by its text); then a user bubble
+ *  still unmatched takes the newest unclaimed stored user row (the gateway
+ *  may store an expanded skill or an @mention note). Each replaced item and
+ *  each stored row is used once, and pairs keep their order: a stored row
+ *  never takes the key of an item drawn after one already paired with a
+ *  newer row. Returns `next`, with new objects only where a key was carried. */
 export function carryKeys(current, next) {
   const before = Array.isArray(current) ? current : []
   const list = Array.isArray(next) ? next : []
   if (!before.length || !list.length) return list
   const shown = new Map(before.map(item => [item.id, item]))
   const nextIds = new Set(list.map(item => item.id))
-  const dropped = { assistant: [], user: [] }
-  for (const item of before) {
-    if (nextIds.has(item.id) || isPersistedItem(item)) continue
-    if (item.kind === 'assistant' || item.kind === 'user') dropped[item.kind].push(item)
+  // Replaced items (newest first) and newly stored rows (newest first).
+  const dropped = before
+    .map((item, order) => ({ item, order }))
+    .filter(({ item }) => !nextIds.has(item.id) && !isPersistedItem(item) && (item.kind === 'assistant' || item.kind === 'user'))
+    .reverse()
+  const fresh = list
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !shown.has(item.id) && isPersistedItem(item) && (item.kind === 'assistant' || item.kind === 'user'))
+    .reverse()
+  const keys = new Map() // next index -> carried key
+  const pairs = [] // { order, index }
+  const fits = (order, index) => pairs.every(p => (p.order < order) === (p.index < index))
+  const pair = (exact, kind) => {
+    for (const old of dropped) {
+      if (old.used || (kind && old.item.kind !== kind)) continue
+      const hit = fresh.find(row => !row.used && row.item.kind === old.item.kind && (!exact || sameText(row.item.text, old.item.text)) && fits(old.order, row.index))
+      if (!hit) continue
+      old.used = true
+      hit.used = true
+      pairs.push({ order: old.order, index: hit.index })
+      keys.set(hit.index, keyOf(old.item))
+    }
   }
-  const used = new Set()
-  const take = item => {
-    const pool = dropped[item.kind]
-    if (!pool || !pool.length) return null
-    let hit = pool.find(old => !used.has(old) && sameText(old.text, item.text))
-    if (!hit && item.kind === 'user') hit = pool.find(old => !used.has(old))
-    if (hit) used.add(hit)
-    return hit || null
-  }
+  pair(true)
+  pair(false, 'user')
   let changed = false
-  const out = list.map(item => {
+  const out = list.map((item, index) => {
     const prev = shown.get(item.id)
     if (prev) {
       if (prev.renderKey && item.renderKey !== prev.renderKey) {
@@ -465,11 +480,9 @@ export function carryKeys(current, next) {
       }
       return item
     }
-    if (!isPersistedItem(item)) return item
-    const old = take(item)
-    if (!old) return item
+    if (!keys.has(index)) return item
     changed = true
-    return { ...item, renderKey: keyOf(old) }
+    return { ...item, renderKey: keys.get(index) }
   })
   return changed ? out : list
 }
