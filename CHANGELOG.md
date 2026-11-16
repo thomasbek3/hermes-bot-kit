@@ -22,7 +22,7 @@
   left you short of the latest message. A pinned view now follows every content resize before paint
   (`src/ui/stickToBottom.ts`, fed by OverlayScroll's existing ResizeObserver; its DOM-mutation thumb update is now
   once per frame). A reader who scrolled up is never moved; a newer message then shows a round jump-to-latest button
-  that scrolls down smoothly (at once with reduced motion) and keeps following a reply that grows on the way (still moving after 1.2 s, it settles at the bottom and stays pinned); your own scrolling cancels it. **Show earlier messages** keeps the message you were reading in place, even inside a tall group or bubble that is still streaming below you. The
+  that scrolls down smoothly (at once with reduced motion) and keeps following a reply that grows on the way (still moving after 1.2 s, it settles at the bottom and stays pinned); your own scrolling, including a drag of the scrollbar, cancels it. **Show earlier messages** keeps the message you were reading in place, even inside a tall group or bubble that is still streaming below you. A message that arrives while older messages load still brings up the jump button, and a message you send then is followed as usual. Known limits are listed in `grokbot-override/PARITY.md`. The
   transcript uses the browser's scroll anchoring, so content changing above you no longer shifts what you read. The
   narrow-pane drawer decision is measured before the first paint, so a docked panel no longer flips after one frame.
 - **grokbot-override: replies are formatted live while they stream (2026-11-15)**: a bot reply no longer

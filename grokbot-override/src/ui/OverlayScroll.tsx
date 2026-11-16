@@ -31,9 +31,12 @@ type Props = Omit<React.HTMLAttributes<HTMLElement>, 'ref'> & {
   /** Drawn over the scroll area, outside the scroller (the jump-to-latest
    *  button): it stays put while the content scrolls. */
   overlay?: React.ReactNode
+  /** The reader grabbed the thumb: their own scrolling starts (the
+   *  transcript ends a jump-to-latest in flight; stickToBottom.ts). */
+  onReaderInput?: () => void
 }
 
-export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, children, ...rest }: Props) {
+export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, onReaderInput, children, ...rest }: Props) {
   const scroller = React.useRef<HTMLElement | null>(null)
   const thumb = React.useRef<HTMLDivElement | null>(null)
   const [dragging, setDragging] = React.useState(false)
@@ -100,6 +103,7 @@ export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className,
     if (!geo || geo.travel <= 0) return
     event.preventDefault()
     event.stopPropagation()
+    onReaderInput?.()
     const target = event.currentTarget
     const startY = event.clientY
     const startTop = el.scrollTop

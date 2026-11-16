@@ -21,13 +21,15 @@ import * as React from 'react'
 import { OverlayScroll } from './src/ui/OverlayScroll'
 import { ANCHOR_ATTR, JUMP_MAX_MS, STICK_PX, useStickToBottom } from './src/ui/stickToBottom'
 import { groupMessages } from './src/core/groups.js'
+import { withDividers } from './src/core/time.js'
 export { JUMP_MAX_MS, STICK_PX }
 // Rows as Chat.tsx draws them: messages (kind user/assistant) fold into
 // groups (the real groupMessages, keyed by the group id), each message root
 // carrying its React identity in ANCHOR_ATTR; any other row stands alone.
 const message = i => React.createElement('div', { key: i.renderKey ?? i.id, 'data-id': i.id, [ANCHOR_ATTR]: String(i.renderKey ?? i.id) }, i.id)
+// The production decoration: time dividers, then groups (Chat.tsx).
 const rowsView = items =>
-  groupMessages(items).map(entry =>
+  groupMessages(withDividers(items)).map(entry =>
     entry.kind === 'group'
       ? React.createElement('div', { key: entry.id, className: 'group' }, entry.items.map(message))
       : React.createElement('div', { key: entry.id, 'data-id': entry.id }, entry.id)
@@ -44,6 +46,7 @@ export function Harness({ items, api }) {
       scrollRef: s.ref,
       onScroll: s.onScroll,
       onContentResize: s.onContentResize,
+      onReaderInput: s.onReaderInput,
       overlay: s.unseen ? React.createElement('button', { className: 'jump-btn', onClick: s.jump }, 'v') : null
     },
     React.createElement('div', { className: 'transcript__col' }, rowsView(items))
@@ -52,6 +55,7 @@ export function Harness({ items, api }) {
 `
 
 const ROW = 40
+const STICK_GAP = 16
 const VIEW = 400
 
 let env = null
@@ -434,7 +438,7 @@ test('r2-02: reading inside a tall bot group whose last bubble streams: growth b
   await settle()
   const offset = id => view.container.querySelector(`[data-id="${id}"]`).getBoundingClientRect().top
   const before = offset('a102')
-  assert.equal(before, 20)
+  assert.ok(before > 0 && before < VIEW, 'a102 is on screen')
   let release
   const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
   await settle()
@@ -448,7 +452,7 @@ test('r2-02: reading inside a tall bot group whose last bubble streams: growth b
   await pending
   await settle()
   assert.equal(offset('a102'), before, 'same message, same offset after 50 older rows')
-  assert.equal(el.scrollTop, 2100)
+  assert.ok(el.scrollTop >= 100 + 50 * ROW, 'the view moved down by the prepended rows')
   view.unmount()
 })
 
@@ -543,5 +547,143 @@ test('r2-03: a jump still animating at its time limit settles at the bottom and 
   e.layout.extra += 300
   e.fireResize()
   assert.equal(gap(), 0, 'still pinned: later growth follows')
+  view.unmount()
+})
+
+// ---- review r3 regressions ----
+
+test('r3-01: a message arriving while an older page loads still shows Jump to latest after the load', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.heights = {}
+  e.layout.manualSmooth = false
+  const view = mount(e, rows(30))
+  await settle()
+  const el = view.scroller()
+  view.scrollTo(100)
+  await settle()
+  let release
+  const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
+  await settle()
+  view.draw([...view.items(), { id: 'live-r3' }]) // a new bot reply starts
+  await settle()
+  assert.ok(view.container.querySelector('.jump-btn'), 'the new message is announced during the load')
+  view.draw([...rows(50, 0, 'o'), ...view.items()])
+  await settle(2)
+  e.layout.extra = 300 // the same reply streams on
+  e.fireResize()
+  release()
+  await pending
+  await settle()
+  assert.ok(el.scrollHeight - el.scrollTop - el.clientHeight > STICK_GAP, 'the reader is still up in the history')
+  assert.ok(view.container.querySelector('.jump-btn'), 'and Jump to latest is still offered')
+  view.container.querySelector('.jump-btn').click()
+  await settle()
+  assert.equal(el.scrollHeight - el.scrollTop - el.clientHeight, 0, 'the button takes them down')
+  view.unmount()
+})
+
+test('r3-01: sending while an older page loads follows the send; the load does not undo the pin', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.heights = {}
+  e.layout.manualSmooth = false
+  const view = mount(e, rows(30))
+  await settle()
+  const el = view.scroller()
+  const gap = () => el.scrollHeight - el.scrollTop - el.clientHeight
+  view.scrollTo(100)
+  await settle()
+  let release
+  const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
+  await settle()
+  view.draw([...view.items(), { id: 'me-r3', mine: true }])
+  await settle()
+  assert.equal(gap(), 0, 'the send is shown at once')
+  view.draw([...rows(50, 0, 'o'), ...view.items()])
+  await settle(2)
+  assert.equal(gap(), 0, 'the older page landing keeps the send in view')
+  release()
+  await pending
+  await settle()
+  assert.equal(gap(), 0, 'still at the bottom after the load settles')
+  e.layout.extra = 250 // the reply to the send grows
+  e.fireResize()
+  assert.equal(gap(), 0, 'still pinned: the reply is followed')
+  assert.equal(view.container.querySelector('.jump-btn'), null)
+  view.unmount()
+})
+
+test('r3-02: a partly visible leading time divider that vanishes on prepend does not cost the reader their place', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.heights = {}
+  // Local noon, so the run below stays inside one day in any time zone.
+  const noon = new Date(2026, 10, 8, 12, 0, 0).getTime()
+  const run = (n, from, start) => Array.from({ length: n }, (_, i) => ({ kind: 'assistant', id: `m${from + i}`, at: start + i * 60_000 }))
+  const view = mount(e, run(30, 100, noon))
+  await settle()
+  const el = view.scroller()
+  const divider = view.container.querySelector('[data-id="divider:m100"]')
+  assert.ok(divider, 'the leading time divider')
+  view.scrollTo(20)
+  await settle()
+  assert.equal(divider.getBoundingClientRect().bottom, 20, 'divider partly visible')
+  const top = () => view.container.querySelector('[data-id="m100"]').getBoundingClientRect().top
+  const before = top()
+  assert.equal(before, 20)
+  const first = view.container.querySelector('[data-id="m100"]')
+  let release
+  const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
+  await settle()
+  // 50 older replies, a minute apart, ending just before m100: the same time
+  // run (no divider before m100 any more) and the same group (re-keyed).
+  view.draw([...run(50, 50, noon - 50 * 60_000), ...view.items()])
+  await settle(2)
+  release()
+  await pending
+  await settle()
+  assert.equal(view.container.querySelector('[data-id="divider:m100"]'), null, 'the old divider is gone')
+  assert.notEqual(view.container.querySelector('[data-id="m100"]'), first, 'the group was re-created')
+  assert.equal(top(), before, 'the message the reader saw keeps its offset')
+  assert.equal(el.scrollTop, 20 + 50 * ROW)
+  view.unmount()
+})
+
+test('r3-03: dragging the overlay scrollbar during a jump ends the jump; growth and the time limit do not pull the reader down', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.heights = {}
+  e.layout.manualSmooth = true
+  e.layout.reduced = false
+  const view = mount(e, rows(30))
+  await settle()
+  const el = view.scroller()
+  view.scrollTo(100)
+  await settle()
+  view.draw([...view.items(), { id: 'live-r3d' }])
+  await settle()
+  view.container.querySelector('.jump-btn').click()
+  await settle()
+  el.scrollTop = 300 // the animation is under way
+  el.dispatchEvent(new window.Event('scroll'))
+  await settle()
+  // The reader grabs the thumb and drags it up.
+  const thumb = view.container.querySelector('.gbo-oscroll-thumb')
+  thumb.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientY: 200 }))
+  thumb.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientY: 150 }))
+  thumb.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientY: 150 }))
+  el.dispatchEvent(new window.Event('scroll'))
+  await settle()
+  const dragged = el.scrollTop
+  assert.ok(dragged < 300, `dragged up (${dragged})`)
+  e.layout.scrollCalls.length = 0
+  e.layout.extra = 300
+  e.fireResize()
+  assert.equal(e.layout.scrollCalls.length, 0, 'no re-target after the drag')
+  await new Promise(r => setTimeout(r, e.m.JUMP_MAX_MS + 100))
+  await settle()
+  assert.equal(el.scrollTop, dragged, 'the time limit does not force the bottom')
+  assert.ok(view.container.querySelector('.jump-btn'), 'the newest message is still unseen')
   view.unmount()
 })

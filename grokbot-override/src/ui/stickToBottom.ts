@@ -36,7 +36,12 @@ function reducedMotion(): boolean {
   }
 }
 
-type Anchor = { el: Element; key: string | null; top: number }
+type Mark = { el: Element; key: string | null; top: number }
+/** Every reading unit visible when the older page was asked for, best first:
+ *  messages (keyed, found again even when their group is re-created) before
+ *  decorative rows (a time divider can vanish when older rows join its time
+ *  run). Restoring uses the first one that is still on screen. */
+type Anchor = Mark[]
 
 /** The reading units of the transcript: every message inside a group (a
  *  group is one row of the column but can be taller than the viewport and
@@ -55,27 +60,40 @@ function unitsOf(scroller: HTMLElement): Element[] {
   return out
 }
 
-/** The first unit with any part inside the viewport, and the distance of
+/** The units with any part inside the viewport, each with the distance of
  *  its TOP edge from the viewport top (negative when it starts above). The
  *  top edge, because a unit only ever grows at its end (a streaming reply,
- *  an image decoding): growth there must not move the reader. */
+ *  an image decoding): growth there must not move the reader. Keyed
+ *  messages come first; null when nothing is visible. */
 function captureAnchor(scroller: HTMLElement): Anchor | null {
   const top = scroller.getBoundingClientRect().top
+  const view = scroller.clientHeight
+  const marks: Mark[] = []
   for (const unit of unitsOf(scroller)) {
     const rect = unit.getBoundingClientRect()
-    if (rect.bottom - top > 0) return { el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top }
+    if (rect.bottom - top <= 0) continue
+    if (view > 0 && rect.top - top >= view) break
+    marks.push({ el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top })
   }
-  return null
+  if (!marks.length) return null
+  return [...marks.filter(m => m.key), ...marks.filter(m => !m.key)]
 }
 
-/** Where the anchor's top edge is now (the same element, or the message now
- *  carrying its key when its group was re-created), relative to the
- *  viewport top. */
-function anchorTop(scroller: HTMLElement, anchor: Anchor): number | null {
-  let unit: Element | null = anchor.el.isConnected ? anchor.el : null
-  if (!unit && anchor.key) unit = unitsOf(scroller).find(u => u.getAttribute(ANCHOR_ATTR) === anchor.key) || null
-  if (!unit) return null
-  return unit.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+/** The first mark still on screen (the same element, or the message now
+ *  carrying its key when its group was re-created) and where its top edge
+ *  is now, relative to the viewport top. */
+function locate(scroller: HTMLElement, anchor: Anchor): { mark: Mark; now: number } | null {
+  const origin = scroller.getBoundingClientRect().top
+  let units: Element[] | null = null
+  for (const mark of anchor) {
+    let unit: Element | null = mark.el.isConnected && scroller.contains(mark.el) ? mark.el : null
+    if (!unit && mark.key) {
+      units = units || unitsOf(scroller)
+      unit = units.find(u => u.getAttribute(ANCHOR_ATTR) === mark.key) || null
+    }
+    if (unit) return { mark, now: unit.getBoundingClientRect().top - origin }
+  }
+  return null
 }
 
 /** `dep`: what changes when the transcript changes (its items). `mine`: the id
@@ -89,6 +107,10 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
   // While an older page loads: the row the reader sees and where. null when
   // nothing is being restored.
   const keep = React.useRef<Anchor | null>(null)
+  // Which "Show earlier" load owns `keep`: a send, a jump or a chat switch
+  // during the load drops it (bumping this), and the load's completion then
+  // neither restores the old place nor overwrites the newer pin.
+  const keepGen = React.useRef(0)
   // The scrollTop this hook last set itself: a scroll event elsewhere is the
   // reader moving.
   const wrote = React.useRef<number | null>(null)
@@ -107,10 +129,18 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
     const el = ref.current
     const anchor = keep.current
     if (!el || !anchor) return
-    const now = anchorTop(el, anchor)
-    if (now === null) return
-    const shift = now - anchor.top
+    const hit = locate(el, anchor)
+    if (!hit) return
+    const shift = hit.now - hit.mark.top
     if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift)
+  }
+
+  /** A newer intent (a send, a jump, another chat) supersedes the place a
+   *  pending older page would restore. */
+  const dropKeep = () => {
+    if (!keep.current) return
+    keep.current = null
+    keepGen.current += 1
   }
 
   const scrollToBottom = (el: HTMLElement, smooth: boolean) => {
@@ -155,13 +185,20 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
     const el = ref.current
     if (mine !== lastMine.current) {
       lastMine.current = mine
-      if (mine) stick.current = true
+      if (mine) {
+        // Your own new message: follow it, whatever an older page would
+        // have restored.
+        stick.current = true
+        dropKeep()
+      }
     }
     const newer = latest !== lastLatest.current
     lastLatest.current = latest
     if (!el) return
     if (keep.current) {
       restore()
+      // A message arriving while the older page loads is still news.
+      if (newer && latest && !stick.current) setUnseen(true)
       return
     }
     if (jumping.current) scrollToBottom(el, !reducedMotion())
@@ -228,25 +265,40 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
 
   const pin = () => {
     stick.current = true
+    dropKeep()
+  }
+
+  /** The reader grabbed the overlay scrollbar (OverlayScroll's thumb sits
+   *  outside the scroller, so its drag never reaches the listeners above):
+   *  a jump in flight ends there. */
+  const onReaderInput = () => {
+    if (jumping.current) endJump()
   }
 
   /** Run `load` (it prepends older rows) keeping what the reader sees in
    *  place: the first row they can see stays at the same offset. */
   const keepPlace = async (load: () => Promise<unknown> | unknown) => {
     const el = ref.current
-    if (el) keep.current = captureAnchor(el)
+    const gen = (keepGen.current += 1)
+    keep.current = el ? captureAnchor(el) : null
+    const mineNow = () => keepGen.current === gen && keep.current !== null
     try {
       await load()
     } finally {
-      restore()
+      if (mineNow()) restore()
       // The store's update may commit after this await resolves: keep the
       // anchor one more frame so the layout effect of that commit restores
       // it too, then let go.
       const done = () => {
+        // Superseded (a send, a jump, another chat): leave its pin alone.
+        if (!mineNow()) return
         restore()
         keep.current = null
         const target = ref.current
-        if (target) stick.current = fromBottom(target) < STICK_PX
+        if (target) {
+          stick.current = fromBottom(target) < STICK_PX
+          if (stick.current) setUnseen(false)
+        }
       }
       const raf = (globalThis as any).requestAnimationFrame
       if (typeof raf === 'function') raf(() => done())
@@ -260,6 +312,7 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
     const el = ref.current
     stick.current = true
     setUnseen(false)
+    dropKeep()
     if (!el) return
     const smooth = !reducedMotion() && typeof el.scrollTo === 'function'
     if (jumping.current) clearTimeout(jumping.current.timer)
@@ -267,5 +320,5 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
     scrollToBottom(el, smooth)
   }
 
-  return { ref, onScroll, onContentResize, pin, stick, keepPlace, jump, unseen }
+  return { ref, onScroll, onContentResize, onReaderInput, pin, stick, keepPlace, jump, unseen }
 }

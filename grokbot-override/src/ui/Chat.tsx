@@ -478,7 +478,7 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
     }
     return ''
   }, [items])
-  const { ref, onScroll: onStickScroll, onContentResize, pin, keepPlace, jump, unseen } = useStickToBottom(items, mine, latest)
+  const { ref, onScroll: onStickScroll, onContentResize, onReaderInput, pin, keepPlace, jump, unseen } = useStickToBottom(items, mine, latest)
   const newLine = useNewLine(rowKey(bot), items, state.phase === 'ready', ref)
   const onScroll = () => {
     onStickScroll()
@@ -532,6 +532,7 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
       scrollRef={ref}
       onScroll={onScroll}
       onContentResize={onContentResize}
+      onReaderInput={onReaderInput}
       overlay={
         unseen ? (
           <button type="button" className="jump-btn gbo-jump" aria-label="Jump to latest" title="Jump to latest" onClick={jump}>

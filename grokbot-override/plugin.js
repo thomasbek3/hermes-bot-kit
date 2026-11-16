@@ -55118,17 +55118,29 @@ function unitsOf(scroller) {
 }
 function captureAnchor(scroller) {
   const top = scroller.getBoundingClientRect().top;
+  const view = scroller.clientHeight;
+  const marks = [];
   for (const unit of unitsOf(scroller)) {
     const rect = unit.getBoundingClientRect();
-    if (rect.bottom - top > 0) return { el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top };
+    if (rect.bottom - top <= 0) continue;
+    if (view > 0 && rect.top - top >= view) break;
+    marks.push({ el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top });
+  }
+  if (!marks.length) return null;
+  return [...marks.filter((m) => m.key), ...marks.filter((m) => !m.key)];
+}
+function locate(scroller, anchor) {
+  const origin = scroller.getBoundingClientRect().top;
+  let units = null;
+  for (const mark of anchor) {
+    let unit = mark.el.isConnected && scroller.contains(mark.el) ? mark.el : null;
+    if (!unit && mark.key) {
+      units = units || unitsOf(scroller);
+      unit = units.find((u) => u.getAttribute(ANCHOR_ATTR) === mark.key) || null;
+    }
+    if (unit) return { mark, now: unit.getBoundingClientRect().top - origin };
   }
   return null;
-}
-function anchorTop(scroller, anchor) {
-  let unit = anchor.el.isConnected ? anchor.el : null;
-  if (!unit && anchor.key) unit = unitsOf(scroller).find((u) => u.getAttribute(ANCHOR_ATTR) === anchor.key) || null;
-  if (!unit) return null;
-  return unit.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
 }
 function useStickToBottom(dep, mine, latest = "") {
   const ref = React13.useRef(null);
@@ -55136,6 +55148,7 @@ function useStickToBottom(dep, mine, latest = "") {
   const lastMine = React13.useRef(mine);
   const lastLatest = React13.useRef(latest);
   const keep = React13.useRef(null);
+  const keepGen = React13.useRef(0);
   const wrote = React13.useRef(null);
   const jumping = React13.useRef(null);
   const [unseen, setUnseen] = React13.useState(false);
@@ -55147,10 +55160,15 @@ function useStickToBottom(dep, mine, latest = "") {
     const el = ref.current;
     const anchor = keep.current;
     if (!el || !anchor) return;
-    const now = anchorTop(el, anchor);
-    if (now === null) return;
-    const shift = now - anchor.top;
+    const hit = locate(el, anchor);
+    if (!hit) return;
+    const shift = hit.now - hit.mark.top;
     if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift);
+  };
+  const dropKeep = () => {
+    if (!keep.current) return;
+    keep.current = null;
+    keepGen.current += 1;
   };
   const scrollToBottom = (el, smooth) => {
     const top = el.scrollHeight;
@@ -55187,13 +55205,17 @@ function useStickToBottom(dep, mine, latest = "") {
     const el = ref.current;
     if (mine !== lastMine.current) {
       lastMine.current = mine;
-      if (mine) stick.current = true;
+      if (mine) {
+        stick.current = true;
+        dropKeep();
+      }
     }
     const newer = latest !== lastLatest.current;
     lastLatest.current = latest;
     if (!el) return;
     if (keep.current) {
       restore();
+      if (newer && latest && !stick.current) setUnseen(true);
       return;
     }
     if (jumping.current) scrollToBottom(el, !reducedMotion());
@@ -55249,19 +55271,29 @@ function useStickToBottom(dep, mine, latest = "") {
   }, []);
   const pin = () => {
     stick.current = true;
+    dropKeep();
+  };
+  const onReaderInput = () => {
+    if (jumping.current) endJump();
   };
   const keepPlace = async (load) => {
     const el = ref.current;
-    if (el) keep.current = captureAnchor(el);
+    const gen = keepGen.current += 1;
+    keep.current = el ? captureAnchor(el) : null;
+    const mineNow = () => keepGen.current === gen && keep.current !== null;
     try {
       await load();
     } finally {
-      restore();
+      if (mineNow()) restore();
       const done = () => {
+        if (!mineNow()) return;
         restore();
         keep.current = null;
         const target = ref.current;
-        if (target) stick.current = fromBottom(target) < STICK_PX;
+        if (target) {
+          stick.current = fromBottom(target) < STICK_PX;
+          if (stick.current) setUnseen(false);
+        }
       };
       const raf2 = globalThis.requestAnimationFrame;
       if (typeof raf2 === "function") raf2(() => done());
@@ -55272,13 +55304,14 @@ function useStickToBottom(dep, mine, latest = "") {
     const el = ref.current;
     stick.current = true;
     setUnseen(false);
+    dropKeep();
     if (!el) return;
     const smooth = !reducedMotion() && typeof el.scrollTo === "function";
     if (jumping.current) clearTimeout(jumping.current.timer);
     jumping.current = smooth ? { timer: setTimeout(finishJump, JUMP_MAX_MS) } : null;
     scrollToBottom(el, smooth);
   };
-  return { ref, onScroll, onContentResize, pin, stick, keepPlace, jump, unseen };
+  return { ref, onScroll, onContentResize, onReaderInput, pin, stick, keepPlace, jump, unseen };
 }
 
 // src/ui/Profile.tsx
@@ -58684,7 +58717,7 @@ function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
   const offset = range > 0 ? Math.round(Math.min(Math.max(scrollTop, 0), range) / range * travel) : 0;
   return { size, offset, travel, range };
 }
-function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, children, ...rest }) {
+function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, onReaderInput, children, ...rest }) {
   const scroller = React21.useRef(null);
   const thumb = React21.useRef(null);
   const [dragging, setDragging] = React21.useState(false);
@@ -58744,6 +58777,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     if (!geo || geo.travel <= 0) return;
     event.preventDefault();
     event.stopPropagation();
+    onReaderInput?.();
     const target = event.currentTarget;
     const startY = event.clientY;
     const startTop = el.scrollTop;
@@ -59635,7 +59669,7 @@ function Transcript({ state, bot, meta, onPrefill }) {
     }
     return "";
   }, [items]);
-  const { ref, onScroll: onStickScroll, onContentResize, pin, keepPlace, jump, unseen } = useStickToBottom(items, mine, latest);
+  const { ref, onScroll: onStickScroll, onContentResize, onReaderInput, pin, keepPlace, jump, unseen } = useStickToBottom(items, mine, latest);
   const newLine = useNewLine(rowKey(bot), items, state.phase === "ready", ref);
   const onScroll = () => {
     onStickScroll();
@@ -59675,6 +59709,7 @@ function Transcript({ state, bot, meta, onPrefill }) {
       scrollRef: ref,
       onScroll,
       onContentResize,
+      onReaderInput,
       overlay: unseen ? /* @__PURE__ */ jsx27("button", { type: "button", className: "jump-btn gbo-jump", "aria-label": "Jump to latest", title: "Jump to latest", onClick: jump, children: /* @__PURE__ */ jsx27(IconChevronDown, {}) }) : null,
       children: /* @__PURE__ */ jsxs25("div", { className: "transcript__col gbo-column", children: [
         state.hasMore ? /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void keepPlace(() => controller2?.loadEarlier()), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,

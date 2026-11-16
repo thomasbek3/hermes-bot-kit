@@ -176,6 +176,25 @@ C25) into `feature/grokbot-override-v2` and wiring them together. The five **Par
 R14, R15) do their job natively; each Notes cell names the stock detail that is not equal or not ported.
 Nothing hands off to stock Bot Mode in normal use; none of the rows is live-qualified.)
 
+## Known limits (transcript feel: scrolling, keys, media)
+
+- **Not checked in the live app.** Stick-to-bottom, jump to latest, Show earlier and media sizing are covered by
+  jsdom tests with a modelled layout (`test/tighter-t1-scroll.test.mjs`, `test/tighter-t5-*.test.mjs`): native
+  smooth-scroll timing, the browser's own scroll anchoring (`overflow-anchor: auto`) and how it combines with the
+  manual restore, and dark-mode visuals still need a live look in Hermes.
+- **Jump to latest** ends on the reader's wheel, touch, pointer press in the transcript, scroll keys or a drag of
+  the overlay scrollbar thumb; anything else (an assistive-technology scroll, for example) is treated as the
+  jump's own progress until it arrives or the 1.2 s limit settles it at the bottom.
+- **Show earlier** restores by the messages that were visible (keyed by their React identity) before decorative
+  rows; if none of the rows that were visible is on screen after the load, the position is left to the browser.
+- **No-remount keys (T4)** apply to replacements the controller can identify: a send confirmed by its stored row
+  (the last 256 confirmations are remembered) and the replies of that turn. A live reply without a confirmed or
+  stored user message before it (a compression, a recovery after a gap, a snapshot reload) gets no carried key
+  and is remounted once: a remount is preferred to another message's identity.
+- **Media sizes (T5)**: an image already read and decoded is drawn at once in its final box; an image seen for the
+  first time still shows the generic placeholder until it decodes, a remote image loads only on **Load**, and the
+  video placeholder assumes 16:9. So first-load and non-16:9 media can still change height once.
+
 ## Architecture notes
 
 **Two panes, Bot Mode's own zones.** Bot Mode puts its roster in the sidebar zone (tab **BOTS**) and its
