@@ -130,3 +130,34 @@ test('a new background reply with the same text as the previous one still notifi
   const swapped = st({ items: [user('u1'), reply('16', 'Ok')] })
   assert.deepEqual(run([liveIdle, liveBusy, swapped], away(seen2)), [])
 })
+
+// Review C-R2-02: each open chat slot has its own previous state; the same
+// reply shown by two slots (two controllers, two live ids) notifies once.
+test('slots: the same reply in two tabs notifies once; each tab\'s own turns still notify', () => {
+  const seen = createSeen()
+  const idle = st({ items: [user('u1')] })
+  const busy = st({ busy: true, items: [user('u1')] })
+  const doneMain = st({ items: [user('u1'), reply('live:a:1', 'shared')] })
+  const doneSide = st({ items: [user('u1'), reply('live:a:9', 'shared')] })
+  const at = 1_000_000
+  const main = (p, n) => nativeNotifications(p, n, away(seen, { slot: 'main', now: at }))
+  const side = (p, n) => nativeNotifications(p, n, away(seen, { slot: 'tab-1', now: at + 50 }))
+  assert.deepEqual([main(null, idle), side(null, idle), main(idle, busy), side(idle, busy)].flat(), [])
+  assert.equal(main(busy, doneMain).length, 1, 'the first tab to see it notifies')
+  assert.equal(side(busy, doneSide).length, 0, 'the other tab showing the same reply does not')
+  // Long after, the other tab's own identical reply is news again.
+  const later = nativeNotifications(doneSide, st({ busy: true, items: doneSide.chat.items }), away(seen, { slot: 'tab-1', now: at + 60_000 }))
+  assert.deepEqual(later, [])
+  const again = nativeNotifications(st({ busy: true, items: doneSide.chat.items }), st({ items: [...doneSide.chat.items, reply('live:a:10', 'shared')] }), away(seen, { slot: 'tab-1', now: at + 60_000 }))
+  assert.equal(again.length, 1)
+  // The same slot repeating its own text right away still notifies (C-R1-03).
+  const s2 = createSeen()
+  const o = { slot: 'main', now: at }
+  const a1 = st({ items: [user('u1'), reply('14', 'Done.')] })
+  const b1 = st({ busy: true, items: a1.chat.items })
+  const c1 = st({ items: [...a1.chat.items, reply('live:x:1', 'Done.')] })
+  const d1 = st({ busy: true, items: c1.chat.items })
+  const e1 = st({ items: [...c1.chat.items, reply('live:x:2', 'Done.')] })
+  const all = run([a1, b1, c1, d1, e1], away(s2, o))
+  assert.deepEqual(all.map(n => n.id), ['done:live:x:1', 'done:live:x:2'])
+})

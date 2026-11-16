@@ -745,7 +745,11 @@ async function readUsage(bot: any, runtimeId: string, key: string) {
 // through the public plugin door `ctx.os.notify`. Hermes only fires its own
 // for sessions its message stream owns, which the override's never is.
 const notifySeen = createSeen()
-let notifyPrev: any = null
+// The previous state of each open chat: the main tab ('main') and every side
+// tab (its slot id), tracked from the moment the tab first renders (review
+// C-R2-02: side tabs never fed the notifier).
+const notifyPrev = new Map<string, any>()
+const slotWatchers = new Map<string, () => void>()
 
 function windowFocused(): boolean {
   try {
@@ -757,16 +761,16 @@ function windowFocused(): boolean {
   }
 }
 
-function sendNativeNotifications(state: any) {
-  const prev = notifyPrev
-  notifyPrev = state
+function sendNativeNotifications(slotId: string, state: any, extra: boolean) {
+  const prev = notifyPrev.get(slotId) ?? null
+  notifyPrev.set(slotId, state)
   const os = app.ctx?.os
   if (typeof os?.notify !== 'function') return
   const bot = state?.bot
   let list: any[] = []
   try {
     const name = bot ? displayName(bot, metaFor(bot)) : ''
-    list = nativeNotifications(prev, state, { focused: windowFocused(), seen: notifySeen, name, keyOf: rowKey })
+    list = nativeNotifications(prev, state, { focused: windowFocused(), seen: notifySeen, name, keyOf: rowKey, slot: slotId })
   } catch {
     return
   }
@@ -777,8 +781,11 @@ function sendNativeNotifications(state: any) {
         body: n.body,
         onActivate: () => {
           try {
-            selectBot(bot)
-            backToOverride()
+            if (extra) host?.revealPane?.(`plugin-workspace:${slotId}`)
+            else {
+              selectBot(bot)
+              backToOverride()
+            }
           } catch {
             /* best-effort */
           }
@@ -790,15 +797,26 @@ function sendNativeNotifications(state: any) {
   }
 }
 
+/** A side Bot Chat tab (ChatSlot, app.ts openBotInNewTab): feed its chat
+ *  store to the notifier. Idempotent; called by the tab renderer (index.tsx)
+ *  and undone on toggle-off. The main slot is fed by onChatState. */
+export function trackChatSlot(slot: any) {
+  const id = String(slot?.id || '')
+  if (!id || !slot?.extra || slotWatchers.has(id) || typeof slot?.chat?.subscribe !== 'function') return
+  sendNativeNotifications(id, slot.chat.get(), true)
+  slotWatchers.set(id, slot.chat.subscribe(() => sendNativeNotifications(id, slot.chat.get(), true)))
+}
+
 /** Test seam: what the notifier last saw (reset between tests). */
 export function _resetNativeNotify() {
-  notifyPrev = null
+  notifyPrev.clear()
   notifySeen.ids.clear()
   notifySeen.base.clear()
+  notifySeen.recent.clear()
 }
 
 function onChatState(state: any) {
-  sendNativeNotifications(state)
+  sendNativeNotifications('main', state, false)
   const key = state?.bot ? rowKey(state.bot) : ''
   const runtimeId = String(state?.runtimeId || '')
   const cur = roster2.usage.get()
@@ -857,7 +875,9 @@ export function stopRosterParity() {
   offEvents = null
   offChat?.()
   offChat = null
-  notifyPrev = null
+  notifyPrev.clear()
+  for (const off of slotWatchers.values()) off()
+  slotWatchers.clear()
   usageRuntime = ''
   roster2.dialog.set(null)
 }

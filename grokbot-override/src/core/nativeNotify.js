@@ -19,6 +19,12 @@
 //    says "Done." again) still notifies (review C-R1-03);
 //  - a new chat (another bot or runtime) is a baseline: what it already
 //    holds is marked seen, nothing fires;
+//  - every open chat counts, the main tab and each side tab (`slot`), with
+//    its own previous state; the `seen` tracker is shared, so an approval or
+//    a question shown in two tabs notifies once, and a reply shown by the
+//    same bot in two tabs (two controllers, two live ids) notifies once: a
+//    reply with the same bot, runtime and text from ANOTHER slot within
+//    15 s is the same reply (review C-R2-02);
 //  - never for a silent reply ([SILENT], NO_REPLY, …) or a failed turn;
 //  - bodies are generic lines: never the reply, the approval command, a
 //    question or any secret / sudo / vault prompt text.
@@ -35,11 +41,14 @@ export const BODIES = Object.freeze({ done: 'Replied.', approval: 'Needs your ap
 
 const SEEN_CAP = 500
 
-/** A fresh dedupe tracker for one app session: notified / seen ids, and the
- *  reply each chat showed when its current turn started. */
+/** A fresh dedupe tracker for one app session: notified / seen ids, the
+ *  reply each chat slot showed when its current turn started, and recent
+ *  reply notifications (for the same reply seen by two slots). */
 export function createSeen() {
-  return { ids: new Set(), base: new Map() }
+  return { ids: new Set(), base: new Map(), recent: new Map() }
 }
+
+export const CROSS_SLOT_MS = 15_000
 
 function remember(seen, id) {
   if (seen.ids.has(id)) return false
@@ -114,7 +123,7 @@ export function markSeen(state, seen) {
  * `{ id, kind: 'done'|'approval'|'input', title, body }`; `seen` is updated.
  * `name` is the bot's display name (the title).
  */
-export function nativeNotifications(prev, next, { focused, seen, name = '', keyOf } = {}) {
+export function nativeNotifications(prev, next, { focused, seen, name = '', keyOf, slot = 'main', now = Date.now() } = {}) {
   if (!seen || !next?.bot || !chatOf(next)) return []
   const same = prev && chatIdentity(prev, keyOf) === chatIdentity(next, keyOf)
   if (!same || focused) {
@@ -125,20 +134,29 @@ export function nativeNotifications(prev, next, { focused, seen, name = '', keyO
   const out = []
   const items = itemsOf(next)
   const identity = chatIdentity(next, keyOf)
+  const baseKey = `${slot}\u0000${identity}`
   // A turn starts: remember the reply already on screen.
   if (!chatOf(prev)?.busy && chatOf(next).busy) {
     const before = finishedReply(itemsOf(prev))
-    seen.base.set(identity, before ? { id: String(before.id || ''), text: String(before.text || '').trim() } : null)
+    seen.base.set(baseKey, before ? { id: String(before.id || ''), text: String(before.text || '').trim() } : null)
     if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value)
   }
   // Turn done: busy → idle with a finished, non-silent, new reply.
   if (chatOf(prev)?.busy && !chatOf(next).busy) {
     const reply = finishedReply(items)
-    const base = seen.base.get(identity)
-    seen.base.delete(identity)
+    const base = seen.base.get(baseKey)
+    seen.base.delete(baseKey)
     const fresh = reply && !sameReply(base, reply)
-    if (fresh && remember(seen, `done:${reply.id}`)) out.push({ id: `done:${reply.id}`, kind: 'done', title, body: BODIES.done })
-    else if (reply) remember(seen, `done:${reply.id}`)
+    if (fresh && remember(seen, `done:${reply.id}`)) {
+      const sameKey = `${identity}\u0000${String(reply.text || '').trim()}`
+      const last = seen.recent.get(sameKey)
+      if (!(last && last.slot !== slot && now - last.at < CROSS_SLOT_MS)) {
+        out.push({ id: `done:${reply.id}`, kind: 'done', title, body: BODIES.done })
+        seen.recent.delete(sameKey)
+        seen.recent.set(sameKey, { slot, at: now })
+        if (seen.recent.size > 50) seen.recent.delete(seen.recent.keys().next().value)
+      }
+    } else if (reply) remember(seen, `done:${reply.id}`)
   }
   // A new pending approval card (one notification per transition).
   let approvals = 0

@@ -47557,8 +47557,9 @@ var INPUT_DEFAULT = "Needs your input.";
 var BODIES = Object.freeze({ done: "Replied.", approval: "Needs your approval.", input: INPUT_DEFAULT });
 var SEEN_CAP = 500;
 function createSeen() {
-  return { ids: /* @__PURE__ */ new Set(), base: /* @__PURE__ */ new Map() };
+  return { ids: /* @__PURE__ */ new Set(), base: /* @__PURE__ */ new Map(), recent: /* @__PURE__ */ new Map() };
 }
+var CROSS_SLOT_MS = 15e3;
 function remember(seen, id) {
   if (seen.ids.has(id)) return false;
   seen.ids.add(id);
@@ -47611,7 +47612,7 @@ function markSeen(state, seen) {
   const key = inputKey(chatOf(state)?.waiting);
   if (key) remember(seen, key);
 }
-function nativeNotifications(prev, next, { focused, seen, name = "", keyOf } = {}) {
+function nativeNotifications(prev, next, { focused, seen, name = "", keyOf, slot = "main", now = Date.now() } = {}) {
   if (!seen || !next?.bot || !chatOf(next)) return [];
   const same = prev && chatIdentity(prev, keyOf) === chatIdentity(next, keyOf);
   if (!same || focused) {
@@ -47622,18 +47623,27 @@ function nativeNotifications(prev, next, { focused, seen, name = "", keyOf } = {
   const out = [];
   const items = itemsOf(next);
   const identity = chatIdentity(next, keyOf);
+  const baseKey = `${slot}\0${identity}`;
   if (!chatOf(prev)?.busy && chatOf(next).busy) {
     const before = finishedReply(itemsOf(prev));
-    seen.base.set(identity, before ? { id: String(before.id || ""), text: String(before.text || "").trim() } : null);
+    seen.base.set(baseKey, before ? { id: String(before.id || ""), text: String(before.text || "").trim() } : null);
     if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value);
   }
   if (chatOf(prev)?.busy && !chatOf(next).busy) {
     const reply = finishedReply(items);
-    const base4 = seen.base.get(identity);
-    seen.base.delete(identity);
+    const base4 = seen.base.get(baseKey);
+    seen.base.delete(baseKey);
     const fresh = reply && !sameReply(base4, reply);
-    if (fresh && remember(seen, `done:${reply.id}`)) out.push({ id: `done:${reply.id}`, kind: "done", title, body: BODIES.done });
-    else if (reply) remember(seen, `done:${reply.id}`);
+    if (fresh && remember(seen, `done:${reply.id}`)) {
+      const sameKey = `${identity}\0${String(reply.text || "").trim()}`;
+      const last = seen.recent.get(sameKey);
+      if (!(last && last.slot !== slot && now - last.at < CROSS_SLOT_MS)) {
+        out.push({ id: `done:${reply.id}`, kind: "done", title, body: BODIES.done });
+        seen.recent.delete(sameKey);
+        seen.recent.set(sameKey, { slot, at: now });
+        if (seen.recent.size > 50) seen.recent.delete(seen.recent.keys().next().value);
+      }
+    } else if (reply) remember(seen, `done:${reply.id}`);
   }
   let approvals = 0;
   for (const item of pendingApprovals(items)) {
@@ -48374,7 +48384,8 @@ async function readUsage(bot, runtimeId, key) {
   }
 }
 var notifySeen = createSeen();
-var notifyPrev = null;
+var notifyPrev = /* @__PURE__ */ new Map();
+var slotWatchers = /* @__PURE__ */ new Map();
 function windowFocused() {
   try {
     if (typeof document === "undefined") return true;
@@ -48384,16 +48395,16 @@ function windowFocused() {
     return true;
   }
 }
-function sendNativeNotifications(state) {
-  const prev = notifyPrev;
-  notifyPrev = state;
+function sendNativeNotifications(slotId, state, extra) {
+  const prev = notifyPrev.get(slotId) ?? null;
+  notifyPrev.set(slotId, state);
   const os = app.ctx?.os;
   if (typeof os?.notify !== "function") return;
   const bot = state?.bot;
   let list = [];
   try {
     const name = bot ? displayName(bot, metaFor(bot)) : "";
-    list = nativeNotifications(prev, state, { focused: windowFocused(), seen: notifySeen, name, keyOf: rowKey });
+    list = nativeNotifications(prev, state, { focused: windowFocused(), seen: notifySeen, name, keyOf: rowKey, slot: slotId });
   } catch {
     return;
   }
@@ -48404,8 +48415,11 @@ function sendNativeNotifications(state) {
         body: n.body,
         onActivate: () => {
           try {
-            selectBot(bot);
-            backToOverride();
+            if (extra) host2?.revealPane?.(`plugin-workspace:${slotId}`);
+            else {
+              selectBot(bot);
+              backToOverride();
+            }
           } catch {
           }
         }
@@ -48414,8 +48428,14 @@ function sendNativeNotifications(state) {
     }
   }
 }
+function trackChatSlot(slot) {
+  const id = String(slot?.id || "");
+  if (!id || !slot?.extra || slotWatchers.has(id) || typeof slot?.chat?.subscribe !== "function") return;
+  sendNativeNotifications(id, slot.chat.get(), true);
+  slotWatchers.set(id, slot.chat.subscribe(() => sendNativeNotifications(id, slot.chat.get(), true)));
+}
 function onChatState(state) {
-  sendNativeNotifications(state);
+  sendNativeNotifications("main", state, false);
   const key = state?.bot ? rowKey(state.bot) : "";
   const runtimeId = String(state?.runtimeId || "");
   const cur = roster2.usage.get();
@@ -48468,7 +48488,9 @@ function stopRosterParity() {
   offEvents = null;
   offChat?.();
   offChat = null;
-  notifyPrev = null;
+  notifyPrev.clear();
+  for (const off of slotWatchers.values()) off();
+  slotWatchers.clear();
   usageRuntime = "";
   roster2.dialog.set(null);
 }
@@ -60549,7 +60571,10 @@ var index_default = {
     setRenderers({
       roster: () => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "roster", children: /* @__PURE__ */ jsx31(RosterPane, {}) }),
       workspace: () => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx31(ChatWorkspace, {}) }),
-      tab: (slot) => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx31(ChatWorkspace, { slot }) }),
+      tab: (slot) => {
+        trackChatSlot(slot);
+        return /* @__PURE__ */ jsx31(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx31(ChatWorkspace, { slot }) });
+      },
       room: (slot) => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "room", children: /* @__PURE__ */ jsx31(RoomWorkspace, { slot }) })
     });
     ctx.registerMany([

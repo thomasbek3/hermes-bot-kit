@@ -8,7 +8,7 @@ import { ChatWorkspace } from './ui/Chat'
 import { primeModelOptions } from './ui/ProfileConfig'
 import { RosterPane } from './ui/Roster'
 import { RoomWorkspace } from './ui/Rooms'
-import { createBot } from './ui/rosterActions'
+import { createBot, trackChatSlot } from './ui/rosterActions'
 import { openDialog, roster2 } from './ui/rosterStores'
 import { openBotScreen, screenStore } from './ui/Screen'
 import { contractNotice, createEventLog, probeContract } from './core/contract.js'
@@ -131,11 +131,15 @@ export default {
           <ChatWorkspace />
         </OverrideBoundary>
       ),
-      tab: slot => (
-        <OverrideBoundary area="chat">
-          <ChatWorkspace slot={slot} />
-        </OverrideBoundary>
-      ),
+      tab: slot => {
+        // T7 / review C-R2-02: a side tab's chat notifies too (idempotent).
+        trackChatSlot(slot)
+        return (
+          <OverrideBoundary area="chat">
+            <ChatWorkspace slot={slot} />
+          </OverrideBoundary>
+        )
+      },
       room: slot => (
         <OverrideBoundary area="room">
           <RoomWorkspace slot={slot} />
