@@ -305,11 +305,10 @@ function isInsecurePublicWs(wsUrl) {
 
 const DEFAULT_ENDPOINT_NAME = 'My computer'
 const ADDRESS_EMPTY_HELP =
-  "Works with a wss:// address, a noVNC web page, a cloud API key, or just host:port — paste it and I'll figure out which."
-const ADDRESS_INVALID_LINE = "Hmm — that doesn't look like an address or key."
+  "Works with a wss:// address, a noVNC web page, a session API address, or just host:port — paste it and I'll figure out which."
+const ADDRESS_INVALID_LINE = "Hmm — that doesn't look like an address."
 const HTTP_PUBLIC_ADDRESS_LINE =
   'Use https:// for internet addresses. http:// only works for localhost, LAN, .local and Tailscale hosts.'
-const SK_KEY_RE = /^sk[_-][A-Za-z0-9_-]{8,}$/
 
 function isDefaultishName(name) {
   const n = String(name || '').trim()
@@ -376,12 +375,6 @@ function probeUrlsFromHostPort(parsed) {
     wsUrl: `${priv ? 'ws' : 'wss'}://${host}:${parsed.port}/websockify`,
     iframeUrl: priv ? `http://${host}:${parsed.port}/vnc.html` : ''
   }
-}
-
-// An address is an API key only when it announces itself as one. The old
-// entropy heuristic swallowed ordinary hostnames (`windows-11-desktop`).
-function looksLikeApiKey(value) {
-  return SK_KEY_RE.test(String(value || '').trim())
 }
 
 function isNovncPageUrl(href) {
@@ -456,14 +449,6 @@ function classifyAddress(raw) {
       patch: { mode: 'session-json', sessionUrl: address, probe: false }
     }
   }
-  if (looksLikeApiKey(address)) {
-    return {
-      kind: 'api-key',
-      line: "✓ API key — I'll find your computers",
-      connectEnabled: true,
-      patch: { mode: 'session-json', sessionBearer: address, probe: false }
-    }
-  }
   const hostPort = parseHostPort(address)
   if (hostPort) {
     const urls = probeUrlsFromHostPort(hostPort)
@@ -526,7 +511,8 @@ function blankEndpoint() {
     hiperfUrl: '',
     hiperfToken: '',
     allowClipboard: false,
-    serverKeyFingerprint: ''
+    serverKeyFingerprint: '',
+    remoteCua: false
   }
 }
 
@@ -555,7 +541,8 @@ function normalizeEndpoint(raw) {
     hiperfUrl: String(raw.hiperfUrl || ''),
     hiperfToken: String(raw.hiperfToken || ''),
     allowClipboard: raw.allowClipboard === true,
-    serverKeyFingerprint: String(raw.serverKeyFingerprint || '')
+    serverKeyFingerprint: String(raw.serverKeyFingerprint || ''),
+    remoteCua: raw.remoteCua === true
   }
 }
 
@@ -588,28 +575,23 @@ function unwrapSessionBody(value) {
   return value
 }
 
-// Orgo has no list-computers endpoint (GET /api/computers?workspace_id= → HTTP 405).
-// Live list is { projects: [{ desktops: [...] }] }. Docs still describe { workspaces }
-// plus GET /api/workspaces/{id}; that detail route takes a project id and 404s on a desktop id.
-
-const ORGO_INSTANCE_ID_RE = /^[a-zA-Z0-9-]+$/
-const ORGO_WORKSPACE_KEYS = ['projects', 'workspaces', 'data', 'items', 'results']
-const ORGO_COMPUTER_KEYS = ['desktops', 'computers', 'data', 'items', 'results']
-
-function orgoApiOrigin(sessionUrl) {
+// The origin an API key may be sent to: the configured session address's own
+// origin, nothing else.
+function sessionOrigin(sessionUrl) {
   try {
     const parsed = new URL(String(sessionUrl || '').trim())
     if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.origin
   } catch {
     /* not an absolute URL */
   }
-  return 'https://www.orgo.ai'
+  return ''
 }
 
 function credentialTargetAllowed(url, sessionUrl) {
   try {
     const parsed = new URL(String(url || '').trim())
-    if (parsed.origin !== orgoApiOrigin(sessionUrl)) return false
+    const allowed = sessionOrigin(sessionUrl)
+    if (!allowed || parsed.origin !== allowed) return false
     if (parsed.protocol === 'https:') return true
     if (parsed.protocol === 'http:' && isPrivateWsHost(parsed.hostname)) return true
     return false
@@ -643,304 +625,8 @@ async function authFetch(url, { bearer, sessionUrl, signal, accept } = {}) {
   return response
 }
 
-function orgoShapeKeys(value) {
-  if (Array.isArray(value)) return ['<array>']
-  if (value && typeof value === 'object') return Object.keys(value)
-  return []
-}
-
-function firstNonEmptyString(values) {
-  for (const value of values) {
-    if (typeof value === 'string') {
-      const text = value.trim()
-      if (text) return text
-    }
-  }
-  return ''
-}
-
-function uuidFromText(value) {
-  const matches = String(value || '').match(
-    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
-  )
-  return matches && matches.length ? matches[matches.length - 1] : ''
-}
-
-function instanceIdFromConnectionUrl(value) {
-  if (value == null || value === '') return ''
-  let last = ''
-  try {
-    const parts = new URL(String(value)).pathname.split('/').filter(Boolean)
-    last = parts.length ? parts[parts.length - 1] : ''
-  } catch {
-    const parts = String(value).split('/').filter(Boolean)
-    last = parts.length ? parts[parts.length - 1] : ''
-  }
-  last = String(last).trim()
-  return ORGO_INSTANCE_ID_RE.test(last) ? last : ''
-}
-
-function orgoInstanceId(record, payload) {
-  const bags = []
-  if (record && typeof record === 'object') bags.push(record)
-  if (payload && typeof payload === 'object' && payload !== record) bags.push(payload)
-  for (const bag of bags) {
-    for (const key of ['instance_id', 'instanceId', 'fly_instance_id', 'flyInstanceId']) {
-      const candidate = typeof bag[key] === 'string' ? bag[key].trim() : ''
-      if (candidate && ORGO_INSTANCE_ID_RE.test(candidate)) return candidate
-    }
-  }
-  for (const bag of bags) {
-    const derived = instanceIdFromConnectionUrl(bag.connection_url)
-    if (derived) return derived
-  }
-  return ''
-}
-
-function unwrapNamedArray(value, keys) {
-  if (Array.isArray(value)) return value
-  if (!value || typeof value !== 'object') return []
-  for (const key of keys) {
-    if (Array.isArray(value[key])) return value[key]
-  }
-  for (const key of keys) {
-    const nested = value[key]
-    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-      for (const inner of keys) {
-        if (Array.isArray(nested[inner])) return nested[inner]
-      }
-    }
-  }
-  return []
-}
-
-function unwrapWorkspaceList(value) {
-  return unwrapNamedArray(value, ORGO_WORKSPACE_KEYS).filter(
-    item =>
-      item && typeof item === 'object' && !Array.isArray(item) && item.id != null && String(item.id).trim() !== ''
-  )
-}
-
-function computerArrayFrom(record) {
-  if (!record || typeof record !== 'object') return null
-  for (const key of ORGO_COMPUTER_KEYS) {
-    if (Array.isArray(record[key])) return record[key]
-  }
-  return null
-}
-
-function computerArrayKey(record) {
-  if (!record || typeof record !== 'object') return null
-  for (const key of ORGO_COMPUTER_KEYS) {
-    if (Array.isArray(record[key])) return key
-  }
-  return null
-}
-
-function computersFromArray(arr) {
-  if (!Array.isArray(arr)) return []
-  return arr.filter(
-    item =>
-      item && typeof item === 'object' && !Array.isArray(item) && typeof item.id === 'string' && item.id.trim() !== ''
-  )
-}
-
-function extractComputers(body) {
-  if (Array.isArray(body)) return computersFromArray(body)
-  if (!body || typeof body !== 'object') return []
-  const records = [body]
-  for (const key of ['data', 'workspace', 'project']) {
-    const nested = body[key]
-    if (nested && typeof nested === 'object' && !Array.isArray(nested)) records.push(nested)
-  }
-  for (const record of records) {
-    const arr = computerArrayFrom(record)
-    if (arr) return computersFromArray(arr)
-  }
-  return []
-}
-
-function mapOrgoPick(computer, workspaceName) {
-  const computerId = String(computer.id).trim()
-  return {
-    workspaceName: workspaceName || 'Workspace',
-    computerId,
-    computerName: String(computer.name || '').trim() || computerId,
-    status: String(computer.status || '').trim() || 'unknown'
-  }
-}
-
-function orgoDiscoverError(kind) {
-  const err = new Error(kind)
-  err.kind = kind
-  return err
-}
-
 function isCredentialError(error) {
   return Boolean(error && (error.status === 'unsafe-origin' || error.status === 'redirect'))
-}
-
-async function orgoFetchJson(url, { bearer, sessionUrl }) {
-  let response
-  try {
-    response = await authFetch(url, { bearer, sessionUrl })
-  } catch (error) {
-    if (isCredentialError(error)) throw error
-    throw orgoDiscoverError('network')
-  }
-  if (response.status === 401 || response.status === 403) throw orgoDiscoverError('auth')
-  if (!response.ok) throw orgoDiscoverError('network')
-  try {
-    return { status: response.status, body: await response.json() }
-  } catch {
-    throw orgoDiscoverError('network')
-  }
-}
-
-async function orgoFetchJsonOptional(url, { bearer, sessionUrl }) {
-  let response
-  try {
-    response = await authFetch(url, { bearer, sessionUrl })
-  } catch (error) {
-    if (isCredentialError(error)) throw error
-    return { ok: false, status: 'network', body: null }
-  }
-  let body = null
-  try {
-    body = await response.json()
-  } catch {
-    body = null
-  }
-  return { ok: response.ok, status: response.status, body }
-}
-
-function pushOrgoComputers(computers, list, workspaceName) {
-  for (const computer of computersFromArray(list)) {
-    computers.push(mapOrgoPick(computer, workspaceName))
-  }
-}
-
-async function discoverOrgoComputers(origin, bearer, sessionUrl) {
-  const listed = await orgoFetchJson(`${origin}/api/workspaces`, { bearer, sessionUrl })
-  const workspaces = unwrapWorkspaceList(listed.body)
-  const workspaceCount = workspaces.length
-  const computers = []
-  const needingDetail = []
-  const embedded = []
-
-  for (const ws of workspaces) {
-    const arr = computerArrayFrom(ws)
-    const key = computerArrayKey(ws)
-    if (arr) {
-      embedded.push({ key, count: arr.length })
-      const workspaceName =
-        String((ws && ws.name) || '').trim() || String((ws && ws.project_name) || '').trim() || 'Workspace'
-      pushOrgoComputers(computers, arr, workspaceName)
-    } else {
-      embedded.push({ key: null, count: 0 })
-      needingDetail.push(ws)
-    }
-  }
-
-  console.info('[computer-viewer] orgo discovery', {
-    stage: 'list',
-    status: listed.status,
-    keys: orgoShapeKeys(listed.body),
-    workspaceCount,
-    firstWorkspaceKeys: workspaces[0] ? orgoShapeKeys(workspaces[0]) : [],
-    embedded
-  })
-
-  const detailSlice = needingDetail.slice(0, 10)
-  const details = await Promise.all(
-    detailSlice.map(async ws => {
-      const id = String(ws.id).trim()
-      const result = await orgoFetchJsonOptional(`${origin}/api/workspaces/${encodeURIComponent(id)}`, {
-        bearer,
-        sessionUrl
-      })
-      return { ws, result }
-    })
-  )
-
-  for (const { ws, result } of details) {
-    const body = result.body
-    const extracted = extractComputers(body)
-    console.info('[computer-viewer] orgo discovery', {
-      stage: 'detail',
-      status: result.status,
-      keys: orgoShapeKeys(body),
-      computerCount: extracted.length,
-      computerKey:
-        computerArrayKey(body) ||
-        computerArrayKey(body && body.data) ||
-        computerArrayKey(body && body.workspace)
-    })
-    if (!result.ok || body == null) continue
-    const workspaceName =
-      String((ws && ws.name) || '').trim() ||
-      String((body && body.name) || '').trim() ||
-      'Workspace'
-    pushOrgoComputers(computers, extracted, workspaceName)
-  }
-
-  let uuidFallback = false
-  let uuidFallbackStatus = null
-  if (computers.length === 0) {
-    const uuid = uuidFromText(sessionUrl)
-    if (uuid) {
-      uuidFallback = true
-      const result = await orgoFetchJsonOptional(`${origin}/api/computers/${encodeURIComponent(uuid)}`, {
-        bearer,
-        sessionUrl
-      })
-      uuidFallbackStatus = result.status
-      const record = unwrapSessionBody(result.body)
-      const id = record && typeof record.id === 'string' ? record.id.trim() : ''
-      console.info('[computer-viewer] orgo discovery', {
-        stage: 'uuid-fallback',
-        status: result.status,
-        keys: orgoShapeKeys(result.body),
-        hasId: Boolean(id)
-      })
-      if (result.ok && id) {
-        const workspaceName =
-          String(record.project_name || record.projectName || '').trim() || 'Workspace'
-        computers.push(mapOrgoPick(record, workspaceName))
-      }
-    }
-  }
-
-  console.info('[computer-viewer] orgo discovery', {
-    stage: 'done',
-    workspaceCount,
-    computerCount: computers.length,
-    detailFetches: detailSlice.length,
-    uuidFallback,
-    uuidFallbackStatus,
-    statuses: computers.map(item => item.status)
-  })
-
-  return { computers, workspaceCount }
-}
-
-function hostnameOf(value) {
-  if (value == null || value === '') return ''
-  try {
-    return String(new URL(String(value)).hostname || '').trim()
-  } catch {
-    return ''
-  }
-}
-
-const NON_RUNNING_COMPUTER = {
-  stopped: true,
-  stopping: true,
-  creating: true,
-  starting: true,
-  restarting: true,
-  deleting: true,
-  error: true
 }
 
 function errorTitle(code) {
@@ -1287,6 +973,8 @@ function showPane() {
 
 function hidePane() {
   if (!unregisterPane) return
+  paneClosedAt = Date.now()
+  handBackOnClose()
   const dispose = unregisterPane
   unregisterPane = null
   engine.paneVisible = false
@@ -1577,13 +1265,52 @@ function ensureIframeEl() {
   frame.style.border = '0'
   frame.style.background = 'rgb(0, 0, 0)'
   engine.iframeEl = frame
+  fenceIframe(frame)
   return frame
+}
+
+/** An embedded viewer page cannot be told to go view-only, so a locked
+ *  machine's iframe gets no focus and no input at all: `inert` (no focus, no
+ *  keys, no clicks, not in the tab order), and focus is taken back if it is
+ *  inside. CSS pointer-events alone would leave the keyboard live. */
+function fenceIframe(frame) {
+  if (!frame) return
+  const locked = controlLocked()
+  if (locked) {
+    frame.inert = true
+    frame.setAttribute('inert', '')
+    frame.setAttribute('tabindex', '-1')
+    try {
+      if (document.activeElement === frame && typeof frame.blur === 'function') frame.blur()
+    } catch {
+      /* no document focus to take back */
+    }
+  } else if (frame.inert || (typeof frame.getAttribute === 'function' && frame.getAttribute('inert') != null)) {
+    frame.inert = false
+    if (typeof frame.removeAttribute === 'function') {
+      frame.removeAttribute('inert')
+      frame.removeAttribute('tabindex')
+    }
+  }
 }
 
 function syncSurfacePointer() {
   const expanded = $ui.get().expanded
   if (engine.surfaceEl) engine.surfaceEl.style.pointerEvents = expanded ? 'auto' : 'none'
-  if (engine.iframeEl) engine.iframeEl.style.pointerEvents = expanded ? 'auto' : 'none'
+  // An embedded page cannot be told to ignore input, so a locked machine gets none.
+  if (engine.iframeEl) {
+    engine.iframeEl.style.pointerEvents = expanded && !controlLocked() ? 'auto' : 'none'
+    fenceIframe(engine.iframeEl)
+  }
+}
+
+/** Input goes to the remote only in the expanded view, and for a remote-cua
+ *  machine only while this window holds control. */
+function effectiveViewOnly() {
+  const ui = $ui.get()
+  if (!ui.expanded) return true
+  if (controlTarget()) return !iHoldControl()
+  return Boolean(ui.viewOnly)
 }
 
 function liveEl() {
@@ -1658,9 +1385,8 @@ function applyRfbDisplay() {
   const rfb = engine.rfb
   const expanded = $ui.get().expanded
   const scaleMode = $ui.get().scaleMode
-  const viewOnly = $ui.get().viewOnly
   if (rfb) {
-    rfb.viewOnly = !expanded || viewOnly
+    rfb.viewOnly = effectiveViewOnly()
     rfb.scaleViewport = !expanded || scaleMode === 'fit'
     rfb.clipViewport = false
     rfb.resizeSession = false
@@ -1726,37 +1452,6 @@ function teardownIframe(blank) {
   if (!engine.iframeEl) return
   engine.iframeEl.onload = null
   if (blank) engine.iframeEl.src = 'about:blank'
-}
-
-async function fetchOrgoVncPassword(origin, computerId, bearer, sessionUrl, signal, gen) {
-  let response
-  try {
-    const url = `${origin}/api/computers/${encodeURIComponent(computerId)}/vnc-password`
-    if (bearer) {
-      response = await authFetch(url, { bearer, sessionUrl, signal })
-    } else {
-      response = await fetch(url, { headers: { Accept: 'application/json' }, signal })
-    }
-  } catch (error) {
-    if (error && error.name === 'AbortError') throw error
-    if (isCredentialError(error)) throw error
-    return ''
-  }
-  if (!still(gen)) {
-    const aborted = new Error('aborted')
-    aborted.status = 'aborted'
-    throw aborted
-  }
-  if (!response.ok) return ''
-  let payload
-  try {
-    payload = await response.json()
-  } catch {
-    return ''
-  }
-  const record = unwrapSessionBody(payload)
-  const raw = record.password ?? record.vnc_password ?? payload.password ?? payload.vnc_password
-  return raw == null ? '' : String(raw)
 }
 
 function credentialErrorDetail(error) {
@@ -1832,46 +1527,8 @@ async function fetchSession(endpoint, gen) {
     throw wrapped
   }
   const record = unwrapSessionBody(payload)
-  let websocketUrl = String(record.websocketUrl || payload.websocketUrl || '').trim()
-  let password = String(record.password ?? payload.password ?? '')
-  if (!websocketUrl) {
-    const instanceId = orgoInstanceId(record, payload)
-    if (instanceId) {
-      const statusRaw = record.status != null ? record.status : payload.status
-      if (statusRaw != null && statusRaw !== '') {
-        const status = String(statusRaw).trim()
-        if (NON_RUNNING_COMPUTER[status.toLowerCase()]) {
-          const wrapped = new Error('computer-status')
-          wrapped.status = status
-          wrapped.sessionDetail = `Computer status: ${status}. Start it in Orgo first.`
-          throw wrapped
-        }
-      }
-      const rawPassword = record.vnc_password ?? record.password ?? payload.vnc_password ?? payload.password
-      password = rawPassword == null ? '' : String(rawPassword)
-      if (password === '') {
-        const computerId = firstNonEmptyString([record.id, payload.id]) || uuidFromText(endpoint.sessionUrl)
-        if (computerId) {
-          password = await fetchOrgoVncPassword(
-            orgoApiOrigin(endpoint.sessionUrl),
-            computerId,
-            bearer,
-            endpoint.sessionUrl,
-            ac.signal,
-            gen
-          )
-        }
-      }
-      const host =
-        hostnameOf(record.connection_url != null ? record.connection_url : payload.connection_url) ||
-        String(record.hostname || payload.hostname || '').trim() ||
-        hostnameOf(endpoint.sessionUrl)
-      if (host) {
-        websocketUrl = `wss://${host}/desktops/${encodeURIComponent(instanceId)}/ws/websockify`
-        if (password !== '') websocketUrl += `?token=${encodeURIComponent(password)}`
-      }
-    }
-  }
+  const websocketUrl = String(record.websocketUrl || payload.websocketUrl || '').trim()
+  const password = String(record.password ?? payload.password ?? '')
   if (!websocketUrl) {
     const wrapped = new Error('missing-websocketUrl')
     wrapped.status = response.status
@@ -2218,6 +1875,7 @@ async function connect(endpoint) {
         )
       }
       patchState({ phase: 'connected', code: null, detail: rfbStatusDetail(), attempt: 0 })
+      void refreshLease()
       measureScreen()
       attachCanvasObserver()
       hiperfOnRfbConnected()
@@ -2331,6 +1989,7 @@ function userDisconnect(endpointId) {
   const id =
     endpointId || (engine.endpoint && engine.endpoint.id) || engine.currentEndpointId
   if (id) userDisconnectIds.add(id)
+  handBackOnClose()
   disconnect()
 }
 
@@ -2481,25 +2140,101 @@ function teardownEngine() {
   pluginCtx = null
 }
 
-// Auto-connect when the agent starts using its computer (Grok-Bot behavior):
-// a fresh orgo-computer tool row appearing DURING a live turn wakes the
-// viewer so the user can watch. Works even when Bot Chat's quiet mode hides
-// the row (display:none keeps it in the DOM). History renders don't trigger
-// it: a wake requires the response-loading indicator to be present.
-const AGENT_TOOL_RE = /orgo[\s_-]?computer/i
-let lastAgentWake = 0
+// ---------------------------------------------------------------------------
+// Waking on the bot's own tool calls.
+//
+// Same rules as Hermes's native "Open Screen when the bot uses it"
+// (hermes-bots/screen-autoraise.ts): a LIVE `tool.start` for a screen tool
+// (`computer_use`, `browser_*`) wakes the pane, never a replayed frame, at
+// most once per bot every 30 s, and a manual close holds until a quiet gap of
+// 30 s. Only for a bot that has its own computer bound in this pane
+// (Settings -> "Endpoint for <bot>"), and only when that bot is the one the
+// pane is showing: waking would otherwise connect a different bot's machine.
+// ---------------------------------------------------------------------------
+const SCREEN_TOOL_PREFIXES = ['computer_use', 'browser_']
+const AUTO_WAKE_COOLDOWN_MS = 30000
+const wakeState = new Map()
+let paneClosedAt = 0
 
-function turnInProgress() {
-  return Boolean(
-    document.querySelector(
-      '[data-slot="aui_response-loading"], [data-slot="aui_message-streaming-marker"]'
-    )
-  )
+function isScreenTool(name) {
+  return typeof name === 'string' && SCREEN_TOOL_PREFIXES.some(prefix => name.startsWith(prefix))
 }
 
-function wakeForAgentActivity() {
-  const endpoint = engine.endpoint || resolveEndpoint()
-  if (!endpoint) return
+function boundEndpointFor(profile) {
+  const settings = $settings.get()
+  const id = settings.perBotEndpoint ? settings.perBotEndpoint[profile] : null
+  if (!id) return null
+  return settings.endpoints.find(item => item.id === id) || null
+}
+
+/** A tool event belongs to the bot only when it came from that bot's own
+ *  gateway: the same profile name on another source is another bot. */
+function eventFromBotSource(event, profile, endpoint) {
+  const source = event.connectionId == null ? null : String(event.connectionId)
+  if (endpoint.remoteCua) {
+    // Only once this machine's owner (connection + profile) is known.
+    const state = $control.get()
+    if (state.profile !== profile || !state.owner) return false
+    return sameSource(source, state.owner.connectionId)
+  }
+  if (source == null) return true // local/legacy events carry no source tag
+  const focused = focusedOwner()
+  if (focused && focused.profile === profile) return sameSource(source, focused.connectionId)
+  if (focused === undefined) {
+    // Older build without the focused owner: the active gateway, if known.
+    const active = activeConnection()
+    return active == null || sameSource(source, active)
+  }
+  return false // Hermes can't tell which bot the focused chat is: don't guess
+}
+
+function sameSource(a, b) {
+  const x = a == null || a === '' ? null : String(a)
+  const y = b == null || b === '' ? null : String(b)
+  return x === y || (x === 'local' && y === null) || (x === null && y === 'local')
+}
+
+/** The connection the focused chat runs on, when this Hermes build says. */
+function activeConnection() {
+  try {
+    const atomLike = host.state && host.state.connectionId
+    if (atomLike && typeof atomLike.get === 'function') return atomLike.get() || null
+  } catch {
+    /* older SDK */
+  }
+  try {
+    if (typeof host.activeConnectionId === 'function') return host.activeConnectionId() || null
+  } catch {
+    /* older SDK */
+  }
+  return null
+}
+
+function shouldWake(profile, now) {
+  if (paneClosedAt && now - paneClosedAt < AUTO_WAKE_COOLDOWN_MS) return false
+  const last = wakeState.get(profile) || 0
+  return !last || now - last >= AUTO_WAKE_COOLDOWN_MS
+}
+
+/** A gateway `tool.start` event. Returns true when it woke the pane. */
+function handleToolStart(event, now = Date.now()) {
+  if (!event || event.replayed === true) return false
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {}
+  if (!isScreenTool(payload.name)) return false
+  const shown = readProfileName()
+  const profile = String(event.profile || '').trim() || shown
+  if (profile !== shown) return false
+  const endpoint = boundEndpointFor(profile)
+  if (!endpoint) return false
+  if (!eventFromBotSource(event, profile, endpoint)) return false
+  if (!shouldWake(profile, now)) return false
+  wakeState.set(profile, now)
+  wakeForAgentActivity(endpoint)
+  return true
+}
+
+function wakeForAgentActivity(endpoint) {
+  showPane()
   const phase = engine.state.get().phase
   if (
     phase === 'connected' ||
@@ -2513,52 +2248,902 @@ function wakeForAgentActivity() {
   void connect(endpoint)
 }
 
-function watchAgentActivity() {
-  if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return null
-  const obs = new MutationObserver(mutations => {
-    const now = Date.now()
-    if (now - lastAgentWake < 30000) return
-    for (const m of mutations) {
-      for (const node of m.addedNodes || []) {
-        if (!node || node.nodeType !== 1) continue
-        let block = null
-        if (typeof node.matches === 'function' && node.matches('[data-slot="tool-block"]')) {
-          block = node
-        } else if (typeof node.querySelector === 'function') {
-          block = node.querySelector('[data-slot="tool-block"]')
-        }
-        if (!block) continue
-        if (!AGENT_TOOL_RE.test(block.textContent || '')) continue
-        if (!turnInProgress()) continue
-        lastAgentWake = now
-        wakeForAgentActivity()
+function watchAgentActivity(ctx) {
+  const listen =
+    ctx && typeof ctx.onEvent === 'function'
+      ? (type, fn) => ctx.onEvent(type, fn)
+      : typeof host.onEvent === 'function'
+        ? (type, fn) => host.onEvent(type, fn)
+        : null
+  if (!listen) return null
+  return listen('tool.start', event => {
+    handleToolStart(event)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Take over / Hand back for machines the bot drives through the kit's
+// `remote-cua` agent plugin (Hermes's own `computer_use` tool, run on another
+// machine over SSH).
+//
+// The lease lives on the gateway host (`<HERMES_HOME>/remote-cua/lease.json`,
+// per bot profile); while a human holds it the plugin refuses the bot's
+// `computer_use` with `human_has_control`, as Hermes's Bot Screen does. The
+// pane reads and changes it through the plugin's dashboard routes
+// (/api/plugins/remote-cua/*, remote-cua/dashboard/plugin_api.py, documented
+// in docs/REMOTE-CUA.md), called on the bot's own connection and profile; it
+// never writes the file itself. Wording and behaviour copy Hermes's Bot
+// Screen ("Using it" in bot-screen.md):
+//   - "Bot is in control" by default; the pane is view-only for that machine.
+//   - Take over: red border, keyboard and mouse drive the machine.
+//   - Hand back, closing the pane, or Disconnect hands control back.
+//   - A dropped connection keeps the human lease until you reconnect and
+//     hand back.
+//   - After a reload the old viewer id is gone; when the lease still says a
+//     human holds control, "Hand back (force)" clears it.
+// ---------------------------------------------------------------------------
+
+// The remote-cua plugin's dashboard routes (its FastAPI router is mounted at
+// /api/plugins/remote-cua/). Change here only.
+const REMOTE_CUA_BASE = '/api/plugins/remote-cua'
+const REMOTE_CUA_ROUTES = {
+  lease: { method: 'GET', path: 'lease' },
+  take: { method: 'POST', path: 'take' },
+  release: { method: 'POST', path: 'release' },
+  status: { method: 'GET', path: 'status' }
+}
+const LEASE_POLL_MS = 5000
+
+const CONTROL_TEXT = {
+  takeOver: 'Take over',
+  handBack: 'Hand back',
+  handBackForce: 'Hand back (force)',
+  handBackForceHint: 'Release a lease held by a viewer that is no longer here, e.g. after a reload.',
+  youControl: 'You are in control',
+  otherControls: 'Another viewer is in control',
+  agentControls: 'Bot is in control',
+  controlTaken: 'Another viewer took control. Watching only.',
+  iframe:
+    "Watching only: an embedded viewer page can't be limited to view-only, so Take over needs this computer's VNC (WebSocket) address.",
+  unbound: profile => `Bind this computer to ${profile} (Settings → Endpoint for ${profile}) to take over.`,
+  pluginMissing: "This bot's gateway doesn't have the remote-cua plugin enabled, so control can't be checked."
+}
+
+function newViewerId() {
+  try {
+    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+      return `cv-${globalThis.crypto.randomUUID()}`
+    }
+  } catch {
+    /* fall through */
+  }
+  return `cv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const IDLE_CONTROL = {
+  key: '',
+  profile: '',
+  endpointId: '',
+  bound: false,
+  // An embedded viewer page: watch only, never Take over (see fenceIframe).
+  iframe: false,
+  // The bot's gateway route { connectionId, profile, key }; null until resolved.
+  owner: null,
+  ownerError: '',
+  lease: null,
+  // Input stays off while a hand back is in flight or its outcome is unknown,
+  // until a lease read or answer says otherwise.
+  fence: false,
+  // After a hand back of lease epoch N, a READ saying this window still holds
+  // an epoch below N + 1 may predate the release: it keeps the fence on.
+  minGrantEpoch: 0,
+  status: null,
+  statusError: '',
+  pending: null,
+  error: '',
+  evicted: false
+}
+
+const $control = atom({ ...IDLE_CONTROL })
+
+const control = {
+  // Minted per plugin load, like Hermes's per-attach viewer id: a reload is a
+  // new viewer, so a lease left behind needs "Hand back (force)". Also
+  // replaced after any lease change whose outcome is unknown (see taint()):
+  // a release that may still commit names the OLD id, and Package P only
+  // lets a release clear the viewer it names, so it can never revoke a grant
+  // made to the new id.
+  viewerId: '',
+  // Every id this window has used: a lease naming one of them is ours to hand back.
+  ownViewers: new Set(),
+  client: null,
+  pollStop: null,
+  // Bumped by every take, hand back, close and target change: an answer to a
+  // request started before that is stale and is not applied.
+  gen: 0,
+  // Owner lookups: each gets a sequence number; only the latest may publish.
+  ownerSeq: 0,
+  // Bumped on attach and dispose: work started under an older attachment
+  // (an owner lookup, a poll, a retry) does nothing.
+  attachment: 0,
+  disposed: false
+}
+
+function mintViewer() {
+  control.viewerId = newViewerId()
+  control.ownViewers.add(control.viewerId)
+  return control.viewerId
+}
+mintViewer()
+
+/** A lease change for `viewer` ended without an answer: it may still commit
+ *  later. Stop using that id for new grants. */
+function taint(viewer) {
+  if (viewer && viewer === control.viewerId) mintViewer()
+}
+
+function isOwnOldViewer(viewer) {
+  return Boolean(viewer && viewer !== control.viewerId && control.ownViewers.has(viewer))
+}
+
+function normalizeLease(raw) {
+  const r = raw && typeof raw === 'object' && raw.lease && typeof raw.lease === 'object' ? raw.lease : raw
+  if (!r || typeof r !== 'object') return { holder: 'agent', viewer: null, since: 0, epoch: 0 }
+  const epoch = Number(r.epoch)
+  return {
+    holder: r.holder === 'human' ? 'human' : 'agent',
+    viewer: typeof r.viewer === 'string' && r.viewer ? r.viewer : null,
+    since: Number(r.since) || 0,
+    epoch: Number.isFinite(epoch) ? epoch : 0
+  }
+}
+
+/** GET status (remote-cua status.py): plain-words `summary` lines plus the
+ *  fields the pane colours by. `null` in a field means "not checked". */
+function normalizeStatus(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const driver = raw.driver && typeof raw.driver === 'object' ? raw.driver : {}
+  const perms = raw.permissions && typeof raw.permissions === 'object' ? raw.permissions : {}
+  const flag = value => (typeof value === 'boolean' ? value : null)
+  return {
+    ok: raw.ok === true,
+    configured: flag(raw.configured),
+    supported: flag(raw.supported),
+    reachable: flag(raw.reachable),
+    driverOk: flag(driver.ok),
+    driverVersion: typeof driver.version === 'string' ? driver.version : '',
+    permissionsOk: flag(perms.ok),
+    screenAwake: flag(raw.screen_awake),
+    error: typeof raw.error === 'string' ? raw.error.trim() : '',
+    summary: Array.isArray(raw.summary)
+      ? raw.summary.filter(line => typeof line === 'string' && line.trim()).map(line => line.trim())
+      : [],
+    cached: raw.cached === true
+  }
+}
+
+/** One plain-words line for a bound machine: { tone, line }. */
+function statusWords(status) {
+  if (!status) return null
+  const line = status.summary.length ? status.summary.join(' · ') : status.error
+  if (!line) return null
+  const failed =
+    status.configured === false ||
+    status.supported === false ||
+    status.reachable === false ||
+    status.driverOk === false ||
+    status.permissionsOk === false ||
+    status.screenAwake === false
+  return { tone: status.ok ? 'good' : failed || status.error ? 'bad' : 'muted', line }
+}
+
+/** The focused chat's connection-qualified owner ({ connectionId, profile }),
+ *  null when Hermes cannot tell (ambiguous or unresolved), undefined on builds
+ *  without it. Tile/tab focus moves without moving the gateway socket, so the
+ *  socket's connection is never used to pick a bot. */
+function focusedOwner() {
+  try {
+    const atomLike = host.state && host.state.focusedSessionOwner
+    if (!atomLike || typeof atomLike.get !== 'function') return undefined
+    const value = atomLike.get()
+    if (!value || typeof value !== 'object' || !value.profile) return null
+    return { connectionId: value.connectionId == null ? null : String(value.connectionId), profile: String(value.profile) }
+  } catch {
+    return undefined
+  }
+}
+
+/** The bot's gateway route: the (connectionId, profile) pair Hermes's registry
+ *  names it by. The focused chat's owner picks it; otherwise only a single
+ *  route with that name will do. Never list order, never the active socket:
+ *  anything else fails closed. */
+async function resolveOwner(profile) {
+  const focused = focusedOwner()
+  const pinned = focused && focused.profile === profile ? focused : null
+  if (typeof host.profileRoutes !== 'function') {
+    // Older desktop, one local gateway: the profile name is the whole scope.
+    const connectionId = pinned ? pinned.connectionId : null
+    return { owner: { connectionId, profile, key: `${connectionId || ''}\u0000${profile}` } }
+  }
+  let routes
+  try {
+    routes = await host.profileRoutes()
+  } catch {
+    return { error: "Couldn't list the gateways, so this bot's computer can't be controlled right now." }
+  }
+  const matches = (Array.isArray(routes) ? routes : []).filter(item => item && item.profile === profile)
+  let candidates = matches
+  if (pinned) candidates = matches.filter(item => sameSource(item.connectionId, pinned.connectionId))
+  if (candidates.length > 1) {
+    return {
+      error: `More than one gateway has a bot named ${profile}. Open a chat with the one this computer belongs to, so the pane knows which to control.`
+    }
+  }
+  if (candidates.length === 0) {
+    return { error: `Couldn't find ${profile}'s gateway, so its computer can't be controlled.` }
+  }
+  const route = candidates[0]
+  const connectionId = route.connectionId ? String(route.connectionId) : null
+  return {
+    owner: {
+      connectionId,
+      profile: route.targetProfile || route.profile || profile,
+      key: `${connectionId || ''}\u0000${route.profile}`
+    }
+  }
+}
+
+/** Hermes Desktop's REST bridge (`window.hermesDesktop.api`, the
+ *  `hermes:api` IPC behind api/client.ts hermesApiAs). It is not part of the
+ *  plugin SDK: Grokbot Override reaches the kit's Slack add-ons the same way.
+ *  `ctx.rest` cannot be used: it is scoped to this plugin's own namespace. */
+function desktopRestBridge() {
+  const api = globalThis.window && globalThis.window.hermesDesktop && globalThis.window.hermesDesktop.api
+  if (typeof api !== 'function') throw new Error('This Hermes build has no REST bridge for plugin routes.')
+  return api
+}
+
+/** An HTTP error from the bridge arrives as "<status>: <body>". */
+function restError(error) {
+  const message = String((error && error.message) || error || '')
+  const match = /^(\d{3}): ([\s\S]*)$/.exec(message)
+  const wrapped = new Error(message || 'Request failed.')
+  wrapped.status = match ? Number(match[1]) : Number(error && error.statusCode) || 0
+  wrapped.body = null
+  if (match) {
+    try {
+      const body = JSON.parse(match[2])
+      if (body && typeof body === 'object') wrapped.body = body
+    } catch {
+      /* not JSON */
+    }
+  }
+  return wrapped
+}
+
+/** The default transport: the plugin's routes on the owner's own connection and profile. */
+async function remoteCuaRestRequest(owner, op, body, query) {
+  const route = REMOTE_CUA_ROUTES[op]
+  if (!route) throw new Error(`unknown remote-cua op ${op}`)
+  if (!owner || !owner.profile) throw new Error("This bot's gateway is not known.")
+  const api = desktopRestBridge()
+  const request = {
+    ...(owner.connectionId ? { connectionId: owner.connectionId } : {}),
+    profile: owner.profile,
+    priority: 'foreground',
+    path: `${REMOTE_CUA_BASE}/${route.path}${query ? `?${query}` : ''}`,
+    method: route.method,
+    ...(body === undefined ? {} : { body })
+  }
+  try {
+    return await api(request)
+  } catch (error) {
+    throw restError(error)
+  }
+}
+
+function createRemoteCuaClient(request) {
+  return {
+    lease: owner => request(owner, 'lease'),
+    take: (owner, viewer) => request(owner, 'take', { viewer }),
+    release: (owner, viewer, force) => request(owner, 'release', { viewer, force: Boolean(force) }),
+    status: (owner, fresh) => request(owner, 'status', undefined, fresh ? 'fresh=1' : '')
+  }
+}
+
+control.client = createRemoteCuaClient(remoteCuaRestRequest)
+
+function controlErrorText(error) {
+  const body = error && error.body
+  if (body && typeof body.message === 'string' && body.message.trim()) return body.message.trim()
+  if (error && error.status === 404) return CONTROL_TEXT.pluginMissing
+  const message = String((error && error.message) || error || '')
+  return message || 'Request failed.'
+}
+
+/** The machine the pane shows, when the bot drives it through remote-cua. */
+function controlTarget() {
+  const endpoint = resolveEndpoint()
+  if (!endpoint || !endpoint.remoteCua) return null
+  const profile = readProfileName()
+  const settings = $settings.get()
+  const bound = Boolean(settings.perBotEndpoint && settings.perBotEndpoint[profile] === endpoint.id)
+  const live = engine.endpoint && engine.endpoint.id === endpoint.id ? engine.endpoint : null
+  const iframe = endpoint.mode === 'iframe' || Boolean(live && live.mode === 'iframe')
+  return { profile, endpoint, bound, iframe, key: `${profile}\u0000${endpoint.id}` }
+}
+
+function leaseHeldBy(lease, viewer) {
+  return Boolean(lease && lease.holder === 'human' && viewer && lease.viewer === viewer)
+}
+
+const CONTROL_BUSY_TEXT = {
+  take: 'Taking over…',
+  release: 'Handing back…',
+  force: 'Handing back…',
+  fence: 'Checking who is in control…'
+}
+
+/** Pure view of the control state for one viewer. */
+function controlView(state, viewerId, ownViewers = control.ownViewers) {
+  const lease = state && state.lease
+  const held = leaseHeldBy(lease, viewerId)
+  const iHold = held && !state.fence
+  // Still held under an id this window retired after an unknown outcome:
+  // being handed back; not another viewer, and not input for us.
+  const oldSelf = Boolean(lease && lease.holder === 'human' && !held && lease.viewer && ownViewers.has(lease.viewer))
+  const humanOther = Boolean(lease && lease.holder === 'human' && !held && !oldSelf)
+  const ready = Boolean(state && state.bound && state.owner)
+  const busy = state && state.pending
+    ? CONTROL_BUSY_TEXT[state.pending]
+    : oldSelf
+      ? CONTROL_BUSY_TEXT.release
+      : state && state.fence
+        ? CONTROL_BUSY_TEXT.fence
+        : ''
+  return {
+    iHold,
+    humanOther,
+    oldSelf,
+    chip: busy || (iHold ? CONTROL_TEXT.youControl : humanOther ? CONTROL_TEXT.otherControls : CONTROL_TEXT.agentControls),
+    // Fenced while the lease still names this window: Take over re-confirms it.
+    canTakeOver: Boolean(ready && !state.iframe && !state.pending && !oldSelf && (!held || state.fence)),
+    canHandBack: Boolean(ready && (held || oldSelf) && !state.pending),
+    canForce: Boolean(ready && humanOther && !state.pending),
+    inputEnabled: Boolean(iHold && !state.iframe && !state.pending)
+  }
+}
+
+function iHoldControl() {
+  const target = controlTarget()
+  const state = $control.get()
+  if (!target || state.key !== target.key || target.iframe) return false
+  return controlView(state, control.viewerId).inputEnabled
+}
+
+/** True when the pane must not send input: a remote-cua machine the human does not hold. */
+function controlLocked() {
+  return Boolean(controlTarget()) && !iHoldControl()
+}
+
+function patchControl(partial) {
+  $control.set({ ...$control.get(), ...partial })
+}
+
+function refreshInputGate() {
+  applyRfbDisplay()
+  syncSurfacePointer()
+}
+
+/** Apply a lease answer for `key` at generation `gen`. A read (`read: true`)
+ *  is dropped while a take or hand back is in flight. A stale answer that
+ *  would hand this window input (its epoch older than the lease already
+ *  shown) is dropped; one that takes input away is always applied. */
+function applyLease(key, gen, raw, { read = false } = {}) {
+  const state = $control.get()
+  if (state.key !== key || control.gen !== gen) return false
+  if (read && state.pending) return false
+  const lease = normalizeLease(raw)
+  const has = leaseHeldBy(lease, control.viewerId)
+  if (has && state.lease && lease.epoch < state.lease.epoch) return false
+  const had = leaseHeldBy(state.lease, control.viewerId) && !state.fence
+  const fence = read && has && lease.epoch < state.minGrantEpoch
+  // Another viewer's Take over wins; this window drops back to watching.
+  let evicted = state.evicted
+  if (had && !has) evicted = lease.holder === 'human'
+  if (has || lease.holder !== 'human') evicted = false
+  patchControl({ lease, fence, error: '', evicted, ...(read ? {} : { minGrantEpoch: has ? 0 : state.minGrantEpoch }) })
+  refreshInputGate()
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Rules that keep the lease safe whatever order requests land in:
+//
+// 1. Every lease change for one owner (take, hand back, cleanup release)
+//    goes through that owner's queue, one at a time. Reads are not queued (a
+//    hung read must not delay a hand back); a read is only sent while no
+//    change is in flight, and its answer is dropped if anything changed.
+// 2. A change whose answer never came (timeout, dropped connection) has an
+//    unknown outcome: the gateway may still commit it later, after the next
+//    request. So its viewer id is retired (taint) and never used for a new
+//    grant. A late release names the old id and Package P refuses to let it
+//    clear another viewer's lease; it cannot revoke the new grant.
+// 3. `possiblyHeld` records every (owner, viewer id) this window may hold:
+//    set when a take is sent, cleared only by an answer that shows that id
+//    does not hold it. Whenever the pane stops controlling that machine, or
+//    an id is retired, the hold is handed back with a release naming exactly
+//    that id, retried a bounded number of times (RETIRE_RETRY_MS).
+// 4. Input is on only while the latest answer names the CURRENT id.
+// ---------------------------------------------------------------------------
+
+const ownerQueues = new Map()
+const ownerInFlight = new Map()
+const possiblyHeld = new Map()
+const RETIRE_RETRY_MS = [2000, 5000, 15000, 30000]
+
+function holdKey(owner, viewer) {
+  return `${owner.key}\u0001${viewer}`
+}
+
+function queued(owner, run) {
+  const key = owner.key
+  const prev = ownerQueues.get(key) || Promise.resolve()
+  ownerInFlight.set(key, (ownerInFlight.get(key) || 0) + 1)
+  const settle = () => {
+    const left = (ownerInFlight.get(key) || 1) - 1
+    if (left > 0) ownerInFlight.set(key, left)
+    else ownerInFlight.delete(key)
+  }
+  const step = async () => {
+    try {
+      return await run()
+    } finally {
+      settle()
+    }
+  }
+  const next = prev.then(step, step)
+  const tail = next.then(
+    () => undefined,
+    () => undefined
+  )
+  ownerQueues.set(key, tail)
+  tail.then(() => {
+    if (ownerQueues.get(key) === tail) ownerQueues.delete(key)
+  })
+  return next
+}
+
+/** What an answer says about this window's holds on `owner`: the id it names
+ *  (if one of ours) holds it; `viewer`, the id the request was about, does
+ *  not unless named. */
+function noteHold(owner, raw, viewer) {
+  if (!owner || !raw || typeof raw !== 'object' || !raw.lease) return
+  const lease = normalizeLease(raw)
+  const named = lease.holder === 'human' ? lease.viewer : null
+  if (viewer && viewer !== named) possiblyHeld.delete(holdKey(owner, viewer))
+  for (const entry of [...possiblyHeld.values()]) {
+    if (entry.owner.key === owner.key && entry.viewer !== named) possiblyHeld.delete(holdKey(owner, entry.viewer))
+  }
+  if (named && control.ownViewers.has(named)) possiblyHeld.set(holdKey(owner, named), { owner, viewer: named })
+}
+
+function markPossiblyHeld(owner, viewer) {
+  possiblyHeld.set(holdKey(owner, viewer), { owner, viewer })
+}
+
+function definitive(error) {
+  return Boolean(error && error.body && error.body.lease)
+}
+
+function scheduleLater(fn, ms) {
+  if (control.disposed) return null
+  const ctx = pluginCtx
+  if (ctx && typeof ctx.setTimeout === 'function') return ctx.setTimeout(fn, ms)
+  if (typeof setTimeout === 'function') {
+    const id = setTimeout(fn, ms)
+    return () => clearTimeout(id)
+  }
+  return null
+}
+
+/** Hand back one possible hold: a release naming exactly that viewer id. */
+const retiring = new Map()
+function retireHold(entry, attempt = 0) {
+  const { owner, viewer } = entry
+  const key = holdKey(owner, viewer)
+  if (!owner || !control.client || !possiblyHeld.has(key)) return Promise.resolve()
+  if (retiring.has(key)) return retiring.get(key)
+  const done = queued(owner, () => {
+    retiring.delete(key)
+    if (!possiblyHeld.has(key)) return null
+    return control.client.release(owner, viewer, false)
+  }).then(
+    raw => {
+      if (raw) {
+        noteHold(owner, raw, viewer)
+        refreshShownLease(owner)
+      }
+    },
+    error => {
+      if (definitive(error)) {
+        noteHold(owner, error.body, viewer)
+        refreshShownLease(owner)
         return
       }
+      // Unknown outcome: this id may be released later, or not at all. Never
+      // grant under it again, and try again a bounded number of times.
+      taint(viewer)
+      if (attempt < RETIRE_RETRY_MS.length) {
+        // Safe whatever happened since: it names only this (retired) id.
+        scheduleLater(() => {
+          if (control.disposed) return
+          void retireHold(entry, attempt + 1)
+        }, RETIRE_RETRY_MS[attempt])
+      }
     }
+  )
+  retiring.set(key, done)
+  return done
+}
+
+/** After a cleanup on the owner the pane shows, show the lease as it is now. */
+function refreshShownLease(owner) {
+  const state = $control.get()
+  if (state.owner && state.owner.key === owner.key) void refreshLease()
+}
+
+/** Retire every possible hold, except the current id on `keepOwnerKey`
+ *  (still in control there). Holds under retired ids always go. */
+function retireAll(keepOwnerKey = '') {
+  for (const entry of [...possiblyHeld.values()]) {
+    if (entry.owner.key === keepOwnerKey && entry.viewer === control.viewerId) continue
+    void retireHold(entry)
+  }
+}
+
+function retireOldIds(owner) {
+  for (const entry of [...possiblyHeld.values()]) {
+    if (entry.owner.key === owner.key && entry.viewer !== control.viewerId) void retireHold(entry)
+  }
+}
+
+async function refreshLease() {
+  if (control.disposed) return
+  const state = $control.get()
+  if (!state.key || !state.bound || !state.owner || state.pending || !control.client) return
+  const { key, owner } = state
+  // A change is in flight for this owner; its answer will do.
+  if (ownerInFlight.has(owner.key)) return
+  const gen = control.gen
+  try {
+    const raw = await control.client.lease(owner)
+    if (control.gen !== gen || ownerInFlight.has(owner.key) || control.disposed) return
+    noteHold(owner, raw)
+    retireOldIds(owner)
+    if (!applyLease(key, gen, raw, { read: true })) return
+    // GET lease answers 200 for a profile without a remote_cua block, with the reason.
+    if (raw && raw.configured === false) {
+      patchControl({ error: String(raw.error || 'This bot has no remote computer configured.') })
+    }
+  } catch (error) {
+    if ($control.get().key === key && control.gen === gen) patchControl({ error: controlErrorText(error) })
+  }
+}
+
+/** GET status; `fresh` skips the plugin's 20 s cache (the Check button). */
+async function refreshStatus(fresh = false) {
+  if (control.disposed) return
+  const state = $control.get()
+  if (!state.key || !state.bound || !state.owner || !control.client) return
+  const { key, owner } = state
+  try {
+    const raw = await control.client.status(owner, fresh)
+    const now = $control.get()
+    if (now.key === key && now.owner === owner) patchControl({ status: normalizeStatus(raw), statusError: '' })
+  } catch (error) {
+    const now = $control.get()
+    if (now.key === key && now.owner === owner) patchControl({ statusError: controlErrorText(error) })
+  }
+}
+
+/** Still the same attachment: same machine, same owner, nothing reset since `gen`. */
+function sameAttachment(key, owner, gen) {
+  const state = $control.get()
+  return !control.disposed && state.key === key && state.owner === owner && control.gen === gen
+}
+
+async function takeOver() {
+  const state = $control.get()
+  if (control.disposed || !controlView(state, control.viewerId).canTakeOver || !control.client) return
+  const { key, owner } = state
+  const gen = ++control.gen
+  const viewer = control.viewerId
+  patchControl({ pending: 'take', error: '', evicted: false })
+  let raw
+  try {
+    raw = await queued(owner, async () => {
+      // A lease change for this owner ended without an answer: read the lease
+      // first, behind it in the queue. Refuse while an old id of ours still
+      // holds it (it is being handed back).
+      const unknown = [...possiblyHeld.values()].some(e => e.owner.key === owner.key && e.viewer !== viewer)
+      if (unknown) {
+        const current = await control.client.lease(owner)
+        noteHold(owner, current)
+        const lease = normalizeLease(current)
+        if (lease.holder === 'human' && isOwnOldViewer(lease.viewer)) {
+          const busy = new Error('Still handing back the previous control. Try again in a moment.')
+          busy.body = current
+          throw busy
+        }
+      }
+      markPossiblyHeld(owner, viewer)
+      return control.client.take(owner, viewer)
+    })
+  } catch (error) {
+    const sure = definitive(error)
+    if (sure) noteHold(owner, error.body, viewer)
+    else taint(viewer)
+    if (!sameAttachment(key, owner, gen)) {
+      retireAll()
+      return
+    }
+    patchControl({ pending: null })
+    if (sure) {
+      // A refused take (409) carries the current lease: show who holds it.
+      applyLease(key, gen, error.body)
+      retireOldIds(owner)
+      patchControl({ error: controlErrorText(error) })
+      return
+    }
+    // The take may have committed under the retired id: hand that back.
+    patchControl({ error: controlErrorText(error) })
+    retireOldIds(owner)
+    return
+  }
+  noteHold(owner, raw, viewer)
+  if (!sameAttachment(key, owner, gen) || viewer !== control.viewerId) {
+    // The pane closed, disconnected or moved on while the take was in flight:
+    // hand it straight back on the gateway it was taken on, and stay closed.
+    retireAll()
+    return
+  }
+  patchControl({ pending: null })
+  applyLease(key, gen, raw)
+  if (iHoldControl()) {
+    setUi({ viewOnly: false })
+    setExpanded(true)
+  }
+}
+
+/** Hand control back. `force` clears a lease this window does not hold.
+ *  Input goes off before the request: the bot resumes the moment the release
+ *  commits, before its answer arrives. */
+async function handBack(force = false) {
+  const state = $control.get()
+  if (control.disposed || !state.key || !state.owner || !control.client || state.pending) return
+  const view = controlView(state, control.viewerId)
+  if (force ? !view.canForce : !view.canHandBack) return
+  const { key, owner } = state
+  // Hand back the id the lease names: ours now, or one this window retired.
+  const viewer = !force && state.lease && isOwnOldViewer(state.lease.viewer) ? state.lease.viewer : control.viewerId
+  const gen = ++control.gen
+  patchControl({
+    pending: force ? 'force' : 'release',
+    fence: true,
+    error: '',
+    minGrantEpoch: Math.max(state.minGrantEpoch, ((state.lease && state.lease.epoch) || 0) + 1)
   })
-  obs.observe(document.body || document.documentElement, { subtree: true, childList: true })
-  return obs
+  refreshInputGate()
+  let raw
+  try {
+    raw = await queued(owner, () => control.client.release(owner, viewer, force))
+  } catch (error) {
+    const sure = definitive(error)
+    if (sure) noteHold(owner, error.body, viewer)
+    else {
+      // It may still commit later: never grant under this id again.
+      taint(viewer)
+      if (!force) markPossiblyHeld(owner, viewer)
+    }
+    if (!sameAttachment(key, owner, gen)) return
+    patchControl({ pending: null })
+    if (sure) {
+      applyLease(key, gen, error.body)
+      patchControl({ error: controlErrorText(error) })
+      return
+    }
+    patchControl({ error: controlErrorText(error) })
+    retireOldIds(owner)
+    void refreshLease()
+    return
+  }
+  noteHold(owner, raw, viewer)
+  if (!sameAttachment(key, owner, gen)) return
+  patchControl({ pending: null, evicted: false })
+  applyLease(key, gen, raw)
+}
+
+/** Closing the pane (or Disconnect, or unload) hands back everything this
+ *  window may hold. A dropped connection does not come through here. */
+function handBackOnClose() {
+  const state = $control.get()
+  control.gen += 1
+  if (state.key) {
+    const held = leaseHeldBy(state.lease, control.viewerId) && !state.fence
+    patchControl({
+      pending: null,
+      fence: held || state.fence,
+      minGrantEpoch: held ? Math.max(state.minGrantEpoch, (state.lease.epoch || 0) + 1) : state.minGrantEpoch
+    })
+  }
+  retireAll()
+  refreshInputGate()
+}
+
+/** Replace the control state. Anything held under the old state is retired
+ *  first: a reset never forgets a lease it might own. */
+function resetControl(next) {
+  control.gen += 1
+  retireAll()
+  $control.set(next)
+  syncLeasePoll()
+  refreshInputGate()
+}
+
+/** Follow the pane to the machine it shows. Any change of machine, bot,
+ *  binding or watch-only state starts a new attachment. */
+function syncControlTarget() {
+  if (control.disposed) return
+  const target = controlTarget()
+  const state = $control.get()
+  const key = target ? target.key : ''
+  if (state.key === key && (!target || (state.bound === target.bound && state.iframe === target.iframe))) return
+  if (!target) {
+    resetControl({ ...IDLE_CONTROL })
+    return
+  }
+  resetControl({
+    ...IDLE_CONTROL,
+    key,
+    profile: target.profile,
+    endpointId: target.endpoint.id,
+    bound: target.bound,
+    iframe: target.iframe
+  })
+  if (target.bound) void resolveControlOwner()
+}
+
+function focusedSnapshot() {
+  const focused = focusedOwner()
+  return focused === undefined ? 'n/a' : focused ? `${focused.connectionId || ''}\u0000${focused.profile}` : 'null'
+}
+
+/** The focused chat moved (maybe to the same bot name on another gateway).
+ *  Synchronously, before any lookup: if the current owner is not provably the
+ *  focused one any more, input goes off and the old owner is retired. */
+function onFocusedOwnerChange() {
+  if (control.disposed) return
+  syncConnection()
+  syncControlTarget()
+  const state = $control.get()
+  if (!state.key || !state.bound) return
+  const focused = focusedOwner()
+  const stillOwner =
+    state.owner &&
+    focused &&
+    focused.profile === state.profile &&
+    sameSource(state.owner.connectionId, focused.connectionId)
+  if (state.owner && !stillOwner) {
+    resetControl({ ...state, owner: null, ownerError: '', lease: null, fence: false, pending: null, status: null, evicted: false, error: '', minGrantEpoch: 0 })
+  }
+  void resolveControlOwner()
+}
+
+/** (Re)resolve the bot's gateway, then read the lease. Each lookup has its
+ *  own sequence number and attachment token; a result is used only if it is
+ *  the latest lookup, the plugin is still attached, and the machine and the
+ *  focused chat's owner are what they were when it started. */
+async function resolveControlOwner() {
+  if (control.disposed) return
+  const { key, profile } = $control.get()
+  if (!key) return
+  const seq = ++control.ownerSeq
+  const attachment = control.attachment
+  const focusedAt = focusedSnapshot()
+  const result = await resolveOwner(profile)
+  if (
+    control.disposed ||
+    control.attachment !== attachment ||
+    control.ownerSeq !== seq ||
+    focusedSnapshot() !== focusedAt
+  )
+    return
+  const state = $control.get()
+  if (state.key !== key) return
+  if (result.error) {
+    if (state.owner || state.ownerError !== result.error) {
+      resetControl({ ...state, owner: null, ownerError: result.error, lease: null, fence: false, pending: null, status: null })
+    }
+    return
+  }
+  if (!state.owner || state.owner.key !== result.owner.key) {
+    resetControl({
+      ...state,
+      owner: result.owner,
+      ownerError: '',
+      lease: null,
+      fence: false,
+      pending: null,
+      status: null,
+      evicted: false,
+      error: '',
+      minGrantEpoch: 0
+    })
+    void refreshStatus()
+  }
+  await refreshLease()
+}
+
+/** Poll the lease only while a bound remote-cua machine is on screen, so the
+ *  chip follows a Take over from another window or a forced hand back. */
+function syncLeasePoll() {
+  const want = Boolean($control.get().bound) && !control.disposed
+  if (want && !control.pollStop) {
+    const attachment = control.attachment
+    const tick = () => {
+      if (control.disposed || control.attachment !== attachment) return
+      if (engine.paneVisible && $control.get().bound) void resolveControlOwner()
+    }
+    const ctx = pluginCtx
+    if (ctx && typeof ctx.setInterval === 'function') {
+      control.pollStop = ctx.setInterval(tick, LEASE_POLL_MS)
+    } else if (typeof setInterval === 'function') {
+      const id = setInterval(tick, LEASE_POLL_MS)
+      control.pollStop = () => clearInterval(id)
+    }
+  } else if (!want && control.pollStop) {
+    stopLeasePoll()
+  }
+}
+
+function stopLeasePoll() {
+  const stop = control.pollStop
+  control.pollStop = null
+  if (typeof stop === 'function') {
+    try {
+      stop()
+    } catch {
+      /* already cleared */
+    }
+  }
 }
 
 function attachEngine(ctx) {
   pluginCtx = ctx
+  control.attachment += 1
+  control.disposed = false
   loadSettingsFrom(ctx)
   const unsubs = []
-  const agentActivityObserver = watchAgentActivity()
-  unsubs.push(() => {
-    try {
-      agentActivityObserver?.disconnect()
-    } catch {
-      /* ignore */
-    }
-  })
+  const stopAgentActivity = watchAgentActivity(ctx)
+  if (typeof stopAgentActivity === 'function') unsubs.push(stopAgentActivity)
+  unsubs.push(stopLeasePoll)
+  const follow = () => {
+    syncConnection()
+    syncControlTarget()
+  }
+  if (host.state.focusedSessionOwner && typeof host.state.focusedSessionOwner.listen === 'function') {
+    // Tile focus can move to the same bot name on another gateway.
+    unsubs.push(host.state.focusedSessionOwner.listen(onFocusedOwnerChange))
+  }
   if (host.state.focusedSessionProfile && typeof host.state.focusedSessionProfile.listen === 'function') {
-    unsubs.push(host.state.focusedSessionProfile.listen(() => syncConnection()))
+    unsubs.push(host.state.focusedSessionProfile.listen(follow))
   }
   if (host.state.profile && typeof host.state.profile.listen === 'function') {
-    unsubs.push(host.state.profile.listen(() => syncConnection()))
+    unsubs.push(host.state.profile.listen(follow))
   }
-  unsubs.push($settings.listen(() => syncConnection()))
+  unsubs.push($settings.listen(follow))
+  syncControlTarget()
   if (typeof host.paneVisibility === 'function') {
     const vis = host.paneVisibility(PANE_CONTRIB_ID)
     if (vis && typeof vis.get === 'function') engine.paneVisible = Boolean(vis.get())
@@ -2566,8 +3151,11 @@ function attachEngine(ctx) {
       unsubs.push(
         vis.listen(value => {
           engine.paneVisible = Boolean(value)
-          if (value) syncConnection()
-          else {
+          if (value) {
+            syncConnection()
+            void refreshLease()
+          } else {
+            handBackOnClose()
             setExpanded(false)
             disconnect()
           }
@@ -2576,6 +3164,11 @@ function attachEngine(ctx) {
     }
   }
   const dispose = () => {
+    handBackOnClose()
+    // Nothing started under this attachment may act after this point.
+    control.disposed = true
+    control.attachment += 1
+    control.ownerSeq += 1
     for (const stop of unsubs) {
       try {
         stop()
@@ -3609,96 +4202,6 @@ function Field({ label, hint, warn, children }) {
   )
 }
 
-function OrgoComputerFinder({ bearer, sessionUrl, onPick }) {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [computers, setComputers] = useState([])
-  const [selectedId, setSelectedId] = useState('')
-  const genRef = useRef(0)
-
-  async function findComputers() {
-    const token = String(bearer || '').trim()
-    if (!token) return
-    const gen = ++genRef.current
-    setLoading(true)
-    setError('')
-    setComputers([])
-    setSelectedId('')
-    try {
-      const found = await discoverOrgoComputers(orgoApiOrigin(sessionUrl), token, sessionUrl)
-      if (gen !== genRef.current) return
-      const list = found && Array.isArray(found.computers) ? found.computers : []
-      setComputers(list)
-      if (list.length === 0) {
-        const n = found && typeof found.workspaceCount === 'number' ? found.workspaceCount : 0
-        setError(
-          n === 0
-            ? 'No workspaces for this key.'
-            : `Found ${n} workspace(s) but no computers.`
-        )
-      }
-    } catch (err) {
-      if (gen !== genRef.current) return
-      const credential = credentialErrorDetail(err)
-      if (credential) setError(credential.detail)
-      else if (err && err.kind === 'auth') setError('This API key was rejected.')
-      else setError("Couldn't reach the API from the app — set the API address in Advanced.")
-    } finally {
-      if (gen === genRef.current) setLoading(false)
-    }
-  }
-
-  const tokenReady = String(bearer || '').trim() !== ''
-
-  return el(
-    'div',
-    { className: 'grid gap-1.5' },
-    el(
-      Button,
-      {
-        type: 'button',
-        size: 'sm',
-        variant: 'secondary',
-        disabled: !tokenReady || loading,
-        onClick: () => void findComputers()
-      },
-      'Find my computers'
-    ),
-    error
-      ? el('p', { className: 'text-[0.64rem] leading-4 text-(--ui-text-secondary)' }, error)
-      : null,
-    computers.length > 0
-      ? el(
-          Field,
-          { label: 'Computer' },
-          el(
-            Select,
-            {
-              value: selectedId || undefined,
-              onValueChange: value => {
-                setSelectedId(value)
-                const computer = computers.find(item => item.computerId === value)
-                if (computer) onPick(computer)
-              }
-            },
-            el(SelectTrigger, { className: 'w-full' }, el(SelectValue, { placeholder: 'Pick a computer' })),
-            el(
-              SelectContent,
-              {},
-              computers.map(item =>
-                el(
-                  SelectItem,
-                  { key: `${item.workspaceName}:${item.computerId}`, value: item.computerId },
-                  `${item.workspaceName} / ${item.computerName} (${item.status})`
-                )
-              )
-            )
-          )
-        )
-      : null
-  )
-}
-
 function localSetupCommand(os) {
   if (os === 'windows') return `irm ${RAW_REPO_URL}/connect-windows.ps1 | iex`
   if (os === 'linux') return `curl -fsSL ${RAW_REPO_URL}/connect-linux.sh | bash`
@@ -3790,17 +4293,6 @@ function EndpointEditor({
     if ($settings.get().endpoints.some(item => item.id === next.id)) persistHiperfFields(next)
   }
 
-  function pickComputer(computer) {
-    setDraft(current => {
-      if (!current) return current
-      return {
-        ...current,
-        sessionUrl: `${orgoApiOrigin(current.sessionUrl)}/api/computers/${computer.computerId}`,
-        name: isDefaultishName(current.name) ? computer.computerName : current.name
-      }
-    })
-  }
-
   function submit() {
     const address = String(draft.address || '').trim()
     const next =
@@ -3867,7 +4359,7 @@ function EndpointEditor({
     },
       el(Input, {
         value: draft.address || '',
-        placeholder: "Paste your computer's address or API key",
+        placeholder: "Paste your computer's address",
         onChange: event => {
           advancedTouchedRef.current = false
           setDraft(withClassifiedAddress(draft, event.target.value))
@@ -3891,13 +4383,6 @@ function EndpointEditor({
             onChange: event => setDraft({ ...draft, username: event.target.value })
           })
         )
-      : null,
-    classified.kind === 'api-key'
-      ? el(OrgoComputerFinder, {
-          bearer: draft.sessionBearer,
-          sessionUrl: draft.sessionUrl,
-          onPick: pickComputer
-        })
       : null,
     el(
       'div',
@@ -4020,6 +4505,29 @@ function EndpointEditor({
                   )
                 )
               : null,
+            el(
+              'div',
+              { className: 'grid gap-1' },
+              el(
+                'div',
+                { className: 'flex items-center justify-between gap-3' },
+                el(
+                  'span',
+                  { className: 'text-[0.7rem] text-(--ui-text-secondary)' },
+                  'The bot drives this computer (remote-cua)'
+                ),
+                el(Switch, {
+                  size: 'xs',
+                  checked: draft.remoteCua === true,
+                  onCheckedChange: value => touchAdvanced({ remoteCua: value })
+                })
+              ),
+              el(
+                'p',
+                { className: 'text-[0.64rem] leading-4 text-(--ui-text-quaternary)' },
+                "For a Mac the bot drives with Hermes's computer_use through the kit's remote-cua plugin. The pane stays view-only while the bot is in control; Take over and Hand back appear once the computer is the bot's endpoint."
+              )
+            ),
             el(
               'div',
               { className: 'flex items-center justify-between gap-3' },
@@ -4394,13 +4902,14 @@ function CollapsePill() {
   )
 }
 
-function OverlayBar({ iframeMode, connected, viewOnly }) {
+function OverlayBar({ iframeMode, connected, viewOnly, remote }) {
   const ui = useValue($ui)
   const hiperfState = useValue($hiperf)
   if (iframeMode) {
     return el(
       'div',
       { className: 'flex flex-wrap items-center gap-1' },
+      remote ? el(ControlBar, { onDark: true }) : null,
       el(Button, { size: 'xs', variant: 'ghost', className: 'text-white hover:bg-white/15 hover:text-white', onClick: reloadIframe },
         el(icons.RefreshCw, { className: 'size-3.5' }), 'Reload'),
       el(Button, {
@@ -4423,19 +4932,21 @@ function OverlayBar({ iframeMode, connected, viewOnly }) {
   return el(
     'div',
     { className: 'flex flex-wrap items-center gap-1.5' },
-    el(
-      'div',
-      { className: 'flex items-center gap-1.5 px-1' },
-      el('span', { className: 'text-[0.68rem] text-white/80' }, 'View only'),
-      el(Switch, {
-        size: 'xs',
-        checked: viewOnly,
-        onCheckedChange: value => {
-          setUi({ viewOnly: value })
-          applyRfbDisplay()
-        }
-      })
-    ),
+    remote
+      ? el(ControlBar, { onDark: true })
+      : el(
+          'div',
+          { className: 'flex items-center gap-1.5 px-1' },
+          el('span', { className: 'text-[0.68rem] text-white/80' }, 'View only'),
+          el(Switch, {
+            size: 'xs',
+            checked: viewOnly,
+            onCheckedChange: value => {
+              setUi({ viewOnly: value })
+              applyRfbDisplay()
+            }
+          })
+        ),
     el(SegmentedControl, {
       options: SCALE_OPTIONS,
       value: ui.scaleMode,
@@ -4525,6 +5036,10 @@ function guardDomParent(parent) {
 function ComputerOverlay({ iframeMode }) {
   const ui = useValue($ui)
   const conn = useValue(engine.state)
+  const controlState = useValue($control)
+  useValue($settings)
+  const remote = Boolean(controlTarget())
+  const inControl = remote && iHoldControl() && controlView(controlState, control.viewerId).inputEnabled
   const overlayRef = useRef(null)
   const mountRef = useRef(null)
   useEffect(() => {
@@ -4607,7 +5122,13 @@ function ComputerOverlay({ iframeMode }) {
         'fixed right-0 bottom-0 left-0 z-[9999] flex flex-col bg-black',
         ui.expanded ? 'pointer-events-auto' : 'hidden pointer-events-none'
       ),
-      style: { top: `${ui.overlayTop || 40}px`, zIndex: 9999, background: '#000' },
+      'data-in-control': inControl ? '' : undefined,
+      style: {
+        top: `${ui.overlayTop || 40}px`,
+        zIndex: 9999,
+        background: '#000',
+        boxShadow: inControl ? RED_RING : undefined
+      },
       onMouseMove: () => {
         if (!ui.expanded) return
         setUi({ chromeOn: true })
@@ -4634,7 +5155,8 @@ function ComputerOverlay({ iframeMode }) {
         el(OverlayBar, {
           iframeMode,
           connected: conn.phase === 'connected',
-          viewOnly: ui.viewOnly
+          viewOnly: remote ? !inControl : ui.viewOnly,
+          remote
         })
       )
     ),
@@ -4727,6 +5249,133 @@ function PaneError({ code, detail }) {
   )
 }
 
+const RED_RING = 'inset 0 0 0 2px rgba(239, 68, 68, 0.7)'
+
+/** Who is in control of a remote-cua machine, and the buttons to change it.
+ *  `onDark` styles it for the expanded overlay's black bar. */
+function ControlBar({ onDark }) {
+  const state = useValue($control)
+  useValue($settings)
+  const target = controlTarget()
+  if (!target || state.key !== target.key) return null
+  if (!target.bound) {
+    return el(
+      'p',
+      { className: cn('text-[0.64rem] leading-4', onDark ? 'px-1 text-white/80' : 'text-center text-(--ui-text-tertiary)') },
+      CONTROL_TEXT.unbound(target.profile)
+    )
+  }
+  const note = (text, tone) =>
+    el(
+      'p',
+      {
+        'data-control-note': '',
+        className: cn('text-[0.64rem] leading-4', onDark ? (tone === 'warn' ? 'px-1 text-amber-200' : 'px-1 text-white/80') : 'text-center text-(--ui-text-tertiary)')
+      },
+      text
+    )
+  if (state.ownerError) return note(state.ownerError, 'warn')
+  if (state.iframe) return note(CONTROL_TEXT.iframe, 'warn')
+  const view = controlView(state, control.viewerId)
+  const ghost = onDark ? 'text-white hover:bg-white/15 hover:text-white disabled:text-white/40' : undefined
+  const chip = el(
+    'span',
+    {
+      'data-control-chip': view.iHold ? 'you' : view.humanOther ? 'other' : 'bot',
+      className: cn(
+        'shrink-0 rounded px-2 py-0.5 text-[0.68rem] font-medium',
+        view.iHold
+          ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+          : onDark
+            ? 'bg-white/15 text-white/80'
+            : 'bg-muted text-muted-foreground'
+      )
+    },
+    view.chip
+  )
+  const held = leaseHeldBy(state.lease, control.viewerId)
+  const buttons = held
+    ? [
+        el(Button, {
+          key: 'hand-back',
+          type: 'button',
+          size: 'xs',
+          variant: onDark ? 'ghost' : 'secondary',
+          className: ghost,
+          disabled: !view.canHandBack,
+          onClick: () => void handBack(false)
+        }, CONTROL_TEXT.handBack),
+        // Fenced after an unsure hand back: Take over re-confirms the lease.
+        state.fence && view.canTakeOver
+          ? el(Button, {
+              key: 'take-over',
+              type: 'button',
+              size: 'xs',
+              variant: onDark ? 'ghost' : undefined,
+              className: ghost,
+              onClick: () => void takeOver()
+            }, CONTROL_TEXT.takeOver)
+          : null
+      ]
+    : [
+        view.humanOther
+          ? el(Tip, { key: 'force', label: CONTROL_TEXT.handBackForceHint },
+              el(Button, {
+                type: 'button',
+                size: 'xs',
+                variant: onDark ? 'ghost' : 'secondary',
+                className: ghost,
+                disabled: !view.canForce,
+                onClick: () => void handBack(true)
+              }, CONTROL_TEXT.handBackForce)
+            )
+          : null,
+        el(Button, {
+          key: 'take-over',
+          type: 'button',
+          size: 'xs',
+          variant: onDark ? 'ghost' : undefined,
+          className: ghost,
+          disabled: !view.canTakeOver,
+          onClick: () => void takeOver()
+        }, CONTROL_TEXT.takeOver)
+      ]
+  return el(
+    'div',
+    { className: cn('grid gap-1', onDark ? '' : 'mt-2') },
+    el(
+      'div',
+      { className: cn('flex flex-wrap items-center gap-1.5', onDark ? 'px-1' : 'justify-center') },
+      chip,
+      ...buttons
+    ),
+    state.evicted
+      ? el('p', { className: cn('text-[0.64rem]', onDark ? 'px-1 text-amber-200' : 'text-center text-(--ui-text-secondary)') }, CONTROL_TEXT.controlTaken)
+      : null,
+    state.error
+      ? el('p', { className: cn('text-[0.64rem]', onDark ? 'px-1 text-red-200' : 'text-center text-(--ui-text-secondary)') }, state.error)
+      : null
+  )
+}
+
+/** GET status for a bound machine, in plain words. */
+function ControlStatusLine() {
+  const state = useValue($control)
+  useValue($settings)
+  const target = controlTarget()
+  if (!target || !target.bound || state.key !== target.key) return null
+  const words = statusWords(state.status)
+  const line = words ? words.line : state.statusError || 'Checking the machine…'
+  const tone = words ? words.tone : state.statusError ? 'bad' : 'muted'
+  return el(
+    'div',
+    { className: 'mt-1 flex items-center justify-center gap-1.5' },
+    el(StatusDot, { tone: tone === 'good' ? 'good' : tone === 'bad' ? 'bad' : 'muted' }),
+    el('p', { 'data-control-status': '', className: 'min-w-0 truncate text-[0.64rem] text-(--ui-text-tertiary)', title: line }, line),
+    el(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => void refreshStatus(true) }, 'Check')
+  )
+}
+
 function ComputerPane() {
   const settings = useValue($settings)
   const ui = useValue($ui)
@@ -4737,10 +5386,12 @@ function ComputerPane() {
   const focused = useValue(safeAtom(host.state.focusedSessionProfile))
   const profile = useValue(safeAtom(host.state.profile))
   const viewport = useValue(safeAtom(host.state.viewport))
+  const controlState = useValue($control)
   const profileName = focused || profile || 'default'
   const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profileName] : null
   const endpointId = overrideId || settings.globalEndpointId
   const endpoint = endpointId ? settings.endpoints.find(item => item.id === endpointId) || null : null
+  const inControl = Boolean(endpoint && endpoint.remoteCua) && iHoldControl() && controlView(controlState, control.viewerId).inputEnabled
   const slotRef = useRef(null)
   const iframeMode = Boolean(endpoint && endpoint.mode === 'iframe')
   const aspect = conn.fbW && conn.fbH ? `${conn.fbW} / ${conn.fbH}` : '16 / 10'
@@ -4750,9 +5401,13 @@ function ComputerPane() {
   useEffect(() => {
     engine.paneVisible = true
     syncConnection()
+    syncControlTarget()
     return () => {
       engine.paneVisible = false
-      if (!$ui.get().expanded) disconnect()
+      if (!$ui.get().expanded) {
+        handBackOnClose()
+        disconnect()
+      }
     }
   }, [])
 
@@ -4813,7 +5468,8 @@ function ComputerPane() {
         'div',
         {
           className: 'group relative w-full overflow-hidden rounded-[8px] border border-(--ui-stroke-secondary)',
-          style: { aspectRatio: aspect }
+          'data-in-control': inControl ? '' : undefined,
+          style: inControl ? { aspectRatio: aspect, boxShadow: RED_RING } : { aspectRatio: aspect }
         },
         el('div', { ref: slotRef, className: 'absolute inset-0 bg-black' }),
         showSnapshot
@@ -4888,6 +5544,8 @@ function ComputerPane() {
           : null
       ),
       el('p', { className: 'mt-1.5 truncate text-center text-[0.68rem] text-(--ui-text-tertiary)' }, phaseLine(conn)),
+      el(ControlBar, {}),
+      el(ControlStatusLine, {}),
       hiperfLine
         ? el(
             'div',

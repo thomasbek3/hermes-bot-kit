@@ -19,11 +19,6 @@ email-drafts/schemas.py
 email-drafts/senders.py
 email-drafts/store.py
 email-drafts/skills/email-drafts/SKILL.md
-computer-viewer/agent-plugin/orgo-computer/__init__.py
-computer-viewer/agent-plugin/orgo-computer/plugin.yaml
-computer-viewer/agent-plugin/orgo-computer/schemas.py
-computer-viewer/agent-plugin/orgo-computer/tools.py
-computer-viewer/agent-plugin/orgo-computer/skills/computer-basics/SKILL.md
 grokbot-override/skills/agent-cards/SKILL.md
 remote-cua/plugin.yaml
 remote-cua/__init__.py

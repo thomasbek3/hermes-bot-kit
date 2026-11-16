@@ -257,6 +257,25 @@ retired_report() {
   fi
 }
 
+# The kit's old agent plugin (per profile, under <home>/plugins/). The kit no
+# longer ships it; its own remover undoes the install, so this only reports.
+retired_agent_report() {
+  local dir found=""
+  for dir in "${HERMES_ROOT}" "${HERMES_ROOT}"/profiles/*; do
+    [ -d "${dir}/plugins/orgo-computer" ] || continue
+    found="${found} ${dir}"
+  done
+  [ -n "${found}" ] || return 0
+  echo
+  echo "Retired agent plugin still installed: orgo-computer (in${found})."
+  echo "Bots now drive machines with Hermes's own computer_use tool. To remove it (dry run first, then --yes):"
+  if [ -n "${SOURCE_DIR}" ] && [ -f "${SOURCE_DIR}/computer-viewer/remove-orgo-computer.sh" ]; then
+    echo "  bash ${SOURCE_DIR}/computer-viewer/remove-orgo-computer.sh"
+  else
+    echo "  bash <(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}/computer-viewer/remove-orgo-computer.sh)"
+  fi
+}
+
 check_js() {
   local file="$1" marker="$2" label="$3"
   grep -q "${marker}" "${file}" || {
@@ -485,6 +504,7 @@ else
 fi
 
 retired_report
+retired_agent_report
 
 echo
 echo "Finish: in Hermes Desktop press Cmd+Shift+P -> 'Reload plugins' (or restart the app)."

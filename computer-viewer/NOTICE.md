@@ -2,21 +2,17 @@
 
 This project is an independent, community plugin for
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research).
-It is not built by, endorsed by, or affiliated with Nous Research, Orgo,
+It is not built by, endorsed by, or affiliated with Nous Research,
 Tailscale, or xAI.
 
 ## Derivative work attribution
 
-The `agent-plugin/orgo-computer` component is derived in part from
+The desktop viewer (`plugin.js`) studied the public source of
 [Korgo Bot](https://github.com/nickvasilescu/korgo-bot) by Nick Vasilescu
-(MIT License, Copyright (c) 2025 Nous Research): the agent-endpoint handling,
-Orgo request/response helpers, error-status mapping, and run-locking pattern
-are adapted from its `orgo_agent_mcp.py`. The desktop viewer (`plugin.js`)
-studied Korgo Bot's public source for UI patterns (thumbnail panel-crop,
-reconnect backoff, expand-without-reconnect) but contains no copied code.
-
-Korgo Bot's permissive MIT license requires that its copyright and permission
-notice accompany derivative portions; this file serves as that notice. The
+(MIT License, Copyright (c) 2025 Nous Research) for UI patterns (thumbnail
+panel-crop, reconnect backoff, expand-without-reconnect) but contains no
+copied code. An earlier agent plugin adapted from Korgo Bot was retired and
+is no longer shipped; its history (with this notice) stays in git. The
 MIT License text is in [`LICENSE`](LICENSE).
 
 ## noVNC (MPL-2.0)

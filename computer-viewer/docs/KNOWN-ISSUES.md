@@ -1,7 +1,7 @@
 # Known Issues & Battle Scars
 
 Every non-obvious failure we hit building and running this on real machines
-(2 Macs, 1 Windows 11 PC, 1 Orgo cloud Linux box), with the fix that worked.
+(2 Macs, 1 Windows 11 PC, 1 cloud Linux box), with the fix that worked.
 If your setup misbehaves, start here — odds are decent it's already been
 fought once.
 
@@ -52,14 +52,11 @@ noVNC offers `binary` + others and some picky servers drop the handshake.
 `binary`, remember the working choice per endpoint.
 
 ### ✅ Rotating cloud endpoints fail after the machine restarts
-**Symptom:** Orgo-style computers stop connecting after a VM restart even
+**Symptom:** Session-API computers stop connecting after a VM restart even
 though nothing changed client-side.
 **Cause:** The VNC password/URL rotates per boot; the cached session is
-stale. Also: Orgo's API field names differ from its docs (`projects` /
-`desktops`, not `workspaces` / `computers`; `fly_instance_id`, not
-`instance_id`).
-**Fix:** Session document re-fetched on every connect; parser accepts both
-the documented and live shapes; dashboard-URL UUIDs are recognized directly.
+stale.
+**Fix:** Session document re-fetched on every connect.
 
 ### ✅ Wrong-password errors get masked as "unreachable"
 **Cause:** The trailing unclean disconnect event overwrote the precise auth
@@ -204,28 +201,20 @@ the stream from the first view until it reconnects.
 
 ---
 
-## Orgo cloud box (Linux)
+## Cloud Linux box
 
 ### ⚠️ Chrome dies as root / "Missing X server"
 **Symptom:** `google-chrome URL &` exits immediately. Logs say
 `Running as root without --no-sandbox` or `Missing X server or $DISPLAY`.
-**Cause:** Orgo's desktop is Xvnc on **`:99`**, not `:0`. Chrome also
-refuses to start as root without `--no-sandbox`, and the software GPU
-needs `--disable-gpu`.
+**Cause:** Some cloud desktops run Xvnc on a display other than `:0` (for
+example `:99`). Chrome also refuses to start as root without `--no-sandbox`,
+and a software GPU needs `--disable-gpu`.
 **Fix:**
 ```
 DISPLAY=:99 google-chrome --no-sandbox --disable-gpu --no-first-run URL &
 ```
 First launch also shows a "Sign in to Chrome" interstitial — dismiss once
 with Tab then Return.
-
-### ⚠️ Direct SSH into the box is blocked
-**Symptom:** Tailscale ping works; `ssh root@<tailnet-ip>` hangs.
-**Cause:** Orgo uses userspace networking. Outbound works; inbound TCP
-(including SSH) does not. This is platform design, not a misconfig.
-**Fix:** Use `orgo-term` (WebSocket PTY) or `orgo_computer_bash` /
-`orgo-hands` (screenshot/click). Hosted `orgo_computer_run` is off by
-default and spends AI credits — do not enable it just to click.
 
 
 

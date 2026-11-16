@@ -35,7 +35,7 @@ within a few days.
   tailnet or tunnel. The VNC password is 8 characters by protocol
   (classic DES auth); treat it as a second factor, not the boundary. The
   desktop plugin refuses `ws://` to public hosts.
-- HD mode tokens and Orgo API keys are stored locally by design
+- HD mode tokens and session-API bearer tokens are stored locally by design
   (`.env` / plugin storage, `0600`). They are never transmitted anywhere
   except to the endpoint you configure.
 - Social-engineering reports ("the AI told me to run...") are out of scope
@@ -53,7 +53,7 @@ as a quick, partial pass. No code was executed; every check was source review.
 from source alone (they depend on Hermes, proxy or Windows behaviour). This
 change set closes all eight in source anyway:
 
-1. Orgo tool approvals now show the full argument with control characters
+1. The (since retired) computer agent plugin's tool approvals now showed the full argument with control characters
    escaped, up to 2000 characters, with an explicit "more characters" marker.
 2. `C:\usbmmidd_v2` (run by a SYSTEM startup task) gets a protected
    Administrators/SYSTEM ACL, and an existing folder with any other owner
@@ -76,8 +76,7 @@ saved, the Slack HTTP listener stays on loopback unless allowed, noVNC loads
 only from the verified vendored copy, `C:\ffmpeg` is used only when safe, and
 the CI workflows have read-only permissions and actions pinned to commits.
 
-**Not covered** (this pass does not claim these are safe): the Orgo
-agent-plugin installer; the Orgo CLI helpers `orgo-hands` and `orgo-term`; the
+**Not covered** (this pass does not claim these are safe): the
 computer-viewer noVNC loader; the per-plugin install scripts;
 the gateway tool-approval cards in the Grokbot Override desktop UI; Grokbot
 Override scheduled routines (cron); the relay service installer and Tailscale

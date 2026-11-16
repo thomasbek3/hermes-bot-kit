@@ -37,11 +37,11 @@ viewed through the pane's noVNC connection.</em></p>
 
 ## Highlights
 
-- **One pane, every computer.** Cloud (Orgo, TLS-fronted VPS, Docker boxes)
+- **One pane, every computer.** Cloud (TLS-fronted VPS, Docker boxes)
   and LAN machines (Mac / Windows / Linux) in a single switcher. One click to
   jump between them; inactive machines keep a last-frame snapshot.
 - **Paste-anything setup.** One address field accepts a websocket URL, a
-  noVNC page, a session API, an API key, or a bare `host:port` — it figures
+  noVNC page, a session API, or a bare `host:port` — it figures
   out the rest and tells you what it found in plain English.
 - **One-paste host scripts.** `connect-mac.sh` / `connect-windows.ps1` /
   `connect-linux.sh` turn a spare machine into a computer the plugin can see.
@@ -54,14 +54,16 @@ viewed through the pane's noVNC connection.</em></p>
   path. One **HD** toggle; VNC is the silent safety net.
 - **Multi-bot aware.** Per-bot computer bindings — each of your profiles can
   have its own machine, and the pane follows the focused chat.
-- **Auto-connects when your bot goes to work.** The moment a fresh
-  orgo-computer tool call appears in a live turn, the pane wakes itself
-  (clearing a manual Disconnect hold) so you watch the bot drive — the
-  Grok Bot behavior. Never triggered by scrolling old history; at most one
-  wake per 30s.
-- **Bots with hands, not just eyes.** The optional `orgo-computer` agent
-  plugin lets your bots run shell commands and delegate GUI tasks on their
-  pinned computer. Watch the pane while the bot works inside it.
+- **Opens when your bot goes to work.** The moment the bot calls Hermes's
+  own `computer_use` or a browser tool in a live turn, the pane opens and
+  connects to that bot's bound computer (clearing a manual Disconnect hold)
+  so you watch it drive — the same rules as Hermes's "Open Screen when the
+  bot uses it". Never triggered by replayed history; at most one wake per
+  bot per 30 s; closing the pane holds until a 30 s quiet gap.
+- **Take over / Hand back.** For a Mac the bot drives over SSH (the kit's
+  `remote-cua` plugin), the pane shows who is in control, stays view-only
+  while the bot is, and lets you take over and hand back — Hermes's Bot
+  Screen behaviour for machines its own Screen pane cannot show.
 - **Stays inside the plugin system.** One `plugin.js`, the three allowed
   imports, official contribution points (pane, status bar, palette,
   keybinds). Hot-reloadable, no build step, no core patches.
@@ -94,12 +96,9 @@ hiperf-agent.py        optional HD streaming agent (H.264 over WebSocket)
 hiperf-mac.sh          HD agent installer, macOS (VideoToolbox)
 hiperf-windows.ps1     HD agent installer, Windows (NVENC / x264)
 hiperf-linux.sh        HD agent installer, Linux (VAAPI / x264)
-agent-plugin/          orgo-computer: gives bots hands on their computer (shell + GUI tools)
-install-agent-plugin.sh  install the agent plugin into one or every Hermes profile
-orgo-term              one-shot root shell on an Orgo box (WebSocket PTY, no AI credits)
-orgo-hands             screenshot / click / type / key on an Orgo box (REST, no AI credits)
+remove-orgo-computer.sh  remove the retired agent plugin from Hermes profiles
 docs/                  specs, build notes, known issues
-NOTICE.md              licensing + attribution (parts adapted from Korgo Bot, MIT)
+NOTICE.md              licensing + attribution (noVNC, Korgo Bot UI patterns)
 ```
 
 Plugin id: `computer-viewer` (folder name must match).
@@ -109,8 +108,8 @@ Plugin id: `computer-viewer` (folder name must match).
 The plugin talks to two kinds of computer:
 
 - **Cloud** — the machine already speaks the plugin's protocol. Paste a
-  websocket URL, a noVNC page, a session API URL, or an API key (Orgo, a
-  TLS-fronted VPS, a Docker desktop box). Detection is automatic; you do not
+  websocket URL, a noVNC page, or a session API URL (a TLS-fronted VPS, a
+  Docker desktop box, a rotating session API). Detection is automatic; you do not
   pick a mode.
 - **Local** — a Mac, Windows PC, or Linux box on your LAN or Tailscale. Run
   the one-paste script **on that machine**. VNC stays on localhost:5900.
@@ -176,104 +175,154 @@ X11 uses `x11vnc`. wlroots compositors (Sway, Hyprland, ...) use `wayvnc`
 Wayland is not supported** - log into an Xorg session. The script prints the
 address and the VNC password it stored.
 
-## Give your bot hands: the agent plugin
+## When the bot drives the computer
 
-The desktop pane gives **you** eyes on the computer. The optional
-**orgo-computer agent plugin** gives your **bot** hands on it — so Hermes can
-actually drive the machine, not just display it.
+The pane gives **you** eyes on the computer. The **bot** drives machines with
+Hermes's own `computer_use` tool (cua-driver, approvals, the control lease):
 
-With both halves installed, a bot in any chat can:
+- **Linux VM:** fully native. Point the bot's profile at the VM with
+  `terminal.backend: ssh` and Hermes runs its own Bot Screen there (Screen
+  pane, Take over / Hand back, auto-open). Nothing from this kit is needed; see
+  Hermes's Bot Screen docs.
+- **Mac (over SSH):** install the kit's `remote-cua` agent plugin in that
+  bot's profile (`computer_use.backend: remote-cua` plus a `remote_cua:` block
+  with host, user, and optionally `vnc:`). The bot's `computer_use` then runs
+  on the Mac. Hermes's own Screen pane cannot show a Mac, so this pane is the
+  viewer: add the Mac here (Screen Sharing VNC, `connect-mac.sh`), turn on
+  **Advanced → The bot drives this computer (remote-cua)**, and pick it as
+  **Endpoint for <bot>** in Settings.
+- **Windows:** not yet (`remote-cua` refuses `os: windows` with a clear
+  message until cua's Session proxy is supported).
 
-- `orgo_computer_bash` — run shell commands on the pinned computer (files,
-  packages, git — anything that doesn't need a screen)
-- `orgo_computer_screenshot` / `orgo_computer_click` / `orgo_computer_type` /
-  `orgo_computer_key` — see and drive the desktop yourself (no AI credits)
-- `orgo_computer_run` — **off by default.** Orgo's hosted click-AI; spends
-  plan credits. Enable with plugin config `hosted_run: true` only if you want it.
+### Using it
 
-Install into one or every Hermes profile:
+Copied from Hermes's Bot Screen, for the Mac:
+
+1. The chip under the picture says who is in control: **Bot is in control**
+   by default. While the bot is in control the pane is view-only for that
+   machine (no clicks, keys, paste, or Ctrl+Alt+Del reach it).
+2. Click **Take over**. The pane opens large with a red border; your keyboard
+   and mouse now drive the Mac. Meanwhile the bot's `computer_use` calls are
+   refused with `human_has_control`.
+3. Click **Hand back**. The bot regains control. Closing the pane (or
+   Disconnect) also hands control back. A *dropped* connection is different:
+   you keep control until you reconnect and hand back.
+4. After a reload the pane is a new viewer. If the lease still says a human
+   holds control, **Hand back (force)** clears it. When another window takes
+   over, this one drops back to watching.
+
+Safety rules the pane follows (the bot resumes the moment a hand back
+reaches the gateway, so the pane never trusts an old answer to give you
+input):
+
+- Input goes off as soon as you click **Hand back**, before the answer
+  arrives. If the answer is lost, input stays off until a fresh read of the
+  lease; if that read still names you, **Take over** re-confirms it.
+- An answer to a request sent before a Take over, Hand back, close or bot
+  switch is ignored, and a lease older (by `epoch`) than the one shown can
+  never turn input back on.
+- Lease changes for one bot's gateway (take, hand back, cleanup) are sent one
+  at a time, so a hand back from a closed pane can never land after the next
+  Take over.
+- A take or hand back whose answer never came (timeout, dropped connection)
+  may still be carried out by the gateway later. The pane therefore stops
+  using that viewer id: the next Take over is made under a new one. The
+  plugin only lets a release clear the viewer it names, so a late release of
+  the old id cannot take control away from the new one. While an old id of
+  this window still holds the lease, the chip says "Handing back…" and Take
+  over waits; Take over also re-reads the lease first.
+- The pane remembers every lease it *may* hold (a take was sent and no answer
+  has proved otherwise, including a take whose answer was lost). Whenever it
+  stops being in control of that machine (close, Disconnect, unload,
+  removing the binding, switching bot or gateway, becoming watch-only) it
+  hands those back with a release naming exactly that id. A refused take
+  (409) is not a possible hold.
+- When the focused chat moves (for example to a bot with the same name on
+  another gateway), input goes off and the old gateway's lease is handed back
+  at once, before the new gateway is looked up. Each lookup is numbered and
+  tied to the plugin's lifetime: an older lookup, or one that lands after the
+  plugin was disabled or reloaded, changes nothing and starts no polling.
+- The lease is asked of the bot's own gateway: the `(connectionId, profile)`
+  route Hermes lists for it. The focused chat's connection-qualified owner
+  (`host.state.focusedSessionOwner`) picks it; the active gateway socket is
+  never used for that, since tile focus moves without moving the socket. With
+  no provable owner, a bot name on more than one gateway, or no route list,
+  the pane stays view-only and says why. Tool calls from another gateway with
+  the same bot name do not open the pane.
+- A bot-driven computer added as an embedded viewer page (or one whose
+  address fell back to the page) is watch-only: the page is made `inert` (no
+  focus, no keys, no clicks) and Take over needs its VNC (WebSocket) address.
+
+Below the chip, the pane shows the machine's health in plain words from the
+plugin's status check: reachable, driver version, permissions, and whether
+the screen is asleep or locked (**Check** re-runs it).
+
+Take over needs the computer bound to the bot (**Endpoint for <bot>**): the
+control lease belongs to that bot's profile. The pane calls the plugin's
+dashboard routes on that bot's own connection and profile —
+`GET /api/plugins/remote-cua/lease`, `POST …/take {viewer}`,
+`POST …/release {viewer, force}`, `GET …/status[?fresh=1]` (shapes in
+[docs/REMOTE-CUA.md](docs/REMOTE-CUA.md)) — authenticated by Hermes like
+every other `/api/` call; it never writes the lease itself. The plugin must be
+enabled in that bot's profile, or the pane says so.
+
+**Private Hermes dependency.** Those calls go through Hermes Desktop's REST
+bridge, `window.hermesDesktop.api({connectionId?, profile, priority, path,
+method, body})` (the `hermes:api` IPC that the app's own `api/client.ts`
+`hermesApiAs` uses). It is not part of the desktop plugin SDK: the SDK's
+`ctx.rest` only reaches this plugin's own namespace. Grokbot Override reaches
+the kit's Slack add-ons the same way. If a Hermes update renames or removes the
+bridge, the chip says "This Hermes build has no REST bridge for plugin routes."
+and Take over is unavailable; viewing is unaffected. An HTTP error arrives as
+`"<status>: <body>"`, which the pane parses back into the plugin's JSON
+(`error`, `message`, `lease`).
+
+Leave Hermes's own "Open Screen when the bot uses it" off for Mac bots: the
+native pane would only say "No bot screen on this host". This pane opens on
+the bot's `computer_use` / browser calls instead.
+
+### Known limits
+
+- **Cleanup retries are bounded.** A hand back that gets no answer is retried
+  four times (after 2, 5, 15 and 30 seconds), not forever, and not after the
+  plugin is disabled or reloaded. If the gateway stays unreachable for longer,
+  the bot can stay blocked (`human_has_control`) until you open the pane and
+  click **Hand back** after it reconnects, or **Hand back (force)** after a
+  reload. Nothing can release a lease while its gateway is unreachable.
+- **A reload is a new viewer.** The pane picks a new viewer id each time the
+  plugin loads (and after an unanswered lease change, above). A lease left
+  from before a reload shows **Hand back (force)**; it is never silently
+  reclaimed.
+- **Embedded viewer pages are watch-only** for bot-driven computers: Take over
+  needs the VNC (WebSocket) path, where the pane can switch input off.
+  Ordinary (not bot-driven) embedded pages keep their input.
+- **Private Hermes touch points.** The lease calls use Hermes Desktop's REST
+  bridge (see above), and the per-bot binding is stored by profile name, not
+  by `(connectionId, profile)`; connection-qualified bindings belong to the
+  separate binding work. Duplicate bot names across gateways are handled by
+  failing closed, not by the binding.
+- **Not verified live.** These rules are covered by unit tests against a fake
+  gateway and a fake VNC client. No real desktop, two viewers on one
+  machine, real network drop, app reload, or Chromium keyboard-focus check
+  has been run.
+
+### Upgrading from the old agent plugin
+
+Earlier releases shipped a cloud-computer agent plugin and two CLI helpers.
+They are gone. To remove the plugin from your profiles (dry run first; nothing
+is deleted, `.env` is left alone):
 
 ```bash
-bash install-agent-plugin.sh            # all profiles, prompts once for the key
-bash install-agent-plugin.sh --profiles default,helper --yes --api-key-stdin <<< "$ORGO_API_KEY"
-bash install-agent-plugin.sh --profiles default,helper --yes --api-key-file ~/.config/orgo/api-key
+bash remove-orgo-computer.sh          # what it would do
+bash remove-orgo-computer.sh --yes    # do it, then restart the gateway
 ```
 
-The key never appears in argv or shell history this way. `--api-key KEY` still
-works but is discouraged (visible in the process list and shell history).
-
-Then pin a computer per profile with `/computer` in that chat. The plugin is
-per-profile on purpose: one bot can drive one Orgo box while another bot's
-drives another. Pair each profile with the same machine in the viewer's
-per-bot endpoint and you get the full picture — watch the pane while the bot
-works inside it.
-
-One Orgo computer can run up to four screens, so several bots can share one
-box without stepping on each other. Pin a screen per profile with the plugin
-config `screen` (or the env var `ORGO_SCREEN`, or
-`hermes orgo-computer set <profile> <uuid> --screen <id>`); leave it empty for
-the boot screen. Screenshot, click, type, and key go to that screen only —
-`orgo_computer_bash` is the whole machine either way.
-
-> Attribution: parts of this agent plugin are adapted from
-> [Korgo Bot](https://github.com/nickvasilescu/korgo-bot) (MIT) — see
-> [NOTICE.md](NOTICE.md).
-
-### Costs: bash and hands are free; hosted AI is not
-
-Orgo meters only one thing: its **hosted computer-use AI** (`orgo_computer_run`),
-which burns plan AI credits (~1¢/step). That tool is **off by default**.
-Everything else is included in the monthly plan:
-
-- **`orgo_computer_bash`** — open a URL, install, files, processes.
-- **Screenshot / click / type / key** — the bot looks at the desktop and
-  clicks itself (Grok Bot style).
-- **`orgo-term` / `orgo-hands`** — human CLI for the same free pipes.
-
-Measured on a real Orgo box (Google News headlines visible):
-
-- bash launch Chrome to the URL: **~14s, $0**
-- screenshot + click: **~34s, $0**
-- hosted `orgo_computer_run`: **~90s, ~12¢**
-
-Default: bash first, pixels if you must see it, hosted run never unless you
-turned it on.
-
-### Direct terminal access: `orgo-term`
-
-For humans (and Mac-side agents), `orgo-term` is a one-shot terminal on any
-Orgo computer over Orgo's official WebSocket PTY — no SSH needed (Orgo boxes
-don't accept inbound SSH by design), no credits burned:
-
-```bash
-ORGO_COMPUTER_ID=<your-computer-uuid> ./orgo-term "whoami && hostname"
-```
-
-`ORGO_API_KEY` comes from the environment or `~/.hermes/.env`. You can also
-drop both values in `~/.hermes-cv/orgo.env` so you don't have to export them
-every time. Precedence: already-set environment variables win, then
-`~/.hermes-cv/orgo.env`, then `~/.hermes/.env`. Optional: `ORGO_INSTANCE_ID`
-if auto-detect from the computer record fails.
-
-Works from macOS or Linux. Needs `websocket-client`
-(`python3 -m pip install --user websocket-client`; the script installs it
-on first run if missing).
-
-Chrome-on-Orgo tips learned the hard way: launch with `--no-sandbox
---disable-gpu` (root + software rendering), dismiss the first-run sign-in
-dialog once via keyboard (`Tab` then `Return`), and always set
-`DISPLAY=:99` (Orgo's Xvnc display):
-
-```bash
-./orgo-term 'DISPLAY=:99 google-chrome --no-sandbox --disable-gpu --no-first-run https://news.google.com >/tmp/chrome.log 2>&1 &'
-```
-
-Architecture note: like Grok Bot, the brain does not live on the computer.
-Hermes (the brain) reaches out to the box (the hands) through Orgo's API;
-the pane is only the window. Because the pieces are decoupled, the viewer
-can run from a different Mac than the gateway doing the driving. And if you
-launch your Orgo computer from the **Hermes Agent template**, a full Hermes
-brain can live *on* the computer itself — Grok Bot can't do that part.
+It only rewrites a `plugins.enabled` list written one item per line or as a
+one-line `[a, b]` list, removes just that item, and checks the result (with
+Ruby or PyYAML when installed) before replacing the file. A profile whose
+config names the plugin any other way (a list over several lines,
+`plugins: {enabled: [...]}`) is left untouched, plugin folder included; the
+script prints the manual steps and exits 3.
 
 ## High-performance mode (optional)
 
@@ -365,10 +414,10 @@ stream), paste the printed token, turn on HD.
   installed the HD agent before this, re-run `hiperf-windows.ps1` and, if
   other people use that PC, delete `hiperf-token.txt` first so a new token is
   made.
-- **Approvals show the whole command.** The Orgo hands, `run` and `bash` tools
-  ask Hermes for approval with the argument as it will run: control
-  characters escaped (`\r`, `\t`, `\x1b`), up to 2000 characters, then
-  `… [+N more characters, M total]`; a click names its button and double.
+- **The control fence is a tool-level fence.** While you hold control of a
+  bot-driven Mac, the bot's `computer_use` is refused and this pane sends
+  input; while the bot holds it the pane sends none. It is not an OS fence:
+  the bot's SSH user is the logged-in user, as with Hermes's Bot Screen.
 - **August 2026 macOS Screen Sharing CVE (CVE-2026-65400).** Unpatched Screen
   Sharing can authenticate an attacker on the network **without valid
   credentials**. Apple patched this in macOS **Sonoma 14.8.9**,
@@ -414,7 +463,7 @@ One install covers every profile — do not copy this into
 the desktop-plugin root is APP-level (`electron/desktop-plugins-root.ts`:
 `desktopPluginsRoot()` resolves `<HERMES_HOME>/desktop-plugins` and
 `migrateProfileScopedDesktopPlugins()` moves any profile-scoped leftovers up on
-the next launch). The Orgo agent plugin below is the per-profile half.
+the next launch). Agent plugins (such as the kit's `remote-cua`) are the per-profile half.
 
 Windows (typical):
 
@@ -445,7 +494,7 @@ The pane starts empty until you add a computer:
 
 1. Click **Add a computer** on the empty pane, or **＋ Add computer** in the
    header menu.
-2. Pick **Cloud** or **Local**. Cloud is the paste-address / API key form.
+2. Pick **Cloud** or **Local**. Cloud is the paste-address form.
    Local shows a Mac / Windows / Linux setup one-liner, then the same address
    field.
 3. Paste into **Computer address**. The field accepts any of the shapes below
@@ -461,7 +510,6 @@ The pane starts empty until you add a computer:
 | `wss://host/websockify` (or `ws://` on a private host) | Treated as a VNC address. |
 | `http://127.0.0.1:6080/vnc.html` (a noVNC page) | Embedded as a web viewer. |
 | `https://api.example/computers/id` | Fetches the connection from that API. |
-| An API key (`sk-…` / `sk_…`, or a similar bare key) | **Find my computers**, then pick one. |
 | `host:port` or a hostname (`macbook.local:6080`) | Probes WebSocket `/websockify`, then `http://host:port/vnc.html`. |
 
 `http://` addresses (web viewer pages and session APIs) are accepted only for
@@ -666,7 +714,7 @@ desktop.example.com {
 }
 ```
 
-### 7. Rotating APIs (Orgo, Modal, …)
+### 7. Rotating session APIs
 
 Paste the session API URL into **Computer address** when the desktop URL is
 minted per session instead of being stable. (Advanced: Session JSON.)
@@ -681,73 +729,18 @@ return JSON of this shape:
 }
 ```
 
-`websocketUrl` is required unless the body is an Orgo computer document
-(`fly_instance_id` / `instance_id` instead — see below); `password` is
-optional. The engine then behaves exactly like WebSocket mode.
+`websocketUrl` is required; `password` is optional. The engine then behaves exactly like WebSocket mode.
 
 The session is **re-fetched on every (re)connect** — never cached. Rotating
 tokens make a cached URL the #1 cause of mystery reconnect failures. The same
 rotating password often doubles as the websockify `?token=` query parameter;
 sending it both in the URL and as RFB credentials is the usual pattern.
 
-Non-2xx responses or a body without a usable `websocketUrl` (and without an
-Orgo instance id) surface as **Session request failed** (`GET {sessionUrl} →
+Non-2xx responses or a body without a usable `websocketUrl` surface as **Session request failed** (`GET {sessionUrl} →
 HTTP {status}.`).
 
-#### Orgo
-
-Paste your API key into **Computer address**, click **Find my computers**,
-pick a workspace/computer, then **Connect**. The plugin fills the session URL
-as `https://www.orgo.ai/api/computers/<computer-id>` (and names the computer
-after the pick if it was still "My computer", "Local box", "Untitled", or
-empty). Discovery origin defaults to `https://www.orgo.ai`; override it with
-**Session URL** under Advanced.
-
-If discovery can't reach the API from the app, paste the session URL by hand
-(Computer address or Advanced):
-
-- **Session URL:** `https://www.orgo.ai/api/computers/<computer-id>`
-- **Bearer:** API key (from orgo.ai settings) — or paste the key into
-  Computer address.
-
-The official computer document has no `websocketUrl`; Session JSON mode
-constructs it.
-
-Live `GET /api/computers/{id}` returns
-`{ id, status, fly_instance_id, hostname, connection_url, vnc_password }`
-(Orgo's docs still say `instance_id`). The plugin accepts the first
-non-empty of `instance_id` / `instanceId` / `fly_instance_id` /
-`flyInstanceId` (must match `/^[a-zA-Z0-9-]+$/`), and if those are missing it
-uses the last path segment of `connection_url`. It builds:
-
-```text
-wss://{host}/desktops/{instance_id}/ws/websockify?token={password}
-```
-
-`{host}` is the hostname of `connection_url`, else the body's `hostname`,
-else the Session URL host (never hardcoded). `password` is `vnc_password`
-falling back to `password`; if still empty, the plugin GETs
-`{origin}/api/computers/{id}/vnc-password` and reads `password` /
-`vnc_password` (that extra call is non-fatal). If there is still no password,
-`?token=` is omitted. The same password is also the RFB credential. It
-rotates on every computer restart, which is why the session is re-fetched on
-each connect.
-
-Workspace discovery follows the live list shape
-`{ projects: [{ desktops: [...] }] }` (docs still say `workspaces` /
-`computers`). If the list embeds no computers and the Session URL contains a
-UUID, the plugin also tries `GET /api/computers/{uuid}` — the id in an Orgo
-dashboard `/workspaces/{uuid}` URL is sometimes a desktop id, not a project
-id.
-
-If `status` is a non-running lifecycle value (`stopped`, `stopping`,
-`creating`, `starting`, `restarting`, `deleting`, `error`), the pane shows
-**Session request failed** with `Computer status: {status}. Start it in Orgo
-first.`
-
-Official Orgo docs say API keys are meant to be server-side. If the API
-rejects browser-origin requests, paste the constructed `wss://` URL directly
-plus the current VNC password (valid until the computer restarts).
+The bearer token is sent only to the session address's own origin (https,
+or http to a private address), never across a redirect.
 
 ## Viewer modes
 
@@ -758,7 +751,7 @@ The address field picks a mode for you. These names only appear under
 |---|---|---|
 | **WebSocket** (default) | Loads the vendored noVNC 1.7.0 (`RFB`) the installer places in `computer-viewer/vendor/`, after a SHA-256 check, and nothing else: no CDN copy is ever loaded. If that file is **missing, truncated, or unreadable**, the pane stops with **Couldn't load the viewer** and asks you to re-run the kit installer. A file that is present but **fails the hash check, or fails to import**, is treated as tampering: the pane stops with **Viewer file failed verification**. | Full controls: scale, view-only, clipboard, Ctrl+Alt+Del, screenshot. |
 | **Iframe** | `<iframe>` pointed at a hosted noVNC page. No CDN. Sandboxed; the page cannot read the clipboard unless **Allow this computer to use my clipboard** is on for that computer (Advanced, off by default). | The vendored noVNC is missing, or you already have `vnc.html`. |
-| **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Rotating desktops (paste the API URL or an API key). |
+| **Session JSON** | `GET` a session document, then WebSocket/RFB as above. | Rotating desktops (paste the API URL; a bearer token goes under Advanced). |
 
 If the vendored noVNC cannot be loaded (missing, truncated or unreadable), the
 pane shows **Couldn't load the viewer**: re-run the kit installer, or switch the
@@ -812,7 +805,7 @@ Mouse-move shows the bar; it auto-fades after 2s idle. Escape collapses
 
 | Control | Action |
 |---|---|
-| View only | Live-updates `rfb.viewOnly`. |
+| View only | Live-updates `rfb.viewOnly`. For a bot-driven (remote-cua) computer this is replaced by the control chip with **Take over** / **Hand back** / **Hand back (force)**. |
 | Fit / Native | Fit scales the framebuffer into the overlay. Native turns scaling off and lets the container scroll. |
 | Paste | `navigator.clipboard.readText()` → `rfb.clipboardPasteFrom`. Remote clipboard events write back via `ctx.os.writeClipboard` **only when Allow this computer to use my clipboard is on** (Advanced, off by default, all modes). |
 | Ctrl+Alt+Del | `rfb.sendCtrlAltDel()`. |

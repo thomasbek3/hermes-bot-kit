@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- **computer-viewer: native computer_use, Take over / Hand back, Orgo removed (2026-11-15)**: the pane now opens on
+  Hermes's own `computer_use` and `browser_*` tool calls (live `tool.start` only, never replayed, once per bot per
+  30 s, a manual close holds 30 s) for a bot with its own bound computer, instead of on Orgo tool rows. Computers the
+  bot drives through the kit's `remote-cua` plugin get Hermes's Bot Screen controls: "Bot is in control" /
+  "You are in control" chip, **Take over** (red border, input on), **Hand back**, closing the pane or Disconnect
+  hands back, a dropped connection keeps the lease, **Hand back (force)** after a reload; view-only while the bot
+  holds control; the plugin's status check in plain words. Removed: the `orgo-computer` agent plugin, `orgo-term`,
+  `orgo-hands`, Orgo API-key discovery and the Orgo session parser, `install-agent-plugin.sh`. New
+  `computer-viewer/remove-orgo-computer.sh` (dry run, `--yes`) removes an installed `orgo-computer` from profiles;
+  `install.sh` names it when it finds one.
+- **computer-viewer: Take over talks to remote-cua's dashboard routes (2026-11-15)**: the pane now calls
+  `/api/plugins/remote-cua/{lease,take,release,status}` on the bot's own connection and profile through Hermes
+  Desktop's REST bridge (`window.hermesDesktop.api`, a private Hermes touch point, documented in the
+  computer-viewer README), instead of gateway RPC. It reads the plugin's exact lease and status shapes, shows the
+  status `summary` lines, re-checks with `?fresh=1` on **Check**, and shows a refused take or release (409) with
+  the plugin's message and the current holder.
+- **computer-viewer: control fixes from review (2026-11-15)**: input goes off when Hand back starts and stays off
+  after a lost answer until a fresh lease read; stale lease answers (older epoch, or sent before a take, hand back,
+  close or switch) are ignored; closing, Disconnect or switching bots during a pending Take over hands the late grant
+  back without reopening the pane; the lease is asked of the bot's own `(connectionId, profile)` route and the pane
+  fails closed when that is ambiguous or unknown; tool calls from another gateway no longer wake it; a bot-driven
+  computer shown as an embedded page is `inert` and watch-only. `remove-orgo-computer.sh` now refuses (exit 3, no
+  changes for that profile) any config form it cannot rewrite safely, and validates its edit before replacing.
+- **computer-viewer: control fixes from review round 2 (2026-11-15)**: lease changes per gateway are serialized
+  (a late close-release can no longer undo the next Take over); every lease this window may hold, including a take
+  whose answer was lost, is handed back (with retries) whenever the pane stops controlling that machine, including
+  removing the binding; the gateway is picked by the focused chat's `focusedSessionOwner`, never the active socket,
+  and fails closed when unprovable.
+- **computer-viewer: control fixes from review round 3 (2026-11-16)**: a lease change with no answer retires its
+  viewer id, so a release that commits late can never revoke a later grant (Package P's release only clears the
+  viewer it names), and Take over re-reads the lease and waits while an old id of this window holds it; a focus
+  change fences input and hands back the old gateway synchronously; owner lookups are sequenced and tied to the
+  plugin's lifetime, so a stale or post-unload lookup changes nothing and arms no polling. The README lists the
+  known limits.
 - **remote-cua: Hermes's own computer_use on a remote Mac (2026-11-15)**: a new per-profile agent plugin,
   [`remote-cua`](remote-cua/README.md). With `computer_use.backend: remote-cua` and a `remote_cua` block
   (`host`, `user`, `os`, optional `driver`, `vnc`) the bot's native `computer_use` (schema, approvals,
