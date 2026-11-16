@@ -178,3 +178,21 @@ test('an earlier failed turn does not silence a later background reply; a failed
   const failed2 = st({ items: [...bgDone.chat.items, reply('live:a:6', 'partial'), { kind: 'error', id: 'live:e:2', text: 'new failure' }] })
   assert.deepEqual(run([bgDone, busy2, failed2], away(seen)), [])
 })
+
+// Review C-R3-04: the turn boundary is recorded even while focused.
+test('a turn started while focused and finished unfocused uses its own boundary (old error ignored)', () => {
+  const seen = createSeen()
+  const err = { kind: 'error', id: 'live:e:1', text: 'old failure' }
+  const idle = st({ items: [user('u1'), err] })
+  const busy = st({ busy: true, items: idle.chat.items })
+  const done = st({ items: [...idle.chat.items, reply('live:a:7', 'finished')] })
+  assert.deepEqual(nativeNotifications(null, idle, away(seen)), [])
+  assert.deepEqual(nativeNotifications(idle, busy, { focused: true, seen, name: 'Scout' }), [], 'started while focused')
+  assert.deepEqual(nativeNotifications(busy, done, away(seen)).map(n => n.id), ['done:live:a:7'], 'finished unfocused: notifies')
+  // A turn that both starts and ends while focused is never notified later.
+  const busy2 = st({ busy: true, items: done.chat.items })
+  const done2 = st({ items: [...done.chat.items, reply('live:a:8', 'quiet')] })
+  assert.deepEqual(nativeNotifications(done, busy2, { focused: true, seen }), [])
+  assert.deepEqual(nativeNotifications(busy2, done2, { focused: true, seen }), [])
+  assert.deepEqual(nativeNotifications(done2, { ...done2 }, away(seen)), [])
+})

@@ -47621,7 +47621,7 @@ function markSeen(state, seen) {
 function nativeNotifications(prev, next, { focused, seen, name = "", keyOf, slot = "main", now = Date.now() } = {}) {
   if (!seen || !next?.bot || !chatOf(next)) return [];
   const same = prev && chatIdentity(prev, keyOf) === chatIdentity(next, keyOf);
-  if (!same || focused) {
+  if (!same) {
     markSeen(next, seen);
     return [];
   }
@@ -47638,6 +47638,16 @@ function nativeNotifications(prev, next, { focused, seen, name = "", keyOf, slot
       startIds: new Set(itemsOf(prev).map((item) => String(item?.id || "")))
     });
     if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value);
+  }
+  if (focused) {
+    if (chatOf(prev)?.busy && !chatOf(next).busy) {
+      const base4 = seen.base.get(baseKey);
+      seen.base.delete(baseKey);
+      const reply = base4 ? turnReply(items, base4.startIds) : finishedReply(items);
+      if (reply) remember(seen, `done:${reply.id}`);
+    }
+    markSeen(next, seen);
+    return [];
   }
   if (chatOf(prev)?.busy && !chatOf(next).busy) {
     const base4 = seen.base.get(baseKey);

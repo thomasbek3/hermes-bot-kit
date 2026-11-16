@@ -14,7 +14,8 @@ const tick = (ms = 120) => new Promise(resolve => setTimeout(resolve, ms))
 test('native notifications: an old error does not silence a later background reply', { skip: !READY && 'dev dependencies not installed' }, async t => {
   const sent = []
   const { panes, workspaces, mount, emit } = await bootPlugin(t, { ctxExtras: { os: { notify: n => sent.push(n) } } })
-  document.hasFocus = () => false
+  let focused = false
+  document.hasFocus = () => focused
   const rosterEl = mount(panes.find(p => p.id === 'roster').render)
   ;(await waitFor(() => [...rosterEl.querySelectorAll('button.gbo-row')].find(b => b.textContent.includes('Security')), 'row')).click()
   const chatEl = mount((await waitFor(() => workspaces.get('grokbot-override'), 'workspace')).render)
@@ -44,4 +45,15 @@ test('native notifications: an old error does not silence a later background rep
   emit({ type: 'message.complete', session_id: 'rt-security', payload: { status: 'error', error: 'new failure', text: 'partial' } })
   await tick(200)
   assert.equal(sent.length, 1, 'the new failed turn does not notify')
+
+  // Review C-R3-04: a background turn that STARTS while Hermes is focused and
+  // finishes after it lost focus still notifies, despite the old errors.
+  focused = true
+  emit({ type: 'message.start', session_id: 'rt-security', payload: { display_kind: 'process_complete' } })
+  await tick()
+  focused = false
+  emit({ type: 'message.delta', session_id: 'rt-security', payload: { text: 'finished ' } })
+  emit({ type: 'message.complete', session_id: 'rt-security', payload: { text: 'finished in the background' } })
+  await waitFor(() => chatEl.textContent.includes('finished in the background'), 'the reply')
+  await waitFor(() => sent.length === 2, 'a turn started while focused notifies when it ends unfocused')
 })

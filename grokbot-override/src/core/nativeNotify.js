@@ -147,7 +147,7 @@ export function markSeen(state, seen) {
 export function nativeNotifications(prev, next, { focused, seen, name = '', keyOf, slot = 'main', now = Date.now() } = {}) {
   if (!seen || !next?.bot || !chatOf(next)) return []
   const same = prev && chatIdentity(prev, keyOf) === chatIdentity(next, keyOf)
-  if (!same || focused) {
+  if (!same) {
     markSeen(next, seen)
     return []
   }
@@ -156,7 +156,9 @@ export function nativeNotifications(prev, next, { focused, seen, name = '', keyO
   const items = itemsOf(next)
   const identity = chatIdentity(next, keyOf)
   const baseKey = `${slot}\u0000${identity}`
-  // A turn starts: remember the reply already on screen.
+  // A turn starts: remember the reply already on screen. Recorded whether or
+  // not Hermes is focused, so a turn started in the foreground and finished
+  // in the background has its boundary (review C-R3-04).
   if (!chatOf(prev)?.busy && chatOf(next).busy) {
     const before = finishedReply(itemsOf(prev))
     seen.base.set(baseKey, {
@@ -165,6 +167,17 @@ export function nativeNotifications(prev, next, { focused, seen, name = '', keyO
       startIds: new Set(itemsOf(prev).map(item => String(item?.id || '')))
     })
     if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value)
+  }
+  // Focused: nothing is sent; what is on screen counts as seen.
+  if (focused) {
+    if (chatOf(prev)?.busy && !chatOf(next).busy) {
+      const base = seen.base.get(baseKey)
+      seen.base.delete(baseKey)
+      const reply = base ? turnReply(items, base.startIds) : finishedReply(items)
+      if (reply) remember(seen, `done:${reply.id}`)
+    }
+    markSeen(next, seen)
+    return []
   }
   // Turn done: busy → idle with a finished, non-silent, new reply.
   if (chatOf(prev)?.busy && !chatOf(next).busy) {

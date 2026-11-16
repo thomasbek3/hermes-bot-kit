@@ -177,6 +177,26 @@ C25) into `feature/grokbot-override-v2` and wiring them together. The five **Par
 R14, R15) do their job natively; each Notes cell names the stock detail that is not equal or not ported.
 Nothing hands off to stock Bot Mode in normal use; none of the rows is live-qualified.)
 
+## Known limits
+
+- **Native notifications (C31), one reply in two tabs.** Each side tab's chat runs its own controller, so the same
+  reply has a different live id in each tab. To notify once, a reply with the same bot, runtime and text seen by
+  another tab within 15 s counts as the same reply. A genuinely new reply with the same text that only one tab
+  still shows (for example after the main tab switched to another bot) inside that window is therefore not
+  notified. Exact correlation needs a shared gateway turn or message id, which the event stream does not give
+  every frame. Tracked; not fixed.
+- **Native notifications, closed side tabs.** A side tab is registered with the notifier when it first renders.
+  Nothing tells the plugin when that tab closes without changing `app.ts`, so its subscription and last chat
+  state stay until the override is switched off (one entry per side tab opened in the app session). A closed tab
+  receives no events, so it never notifies. Tracked; not fixed.
+- **Native notifications are not live-checked yet.** Delivery, Hermes's *Plugin notifications* setting and
+  throttling, and click-to-open are covered by unit and loader tests with a stub OS door only.
+- **Drafts (T8).** Text only, in memory for the app session: a plugin reload or app restart discards them, files
+  are never kept across a switch (a refused send's files come back only into the same composer; otherwise a note
+  asks to attach them again), and only the 20 most recently written bots keep a draft.
+- **Contract probes (T10)** show that a private selector, key or bridge call is still present, not that it still
+  means the same thing after a Hermes update. The sidebar seam colours stay fixed light/dark values.
+
 ## Architecture notes
 
 **Two panes, Bot Mode's own zones.** Bot Mode puts its roster in the sidebar zone (tab **BOTS**) and its
