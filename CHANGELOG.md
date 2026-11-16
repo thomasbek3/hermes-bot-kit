@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **grokbot-override: a finished reply no longer flashes when its stored copy arrives (2026-11-15)**: a streamed
+  reply (`live:…`) and a sent bubble (`local:…`) were replaced by their stored rows on the next history read, which
+  gave them new React keys: the bubble and its group remounted, Markdown re-parsed, cards showed their loading box
+  again and images went back to the placeholder. The stored item now carries the old identity as `renderKey`
+  (`carryKeys` in `src/core/history.js`: same text for a reply; same text, else order, for a sent bubble) and keeps
+  it across later refreshes; groups and the transcript key on it. The durable id stays the stored row's, so
+  reactions, edit and rewind address the same rows as before.
 - **grokbot-override: the transcript stays pinned through late growth (2026-11-15)**: the chat used to follow the
   bottom only when its message list changed, so an image, card, preview or code block that finished sizing afterwards
   left you short of the latest message. A pinned view now follows every content resize before paint

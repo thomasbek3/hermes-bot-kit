@@ -466,13 +466,15 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
   // them (core/workRows.js); display only, the chat keeps every item.
   const showWork = useStore(app.showWork)
   const mine = React.useMemo(() => {
-    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === 'user') return String(items[i].id)
+    // React identity (renderKey): the stored copy of a sent bubble replacing
+    // it is not a new message of yours, so it does not pin again.
+    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === 'user') return String(items[i].renderKey ?? items[i].id)
     return ''
   }, [items])
   const latest = React.useMemo(() => {
     for (let i = items.length - 1; i >= 0; i -= 1) {
       const kind = items[i]?.kind
-      if (kind === 'user' || kind === 'assistant') return String(items[i].id)
+      if (kind === 'user' || kind === 'assistant') return String(items[i].renderKey ?? items[i].id)
     }
     return ''
   }, [items])
@@ -553,14 +555,14 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
         ) : null}
         {decorated.map((entry: any) => {
           const props = { bot, controller, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock }
-          if (entry.kind !== 'group') return <Item key={entry.id} item={entry} {...props} />
+          if (entry.kind !== 'group') return <Item key={entry.renderKey ?? entry.id} item={entry} {...props} />
           // Tail corners count the group's bubbles only (a reasoning-only
           // reply draws none).
           const bubbles = entry.items.filter((item: any) => item.text)
           return (
             <div key={entry.id} className={`group is-${entry.side}`}>
               {entry.items.map((item: any) => (
-                <Item key={item.id} item={item} {...props} pos={item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : ''} />
+                <Item key={item.renderKey ?? item.id} item={item} {...props} pos={item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : ''} />
               ))}
             </div>
           )

@@ -41910,6 +41910,46 @@ function isPersistedItem(item) {
 function rowsToItems(rows) {
   return historyToItems(rows, { idPrefix: PERSISTED_PREFIX });
 }
+var keyOf = (item) => item?.renderKey ?? item?.id;
+var sameText = (a2, b2) => String(a2 || "").trim() === String(b2 || "").trim();
+function carryKeys(current, next) {
+  const before = Array.isArray(current) ? current : [];
+  const list = Array.isArray(next) ? next : [];
+  if (!before.length || !list.length) return list;
+  const shown = new Map(before.map((item) => [item.id, item]));
+  const nextIds = new Set(list.map((item) => item.id));
+  const dropped = { assistant: [], user: [] };
+  for (const item of before) {
+    if (nextIds.has(item.id) || isPersistedItem(item)) continue;
+    if (item.kind === "assistant" || item.kind === "user") dropped[item.kind].push(item);
+  }
+  const used = /* @__PURE__ */ new Set();
+  const take = (item) => {
+    const pool = dropped[item.kind];
+    if (!pool || !pool.length) return null;
+    let hit = pool.find((old) => !used.has(old) && sameText(old.text, item.text));
+    if (!hit && item.kind === "user") hit = pool.find((old) => !used.has(old));
+    if (hit) used.add(hit);
+    return hit || null;
+  };
+  let changed = false;
+  const out = list.map((item) => {
+    const prev = shown.get(item.id);
+    if (prev) {
+      if (prev.renderKey && item.renderKey !== prev.renderKey) {
+        changed = true;
+        return { ...item, renderKey: prev.renderKey };
+      }
+      return item;
+    }
+    if (!isPersistedItem(item)) return item;
+    const old = take(item);
+    if (!old) return item;
+    changed = true;
+    return { ...item, renderKey: keyOf(old) };
+  });
+  return changed ? out : list;
+}
 function rebuildItems(current, persisted, keep) {
   const kept = [];
   let anchor = null;
@@ -41917,7 +41957,7 @@ function rebuildItems(current, persisted, keep) {
     if (isPersistedItem(item)) anchor = item.id;
     else if (keep(item)) kept.push({ item, anchor });
   }
-  if (!kept.length) return persisted;
+  if (!kept.length) return carryKeys(current, persisted);
   const ids = new Set(persisted.map((item) => item.id));
   const after = /* @__PURE__ */ new Map();
   const tail = [];
@@ -41939,7 +41979,7 @@ function rebuildItems(current, persisted, keep) {
     out.push(item);
     if (after.has(item.id)) out.push(...after.get(item.id));
   }
-  return [...out, ...tail];
+  return carryKeys(current, [...out, ...tail]);
 }
 
 // src/core/sections.js
@@ -45753,10 +45793,10 @@ function pinsFrom(value) {
   }
   return out;
 }
-function pinState(pins, rows, keyOf) {
+function pinState(pins, rows, keyOf2) {
   const byKey = /* @__PURE__ */ new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
-    const key = keyOf(row);
+    const key = keyOf2(row);
     if (!byKey.has(key)) byKey.set(key, row);
   }
   const shown = [];
@@ -45765,18 +45805,18 @@ function pinState(pins, rows, keyOf) {
     const row = byKey.get(key);
     if (row) shown.push(row);
   }
-  return { shown, keys: new Set(shown.map((row) => keyOf(row))), canPin: shown.length < MAX_PINS };
+  return { shown, keys: new Set(shown.map((row) => keyOf2(row))), canPin: shown.length < MAX_PINS };
 }
-function togglePin(pins, key, rows, keyOf) {
+function togglePin(pins, key, rows, keyOf2) {
   const list = pinsFrom(pins);
-  const state = pinState(list, rows, keyOf);
+  const state = pinState(list, rows, keyOf2);
   if (state.keys.has(key)) return { pins: list.filter((entry) => entry !== key), changed: true, pinned: false };
   if (!state.canPin) return { pins: list, changed: false, pinned: false };
   return { pins: [...list.filter((entry) => entry !== key), key], changed: true, pinned: true };
 }
-function withoutPinned(rows, state, keyOf) {
+function withoutPinned(rows, state, keyOf2) {
   if (!state?.keys?.size) return rows;
-  return rows.filter((row) => !state.keys.has(keyOf(row)));
+  return rows.filter((row) => !state.keys.has(keyOf2(row)));
 }
 
 // src/core/workRows.js
@@ -47570,13 +47610,13 @@ function matchesQuery(bot, meta, q) {
   const needle = q.replace(/^@/, "");
   return [bot.name, displayName(bot, meta), handleOf(bot), meta?.title].some((v) => String(v || "").toLowerCase().includes(needle));
 }
-function deriveRosterView(rows, { metaFor: metaFor2, filters = DEFAULT_FILTERS, query = "", workingKey = "", keyOf, sources = [], hiddenExpanded = false, groupCount = 0, now = Date.now() } = {}) {
+function deriveRosterView(rows, { metaFor: metaFor2, filters = DEFAULT_FILTERS, query = "", workingKey = "", keyOf: keyOf2, sources = [], hiddenExpanded = false, groupCount = 0, now = Date.now() } = {}) {
   const f2 = { ...DEFAULT_FILTERS, ...filters || {} };
   const q = String(query || "").trim().toLowerCase();
   const all = (rows || []).filter((bot) => !bot?.ghost);
   const gatewayOptions = rosterGatewayOptions(sources, all);
   const gateway = f2.gateway === "all" || gatewayOptions.some((o) => o.connectionId === f2.gateway) ? f2.gateway : "all";
-  const activityRow = (bot) => ({ activity: activityOf(bot, metaFor2(bot)), active: botActiveNow(bot, { working: Boolean(keyOf && keyOf(bot) === workingKey && workingKey), now }) });
+  const activityRow = (bot) => ({ activity: activityOf(bot, metaFor2(bot)), active: botActiveNow(bot, { working: Boolean(keyOf2 && keyOf2(bot) === workingKey && workingKey), now }) });
   const keep = (bot) => matchesQuery(bot, metaFor2(bot), q) && rosterActivityMatches(activityRow(bot), f2.activity, now);
   const hiddenAll = all.filter((bot) => metaFor2(bot)?.hidden);
   const visibleAll = all.filter((bot) => !metaFor2(bot)?.hidden);
@@ -51853,7 +51893,7 @@ function groupMessages(items) {
     const at = Number(item?.at || 0);
     const close = !prevAt || !at || Math.abs(at - prevAt) < GROUP_GAP_MS;
     if (prev && last.side === side && close) last.items.push(item);
-    else out.push({ kind: "group", id: `group:${item.id}`, side, items: [item] });
+    else out.push({ kind: "group", id: `group:${item.renderKey ?? item.id}`, side, items: [item] });
   }
   return out;
 }
@@ -59349,13 +59389,13 @@ function Transcript({ state, bot, meta, onPrefill }) {
   const items = state.chat.items;
   const showWork = useStore(app.showWork);
   const mine = React25.useMemo(() => {
-    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === "user") return String(items[i].id);
+    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === "user") return String(items[i].renderKey ?? items[i].id);
     return "";
   }, [items]);
   const latest = React25.useMemo(() => {
     for (let i = items.length - 1; i >= 0; i -= 1) {
       const kind = items[i]?.kind;
-      if (kind === "user" || kind === "assistant") return String(items[i].id);
+      if (kind === "user" || kind === "assistant") return String(items[i].renderKey ?? items[i].id);
     }
     return "";
   }, [items]);
@@ -59409,9 +59449,9 @@ function Transcript({ state, bot, meta, onPrefill }) {
         ] }) : null,
         decorated.map((entry) => {
           const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
-          if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.id);
+          if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.renderKey ?? entry.id);
           const bubbles = entry.items.filter((item) => item.text);
-          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.id)) }, entry.id);
+          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.renderKey ?? item.id)) }, entry.id);
         }),
         state.chat.waiting ? /* @__PURE__ */ jsx27(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
         activity2 ? /* @__PURE__ */ jsxs25("div", { className: "activity-line gbo-activity", role: "status", children: [

@@ -30,7 +30,9 @@ export function groupMessages(items) {
     const at = Number(item?.at || 0)
     const close = !prevAt || !at || Math.abs(at - prevAt) < GROUP_GAP_MS
     if (prev && last.side === side && close) last.items.push(item)
-    else out.push({ kind: 'group', id: `group:${item.id}`, side, items: [item] })
+    // Keyed by the first item's React identity (renderKey, history.js
+    // carryKeys), so a live reply turning into its stored row keeps its group.
+    else out.push({ kind: 'group', id: `group:${item.renderKey ?? item.id}`, side, items: [item] })
   }
   return out
 }

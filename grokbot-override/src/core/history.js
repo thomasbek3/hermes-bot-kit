@@ -418,6 +418,62 @@ export function rowsToItems(rows) {
   return historyToItems(rows, { idPrefix: PERSISTED_PREFIX })
 }
 
+const keyOf = item => item?.renderKey ?? item?.id
+const sameText = (a, b) => String(a || '').trim() === String(b || '').trim()
+
+/** React identity across a history rebuild. A stored row that replaces a
+ *  live reply (`live:…`) or an optimistic bubble (`local:…`) takes the old
+ *  item's key as `renderKey`, so the bubble (and its group) is not remounted
+ *  when the stored copy arrives: no Markdown re-parse, no card back to its
+ *  loading box, no image back to its placeholder. A stored item that was
+ *  already shown keeps the `renderKey` it had. The durable `id` never
+ *  changes (reactions, edit and rewind address the stored row).
+ *
+ *  `current`: the items on screen; `next`: the rebuilt items. An assistant
+ *  item matches a dropped one of the same text; a user item matches a
+ *  dropped user bubble of the same text, else the oldest one left (the
+ *  gateway may store an expanded skill or an @mention note). Each dropped
+ *  item is used once. Returns `next`, with new objects only where a key was
+ *  carried. */
+export function carryKeys(current, next) {
+  const before = Array.isArray(current) ? current : []
+  const list = Array.isArray(next) ? next : []
+  if (!before.length || !list.length) return list
+  const shown = new Map(before.map(item => [item.id, item]))
+  const nextIds = new Set(list.map(item => item.id))
+  const dropped = { assistant: [], user: [] }
+  for (const item of before) {
+    if (nextIds.has(item.id) || isPersistedItem(item)) continue
+    if (item.kind === 'assistant' || item.kind === 'user') dropped[item.kind].push(item)
+  }
+  const used = new Set()
+  const take = item => {
+    const pool = dropped[item.kind]
+    if (!pool || !pool.length) return null
+    let hit = pool.find(old => !used.has(old) && sameText(old.text, item.text))
+    if (!hit && item.kind === 'user') hit = pool.find(old => !used.has(old))
+    if (hit) used.add(hit)
+    return hit || null
+  }
+  let changed = false
+  const out = list.map(item => {
+    const prev = shown.get(item.id)
+    if (prev) {
+      if (prev.renderKey && item.renderKey !== prev.renderKey) {
+        changed = true
+        return { ...item, renderKey: prev.renderKey }
+      }
+      return item
+    }
+    if (!isPersistedItem(item)) return item
+    const old = take(item)
+    if (!old) return item
+    changed = true
+    return { ...item, renderKey: keyOf(old) }
+  })
+  return changed ? out : list
+}
+
 /** Replace the persisted items of `current` with `persisted`, keeping the
  *  items `keep` selects (live or local-only) where they were: each kept item
  *  goes right after the persisted item that preceded it before, or, when
@@ -429,7 +485,7 @@ export function rebuildItems(current, persisted, keep) {
     if (isPersistedItem(item)) anchor = item.id
     else if (keep(item)) kept.push({ item, anchor })
   }
-  if (!kept.length) return persisted
+  if (!kept.length) return carryKeys(current, persisted)
   const ids = new Set(persisted.map(item => item.id))
   const after = new Map()
   const tail = []
@@ -451,5 +507,5 @@ export function rebuildItems(current, persisted, keep) {
     out.push(item)
     if (after.has(item.id)) out.push(...after.get(item.id))
   }
-  return [...out, ...tail]
+  return carryKeys(current, [...out, ...tail])
 }
