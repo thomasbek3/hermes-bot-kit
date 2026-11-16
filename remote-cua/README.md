@@ -34,8 +34,12 @@ Per Hermes run, on the remote Mac, the gateway:
 3. Runs Hermes's MCP session over **one** SSH connection:
    `ssh -T -o BatchMode=yes -o ServerAliveInterval=15 user@host '… exec <bin> mcp --no-overlay
    --embedded --socket /tmp/hc-<token>.sock'`.
-4. Stops the daemon on session end, at gateway exit, and (next start) any daemon a crashed gateway
-   process of this profile left behind (`<profile home>/remote-cua/daemons.json`).
+4. Records each daemon in `<profile home>/remote-cua/daemons.json` **before** launching it, and
+   forgets it only once the Mac confirms it is gone (`stop`, then its socket no longer answers; only
+   then is the socket file removed). It stops the daemon on session end, at gateway exit, and if the
+   SSH session drops mid-start (a remote trap). A stop that cannot be confirmed (network down) is kept
+   as `pending` and retried by the next stop, at exit and at the next start, as are daemons a crashed
+   gateway process left behind.
 
 The remote driver always runs in cua-driver's `standard` mode. Hermes's approvals still apply on the
 gateway as usual.
@@ -68,6 +72,9 @@ the app next to the driver it found.
 ```bash
 bash remote-cua/install.sh --profiles helper      # copies to <profile>/plugins/remote-cua, enables it
 ```
+
+It checks the Hermes version first (same range as at runtime) and stops before copying anything on an
+unsupported Hermes. Enabling uses Hermes's own `hermes plugins enable remote-cua` per profile.
 
 Then in that profile's `config.yaml`:
 
@@ -103,7 +110,10 @@ pane instead.
 The lease lives at `<profile home>/remote-cua/lease.json`
 (`{"holder": "agent"|"human", "viewer": …, "since": …, "epoch": …}`; no file = the bot). While you hold
 it, `computer_use` is refused with `human_has_control`, captures included, and a result that comes
-back after you took over is discarded. The pane changes it through `/api/plugins/remote-cua/`
+back after you took over is discarded. The fence covers a whole action: if you take over at any point
+during one (even take over and hand back between two of its driver calls, such as a capture's
+fallback re-fetch), the rest of that action is refused. Screenshots only ever come back inline; a file
+path in the driver's answer names a file on the Mac and is ignored, never read on the gateway. The pane changes it through `/api/plugins/remote-cua/`
 (`lease`, `take`, `release`, `status`); request and response:
 [computer-viewer/docs/REMOTE-CUA.md](../computer-viewer/docs/REMOTE-CUA.md). It is a tool-level fence:
 the viewer must also stop sending input while the bot holds control.

@@ -11,7 +11,12 @@
 #   --dry-run        show what would change, change nothing
 #
 # Env: HERMES_HOME (default ~/.hermes), KIT_REF (tag when curl-piped), HERMES_AGENT_DIR
-#      (default $HERMES_HOME/hermes-agent), HERMES_PYTHON (default $HERMES_AGENT_DIR/venv/bin/python)
+#      (default $HERMES_HOME/hermes-agent), HERMES_PYTHON (default $HERMES_AGENT_DIR/venv/bin/python),
+#      HERMES_BIN (default $HERMES_AGENT_DIR/venv/bin/hermes, else hermes on PATH)
+#
+# The Hermes version is checked first (the plugin's own compat.py, the same range as at runtime);
+# an unsupported Hermes stops the script before any file is copied. Enabling goes through the
+# public `hermes plugins enable remote-cua`, run with HERMES_HOME set to each profile's home.
 set -euo pipefail
 
 KIT_REF="${KIT_REF:-v2026.11.10.4}"
@@ -43,6 +48,11 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 HERMES_HOME="${HERMES_HOME%/}"
 AGENT_DIR="${HERMES_AGENT_DIR:-$HERMES_HOME/hermes-agent}"
 PY="${HERMES_PYTHON:-$AGENT_DIR/venv/bin/python}"
+HERMES_CMD="${HERMES_BIN:-}"
+if [ -z "$HERMES_CMD" ]; then
+  if [ -x "$AGENT_DIR/venv/bin/hermes" ]; then HERMES_CMD="$AGENT_DIR/venv/bin/hermes"
+  else HERMES_CMD="$(command -v hermes 2>/dev/null || true)"; fi
+fi
 [ -d "$HERMES_HOME" ] || { echo "No Hermes home at $HERMES_HOME (set HERMES_HOME)" >&2; exit 1; }
 
 say() { printf '%s\n' "$*"; }
@@ -78,6 +88,22 @@ for f in "${FILES[@]}"; do
   [ -f "$SRC_DIR/$f" ] || { echo "missing source file: $SRC_DIR/$f" >&2; exit 1; }
 done
 grep -q "register_computer_use_provider" "$SRC_DIR/__init__.py" || { echo "install.sh: source does not look like remote-cua" >&2; exit 1; }
+
+# ---- version gate (before anything is copied) -----------------------------------------------
+[ -x "$PY" ] || { echo "install.sh: Hermes Python not found at $PY (set HERMES_PYTHON); cannot check the Hermes version" >&2; exit 1; }
+"$PY" -I - "$AGENT_DIR" "$SRC_DIR/compat.py" <<'PY' || exit 3
+import importlib.util, sys
+sys.path.insert(0, sys.argv[1])
+spec = importlib.util.spec_from_file_location("remote_cua_install_compat", sys.argv[2])
+compat = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(compat)
+try:
+    print("Hermes " + compat.check_version() + ": supported")
+except compat.CompatError as exc:
+    sys.stderr.write(f"install.sh: {exc}\nNothing was installed.\n")
+    sys.exit(3)
+PY
+[ -n "$HERMES_CMD" ] && [ -x "$HERMES_CMD" ] || { echo "install.sh: the hermes command was not found (set HERMES_BIN)" >&2; exit 1; }
 
 # ---- profiles ------------------------------------------------------------------------------
 declare -a TARGETS=()
@@ -122,21 +148,12 @@ for name in "${TARGETS[@]}"; do
     done
     say "  files installed"
   fi
-  if [ ! -x "$PY" ]; then
-    say "  Hermes Python not found at $PY: add '$PLUGIN' to plugins.enabled in $home/config.yaml yourself"
-    continue
-  fi
   if [ "$DRY_RUN" = 1 ]; then
-    say "  [dry-run] would add $PLUGIN to plugins.enabled ($home/config.yaml)"
+    say "  [dry-run] would run: HERMES_HOME=$home hermes plugins enable $PLUGIN"
     continue
   fi
-  # Hermes's own locked, admission-checked writer for plugins.enabled.
-  (cd "$home" && HERMES_HOME="$home" "$PY" -I -c '
-import sys; sys.path.insert(0, sys.argv[1])
-from hermes_cli.plugins_cmd import _get_enabled_set, _set_plugin_enabled
-if "remote-cua" not in _get_enabled_set():
-    _set_plugin_enabled("remote-cua", enable=True)
-' "$AGENT_DIR") >/dev/null
+  # Hermes's public command: locked, admission-checked write of plugins.enabled (no restart).
+  (cd "$home" && HERMES_HOME="$home" "$HERMES_CMD" plugins enable "$PLUGIN") >/dev/null
   say "  enabled in plugins.enabled"
 done
 

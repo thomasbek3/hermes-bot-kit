@@ -277,22 +277,33 @@ def serve_command(info: DriverInfo, sock: str) -> str:
                      *(shlex.quote(a) for a in args)])
 
 
-def stop_command(binary: str, sock: str) -> str:
-    return (f"{shlex.quote(binary)} stop --socket {shlex.quote(sock)} >/dev/null 2>&1 </dev/null; "
-            f"rm -f {shlex.quote(sock)}")
+def stop_command(binary: str, sock: str, mark: str = "stopped") -> str:
+    """Stop the daemon at ``sock`` and say whether it is gone: ``RCUA:<mark>=1`` once its socket no longer
+    answers (only then is the socket file removed), ``RCUA:<mark>=0`` while it still answers. A failed
+    ``stop`` never unlinks a live daemon's socket."""
+    b, k = shlex.quote(binary), shlex.quote(sock)
+    return (f"{b} stop --socket {k} >/dev/null 2>&1 </dev/null; "
+            f"if {b} status --socket {k} >/dev/null 2>&1 </dev/null; "
+            f'then echo "{MARK}{mark}=0"; else rm -f {k}; echo "{MARK}{mark}=1"; fi')
 
 
-def start_script(info: DriverInfo, sock: str, stale: list[tuple[str, str]] = ()) -> str:
-    """Stop stale daemons this profile recorded, start ours, poll until its socket answers."""
-    lines = [stop_command(b, s) for b, s in stale]
+def sweep_script(stale: list[tuple[str, str]]) -> str:
+    """Stop daemons this profile recorded and lost; ``RCUA:stale<i>=1`` for each one confirmed gone."""
+    return "\n".join(stop_command(b, s, f"stale{i}") for i, (b, s) in enumerate(stale)) + "\n"
+
+
+def start_script(info: DriverInfo, sock: str) -> str:
+    """Start our daemon and poll until its socket answers. If the SSH session is cut while it starts
+    (HUP/INT/TERM), the trap stops what was started; once ready the trap is cleared and the daemon stays."""
     status = f"{shlex.quote(info.path)} status --socket {shlex.quote(sock)} >/dev/null 2>&1 </dev/null"
-    lines += [
+    lines = [
+        f"trap {shlex.quote(stop_command(info.path, sock) + '; exit 1')} HUP INT TERM",
         serve_command(info, sock),
         "rc=$?",
         f'if [ "$rc" -ne 0 ]; then echo "{MARK}open_failed=$rc"; exit 0; fi',
         "i=0",
         f"while [ $i -lt {START_POLL_STEPS} ]; do",
-        f'  if {status}; then echo "{MARK}ready=1"; exit 0; fi',
+        f'  if {status}; then trap - HUP INT TERM; echo "{MARK}ready=1"; exit 0; fi',
         "  sleep 0.1",
         "  i=$((i+1))",
         "done",
@@ -318,6 +329,9 @@ def call_remote_command(binary: str, sock: str, tool: str, args: dict[str, Any])
 # ---------------------------------------------------------------------------
 # Registry of daemons this profile started (for the stale sweep)
 # ---------------------------------------------------------------------------
+# An entry is written BEFORE the remote launch and removed only once a stop is confirmed. ``pending``
+# marks an entry whose owner gave up on it (start or stop could not be confirmed): any later start
+# sweeps it, even from the same live process. Entries of a dead gateway process are swept too.
 
 _registry_lock = threading.Lock()
 
@@ -356,22 +370,21 @@ def _pid_alive(pid: Any) -> bool:
     return True
 
 
-def take_stale(home: Path, destination: str, *, alive: Callable[[Any], bool] = _pid_alive) -> list[tuple[str, str]]:
-    """``(bin, socket)`` of daemons this profile started on ``destination`` from a gateway process that is
-    gone; they are removed from the registry (the start script stops them). A live owner is never touched."""
+def stale_entries(home: Path, destination: str, *, alive: Callable[[Any], bool] = _pid_alive) -> list[tuple[str, str]]:
+    """``(bin, socket)`` of daemons on ``destination`` to sweep: pending ones, and those of a gateway process
+    that is gone. Nothing is removed here; :func:`forget` runs per daemon once its stop is confirmed."""
     with _registry_lock:
         entries = _read_registry(home)
-        stale = [e for e in entries if e.get("destination") == destination and not alive(e.get("pid"))]
-        if stale:
-            _write_registry(home, [e for e in entries if e not in stale])
-    return [(str(e.get("bin") or ""), str(e.get("socket") or "")) for e in stale if e.get("bin") and e.get("socket")]
+    return [(str(e["bin"]), str(e["socket"])) for e in entries
+            if e.get("destination") == destination and e.get("bin") and e.get("socket")
+            and (e.get("pending") is True or not alive(e.get("pid")))]
 
 
-def record(home: Path, destination: str, binary: str, sock: str) -> None:
+def record(home: Path, destination: str, binary: str, sock: str, *, pending: bool = False) -> None:
     with _registry_lock:
         entries = [e for e in _read_registry(home) if e.get("socket") != sock or e.get("destination") != destination]
         entries.append({"destination": destination, "bin": binary, "socket": sock, "pid": os.getpid(),
-                        "started": time.time()})
+                        "started": time.time(), "pending": pending})
         _write_registry(home, entries)
 
 
@@ -383,16 +396,37 @@ def forget(home: Path, destination: str, sock: str) -> None:
             _write_registry(home, kept)
 
 
+def sweep(cfg: RemoteCuaConfig, runner: SSHRunner, home: Path) -> None:
+    """Stop the stale daemons of this profile on ``cfg``'s machine; forget only the confirmed ones."""
+    stale = stale_entries(home, cfg.destination)
+    if not stale:
+        return
+    try:
+        marks = _marks(runner.run(sweep_script(stale), timeout=30.0 + 5.0 * len(stale)).stdout)
+    except RemoteError as exc:
+        logger.warning("remote-cua: could not stop %d stale daemon(s) on %s: %s", len(stale), cfg.host, exc)
+        return
+    for i, (_, sock) in enumerate(stale):
+        if marks.get(f"stale{i}") == "1":
+            forget(home, cfg.destination, sock)
+        else:
+            logger.warning("remote-cua: stale daemon %s on %s did not stop; will retry", sock, cfg.host)
+
+
 # ---------------------------------------------------------------------------
 # The daemon stand-in Hermes's _CuaDriverSession drives
 # ---------------------------------------------------------------------------
 
 class RemoteDaemon:
     """The remote counterpart of Hermes's ``_EmbeddedCuaDaemon``: same ``start/stop/proxy_invocation/
-    child_env/socket_path`` surface, so Hermes's MCP session and backend run unchanged on top of it."""
+    child_env/socket_path`` surface, so Hermes's MCP session and backend run unchanged on top of it.
+
+    Ownership is recorded before anything is launched, and forgotten only after the remote end confirms
+    the daemon is gone; an unconfirmed stop stays ``pending`` and is retried by ``stop()``, atexit, and
+    the next start's sweep."""
 
     def __init__(self, cfg: RemoteCuaConfig, policy: DriverPolicy, *, home: Path,
-                 runner: Optional[SSHRunner] = None, token: Optional[str] = None):
+                 runner: Optional[SSHRunner] = None, token: Optional[str] = None, at_exit: bool = True):
         self.cfg, self.policy, self.home = cfg, policy, Path(home)
         self.runner = runner or SSHRunner(cfg)
         self.permission_mode = "standard"
@@ -400,7 +434,9 @@ class RemoteDaemon:
         self.socket_path = socket_for(self.token)
         self.info: Optional[DriverInfo] = None
         self._running = False
-        self._atexit = False
+        self._needs_stop = False  # something may be running remotely that is not confirmed stopped
+        self._at_exit = at_exit
+        self._atexit_registered = False
         self._lock = threading.Lock()
 
     @property
@@ -411,31 +447,39 @@ class RemoteDaemon:
     def no_overlay(self) -> bool:
         return bool(self.info and self.info.no_overlay)
 
-    def start(self) -> None:
+    def start(self, info: Optional[DriverInfo] = None) -> None:
         with self._lock:
             if self._running:
                 return
-            info = discover(self.cfg, self.runner, self.policy.pin)
+            if info is None:
+                info = discover(self.cfg, self.runner, self.policy.pin)
             problems = driver_problems(self.cfg, info, self.policy)
             if problems:
                 raise RemoteError("; ".join(problems))
-            stale = take_stale(self.home, self.cfg.destination)
-            result = self.runner.run(start_script(info, self.socket_path, stale), timeout=60.0)
+            sweep(self.cfg, self.runner, self.home)
+            # Ownership first: whatever happens to the launch below, this socket is accounted for.
+            self.info, self._needs_stop = info, True
+            record(self.home, self.cfg.destination, info.path, self.socket_path)
+            if self._at_exit and not self._atexit_registered:
+                atexit.register(self.stop)
+                self._atexit_registered = True
+            try:
+                result = self.runner.run(start_script(info, self.socket_path), timeout=60.0)
+            except BaseException as exc:
+                self._cleanup_locked()
+                if isinstance(exc, RemoteError):
+                    raise RemoteError(f"the cua-driver daemon on {self.cfg.host} did not start: {exc}") from exc
+                raise
             marks = _marks(result.stdout)
-            if result.returncode == 255 and not marks:
-                raise RemoteError(ssh_failure(self.cfg, result))
-            self.info = info
             if marks.get("ready") != "1":
+                self._cleanup_locked()
+                if result.returncode == 255 and not marks:
+                    raise RemoteError(ssh_failure(self.cfg, result))
                 why = (f"open exited {marks['open_failed']}" if "open_failed" in marks else
                        "its socket did not answer within 15 s")
-                self._stop_remote()  # nothing left half-started
                 raise RemoteError(f"the cua-driver daemon on {self.cfg.host} did not start ({why}). "
                                   "Is the user logged in at the Mac's screen?")
             self._running = True
-            record(self.home, self.cfg.destination, info.path, self.socket_path)
-            if not self._atexit:
-                atexit.register(self.stop)
-                self._atexit = True
 
     def proxy_invocation(self) -> tuple[str, list[str]]:
         if not self._running or self.info is None:
@@ -456,20 +500,34 @@ class RemoteDaemon:
         parsed = json_object(result.stdout)
         if parsed is None:
             tail = (result.stdout or result.stderr).strip()[-200:]
-            raise RemoteError(f"cua-driver call {tool} on {self.cfg.host} returned no JSON: {tail}")
+            raise RemoteError(f"cua-driver call {tool} on {self.cfg.host} returned no JSON: {tail or 'empty output'}")
         return parsed
 
-    def _stop_remote(self) -> None:
-        if self.info is None:
-            return
-        with contextlib.suppress(Exception):
-            self.runner.run(stop_command(self.info.path, self.socket_path), timeout=15.0)
+    def _cleanup_locked(self) -> bool:
+        """Stop the remote daemon; forget it only when the remote end confirms it is gone. Never raises."""
+        self._running = False
+        if self.info is None or not self._needs_stop:
+            return True
+        confirmed = False
+        try:
+            result = self.runner.run(stop_command(self.info.path, self.socket_path), timeout=20.0)
+            confirmed = result.returncode != 255 and _marks(result.stdout).get("stopped") == "1"
+        except BaseException as exc:  # noqa: BLE001 -- cleanup must not raise; the record keeps the retry
+            logger.warning("remote-cua: stopping %s on %s failed: %s", self.socket_path, self.cfg.host, exc)
+        try:
+            if confirmed:
+                forget(self.home, self.cfg.destination, self.socket_path)
+                self._needs_stop = False
+            else:
+                record(self.home, self.cfg.destination, self.info.path, self.socket_path, pending=True)
+                logger.warning("remote-cua: daemon %s on %s is not confirmed stopped; kept for a retry",
+                               self.socket_path, self.cfg.host)
+        except OSError as exc:
+            logger.warning("remote-cua: could not update the daemon registry: %s", exc)
+        return confirmed
 
     def stop(self) -> None:
         with self._lock:
-            was_running, self._running = self._running, False
-            if not was_running:
+            if not (self._running or self._needs_stop):
                 return
-            self._stop_remote()
-            with contextlib.suppress(Exception):
-                forget(self.home, self.cfg.destination, self.socket_path)
+            self._cleanup_locked()

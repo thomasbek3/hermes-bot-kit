@@ -1,13 +1,13 @@
 """Health of a profile's remote-cua machine: reachable, driver, permissions, screen awake.
 
 Used by ``GET /api/plugins/remote-cua/status``, ``hermes remote-cua check`` and the provider's doctor.
-Two SSH sessions: driver discovery, then one probe that starts a private daemon, asks it
-``check_permissions`` (``prompt: false``: never a dialog on the Mac) and ``list_windows``, and stops it.
-Read-only on the remote apart from that short-lived daemon and its socket.
+Driver discovery, then a short-lived private daemon run through the same managed lifecycle as the
+backend (:class:`remote.RemoteDaemon`: recorded before launch, stopped in ``finally``, forgotten only
+when the stop is confirmed). It answers ``check_permissions`` (``prompt: false``: never a dialog on the
+Mac) and ``list_windows``. Read-only on the remote apart from that daemon and its socket.
 """
 from __future__ import annotations
 
-import shlex
 import threading
 import time
 from pathlib import Path
@@ -19,39 +19,6 @@ from .settings import OS_WINDOWS, WINDOWS_REFUSAL, ConfigError, RemoteCuaConfig
 CACHE_SECONDS = 20.0
 _cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _cache_lock = threading.Lock()
-
-
-def probe_script(info: remote.DriverInfo, sock: str) -> str:
-    q = shlex.quote
-    status = f"{q(info.path)} status --socket {q(sock)} >/dev/null 2>&1 </dev/null"
-    perms = remote.call_remote_command(info.path, sock, "check_permissions", {"prompt": False})
-    windows = remote.call_remote_command(info.path, sock, "list_windows", {"on_screen_only": True})
-    m = remote.MARK
-    return "\n".join([
-        remote.serve_command(info, sock),
-        "rc=$?",
-        f'if [ "$rc" -ne 0 ]; then echo "{m}open_failed=$rc"; exit 0; fi',
-        "i=0",
-        "ready=0",
-        f"while [ $i -lt {remote.START_POLL_STEPS} ]; do",
-        f"  if {status}; then ready=1; break; fi",
-        "  sleep 0.1",
-        "  i=$((i+1))",
-        "done",
-        f'echo "{m}ready=$ready"',
-        'if [ "$ready" = 1 ]; then',
-        f'  echo "{m}perm-begin"',
-        f"  {perms} 2>/dev/null",
-        "  echo",
-        f'  echo "{m}perm-end"',
-        f'  echo "{m}win-begin"',
-        f"  {windows} 2>/dev/null",
-        "  echo",
-        f'  echo "{m}win-end"',
-        "fi",
-        remote.stop_command(info.path, sock),
-        f'echo "{m}end=1"',
-    ]) + "\n"
 
 
 def _find(value: Any, key: str, depth: int = 0) -> Any:
@@ -115,10 +82,21 @@ def _words(result: dict[str, Any]) -> list[str]:
     return lines
 
 
+def probe_error(parsed: Any) -> str:
+    """The driver's own error text for a logical failure (``isError``/``ok: false``), else ``""``."""
+    if not isinstance(parsed, dict):
+        return ""
+    if parsed.get("isError") is True or parsed.get("is_error") is True or parsed.get("ok") is False:
+        text = parsed.get("error") or parsed.get("message") or parsed.get("data") or "the driver reported an error"
+        return str(text)[:200]
+    return ""
+
+
 def run_status(cfg: Optional[RemoteCuaConfig], *, runner: Optional[remote.SSHRunner] = None,
                policy: Optional[remote.DriverPolicy] = None, config_error: str = "",
-               token: Optional[str] = None) -> dict[str, Any]:
-    """The status payload (see computer-viewer/docs/REMOTE-CUA.md). Never raises."""
+               token: Optional[str] = None, home: Optional[Path] = None) -> dict[str, Any]:
+    """The status payload (see computer-viewer/docs/REMOTE-CUA.md). Never raises. ``ok`` needs affirmative
+    evidence: both permissions granted and at least one window visible."""
     now = time.time()
     if cfg is None:
         return {"ok": False, "configured": False, "error": config_error or "remote_cua is not configured",
@@ -147,37 +125,54 @@ def run_status(cfg: Optional[RemoteCuaConfig], *, runner: Optional[remote.SSHRun
     if problems:
         base.update(error=base["driver"]["problem"], summary=_words(base))
         return base
-    sock = remote.socket_for(token or remote.new_token())
+    if home is None:
+        from . import lease
+        home = lease.hermes_home()
+    daemon = remote.RemoteDaemon(cfg, policy, home=Path(home), runner=runner, token=token, at_exit=False)
+    errors: list[str] = []
+    perms: dict[str, Optional[bool]] = {"accessibility": None, "screen_recording": None}
+    windows: Optional[int] = None
     try:
-        result = runner.run(probe_script(info, sock), timeout=60.0)
+        daemon.start(info)
+        try:
+            parsed = daemon.call("check_permissions", {"prompt": False}, timeout=20.0)
+            err = probe_error(parsed)
+            if err:
+                errors.append(f"permission check failed: {err}")
+            else:
+                perms = parse_permissions(parsed)
+        except Exception as exc:
+            errors.append(f"permission check failed: {exc}")
+        try:
+            parsed = daemon.call("list_windows", {"on_screen_only": True}, timeout=20.0)
+            err = probe_error(parsed)
+            if err:
+                errors.append(f"window check failed: {err}")
+            else:
+                windows = count_windows(parsed)
+                if windows is None:
+                    errors.append("window check failed: the driver's answer has no window list")
+        except Exception as exc:
+            errors.append(f"window check failed: {exc}")
     except Exception as exc:
-        base.update(error=str(exc), summary=_words(base) + [f"Probe failed: {exc}"])
-        return base
-    marks = remote._marks(result.stdout)
-    if marks.get("ready") != "1":
-        why = (f"open exited {marks['open_failed']}" if "open_failed" in marks else
-               remote.ssh_failure(cfg, remote.Result(result.returncode, result.stdout, result.stderr))
-               if result.returncode == 255 else "its socket did not answer within 15 s")
-        base.update(error=f"the cua-driver daemon did not start ({why})")
-        base["summary"] = _words(base) + [f"Daemon did not start ({why}); is the user logged in at the Mac?"]
-        return base
-    perms = parse_permissions(remote.json_object(remote._between(result.stdout, "perm-begin", "perm-end")))
+        errors.append(str(exc))
+    finally:
+        daemon.stop()
     if perms["accessibility"] is True and perms["screen_recording"] is True:
         perms_ok: Optional[bool] = True
     elif False in perms.values():
         perms_ok = False
     else:
-        perms_ok = None  # the driver answered in a shape this plugin does not know
+        perms_ok = None  # not checked, or the driver answered in a shape this plugin does not know
     base["permissions"] = {**perms, "ok": perms_ok}
-    windows = count_windows(remote.json_object(remote._between(result.stdout, "win-begin", "win-end")))
     base["windows"] = windows
     base["screen_awake"] = None if windows is None else windows > 0
-    base["ok"] = perms_ok is True and base["screen_awake"] is not False and info.logged_in is not False
-    base["summary"] = _words(base)
+    base["ok"] = (not errors and perms_ok is True and base["screen_awake"] is True and info.logged_in is not False)
+    base["summary"] = _words(base) + [e[:1].upper() + e[1:] for e in errors]
     if not base["ok"]:
         good = ("Reachable", "Driver ready", "Permissions OK", "Screen awake")
-        base["error"] = "; ".join(line for line in base["summary"] if not line.startswith(good)) or \
-            "permissions could not be read from the driver"
+        bad = [line for line in base["summary"] if not line.startswith(good)]
+        base["error"] = "; ".join(bad) or "the probe could not confirm permissions and a visible screen"
     return base
 
 
@@ -215,4 +210,4 @@ def status_for_profile(config: Optional[dict[str, Any]] = None, *, fresh: bool =
         cfg, error = None, str(exc)
     except Exception as exc:
         cfg, error = None, f"could not read this profile's config.yaml: {type(exc).__name__}"
-    return cached_status(str(home), lambda: run_status(cfg, config_error=error), fresh=fresh)
+    return cached_status(str(home), lambda: run_status(cfg, config_error=error, home=home), fresh=fresh)

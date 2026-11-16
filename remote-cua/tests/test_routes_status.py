@@ -94,43 +94,46 @@ def policy():
 CFG = settings.parse({"host": "100.64.0.10", "user": "you"})
 
 
-def run(fake):
-    return status.run_status(CFG, runner=remote.SSHRunner(CFG, run_fn=fake), policy=policy(), token="rcprobe")
+def run(fake, home):
+    return status.run_status(CFG, runner=remote.SSHRunner(CFG, run_fn=fake), policy=policy(), token="rcprobe",
+                             home=home)
 
 
-def test_status_all_good():
+def test_status_all_good(home):
     fake = FakeSSH()
-    out = run(fake)
+    out = run(fake, home)
     assert out["ok"] and out["reachable"] and out["driver"]["ok"] and out["permissions"]["ok"]
-    assert out["screen_awake"] is True and out["windows"] == 2
-    probe = fake.scripts()[1]
-    assert '"prompt": false' in probe and "check_permissions" in probe
-    assert probe.rstrip().endswith('echo "RCUA:end=1"')
-    assert "stop --socket /tmp/hc-rcprobe.sock" in probe  # the probe daemon never outlives the probe
+    assert out["screen_awake"] is True and out["windows"] == 2 and out["error"] == ""
+    scripts = fake.scripts()
+    perms = next(s for s in scripts if " call check_permissions " in s)
+    assert '"prompt": false' in perms and "--socket /tmp/hc-rcprobe.sock" in perms
+    assert scripts[-1] == remote.stop_command(remote.parse_discovery(discovery_stdout()).path, "/tmp/hc-rcprobe.sock")
+    assert remote._read_registry(home) == []  # the probe daemon never outlives the probe
     assert "Permissions OK (Accessibility and Screen Recording)" in out["summary"]
 
 
-def test_status_permissions_missing_and_screen_asleep():
+def test_status_permissions_missing_and_screen_asleep(home):
     def respond(script):
-        if "check_permissions" in script:
-            return FakeProc(0, "RCUA:ready=1\nRCUA:perm-begin\n{\"accessibility\":true,\"screen_recording\":false}\n"
-                               "RCUA:perm-end\nRCUA:win-begin\n{\"windows\":[]}\nRCUA:win-end\nRCUA:end=1\n")
+        if " call check_permissions " in script:
+            return FakeProc(0, '{"accessibility": true, "screen_recording": false}')
+        if " call list_windows " in script:
+            return FakeProc(0, '{"windows": []}')
         return FakeSSH.default(script)
-    out = run(FakeSSH(respond))
+    out = run(FakeSSH(respond), home)
     assert not out["ok"] and out["permissions"]["ok"] is False and out["screen_awake"] is False
     assert any("Screen Recording" in line for line in out["summary"])
     assert any("asleep" in line for line in out["summary"])
 
 
-def test_status_unreachable():
-    out = run(FakeSSH(lambda s: FakeProc(255, "", "Permission denied (publickey).")))
+def test_status_unreachable(home):
+    out = run(FakeSSH(lambda s: FakeProc(255, "", "Permission denied (publickey).")), home)
     assert out["reachable"] is False and "Permission denied" in out["error"]
 
 
-def test_status_wrong_driver_version_stops_before_probe():
+def test_status_wrong_driver_version_stops_before_probe(home):
     fake = FakeSSH(lambda s: FakeProc(0, discovery_stdout(manifest='{"binary_version":"0.28.2"}'))
                    if "manifest-begin" in s else FakeSSH.default(s))
-    out = run(fake)
+    out = run(fake, home)
     assert out["driver"]["ok"] is False and "pins 0.21.0" in out["driver"]["problem"] and len(fake.calls) == 1
 
 

@@ -23,6 +23,21 @@ below is imported at plugin load time.
 
 Also read, not imported: `pm/lock.json` → `packages.cua-driver.version` (the gateway's pin).
 
+The version check itself reads `hermes_cli.version_info.get_version_info().base_version`; an unknown
+version is refused, never assumed supported.
+
+## Installer (`install.sh`)
+
+- Before copying any file it runs the plugin's own `compat.check_version()` with Hermes's Python, so an
+  unsupported Hermes stops with "remote-cua needs Hermes <range>" and nothing installed.
+- It enables the plugin with the public CLI, `HERMES_HOME=<profile home> hermes plugins enable
+  remote-cua` (remote-cua ships a `plugin.yaml`, so the CLI knows it). No private Hermes import.
+
+`CuaDriverBackend`'s public methods (everything not starting with `_` except `start`, `stop`,
+`is_available`) are wrapped so each is one lease-fenced operation; `_CaptureMixin` reaches
+`_session._call_tool_via_cli` directly for its re-fetch, which is why that method is fenced too.
+`_cli_result` reads `screenshot_file_path` from a local path, so remote answers are stripped of it first.
+
 `_CuaDriverSession` attributes the subclass relies on: `_embedded_daemon`, `_lifecycle_coro` (overridden),
 `_populate_capabilities`, `_ready_event`, `_shutdown_event`, `_setup_error`, `_startup_phase`,
 `_session`, `_started`, `_LIFECYCLE_CALLS`, `_call_tool_via_cli` (overridden), `call_tool`.

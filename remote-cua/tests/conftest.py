@@ -84,14 +84,18 @@ class FakeSSH:
 
     @staticmethod
     def default(script: str) -> FakeProc:
+        import re
         if "manifest-begin" in script:
             return FakeProc(0, discovery_stdout())
-        if "status --socket" in script and "check_permissions" in script:
-            return FakeProc(0, "RCUA:ready=1\nRCUA:perm-begin\n{\"accessibility\":true,\"screen_recording\":true}\n"
-                               "RCUA:perm-end\nRCUA:win-begin\n{\"windows\":[{\"pid\":1},{\"pid\":2}]}\nRCUA:win-end\n"
-                               "RCUA:end=1\n")
-        if "status --socket" in script:
+        if "--args serve" in script:  # start script (its HUP trap also names a stop)
             return FakeProc(0, "RCUA:ready=1\n")
+        marks = re.findall(r'echo "RCUA:(\w+)=1"', script)
+        if marks:  # stop / sweep scripts: every daemon confirmed gone
+            return FakeProc(0, "".join(f"RCUA:{m}=1\n" for m in marks))
+        if " call check_permissions " in script:
+            return FakeProc(0, '{"accessibility": true, "screen_recording": true}')
+        if " call list_windows " in script:
+            return FakeProc(0, '{"windows": [{"pid": 1}, {"pid": 2}]}')
         if " call " in script:
             return FakeProc(0, '{"ok": true}')
         return FakeProc(0, "")
@@ -106,6 +110,14 @@ class FakeSSH:
 
     def scripts(self) -> list[str]:
         return [c["script"] for c in self.calls]
+
+
+@pytest.fixture(autouse=True)
+def _no_real_atexit(monkeypatch):
+    """A test's fake daemon must never be 'stopped' again by the real interpreter exit."""
+    from types import SimpleNamespace
+    # Only remote-cua's own reference: the real atexit module stays untouched for pytest itself.
+    monkeypatch.setattr(mod("remote"), "atexit", SimpleNamespace(register=lambda *a, **k: None))
 
 
 @pytest.fixture

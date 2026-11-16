@@ -69,9 +69,10 @@ when you took over has its result discarded.
 
 ### `GET /api/plugins/remote-cua/status[?fresh=1]`
 
-Two SSH sessions to the Mac (cached 20 s per profile; `fresh=1` skips the cache): driver discovery,
-then a short-lived private daemon that answers `check_permissions` with `prompt: false` (never a
-dialog) and `list_windows`, then is stopped.
+A few short SSH sessions to the Mac (cached 20 s per profile; `fresh=1` skips the cache): driver
+discovery, then a short-lived private daemon (the same managed lifecycle as the bot's: recorded before
+launch, always stopped, swept later if the stop cannot be confirmed) that answers `check_permissions`
+with `prompt: false` (never a dialog) and `list_windows`.
 
 ```json
 200 {"ok": true, "configured": true, "supported": true,
@@ -86,7 +87,10 @@ dialog) and `list_windows`, then is stopped.
                  "Permissions OK (Accessibility and Screen Recording)", "Screen awake"]}
 ```
 
-Always 200; `ok` says whether the machine is ready. `summary` is plain words for the pane, one line per
+Always 200; `ok` says whether the machine is ready, and needs positive evidence: both permissions
+granted **and** at least one visible window. A probe that could not tell (driver error, unreadable
+answer) is `ok: false` with the driver's words in `error` and in `summary` (e.g. "Window check failed:
+cannot enumerate screen"), never READY. `summary` is plain words for the pane, one line per
 check. Failure shapes:
 
 - unreachable: `"reachable": false, "error": "could not reach you@100.64.0.10 over SSH (Permission denied (publickey).)"`

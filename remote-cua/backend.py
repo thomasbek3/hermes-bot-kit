@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import importlib
+import inspect
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from . import lease, remote
 from .settings import OS_WINDOWS, WINDOWS_REFUSAL, RemoteCuaConfig
@@ -21,6 +23,24 @@ from .settings import OS_WINDOWS, WINDOWS_REFUSAL, RemoteCuaConfig
 logger = logging.getLogger(__name__)
 
 _classes: Optional[tuple[type, type]] = None
+
+# Response/request keys that carry a file path on the remote Mac (never read on the gateway).
+_REMOTE_PATH_FIELDS = frozenset({"screenshot_file_path", "screenshot_out_file"})
+_NOT_OPERATIONS = frozenset({"start", "stop", "is_available"})
+
+
+def _operation_methods(cls: type) -> list[str]:
+    """Public methods of Hermes's backend that act on the machine (everything but the lifecycle)."""
+    return sorted(name for name in dir(cls) if not name.startswith("_") and name not in _NOT_OPERATIONS
+                  and inspect.isfunction(getattr(cls, name, None)))
+
+
+def _as_operation(fn: Any) -> Any:
+    @functools.wraps(fn)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._session.operation():
+            return fn(self, *args, **kwargs)
+    return wrapper
 
 
 def _refused(priv: Any, name: str, message: str) -> dict[str, Any]:
@@ -44,6 +64,8 @@ def classes() -> tuple[type, type]:
         def __init__(self, bridge: Any, daemon: remote.RemoteDaemon, lease_home: Path):
             super().__init__(bridge, daemon)
             self._lease_home = lease_home
+            self._op_depth = 0
+            self._op_epoch: Optional[int] = None
 
         async def _lifecycle_coro(self) -> None:
             from mcp import ClientSession, StdioServerParameters
@@ -71,20 +93,53 @@ def classes() -> tuple[type, type]:
             finally:
                 self._session, self._started = None, False
 
+        @contextlib.contextmanager
+        def operation(self) -> Iterator[None]:
+            """One backend operation (a capture, a click ...). Its admission epoch is taken once, at the
+            outermost entry, and every transport call inside it, MCP or CLI fallback, is checked against
+            it: a take-over at any point, even a full take-over and hand-back between two calls, voids the
+            rest of the operation."""
+            if self._op_depth == 0:
+                self._op_epoch = lease.read(self._lease_home).epoch
+            self._op_depth += 1
+            try:
+                yield
+            finally:
+                self._op_depth -= 1
+                if self._op_depth == 0:
+                    self._op_epoch = None
+
+        def _fenced(self, name: str, call: Any) -> dict[str, Any]:
+            """Refuse while a human holds the lease; refuse/discard when it moved since admission."""
+            now = lease.read(self._lease_home)
+            if now.holder == lease.HUMAN:
+                return _refused(priv, name, lease.REFUSAL)
+            admitted = self._op_epoch if self._op_epoch is not None else now.epoch
+            if now.epoch != admitted:
+                return _refused(priv, name, lease.DISCARDED)
+            result = call()
+            if lease.read(self._lease_home).epoch != admitted:
+                return _refused(priv, name, lease.DISCARDED)
+            return result
+
         def _call_tool_via_cli(self, name: str, args: dict[str, Any], timeout: float) -> dict[str, Any]:
-            call_args = {k: v for k, v in dict(args).items() if k != "screenshot_out_file"}  # remote path: never
-            return priv.cli_result(self._embedded_daemon.call(name, call_args, timeout=timeout), None)
+            # Hermes's capture code reaches this directly (its empty-result refetch), not via call_tool,
+            # so it is fenced here too.
+            return self._fenced(name, lambda: self._cli_unfenced(name, args, timeout))
+
+        def _cli_unfenced(self, name: str, args: dict[str, Any], timeout: float) -> dict[str, Any]:
+            call_args = {k: v for k, v in dict(args).items() if k not in _REMOTE_PATH_FIELDS}
+            parsed = self._embedded_daemon.call(name, call_args, timeout=timeout)
+            if isinstance(parsed, dict):
+                # A path in the answer names a file on the remote Mac. Hermes's parser would open it on
+                # the gateway, so it never sees one: only inline images are used.
+                parsed = {k: v for k, v in parsed.items() if k not in _REMOTE_PATH_FIELDS}
+            return priv.cli_result(parsed, None)
 
         def call_tool(self, name: str, args: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
             if name in self._LIFECYCLE_CALLS:
                 return super().call_tool(name, args, timeout)
-            before = lease.read(self._lease_home)
-            if before.holder == lease.HUMAN:
-                return _refused(priv, name, lease.REFUSAL)
-            result = super().call_tool(name, args, timeout)
-            if lease.read(self._lease_home).epoch != before.epoch:
-                return _refused(priv, name, lease.DISCARDED)
-            return result
+            return self._fenced(name, lambda: super(RemoteCuaSession, self).call_tool(name, args, timeout))
 
     class RemoteCuaBackend(priv.CuaDriverBackend):
         """``CuaDriverBackend`` driving a remote Mac. Always cua-driver's ``standard`` permission mode on
@@ -128,6 +183,10 @@ def classes() -> tuple[type, type]:
 
         def is_available(self) -> bool:
             return True
+
+    # Every public backend method is one fenced operation (see RemoteCuaSession.operation).
+    for attr in _operation_methods(priv.CuaDriverBackend):
+        setattr(RemoteCuaBackend, attr, _as_operation(getattr(priv.CuaDriverBackend, attr)))
 
     _classes = (RemoteCuaSession, RemoteCuaBackend)
     return _classes

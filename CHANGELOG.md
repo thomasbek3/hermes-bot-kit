@@ -17,6 +17,12 @@
   accepted and refused with "Windows support coming: needs cua Session proxy". Hermes internals it uses are
   version-gated (`>=0.23.0,<0.24.0`, [CONTRACT.md](remote-cua/CONTRACT.md)). Linux VMs: Hermes's native
   `terminal.backend: ssh` path, documented in [docs/LINUX-VM.md](docs/LINUX-VM.md).
+  Review round 1: the lease fence covers a whole action, a capture's CLI re-fetch included; a screenshot
+  path in a remote answer is never read on the gateway; daemons are recorded before launch and forgotten
+  only after a confirmed stop (no socket unlinked while the daemon still answers; unconfirmed stops are
+  retried); the status probe runs on that managed lifecycle and is READY only with both permissions and
+  a visible window; the installer checks the Hermes version before copying and enables through
+  `hermes plugins enable`.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

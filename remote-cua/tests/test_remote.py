@@ -137,7 +137,7 @@ def test_start_then_stop_cleans_up(home, monkeypatch):
     assert remote._read_registry(home)[0]["socket"] == "/tmp/hc-rctoken000001.sock"
     assert registered == [d.stop]
     d.stop()
-    assert fake.scripts()[-1] == f"{REMOTE_BIN} stop --socket /tmp/hc-rctoken000001.sock >/dev/null 2>&1 </dev/null; rm -f /tmp/hc-rctoken000001.sock"
+    assert fake.scripts()[-1] == remote.stop_command(REMOTE_BIN, "/tmp/hc-rctoken000001.sock")
     assert remote._read_registry(home) == []
     n = len(fake.calls)
     d.stop()  # idempotent (atexit after an explicit stop)
@@ -145,12 +145,13 @@ def test_start_then_stop_cleans_up(home, monkeypatch):
 
 
 def test_failed_start_stops_what_it_started(home):
-    fake = FakeSSH(lambda s: FakeProc(0, "RCUA:ready=0\n") if "status --socket" in s else FakeSSH.default(s))
+    fake = FakeSSH(lambda s: FakeProc(0, "RCUA:ready=0\n") if "--args serve" in s else FakeSSH.default(s))
     d = daemon(home, fake)
     with pytest.raises(remote.RemoteError, match="did not start .*socket did not answer"):
         d.start()
     assert not d.running
-    assert "stop --socket /tmp/hc-rctoken000001.sock" in fake.scripts()[-1]
+    assert fake.scripts()[-1] == remote.stop_command(REMOTE_BIN, "/tmp/hc-rctoken000001.sock")
+    assert remote._read_registry(home) == []
 
 
 def test_bad_driver_refuses_before_starting_anything(home):
@@ -171,9 +172,10 @@ def test_stale_sweep_stops_only_dead_owners(home):
     fake = FakeSSH()
     d = daemon(home, fake)
     d.start()
-    start = fake.scripts()[1]
-    assert "stop --socket /tmp/hc-rcdead.sock" in start
-    assert "hc-rclive" not in start and "hc-rcother" not in start
+    swept = fake.scripts()[1]  # its own SSH session, before the launch
+    assert "stop --socket /tmp/hc-rcdead.sock" in swept
+    assert "hc-rclive" not in swept and "hc-rcother" not in swept
+    assert "--args serve" in fake.scripts()[2]
     sockets = {e["socket"] for e in remote._read_registry(home)}
     assert sockets == {"/tmp/hc-rclive.sock", "/tmp/hc-rcother.sock", "/tmp/hc-rctoken000001.sock"}
     d.stop()
@@ -183,8 +185,8 @@ def test_cli_call_goes_over_ssh_to_the_private_socket(home):
     fake = FakeSSH()
     d = daemon(home, fake)
     d.start()
-    assert d.call("list_windows", {"on_screen_only": True}, timeout=5) == {"ok": True}
+    assert d.call("get_screen_size", {}, timeout=5) == {"ok": True}
     script = fake.scripts()[-1]
-    assert script.startswith(f"CUA_DRIVER_RS_TELEMETRY_ENABLED=0 {REMOTE_BIN} call list_windows ")
+    assert script.startswith(f"CUA_DRIVER_RS_TELEMETRY_ENABLED=0 {REMOTE_BIN} call get_screen_size ")
     assert script.endswith("--socket /tmp/hc-rctoken000001.sock </dev/null")
     d.stop()
