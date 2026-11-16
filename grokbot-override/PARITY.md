@@ -194,6 +194,21 @@ guard the retired `bot-sections` used for SESSIONS). OFF unregisters the panes, 
 stock Bots pane: stock is back instantly. Fallback actions set a temporary "peek" that removes the hide
 style until the override tab is shown again.
 
+**Private Hermes internals: one guarded contract (T10).** Everything the override uses that has no SDK door is
+listed, each with a read-only probe, in `src/core/contract.js`: the DOM anchors of the window chrome it hides
+(`[data-tree-tab]`, `[data-narrow-overlay-tab]`, `[data-tree-group][data-window-top] > [data-panel-header]`,
+`[data-zone-tabstrip]`, `[data-window-drag-handle]`, `[data-titlebar-cluster]`, `footer[data-slot="statusbar"]`,
+`[data-tree-group]`, `[data-sash-overlap]`, `.aui-md`), Bot Mode's roster query key `['hermes-bots','roster']` and
+localStorage keys (`hermes.plugin.hermes-bots.{bot-meta-v2,activity-toasts,group-chats}`), the desktop bridge
+`window.hermesDesktop.{api,readFileDataUrl,getMachineProfile,requestMicrophoneAccess}` (`desktopBridge()` in
+`src/ui/sdk.ts`), and the gateway event names the chat acts on. `core/stock.js` writes each chrome rule only
+while its anchor is in the DOM, so a renamed anchor drops its rule instead of hiding the wrong thing. The
+self-check writes the probe results as a `contract` block in `self-check.json`; a required entry that is missing
+(the tab, top header, titlebar cluster and tree-group anchors, `window.hermesDesktop.api`) shows one quiet notice
+per app session, once the override is on screen. Optional entries (a status bar the user turned off, a closed
+sidebar, Bot Mode data not written yet) report `absent`; events report `seen` / `unseen`. Any new private touch
+point must be added to this list.
+
 **Same engine, same chats.** Every RPC goes through a port of Bot Mode's `requestForBot`: a
 source-scoped row uses `host.requestProfile(route, …)` with `profile` rewritten to the route's
 `targetProfile`; an active-gateway row uses `host.request`. The chat is the `Bot Chat` registry row (C1).

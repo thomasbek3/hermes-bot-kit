@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **grokbot-override: one guarded contract for private Hermes internals (T10, 2026-11-15)**: every private
+  dependency (window-chrome DOM anchors, Bot Mode's roster cache key and localStorage keys, the
+  `window.hermesDesktop` bridge calls, the gateway event names) is listed in `src/core/contract.js` with a
+  read-only probe. Each window-chrome rule is now written only while its anchor is in the DOM, so a Hermes
+  update that renames one drops that rule instead of hiding the wrong thing. The self-check report gains a
+  `contract` block, and a missing required entry shows one quiet notice per app session. No behaviour change
+  while everything is present.
 - **grokbot-override: the composer keeps a draft per bot (T8, 2026-11-15)**: switching bots used to clear what
   you had typed. The composer now keeps the typed text per bot and puts it back when you return, as Hermes's
   own composer does per session. Text only (never attachments), in memory for this app session, up to 20 bots

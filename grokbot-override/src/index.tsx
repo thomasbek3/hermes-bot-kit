@@ -11,9 +11,66 @@ import { RoomWorkspace } from './ui/Rooms'
 import { createBot } from './ui/rosterActions'
 import { openDialog, roster2 } from './ui/rosterStores'
 import { openBotScreen, screenStore } from './ui/Screen'
-import { PALETTE_AREA, sdk } from './ui/sdk'
+import { contractNotice, createEventLog, probeContract } from './core/contract.js'
+import { desktopBridge, host, PALETTE_AREA, queryClient, sdk } from './ui/sdk'
 import { UsageStatusChip } from './ui/UsageMeter'
 import { createBotChat, wireParity } from './ui/wiring'
+
+// T10: the private-internals contract (core/contract.js). Event names seen
+// this app session, the probe, and the one quiet notice per app session.
+const contractEvents = createEventLog()
+const NOTICE_FLAG = '__grokbotOverrideContractNoticed'
+const CONTRACT_PROBE_MS = 8_000
+
+function runContractProbe() {
+  return probeContract({
+    document: typeof document === 'undefined' ? null : document,
+    queryClient: queryClient(),
+    localStorage: (() => {
+      try {
+        return globalThis.localStorage ?? null
+      } catch {
+        return null
+      }
+    })(),
+    bridge: desktopBridge(),
+    events: contractEvents
+  })
+}
+
+/** Once the override is on screen: probe, and if a required entry is gone,
+ *  one quiet notice per app session (survives a plugin reload). */
+function contractStartupCheck() {
+  try {
+    if (!app.enabled.get() || typeof document === 'undefined' || !document.querySelector('[data-gbo-root]')) return
+    const notice = contractNotice(runContractProbe())
+    const w = (globalThis as any).window ?? globalThis
+    if (!notice || w[NOTICE_FLAG]) return
+    w[NOTICE_FLAG] = true
+    host?.notify?.(notice)
+  } catch {
+    /* read-only and best-effort */
+  }
+}
+
+/** The self-check report (app.ts selfCheck writes it through ctx.files) gets
+ *  the contract block: the files door is wrapped, nothing else changes. */
+function withContractReport(ctx: any) {
+  const files = ctx?.files
+  if (!files || typeof files.writeText !== 'function') return ctx
+  const wrapped = Object.create(files)
+  wrapped.writeText = (scope: string, name: string, text: string, ...rest: any[]) => {
+    if (scope === 'data' && name === 'self-check.json') {
+      try {
+        text = JSON.stringify({ ...JSON.parse(text), contract: runContractProbe() }, null, 2)
+      } catch {
+        /* keep the report as it was */
+      }
+    }
+    return files.writeText(scope, name, text, ...rest)
+  }
+  return { ...ctx, files: wrapped }
+}
 
 export default {
   id: PLUGIN_ID,
@@ -164,11 +221,14 @@ export default {
     // Roster-side surfaces call into the chat side (R13 kickoff, R12 new tab,
     // New group chat, room failures on the badge): src/ui/wiring.ts.
     const unwire = wireParity()
-    start(ctx)
+    const offContractEvents = typeof ctx?.onEvent === 'function' ? ctx.onEvent('*', (event: any) => contractEvents.note(event?.type)) : null
+    start(withContractReport(ctx))
+    ctx.setTimeout?.(contractStartupCheck, CONTRACT_PROBE_MS)
     if (PROBE) ctx.setTimeout(() => void selfCheck({ notify: false }), 6_000)
     ctx.onDispose(() => {
       stop()
       unwire()
+      if (typeof offContractEvents === 'function') offContractEvents()
     })
   }
 }

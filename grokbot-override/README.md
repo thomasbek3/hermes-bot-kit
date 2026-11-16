@@ -106,7 +106,9 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
   scheduled job for this bot**, **open this bot's computer**.
 - **Grokbot Override: self-check (read-only)**: reads the roster, one bot's Bot Chat registry and history
   tail, and its cron list, then writes counts (never message text) to the plugin's data folder as
-  `self-check.json`.
+  `self-check.json`. Its `contract` block probes every private Hermes detail the override relies on
+  (`src/core/contract.js`); if a required one disappears after a Hermes update, the override shows one quiet
+  notice per app session, and any window-chrome rule whose anchor is gone is simply not applied.
 
 A bot that has never been opened has no Bot Chat yet. Clicking it creates one exactly as Bot Mode does
 (registry first, adopt the existing chat on a conflict, so the two can never make two); a chat tab that

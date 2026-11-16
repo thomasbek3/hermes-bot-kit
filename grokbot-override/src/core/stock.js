@@ -26,6 +26,11 @@
 // native scrollbars in the sidebar zone that holds the override's roster, and
 // the sidebar | workspace sash, whose faint hairline becomes a solid one. The
 // sash itself stays Hermes's: same 8px grab band, drag and double-click reset.
+//
+// Guarded (T10, core/contract.js): each chrome rule is written only while its
+// anchor is in the DOM (CHROME_ANCHORS). A Hermes update that renames an
+// anchor drops that rule instead of letting a stale selector hide the wrong
+// thing; the rule comes back on the next sync once the anchor is there.
 
 export const STOCK_PANE_ID = 'hermes-bots:pane'
 export const OVERRIDE_ROSTER_PANE_ID = 'grokbot-override:roster'
@@ -39,9 +44,26 @@ export function hideStockCss(attrs = TAB_ATTRS) {
 }
 
 const TOP_HEADER = '[data-tree-group][data-window-top] > [data-panel-header]'
+const LEFT_CLUSTER = '[data-titlebar-cluster="left"]'
+const RIGHT_CLUSTER = '[data-titlebar-cluster="right"]'
+const ROSTER_ZONE = '[data-tree-group]:has([data-gbo-root].gbo-roster)'
+const SEAM = ':is(div:has(> [data-sash-overlap]):has([data-gbo-root])) > [data-sash-overlap].cursor-col-resize > span:first-child'
 
-/** Hermes's top tab strips, hidden; the header band stays as a drag region. */
-export function hideTopStripCss() {
+/** The DOM anchor each chrome rule depends on (probed before writing it). */
+export const CHROME_ANCHORS = Object.freeze({
+  topHeader: TOP_HEADER,
+  titlebarCluster: '[data-titlebar-cluster]',
+  statusbar: 'footer[data-slot="statusbar"]',
+  rosterZone: '[data-tree-group]',
+  seam: '[data-sash-overlap]'
+})
+
+const always = () => true
+
+/** Hermes's top tab strips, hidden; the header band stays as a drag region.
+ *  `has(anchor)` says whether an anchor is in the DOM (default: assume so). */
+export function hideTopStripCss(has = always) {
+  if (!has(CHROME_ANCHORS.topHeader)) return ''
   return [
     `${TOP_HEADER} [data-zone-tabstrip],${TOP_HEADER} [data-panel-page-header]{display:none!important}`,
     `${TOP_HEADER}{height:var(--titlebar-height,34px)!important;background:transparent!important;-webkit-app-region:drag}`,
@@ -49,33 +71,31 @@ export function hideTopStripCss() {
   ].join('\n')
 }
 
-const LEFT_CLUSTER = '[data-titlebar-cluster="left"]'
-const RIGHT_CLUSTER = '[data-titlebar-cluster="right"]'
-const ROSTER_ZONE = '[data-tree-group]:has([data-gbo-root].gbo-roster)'
-const SEAM = ':is(div:has(> [data-sash-overlap]):has([data-gbo-root])) > [data-sash-overlap].cursor-col-resize > span:first-child'
-
-/** The window chrome hidden or restyled while the override is on. */
-export function hideWindowChromeCss() {
+/** The window chrome hidden or restyled while the override is on; each rule
+ *  only when `has` finds its anchor. */
+export function hideWindowChromeCss(has = always) {
   return [
     // Titlebar icons: the left cluster beside the traffic lights (sidebar
     // toggle), the fixed right cluster and the pane-tools cluster Hermes
     // renders just before it. Nothing clickable stays in the top band but the
     // override's own buttons.
-    `${LEFT_CLUSTER},${RIGHT_CLUSTER},div:has(+ ${RIGHT_CLUSTER}):not([data-titlebar-cluster]){visibility:hidden!important;pointer-events:none!important}`,
+    has(CHROME_ANCHORS.titlebarCluster) ? `${LEFT_CLUSTER},${RIGHT_CLUSTER},div:has(+ ${RIGHT_CLUSTER}):not([data-titlebar-cluster]){visibility:hidden!important;pointer-events:none!important}` : '',
     // The bottom status bar.
-    `footer[data-slot="statusbar"]{display:none!important}`,
+    has(CHROME_ANCHORS.statusbar) ? `footer[data-slot="statusbar"]{display:none!important}` : '',
     // Native scrollbars in the roster's sidebar zone (the override draws its
     // own overlay thumb on hover).
-    `${ROSTER_ZONE} *{scrollbar-width:none!important}`,
+    has(CHROME_ANCHORS.rosterZone) ? `${ROSTER_ZONE} *{scrollbar-width:none!important}` : '',
     // The sidebar | workspace seam: one solid hairline.
-    `${SEAM}{opacity:1!important;background:#e4e4e4!important}`,
-    `.dark ${SEAM}{background:#222!important}`
-  ].join('\n')
+    has(CHROME_ANCHORS.seam) ? `${SEAM}{opacity:1!important;background:#e4e4e4!important}` : '',
+    has(CHROME_ANCHORS.seam) ? `.dark ${SEAM}{background:#222!important}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 /** Everything the second style element holds: top strips plus window chrome. */
-export function overrideChromeCss() {
-  return `${hideTopStripCss()}\n${hideWindowChromeCss()}`
+export function overrideChromeCss(has = always) {
+  return [hideTopStripCss(has), hideWindowChromeCss(has)].filter(Boolean).join('\n')
 }
 
 export function createStockController({ document, host, now = () => Date.now() }) {
@@ -111,9 +131,20 @@ export function createStockController({ document, host, now = () => Date.now() }
     }
   }
 
+  // A document that cannot be queried keeps every rule (the behaviour before
+  // the guard); one that can drops a rule whose anchor is missing.
+  const has = anchor => {
+    if (typeof document?.querySelector !== 'function') return true
+    try {
+      return Boolean(document.querySelector(anchor))
+    } catch {
+      return false
+    }
+  }
+
   const writeStyle = (css, strip) => {
     writeStyleAt(HIDE_STYLE_ID, css)
-    if (strip) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss())
+    if (strip) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss(has))
     else removeStyleAt(HIDE_STRIP_STYLE_ID)
   }
 

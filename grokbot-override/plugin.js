@@ -45588,37 +45588,45 @@ function hideStockCss(attrs = TAB_ATTRS) {
   return attrs.map((attr) => `[${attr}="${STOCK_PANE_ID}"]{display:none!important}`).join("\n");
 }
 var TOP_HEADER = "[data-tree-group][data-window-top] > [data-panel-header]";
-function hideTopStripCss() {
+var LEFT_CLUSTER = '[data-titlebar-cluster="left"]';
+var RIGHT_CLUSTER = '[data-titlebar-cluster="right"]';
+var ROSTER_ZONE = "[data-tree-group]:has([data-gbo-root].gbo-roster)";
+var SEAM = ":is(div:has(> [data-sash-overlap]):has([data-gbo-root])) > [data-sash-overlap].cursor-col-resize > span:first-child";
+var CHROME_ANCHORS = Object.freeze({
+  topHeader: TOP_HEADER,
+  titlebarCluster: "[data-titlebar-cluster]",
+  statusbar: 'footer[data-slot="statusbar"]',
+  rosterZone: "[data-tree-group]",
+  seam: "[data-sash-overlap]"
+});
+var always = () => true;
+function hideTopStripCss(has = always) {
+  if (!has(CHROME_ANCHORS.topHeader)) return "";
   return [
     `${TOP_HEADER} [data-zone-tabstrip],${TOP_HEADER} [data-panel-page-header]{display:none!important}`,
     `${TOP_HEADER}{height:var(--titlebar-height,34px)!important;background:transparent!important;-webkit-app-region:drag}`,
     `${TOP_HEADER} > [data-window-drag-handle]{flex:1 1 auto!important;width:auto!important}`
   ].join("\n");
 }
-var LEFT_CLUSTER = '[data-titlebar-cluster="left"]';
-var RIGHT_CLUSTER = '[data-titlebar-cluster="right"]';
-var ROSTER_ZONE = "[data-tree-group]:has([data-gbo-root].gbo-roster)";
-var SEAM = ":is(div:has(> [data-sash-overlap]):has([data-gbo-root])) > [data-sash-overlap].cursor-col-resize > span:first-child";
-function hideWindowChromeCss() {
+function hideWindowChromeCss(has = always) {
   return [
     // Titlebar icons: the left cluster beside the traffic lights (sidebar
     // toggle), the fixed right cluster and the pane-tools cluster Hermes
     // renders just before it. Nothing clickable stays in the top band but the
     // override's own buttons.
-    `${LEFT_CLUSTER},${RIGHT_CLUSTER},div:has(+ ${RIGHT_CLUSTER}):not([data-titlebar-cluster]){visibility:hidden!important;pointer-events:none!important}`,
+    has(CHROME_ANCHORS.titlebarCluster) ? `${LEFT_CLUSTER},${RIGHT_CLUSTER},div:has(+ ${RIGHT_CLUSTER}):not([data-titlebar-cluster]){visibility:hidden!important;pointer-events:none!important}` : "",
     // The bottom status bar.
-    `footer[data-slot="statusbar"]{display:none!important}`,
+    has(CHROME_ANCHORS.statusbar) ? `footer[data-slot="statusbar"]{display:none!important}` : "",
     // Native scrollbars in the roster's sidebar zone (the override draws its
     // own overlay thumb on hover).
-    `${ROSTER_ZONE} *{scrollbar-width:none!important}`,
+    has(CHROME_ANCHORS.rosterZone) ? `${ROSTER_ZONE} *{scrollbar-width:none!important}` : "",
     // The sidebar | workspace seam: one solid hairline.
-    `${SEAM}{opacity:1!important;background:#e4e4e4!important}`,
-    `.dark ${SEAM}{background:#222!important}`
-  ].join("\n");
+    has(CHROME_ANCHORS.seam) ? `${SEAM}{opacity:1!important;background:#e4e4e4!important}` : "",
+    has(CHROME_ANCHORS.seam) ? `.dark ${SEAM}{background:#222!important}` : ""
+  ].filter(Boolean).join("\n");
 }
-function overrideChromeCss() {
-  return `${hideTopStripCss()}
-${hideWindowChromeCss()}`;
+function overrideChromeCss(has = always) {
+  return [hideTopStripCss(has), hideWindowChromeCss(has)].filter(Boolean).join("\n");
 }
 function createStockController({ document: document2, host: host3, now = () => Date.now() }) {
   let on = false;
@@ -45648,9 +45656,17 @@ function createStockController({ document: document2, host: host3, now = () => D
     } catch {
     }
   };
+  const has = (anchor) => {
+    if (typeof document2?.querySelector !== "function") return true;
+    try {
+      return Boolean(document2.querySelector(anchor));
+    } catch {
+      return false;
+    }
+  };
   const writeStyle = (css, strip) => {
     writeStyleAt(HIDE_STYLE_ID, css);
-    if (strip) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss());
+    if (strip) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss(has));
     else removeStyleAt(HIDE_STRIP_STYLE_ID);
   };
   const removeStyle2 = () => {
@@ -46365,6 +46381,13 @@ function readPluginStorage(pluginId, key, fallback) {
     return JSON.parse(raw);
   } catch {
     return fallback;
+  }
+}
+function desktopBridge() {
+  try {
+    return globalThis.window?.hermesDesktop ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -60134,6 +60157,128 @@ function RosterPane() {
   ] });
 }
 
+// src/core/contract.js
+var BOT_MODE_STORAGE_KEYS = Object.freeze({
+  botMeta: "hermes.plugin.hermes-bots.bot-meta-v2",
+  activityToasts: "hermes.plugin.hermes-bots.activity-toasts",
+  groupChats: "hermes.plugin.hermes-bots.group-chats"
+});
+var CONTRACT_EVENTS = Object.freeze([
+  "message.start",
+  "message.delta",
+  "message.interim",
+  "message.complete",
+  "reasoning.delta",
+  "thinking.delta",
+  "reasoning.available",
+  "error",
+  "approval.request",
+  "approval.settled",
+  "approval.cancelled",
+  "clarify.request",
+  "clarify.settled",
+  "request.cancel",
+  "connection.request",
+  "connection.update",
+  "tool.generating",
+  "tool.start",
+  "tool.complete",
+  "status.update",
+  "message.reaction",
+  "session.usage",
+  "session.info",
+  "session.reclaimed"
+]);
+var selector = (id, sel, used, required) => ({ id, kind: "selector", target: sel, used, required });
+var CONTRACT = Object.freeze([
+  // DOM anchors (stock.js hides; app.ts finds the stock session tiles).
+  selector("dom.tree-tab", `[${TAB_ATTRS[0]}]`, "stock.js: hide the stock Bots tab; app.ts: stock session tiles", true),
+  selector("dom.narrow-overlay-tab", `[${TAB_ATTRS[1]}]`, "stock.js: hide the stock Bots tab on the narrow overlay (only in narrow windows)", false),
+  selector("dom.stock-bots-tab", `[${TAB_ATTRS[0]}="${STOCK_PANE_ID}"]`, "stock.js: the tab that is hidden (Bot Mode registered)", false),
+  selector("dom.top-header", CHROME_ANCHORS.topHeader, "stock.js: top tab strips hidden, header band kept as drag region", true),
+  selector("dom.zone-tabstrip", "[data-zone-tabstrip]", "stock.js: top tab strip rule", false),
+  selector("dom.window-drag-handle", "[data-window-drag-handle]", "stock.js: drag handle widened", false),
+  selector("dom.titlebar-cluster", CHROME_ANCHORS.titlebarCluster, "stock.js: titlebar icon clusters made invisible and click-through", true),
+  selector("dom.statusbar", CHROME_ANCHORS.statusbar, "stock.js: status bar hidden (absent when the user turned it off)", false),
+  selector("dom.tree-group", CHROME_ANCHORS.rosterZone, "stock.js: native scrollbars hidden in the roster zone", true),
+  selector("dom.sash-overlap", CHROME_ANCHORS.seam, "stock.js: the sidebar | workspace seam (absent while the sidebar is closed)", false),
+  selector("css.aui-md", ".aui-md", "styles-adapt.ts: Hermes markdown inside bubbles (only once a chat is on screen)", false),
+  // Bot Mode's data.
+  { id: "query.bot-mode-roster", kind: "query", target: JSON.stringify(STOCK_ROSTER_KEY), used: "app.ts/roster.js: read Bot Mode's roster cache (falls back to host.agents + profiles.list)", required: false },
+  { id: "storage.bot-meta", kind: "storage", target: BOT_MODE_STORAGE_KEYS.botMeta, used: "app.ts readSideData: Bot Mode's local bot meta", required: false },
+  { id: "storage.activity-toasts", kind: "storage", target: BOT_MODE_STORAGE_KEYS.activityToasts, used: "app.ts: Bot Mode's activity-toast setting", required: false },
+  { id: "storage.group-chats", kind: "storage", target: BOT_MODE_STORAGE_KEYS.groupChats, used: "rosterActions.ts: Bot Mode's group chats", required: false },
+  // The desktop bridge.
+  { id: "bridge.api", kind: "bridge", target: "api", used: "app.ts/rosterActions.ts/cronOps.js: core REST (history paging, media and workspace reads, transcription, cron)", required: true },
+  { id: "bridge.readFileDataUrl", kind: "bridge", target: "readFileDataUrl", used: "app.ts: local media reads (falls back to api)", required: false },
+  { id: "bridge.getMachineProfile", kind: "bridge", target: "getMachineProfile", used: "app.ts: the user's name for the roster", required: false },
+  { id: "bridge.requestMicrophoneAccess", kind: "bridge", target: "requestMicrophoneAccess", used: "Voice.tsx: the microphone prompt", required: false },
+  // Gateway events.
+  ...CONTRACT_EVENTS.map((name) => ({ id: `event.${name}`, kind: "event", target: name, used: "session.js / rosterActions.ts / Screen.tsx event tap", required: false }))
+]);
+function createEventLog(names = CONTRACT_EVENTS) {
+  const wanted = new Set(names);
+  const counts = /* @__PURE__ */ new Map();
+  return {
+    note(type) {
+      const name = String(type || "");
+      if (wanted.has(name)) counts.set(name, (counts.get(name) || 0) + 1);
+    },
+    count: (name) => counts.get(name) || 0
+  };
+}
+function probeEntry(entry, env) {
+  try {
+    switch (entry.kind) {
+      case "selector": {
+        const doc = env.document;
+        if (!doc || typeof doc.querySelector !== "function") return "unprobed";
+        return doc.querySelector(entry.target) ? "ok" : null;
+      }
+      case "query": {
+        const client = env.queryClient;
+        const cache = client?.getQueryCache?.();
+        if (!cache || typeof cache.findAll !== "function") return null;
+        const hits = cache.findAll({ queryKey: JSON.parse(entry.target) });
+        return Array.isArray(hits) && hits.length ? "ok" : null;
+      }
+      case "storage": {
+        const store = env.localStorage;
+        if (!store || typeof store.getItem !== "function") return "unprobed";
+        return store.getItem(entry.target) !== null ? "ok" : null;
+      }
+      case "bridge":
+        return typeof env.bridge?.[entry.target] === "function" ? "ok" : null;
+      case "event":
+        return env.events ? env.events.count(entry.target) > 0 ? "seen" : "unseen" : "unprobed";
+      default:
+        return "unprobed";
+    }
+  } catch {
+    return null;
+  }
+}
+function probeContract(env = {}, contract = CONTRACT) {
+  const entries = contract.map((entry) => {
+    const found = probeEntry(entry, env);
+    const status = found ?? (entry.required ? "missing" : "absent");
+    return { id: entry.id, kind: entry.kind, target: entry.target, required: entry.required, status };
+  });
+  const missing = entries.filter((e2) => e2.status === "missing").map((e2) => e2.id);
+  const counts = {};
+  for (const e2 of entries) counts[e2.status] = (counts[e2.status] || 0) + 1;
+  return { ok: missing.length === 0, missing, counts, entries };
+}
+function contractNotice(result) {
+  if (!result || result.ok || !result.missing?.length) return null;
+  const list = result.missing.slice(0, 3).join(", ") + (result.missing.length > 3 ? "…" : "");
+  return {
+    kind: "info",
+    title: "Grokbot Override: Hermes changed",
+    message: `Some Hermes internals the override relies on were not found (${list}). It keeps working where it can; run "Grokbot Override: self-check" for details.`
+  };
+}
+
 // src/ui/UsageMeter.tsx
 import { jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 function Bar({ percent }) {
@@ -60220,6 +60365,50 @@ function unwireParity() {
 
 // src/index.tsx
 import { jsx as jsx31 } from "react/jsx-runtime";
+var contractEvents = createEventLog();
+var NOTICE_FLAG = "__grokbotOverrideContractNoticed";
+var CONTRACT_PROBE_MS = 8e3;
+function runContractProbe() {
+  return probeContract({
+    document: typeof document === "undefined" ? null : document,
+    queryClient: queryClient2(),
+    localStorage: (() => {
+      try {
+        return globalThis.localStorage ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+    bridge: desktopBridge(),
+    events: contractEvents
+  });
+}
+function contractStartupCheck() {
+  try {
+    if (!app.enabled.get() || typeof document === "undefined" || !document.querySelector("[data-gbo-root]")) return;
+    const notice = contractNotice(runContractProbe());
+    const w = globalThis.window ?? globalThis;
+    if (!notice || w[NOTICE_FLAG]) return;
+    w[NOTICE_FLAG] = true;
+    host2?.notify?.(notice);
+  } catch {
+  }
+}
+function withContractReport(ctx) {
+  const files = ctx?.files;
+  if (!files || typeof files.writeText !== "function") return ctx;
+  const wrapped = Object.create(files);
+  wrapped.writeText = (scope, name, text3, ...rest) => {
+    if (scope === "data" && name === "self-check.json") {
+      try {
+        text3 = JSON.stringify({ ...JSON.parse(text3), contract: runContractProbe() }, null, 2);
+      } catch {
+      }
+    }
+    return files.writeText(scope, name, text3, ...rest);
+  };
+  return { ...ctx, files: wrapped };
+}
 var index_default = {
   id: PLUGIN_ID,
   name: "Grokbot Override",
@@ -60338,11 +60527,14 @@ var index_default = {
     ]);
     if (typeof ctx?.__gboSmoke === "function") ctx.__gboSmoke({ app, roster2, openDialog, selectBot, openBotScreen, screenStore, setEnabled, primeModelOptions, createBot, createBotChat });
     const unwire = wireParity();
-    start(ctx);
+    const offContractEvents = typeof ctx?.onEvent === "function" ? ctx.onEvent("*", (event) => contractEvents.note(event?.type)) : null;
+    start(withContractReport(ctx));
+    ctx.setTimeout?.(contractStartupCheck, CONTRACT_PROBE_MS);
     if (PROBE) ctx.setTimeout(() => void selfCheck({ notify: false }), 6e3);
     ctx.onDispose(() => {
       stop();
       unwire();
+      if (typeof offContractEvents === "function") offContractEvents();
     });
   }
 };

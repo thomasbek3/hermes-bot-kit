@@ -295,4 +295,14 @@ test('self-check performs reads only and records counts, never message text', as
   const report = JSON.parse(kit.files[0].text)
   assert.equal(report.ok, true, JSON.stringify(report))
   assert.doesNotMatch(kit.files[0].text, /secret words/)
+  // T10: the private-internals contract, probed read-only (core/contract.js).
+  const contract = report.contract
+  assert.ok(contract && Array.isArray(contract.entries), 'a contract block')
+  const ids = contract.entries.map(e => e.id)
+  for (const id of ['dom.statusbar', 'dom.sash-overlap', 'dom.titlebar-cluster', 'query.bot-mode-roster', 'storage.bot-meta', 'bridge.api', 'bridge.getMachineProfile', 'event.message.complete']) assert.ok(ids.includes(id), id)
+  const status = id => contract.entries.find(e => e.id === id).status
+  assert.equal(status('bridge.api'), 'ok', 'the fake desktop bridge has api')
+  assert.equal(status('query.bot-mode-roster'), 'ok', 'Bot Mode\'s roster cache is read')
+  assert.ok(['seen', 'unseen'].includes(status('event.message.complete')))
+  assert.equal(typeof contract.ok, 'boolean')
 })

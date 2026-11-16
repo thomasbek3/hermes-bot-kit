@@ -254,3 +254,51 @@ test('window chrome rule: left and right titlebar clusters invisible and click-t
   assert.notEqual(css('.sash').display, 'none', 'Hermes\'s own sash keeps resizing the sidebar')
   window.close()
 })
+
+// T10: each chrome rule is written only while its anchor is in the DOM.
+test('guarded chrome: no seam rule without [data-sash-overlap]; the rule comes back once it is there', async t => {
+  let JSDOM
+  try {
+    ;({ JSDOM } = await import('jsdom'))
+  } catch {
+    t.skip('jsdom not installed')
+    return
+  }
+  const body = sash => `
+    <div data-titlebar-cluster="left"></div><div data-titlebar-cluster="right"></div>
+    <div data-tree-group="side" data-window-top="true"><div data-panel-header=""><div data-zone-tabstrip="side">
+      <button data-tree-tab="hermes-bots:pane" aria-selected="false"></button>
+      <button data-tree-tab="grokbot-override:roster" aria-selected="true"></button>
+    </div></div></div>
+    ${sash ? '<div class="sash cursor-col-resize" data-sash-overlap="trailing"><span></span></div>' : ''}
+    <footer data-slot="statusbar"></footer>`
+  const { window } = new JSDOM(`<!doctype html><head></head><body>${body(false)}</body>`)
+  const document = window.document
+  const stock = createStockController({ document, host: { revealPane: () => undefined }, now: () => 10_000 })
+  stock.setOn(true)
+  const strip = () => document.getElementById(HIDE_STRIP_STYLE_ID).textContent
+  assert.doesNotMatch(strip(), /data-sash-overlap/, 'no seam rule while the sash is missing')
+  assert.match(strip(), /footer\[data-slot="statusbar"\]\{display:none!important\}/, 'present anchors keep their rules')
+  assert.match(strip(), /\[data-titlebar-cluster="right"\]/)
+  assert.match(strip(), /\[data-zone-tabstrip\]/)
+  document.body.insertAdjacentHTML('beforeend', '<div class="sash cursor-col-resize" data-sash-overlap="trailing"><span></span></div>')
+  stock.sync()
+  assert.match(strip(), /\[data-sash-overlap\]\.cursor-col-resize > span:first-child\{opacity:1!important/, 'the seam rule once the sash exists')
+  // A status bar the user turned off: its rule is dropped, the rest stay.
+  document.querySelector('footer').remove()
+  stock.sync()
+  assert.doesNotMatch(strip(), /statusbar/)
+  assert.match(strip(), /data-sash-overlap/)
+  stock.dispose()
+  window.close()
+})
+
+test('guarded chrome: the pure builders drop exactly the rules whose anchors are missing', () => {
+  const none = () => false
+  assert.equal(overrideChromeCss(none), '')
+  assert.equal(hideTopStripCss(none), '')
+  const noSeam = anchor => anchor !== '[data-sash-overlap]'
+  assert.doesNotMatch(hideWindowChromeCss(noSeam), /sash/)
+  assert.match(hideWindowChromeCss(noSeam), /statusbar/)
+  assert.equal(overrideChromeCss(), `${hideTopStripCss()}\n${hideWindowChromeCss()}`, 'default: every rule')
+})
