@@ -1,0 +1,10 @@
+{
+  "name": "remote-cua",
+  "label": "Remote computer use",
+  "description": "Lease (take over / hand back) and health routes for a bot's remote Mac driven by computer_use over SSH.",
+  "icon": "Monitor",
+  "version": "1.0.0",
+  "tab": { "path": "/remote-cua", "hidden": true },
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}

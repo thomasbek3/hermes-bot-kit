@@ -114,6 +114,26 @@ its ownership (do not use broad process-name kills). Debug: `TS_DEBUG=1` logs ho
 `/tmp/texting-style-debug.log`. Uninstall: remove
 `<profile-home>/plugins/texting-style` and its `plugins.enabled` entry.
 
+## Optional: remote-cua (agent plugin, per bot profile)
+
+Lets a bot's own `computer_use` drive a remote Mac over SSH. Run on the
+gateway host, from a clone, naming the bot profiles explicitly:
+
+```bash
+bash remote-cua/install.sh --profiles helper --dry-run   # show what would change
+bash remote-cua/install.sh --profiles helper
+```
+
+It copies the plugin to `<profile-home>/plugins/remote-cua` and adds it to
+`plugins.enabled`. It does NOT set `computer_use.backend: remote-cua` or the
+`remote_cua` block (host, user, os) in the profile's `config.yaml`: ask the
+human for the Mac's address and user, then add them. The Mac needs a
+one-time setup at its own screen (Remote Login, the pinned cua-driver, a
+permissions grant), which an agent cannot do over SSH. Verify after a gateway
+restart: `hermes -p helper remote-cua check` (exit 0 = ready). Never run
+`cua-driver permissions grant` remotely. Uninstall: remove the plugin folder,
+its `plugins.enabled` entry and the two config keys.
+
 ## Optional: give bots hands (agent plugin, Orgo computers)
 
 Separate from the desktop plugins. Installs the `orgo-computer` agent plugin

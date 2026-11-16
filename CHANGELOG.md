@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **remote-cua: Hermes's own computer_use on a remote Mac (2026-11-15)**: a new per-profile agent plugin,
+  [`remote-cua`](remote-cua/README.md). With `computer_use.backend: remote-cua` and a `remote_cua` block
+  (`host`, `user`, `os`, optional `driver`, `vnc`) the bot's native `computer_use` (schema, approvals,
+  Hermes's cua-driver backend) drives a Mac over SSH: the driver is found on the Mac (config, then the
+  gateway's pinned version under `~/.hermes/tools`, then PATH) and checked (version pin, Hermes's driver
+  contract, CuaDriver.app signature), a private daemon is started through that exact `CuaDriver.app`
+  (`open -n -g -a <path>`, never by name), and Hermes's MCP session runs over one `ssh -T -o BatchMode=yes`
+  connection; the daemon is stopped on session end, at exit, and after a crash on the next start. A
+  take-over lease (`<profile>/remote-cua/lease.json`) refuses `computer_use` with `human_has_control` while a
+  human holds it; the Computer pane changes it through `/api/plugins/remote-cua/` (`lease`, `take`,
+  `release`, `status`, see [computer-viewer/docs/REMOTE-CUA.md](computer-viewer/docs/REMOTE-CUA.md)).
+  `hermes remote-cua check` reports reachability, driver, permissions and screen state. `os: windows` is
+  accepted and refused with "Windows support coming: needs cua Session proxy". Hermes internals it uses are
+  version-gated (`>=0.23.0,<0.24.0`, [CONTRACT.md](remote-cua/CONTRACT.md)). Linux VMs: Hermes's native
+  `terminal.backend: ssh` path, documented in [docs/LINUX-VM.md](docs/LINUX-VM.md).
+  Review round 1: the lease fence covers a whole action, a capture's CLI re-fetch included; a screenshot
+  path in a remote answer is never read on the gateway; daemons are recorded before launch and forgotten
+  only after a confirmed stop (no socket unlinked while the daemon still answers; unconfirmed stops are
+  retried); the status probe runs on that managed lifecycle and is READY only with both permissions and
+  a visible window; the installer checks the Hermes version before copying and enables through
+  `hermes plugins enable`.
+  Review round 2: every send to the driver is lease-checked right before it goes out, Hermes's own
+  reconnect and ended-session replays included, and an action whose lease moved raises Hermes's
+  `HumanHasControl` instead of returning; a daemon counts as stopped only when its driver says "not
+  running" (a missing driver or any other status failure keeps the record and socket); the daemon
+  record file is updated under an inter-process file lock. Review round 3: an action refused at its
+  start also forgets the last capture target, so a hand-back always needs a fresh capture.
 - **grokbot-override: source links with service logos in bot replies (2026-11-15)**: a markdown link in a
   bot's reply to a known service now draws as the service's small logo (14 px, full colour, a fixed box so
   nothing shifts) plus its underlined text, like "Her message" next to the Slack logo. About 27 services are

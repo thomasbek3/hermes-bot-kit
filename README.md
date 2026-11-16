@@ -36,6 +36,7 @@ Desktop plugins plus an optional agent plugin, one install:
 | 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Auto-connects the moment your bot starts using its computer**, so you watch it work. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin (**orgo-computer**) that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 | ✉️ **[email-drafts](email-drafts/)** | An **agent plugin**: bots write email as **drafts** that appear as Grok-Bot-style cards in the override's chat (editable To, Cc and body, your signature, attachments). Nothing leaves until you click **Send** (through Composio by default, using the `composio` CLI logged in on the bot's machine; or Gmail through Hermes's own OAuth sign-in, or SMTP), unless you allowed every recipient. Per-bot rules: allow recipient, needs approval, drafts off. Per-profile install. |
+| 🛰️ **[remote-cua](remote-cua/)** | An **agent plugin**: Hermes's own `computer_use` tool drives a **remote Mac** over SSH (cua-driver's private daemon started through the exact pinned app, one SSH session per run), with a take-over lease the Computer pane uses for **Take over / Hand back**. Windows is accepted in config and refused for now. Linux VMs use Hermes's native path instead ([docs/LINUX-VM.md](docs/LINUX-VM.md)). Per-profile install. |
 | 💼 **[Slack](slack-connect/)** | Optional add-ons for the override's Slack card: **one-click Add to Slack** ([slack-connect](slack-connect/README.md), with [slack-relay](slack-relay/README.md) and [slack-http](slack-http/README.md)) and **Test connection** ([slack-check](slack-check/README.md)). |
 
 <p align="center">
@@ -83,6 +84,11 @@ profile), so it has its own one-liner:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.4/texting-style/install.sh | bash
 ```
+
+**remote-cua** is an *agent* plugin too (per bot profile, on the gateway host):
+`bash remote-cua/install.sh --profiles helper` from a clone, then set
+`computer_use.backend: remote-cua` and a `remote_cua` block in that profile's
+`config.yaml`. Mac setup and the check command: [remote-cua/README.md](remote-cua/README.md).
 
 **Installing via an AI agent?** Point it at [AGENTS.md](AGENTS.md) — exact
 unattended install, verify, and uninstall steps, plus the footguns. (Most
@@ -150,8 +156,10 @@ slack-check/        optional backend plugin: the Slack card's Test connection
 slack-connect/      optional Add to Slack add-on (with slack-relay/, slack-http/)
 texting-style/      agent plugin: SMS-register reply style, per profile
 email-drafts/       agent plugin: email drafts the user sends from a chat card, per profile
+remote-cua/         agent plugin: native computer_use on a remote Mac over SSH, take-over lease
 computer-viewer/    Computer: plugin, host connect scripts, HD agent,
                     orgo-computer agent plugin, orgo-term / orgo-hands, docs
+docs/               compatibility notes, LINUX-VM.md (native Linux VM computers)
 SECURITY.md         security policy (VNC/networking guidance lives in the
                     computer-viewer README)
 ```
