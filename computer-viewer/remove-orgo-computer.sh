@@ -107,12 +107,21 @@ fi
 
 PY=$(command -v python3 || true)
 
-# Prints "yes" when config.yaml lists orgo-computer under plugins.enabled.
-# With a second argument "write", also removes it (atomic replace).
+# Plans the config.yaml change. Prints one word:
+#   no           config.yaml does not name orgo-computer
+#   yes          it is in a plugins.enabled list this script can edit safely
+#   unsupported  it is named some other way (a list over several lines, a
+#                {flow mapping}, an anchor, ...): nothing is changed for that
+#                profile, and the script says what to edit by hand
+# With "write", also replaces the file atomically with the edited copy. The
+# edit only removes the one list item; the result is re-checked (and parsed
+# with PyYAML or Ruby when either is installed) before it replaces anything.
 config_edit() {
   "${PY}" - "$1" "$2" <<'PY'
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -120,78 +129,156 @@ path, mode = sys.argv[1], sys.argv[2]
 NAME = "orgo-computer"
 try:
     with open(path, "r", encoding="utf-8") as handle:
-        lines = handle.read().split("\n")
+        text = handle.read()
 except OSError:
     print("no")
     sys.exit(0)
+lines = text.split("\n")
+
+
+def code(line):
+    """The line without a trailing comment (good enough for plain scalars)."""
+    out, quote = [], None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            break
+        out.append(ch)
+    return "".join(out).rstrip()
+
+
+def mentions(line):
+    return re.search(r"(?<![A-Za-z0-9_-])orgo-computer(?![A-Za-z0-9_-])", code(line)) is not None
 
 
 def indent(line):
     return len(line) - len(line.lstrip(" "))
 
 
-def unquote(value):
-    value = value.split(" #", 1)[0].strip()
+def scalar(value):
+    value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-        value = value[1:-1]
+        return value[1:-1]
     return value
 
 
-found = False
+SIMPLE = re.compile(r"""^(?:[A-Za-z0-9_.\-]+|'[^']*'|"[^"]*")$""")
+
+if not any(mentions(line) for line in lines):
+    print("no")
+    sys.exit(0)
+
 out = list(lines)
-plugins_at = next(
-    (i for i, line in enumerate(lines) if re.match(r"^plugins\s*:\s*(#.*)?$", line)), None
-)
+edited = False
+plugins_at = next((i for i, l in enumerate(lines) if re.match(r"^plugins\s*:\s*$", code(l))), None)
 if plugins_at is not None:
     i = plugins_at + 1
     while i < len(lines):
-        line = lines[i]
-        if line.strip() and indent(line) == 0:
+        line, body = lines[i], code(lines[i])
+        if not body.strip():  # blank or comment-only, at any indent
+            i += 1
+            continue
+        if indent(line) == 0:
             break
-        match = re.match(r"^(\s+)enabled\s*:\s*(.*)$", line)
-        if match:
-            key_indent, rest = len(match.group(1)), match.group(2).strip()
-            if rest.startswith("["):
-                inner = rest[1 : rest.rfind("]")] if "]" in rest else rest[1:]
-                items = [unquote(item) for item in inner.split(",") if item.strip()]
-                if NAME in items:
-                    found = True
-                    keep = [item for item in items if item != NAME]
-                    out[i] = "%senabled: [%s]" % (match.group(1), ", ".join(keep))
-            else:
-                j = i + 1
-                drop = []
-                while j < len(lines):
-                    item = lines[j]
-                    if not item.strip():
-                        j += 1
-                        continue
-                    if indent(item) < key_indent or (
-                        indent(item) == key_indent and not item.lstrip().startswith("-")
-                    ):
-                        break
-                    bullet = re.match(r"^\s*-\s*(.*)$", item)
-                    if bullet and unquote(bullet.group(1)) == NAME:
-                        drop.append(j)
+        match = re.match(r"^(\s+)enabled\s*:\s*(.*)$", body)
+        if not match:
+            i += 1
+            continue
+        lead, rest = match.group(1), match.group(2).strip()
+        if rest.startswith("["):
+            if not rest.endswith("]") or rest.count("[") != 1 or rest.count("]") != 1:
+                break  # a list over several lines, or nested: unsupported
+            items = [item.strip() for item in rest[1:-1].split(",") if item.strip()]
+            if not all(SIMPLE.match(item) for item in items):
+                break
+            keep = [item for item in items if scalar(item) != NAME]
+            if len(keep) != len(items):
+                comment = lines[i][len(body):]
+                out[i] = "%senabled: [%s]%s" % (lead, ", ".join(keep), comment)
+                edited = True
+        elif rest == "":
+            j, drop, others = i + 1, [], 0
+            while j < len(lines):
+                item, item_body = lines[j], code(lines[j])
+                if not item_body.strip():
                     j += 1
-                if drop:
-                    found = True
-                    remaining = [
-                        k for k in range(i + 1, j) if k not in drop and re.match(r"^\s*-", lines[k])
-                    ]
-                    for k in reversed(drop):
-                        out[k] = None
-                    if not remaining:
-                        out[i] = "%senabled: []" % match.group(1)
-            break
-        i += 1
+                    continue
+                if indent(item) < len(lead) or (indent(item) == len(lead) and not item_body.lstrip().startswith("-")):
+                    break
+                bullet = re.match(r"^\s*-\s+(.*)$", item_body)
+                if not bullet or indent(item) < len(lead) or not SIMPLE.match(bullet.group(1).strip()):
+                    drop = None  # nested or unusual items: unsupported
+                    break
+                if scalar(bullet.group(1)) == NAME:
+                    drop.append(j)
+                else:
+                    others += 1
+                j += 1
+            if drop:
+                for k in drop:
+                    out[k] = None
+                if not others:
+                    out[i] = "%senabled: []%s" % (lead, lines[i][len(body):])
+                edited = True
+        break
 
-print("yes" if found else "no")
-if found and mode == "write":
-    text = "\n".join(line for line in out if line is not None)
+new_lines = [line for line in out if line is not None]
+if not edited or any(mentions(line) for line in new_lines):
+    print("unsupported")
+    sys.exit(0)
+new_text = "\n".join(new_lines)
+
+
+def parsed(source):
+    """(ok, data) from PyYAML or Ruby; (None, None) when neither is installed."""
+    try:
+        import yaml  # noqa: PLC0415
+    except ImportError:
+        yaml = None
+    if yaml is not None:
+        try:
+            return True, yaml.safe_load(source)
+        except Exception:
+            return False, None
+    ruby = shutil.which("ruby")
+    if ruby:
+        script = "require 'yaml'; require 'json'; print JSON.generate(YAML.safe_load(STDIN.read, aliases: false))"
+        result = subprocess.run([ruby, "-e", script], input=source, capture_output=True, text=True)
+        if result.returncode != 0:
+            return False, None
+        import json  # noqa: PLC0415
+        return True, json.loads(result.stdout or "null")
+    return None, None
+
+
+ok_old, old_data = parsed(text)
+ok_new, new_data = parsed(new_text)
+if ok_new is False:
+    print("unsupported")
+    sys.exit(0)
+if ok_old and ok_new:
+    expected = old_data
+    try:
+        plugins = dict(expected["plugins"])
+        plugins["enabled"] = [x for x in (plugins.get("enabled") or []) if x != NAME]
+        expected = dict(expected)
+        expected["plugins"] = plugins
+    except Exception:
+        print("unsupported")
+        sys.exit(0)
+    if expected != new_data:
+        print("unsupported")
+        sys.exit(0)
+
+print("yes")
+if mode == "write":
     fd, tmp = tempfile.mkstemp(prefix=".config-", suffix=".tmp", dir=os.path.dirname(path) or ".")
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(text)
+        handle.write(new_text)
     os.chmod(tmp, os.stat(path).st_mode & 0o777)
     os.replace(tmp, path)
 PY
@@ -201,25 +288,53 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 DAY=$(date +%Y%m%d)
 touched=0
 
+unsupported=0
 while IFS="$(printf '\t')" read -r name home; do
   wanted "${name}" || continue
   plugin_dir="${home}/plugins/orgo-computer"
   config="${home}/config.yaml"
   has_dir=0
-  has_cfg=no
+  plan=no
   [ -d "${plugin_dir}" ] && has_dir=1
-  if [ -f "${config}" ] && [ -n "${PY}" ]; then
-    has_cfg=$(config_edit "${config}" check)
+  if [ -f "${config}" ]; then
+    if [ -n "${PY}" ]; then
+      plan=$(config_edit "${config}" check)
+    elif grep -q 'orgo-computer' "${config}"; then
+      plan=unsupported
+    fi
   fi
   has_key=0
   if [ -f "${home}/.env" ] && grep -q '^ORGO_API_KEY=' "${home}/.env"; then
     has_key=1
   fi
-  if [ "${has_dir}" -eq 0 ] && [ "${has_cfg}" != "yes" ] && [ "${has_key}" -eq 0 ]; then
+  if [ "${has_dir}" -eq 0 ] && [ "${plan}" = "no" ] && [ "${has_key}" -eq 0 ]; then
     continue
   fi
   touched=1
   echo "${name}  (${home})"
+  if [ "${plan}" = "unsupported" ]; then
+    # Decide before touching anything: no half-done profile.
+    unsupported=1
+    echo "  SKIPPED: config.yaml names orgo-computer in a form this script will not rewrite"
+    echo "  (for example a list spread over several lines, or plugins: {enabled: [...]})."
+    echo "  By hand: remove orgo-computer from plugins.enabled in ${config},"
+    echo "  then move ${plugin_dir} out of plugins/ (or re-run this script)."
+    continue
+  fi
+  if [ "${plan}" = "yes" ]; then
+    if [ "${YES}" -eq 1 ]; then
+      cp -p "${config}" "${config}.bak.${STAMP}"
+      result=$(config_edit "${config}" write)
+      if [ "${result}" != "yes" ]; then
+        unsupported=1
+        echo "  SKIPPED: config.yaml changed while planning; nothing moved. Re-run the script."
+        continue
+      fi
+      echo "  removed orgo-computer from plugins.enabled (backup: config.yaml.bak.${STAMP})"
+    else
+      echo "  would remove orgo-computer from plugins.enabled in config.yaml"
+    fi
+  fi
   if [ "${has_dir}" -eq 1 ]; then
     dest_root="${home}/plugins-retired-${DAY}"
     dest="${dest_root}/orgo-computer"
@@ -231,17 +346,6 @@ while IFS="$(printf '\t')" read -r name home; do
     else
       echo "  would move plugins/orgo-computer -> ${dest}"
     fi
-  fi
-  if [ "${has_cfg}" = "yes" ]; then
-    if [ "${YES}" -eq 1 ]; then
-      cp -p "${config}" "${config}.bak.${STAMP}"
-      config_edit "${config}" write >/dev/null
-      echo "  removed orgo-computer from plugins.enabled (backup: config.yaml.bak.${STAMP})"
-    else
-      echo "  would remove orgo-computer from plugins.enabled in config.yaml"
-    fi
-  elif [ -f "${config}" ] && [ -z "${PY}" ]; then
-    echo "  python3 not found: remove orgo-computer from plugins.enabled in ${config} by hand"
   fi
   if [ "${has_key}" -eq 1 ]; then
     echo "  note: ${home}/.env still has ORGO_API_KEY (left alone; delete the line if you no longer use it)"
@@ -258,4 +362,8 @@ if [ "${YES}" -ne 1 ]; then
 else
   echo
   echo "Done. Restart the gateway (or reload plugins) so the bots drop the old tools."
+fi
+if [ "${unsupported}" -eq 1 ]; then
+  echo "Some profiles were skipped (see SKIPPED above); finish those by hand."
+  exit 3
 fi

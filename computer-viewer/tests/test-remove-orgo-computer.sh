@@ -12,6 +12,19 @@ fail() {
   exit 1
 }
 
+# Parses with Ruby or PyYAML when either is here. Exact-text checks below do
+# not depend on it; this is a second opinion, and says so when it is absent.
+yaml_ok() {
+  if command -v ruby >/dev/null 2>&1; then
+    ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0]))' "$1" >/dev/null 2>&1
+  elif python3 -c 'import yaml' >/dev/null 2>&1; then
+    python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$1" >/dev/null 2>&1
+  else
+    echo "note: no YAML parser here; relying on the exact-text checks" >&2
+    return 0
+  fi
+}
+
 run() {
   env -u HERMES_HOME HOME="$1" PYTHONDONTWRITEBYTECODE=1 bash "${SCRIPT}" "${@:2}"
 }
@@ -71,16 +84,20 @@ ls "${h}"/config.yaml.bak.* >/dev/null 2>&1 || fail "no config backup"
 grep -q "^ORGO_API_KEY=abc" "${h}/.env" || fail ".env was modified"
 echo "${out}" | grep -q "still has ORGO_API_KEY" || fail "did not mention the key"
 [ "$(cat "${h}/profiles/plain/config.yaml")" = "model: x" ] || fail "untouched profile changed"
-python3 - "${h}/config.yaml" "${h}/profiles/helper/config.yaml" <<'PY' || fail "edited config.yaml is not valid YAML"
-import sys
-try:
-    import yaml
-except ImportError:
-    sys.exit(0)
-for path in sys.argv[1:]:
-    data = yaml.safe_load(open(path))
-    assert "orgo-computer" not in (data["plugins"]["enabled"] or []), path
-PY
+# Exact text, so no YAML parser is needed to trust the result.
+expected_default='# my config
+model: some-model
+plugins:
+  enabled:
+    - texting-style
+  disabled: []
+terminal:
+  backend: local'
+[ "$(cat "${h}/config.yaml")" = "${expected_default}" ] || fail "default config.yaml not as expected: $(cat "${h}/config.yaml")"
+[ "$(cat "${h}/profiles/helper/config.yaml")" = "plugins:
+  enabled: []" ] || fail "helper config.yaml not as expected"
+yaml_ok "${h}/config.yaml" || fail "edited default config.yaml does not parse"
+yaml_ok "${h}/profiles/helper/config.yaml" || fail "edited helper config.yaml does not parse"
 
 # 3. second run is a no-op
 out=$(run "${home}" --yes --profiles helper)
@@ -97,5 +114,52 @@ if run "${home}" --profiles nope >/dev/null 2>&1; then fail "unknown profile acc
 # 5. no Hermes home at all
 out=$(run "${WORK}/empty")
 echo "${out}" | grep -q "nothing to remove" || fail "missing home not handled"
+
+# 6. Review round 1: valid YAML this script must not rewrite is left alone,
+#    plugin folder included, and the run says so and exits non-zero.
+unsupported_case() {
+  local label=$1 config=$2
+  local home="${WORK}/unsupported-${label}"
+  mkdir -p "${home}/.hermes/plugins/orgo-computer"
+  echo "name: orgo-computer" > "${home}/.hermes/plugins/orgo-computer/plugin.yaml"
+  printf '%s\n' "${config}" > "${home}/.hermes/config.yaml"
+  local before
+  before=$(cat "${home}/.hermes/config.yaml")
+  local status=0
+  out=$(run "${home}" --yes) || status=$?
+  [ "${status}" -eq 3 ] || fail "${label}: expected exit 3, got ${status}: ${out}"
+  [ "$(cat "${home}/.hermes/config.yaml")" = "${before}" ] || fail "${label}: config.yaml was changed"
+  [ -d "${home}/.hermes/plugins/orgo-computer" ] || fail "${label}: plugin folder moved although config was skipped"
+  echo "${out}" | grep -q "SKIPPED" || fail "${label}: no SKIPPED note"
+  echo "${out}" | grep -q "By hand: remove orgo-computer from plugins.enabled" || fail "${label}: no manual steps"
+}
+unsupported_case multiline 'plugins:
+  enabled: [orgo-computer,
+    texting-style]
+model: sample'
+unsupported_case flowmap 'plugins: {enabled: [orgo-computer, texting-style]}
+model: sample'
+unsupported_case nested 'plugins:
+  enabled:
+    - name: orgo-computer
+model: sample'
+
+# 7. A column-0 comment inside the plugins block is fine: edited, not skipped.
+home="${WORK}/comment"
+mkdir -p "${home}/.hermes/plugins/orgo-computer"
+printf '%s\n' 'plugins:
+# keep these
+  enabled:
+    - orgo-computer
+    - texting-style
+model: sample' > "${home}/.hermes/config.yaml"
+run "${home}" --yes >/dev/null || fail "comment case failed"
+[ "$(cat "${home}/.hermes/config.yaml")" = 'plugins:
+# keep these
+  enabled:
+    - texting-style
+model: sample' ] || fail "comment case: $(cat "${home}/.hermes/config.yaml")"
+[ ! -e "${home}/.hermes/plugins/orgo-computer" ] || fail "comment case: plugin not moved"
+yaml_ok "${home}/.hermes/config.yaml" || fail "comment case does not parse"
 
 echo "remove-orgo-computer: all checks passed"
