@@ -47599,6 +47599,19 @@ function sameReply(base4, reply) {
   if (base4.id === id) return true;
   return isLiveId(base4.id) && !isLiveId(id) && base4.text === String(reply.text || "").trim();
 }
+function turnReply(items, startIds) {
+  const turn = items.filter((item) => !startIds.has(String(item?.id || "")));
+  if (turn.some((item) => item?.kind === "error" || item?.kind === "turn-error" || item?.failedTurn)) return null;
+  for (let i = turn.length - 1; i >= 0; i -= 1) {
+    const item = turn[i];
+    if (item?.kind !== "assistant") continue;
+    if (item.streaming) return null;
+    const text3 = String(item.text || "").trim();
+    if (!text3 || isSilenceReply(text3)) return null;
+    return item;
+  }
+  return null;
+}
 var pendingApprovals = (items) => items.filter((item) => item?.kind === "approval" && item.status === "pending");
 function inputKey(waiting) {
   if (!waiting || typeof waiting !== "object") return "";
@@ -47626,14 +47639,18 @@ function nativeNotifications(prev, next, { focused, seen, name = "", keyOf, slot
   const baseKey = `${slot}\0${identity}`;
   if (!chatOf(prev)?.busy && chatOf(next).busy) {
     const before = finishedReply(itemsOf(prev));
-    seen.base.set(baseKey, before ? { id: String(before.id || ""), text: String(before.text || "").trim() } : null);
+    seen.base.set(baseKey, {
+      id: before ? String(before.id || "") : "",
+      text: before ? String(before.text || "").trim() : "",
+      startIds: new Set(itemsOf(prev).map((item) => String(item?.id || "")))
+    });
     if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value);
   }
   if (chatOf(prev)?.busy && !chatOf(next).busy) {
-    const reply = finishedReply(items);
     const base4 = seen.base.get(baseKey);
     seen.base.delete(baseKey);
-    const fresh = reply && !sameReply(base4, reply);
+    const reply = base4 ? turnReply(items, base4.startIds) : finishedReply(items);
+    const fresh = reply && !sameReply(base4?.id ? base4 : null, reply);
     if (fresh && remember(seen, `done:${reply.id}`)) {
       const sameKey = `${identity}\0${String(reply.text || "").trim()}`;
       const last = seen.recent.get(sameKey);

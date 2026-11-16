@@ -161,3 +161,20 @@ test('slots: the same reply in two tabs notifies once; each tab\'s own turns sti
   const all = run([a1, b1, c1, d1, e1], away(s2, o))
   assert.deepEqual(all.map(n => n.id), ['done:live:x:1', 'done:live:x:2'])
 })
+
+// Review C-R2-03: the turn is what appeared after it started, not everything
+// since the last user row.
+test('an earlier failed turn does not silence a later background reply; a failed current turn stays quiet', () => {
+  const seen = createSeen()
+  const err = { kind: 'error', id: 'live:e:1', text: 'old failure' }
+  const failedIdle = st({ items: [user('u1'), err] })
+  const bgBusy = st({ busy: true, items: [user('u1'), err, { kind: 'notice', id: 'live:n:1', text: 'Process complete' }] })
+  const bgDone = st({ items: [...bgBusy.chat.items, reply('live:a:5', 'successful follow-up')] })
+  // The first state after the failure is the baseline (same chat, idle).
+  const out = run([failedIdle, { ...failedIdle }, bgBusy, bgDone], away(seen))
+  assert.deepEqual(out.map(n => n.id), ['done:live:a:5'], 'the background reply notifies despite the old error')
+  // A current turn that ends in an error: nothing, even with partial text.
+  const busy2 = st({ busy: true, items: bgDone.chat.items })
+  const failed2 = st({ items: [...bgDone.chat.items, reply('live:a:6', 'partial'), { kind: 'error', id: 'live:e:2', text: 'new failure' }] })
+  assert.deepEqual(run([bgDone, busy2, failed2], away(seen)), [])
+})

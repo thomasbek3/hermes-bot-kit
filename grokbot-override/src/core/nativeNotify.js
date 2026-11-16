@@ -25,7 +25,10 @@
 //    same bot in two tabs (two controllers, two live ids) notifies once: a
 //    reply with the same bot, runtime and text from ANOTHER slot within
 //    15 s is the same reply (review C-R2-02);
-//  - never for a silent reply ([SILENT], NO_REPLY, …) or a failed turn;
+//  - never for a silent reply ([SILENT], NO_REPLY, …) or a failed turn. A
+//    turn is what appeared after it started (the items not on screen when
+//    the chat went busy), so an earlier failed turn never vetoes a later
+//    background reply that has no user row of its own (review C-R2-03);
 //  - bodies are generic lines: never the reply, the approval command, a
 //    question or any secret / sudo / vault prompt text.
 
@@ -101,6 +104,24 @@ function sameReply(base, reply) {
   return isLiveId(base.id) && !isLiveId(id) && base.text === String(reply.text || '').trim()
 }
 
+/** The finished reply of the turn that began when the chat went busy: only
+ *  items that were not on screen then (`startIds`) count, so an error or a
+ *  reply from an earlier turn is ignored. Null when this turn holds an error
+ *  card, or its last reply is streaming, empty or a silence marker. */
+export function turnReply(items, startIds) {
+  const turn = items.filter(item => !startIds.has(String(item?.id || '')))
+  if (turn.some(item => item?.kind === 'error' || item?.kind === 'turn-error' || item?.failedTurn)) return null
+  for (let i = turn.length - 1; i >= 0; i -= 1) {
+    const item = turn[i]
+    if (item?.kind !== 'assistant') continue
+    if (item.streaming) return null
+    const text = String(item.text || '').trim()
+    if (!text || isSilenceReply(text)) return null
+    return item
+  }
+  return null
+}
+
 const pendingApprovals = items => items.filter(item => item?.kind === 'approval' && item.status === 'pending')
 
 function inputKey(waiting) {
@@ -138,15 +159,19 @@ export function nativeNotifications(prev, next, { focused, seen, name = '', keyO
   // A turn starts: remember the reply already on screen.
   if (!chatOf(prev)?.busy && chatOf(next).busy) {
     const before = finishedReply(itemsOf(prev))
-    seen.base.set(baseKey, before ? { id: String(before.id || ''), text: String(before.text || '').trim() } : null)
+    seen.base.set(baseKey, {
+      id: before ? String(before.id || '') : '',
+      text: before ? String(before.text || '').trim() : '',
+      startIds: new Set(itemsOf(prev).map(item => String(item?.id || '')))
+    })
     if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value)
   }
   // Turn done: busy → idle with a finished, non-silent, new reply.
   if (chatOf(prev)?.busy && !chatOf(next).busy) {
-    const reply = finishedReply(items)
     const base = seen.base.get(baseKey)
     seen.base.delete(baseKey)
-    const fresh = reply && !sameReply(base, reply)
+    const reply = base ? turnReply(items, base.startIds) : finishedReply(items)
+    const fresh = reply && !sameReply(base?.id ? base : null, reply)
     if (fresh && remember(seen, `done:${reply.id}`)) {
       const sameKey = `${identity}\u0000${String(reply.text || '').trim()}`
       const last = seen.recent.get(sameKey)
