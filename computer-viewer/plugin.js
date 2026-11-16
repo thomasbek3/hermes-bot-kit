@@ -2196,7 +2196,9 @@ function watchAgentActivity(ctx) {
 // The lease lives on the gateway host (`<HERMES_HOME>/remote-cua/lease.json`,
 // per bot profile); while a human holds it the plugin refuses the bot's
 // `computer_use` with `human_has_control`, as Hermes's Bot Screen does. The
-// pane reads and changes it through the plugin's gateway RPC methods; it
+// pane reads and changes it through the plugin's dashboard routes
+// (/api/plugins/remote-cua/*, remote-cua/dashboard/plugin_api.py, documented
+// in docs/REMOTE-CUA.md), called on the bot's own connection and profile; it
 // never writes the file itself. Wording and behaviour copy Hermes's Bot
 // Screen ("Using it" in bot-screen.md):
 //   - "Bot is in control" by default; the pane is view-only for that machine.
@@ -2208,13 +2210,14 @@ function watchAgentActivity(ctx) {
 //     human holds control, "Hand back (force)" clears it.
 // ---------------------------------------------------------------------------
 
-// Wire names of the remote-cua plugin's RPC methods (`ctx.register_rpc` in
-// Hermes serves `plugin.<plugin id>.<name>`). Change here only.
-const REMOTE_CUA_METHODS = {
-  lease: 'plugin.remote-cua.lease.get',
-  take: 'plugin.remote-cua.lease.take',
-  release: 'plugin.remote-cua.lease.release',
-  status: 'plugin.remote-cua.status'
+// The remote-cua plugin's dashboard routes (its FastAPI router is mounted at
+// /api/plugins/remote-cua/). Change here only.
+const REMOTE_CUA_BASE = '/api/plugins/remote-cua'
+const REMOTE_CUA_ROUTES = {
+  lease: { method: 'GET', path: 'lease' },
+  take: { method: 'POST', path: 'take' },
+  release: { method: 'POST', path: 'release' },
+  status: { method: 'GET', path: 'status' }
 }
 const LEASE_POLL_MS = 5000
 
@@ -2228,7 +2231,7 @@ const CONTROL_TEXT = {
   agentControls: 'Bot is in control',
   controlTaken: 'Another viewer took control. Watching only.',
   unbound: profile => `Bind this computer to ${profile} (Settings → Endpoint for ${profile}) to take over.`,
-  pluginMissing: "This bot's gateway doesn't have the remote-cua plugin, so control can't be checked."
+  pluginMissing: "This bot's gateway doesn't have the remote-cua plugin enabled, so control can't be checked."
 }
 
 function newViewerId() {
@@ -2277,102 +2280,48 @@ function normalizeLease(raw) {
   }
 }
 
-function pickBool(...values) {
-  for (const value of values) {
-    if (typeof value === 'boolean') return value
-  }
-  return null
-}
-
-/** GET status, tolerant of the field spellings a JSON API might use. */
+/** GET status (remote-cua status.py): plain-words `summary` lines plus the
+ *  fields the pane colours by. `null` in a field means "not checked". */
 function normalizeStatus(raw) {
-  const s = raw && typeof raw === 'object' && raw.status && typeof raw.status === 'object' ? raw.status : raw
-  if (!s || typeof s !== 'object') return null
-  const driver = s.driver && typeof s.driver === 'object' ? s.driver : null
-  const perms = s.permissions && typeof s.permissions === 'object' ? s.permissions : null
-  const screen = s.screen && typeof s.screen === 'object' ? s.screen : null
-  const version =
-    (typeof s.driver_version === 'string' && s.driver_version) ||
-    (driver && typeof driver.version === 'string' && driver.version) ||
-    (typeof s.driver === 'string' && s.driver) ||
-    ''
-  let permissions = pickBool(s.permissions_ok, typeof s.permissions === 'boolean' ? s.permissions : null, perms && perms.ok)
-  if (permissions == null && perms) {
-    const ax = pickBool(perms.accessibility)
-    const sr = pickBool(perms.screen_recording, perms.screenRecording)
-    if (ax != null && sr != null) permissions = ax && sr
-  }
-  let screenAwake = pickBool(s.screen_awake, screen && screen.awake)
-  if (screenAwake == null) {
-    const asleep = pickBool(s.screen_asleep, screen && screen.asleep)
-    if (asleep != null) screenAwake = !asleep
-  }
-  const detail = [s.detail, s.error, s.message].find(v => typeof v === 'string' && v.trim()) || ''
+  if (!raw || typeof raw !== 'object') return null
+  const driver = raw.driver && typeof raw.driver === 'object' ? raw.driver : {}
+  const perms = raw.permissions && typeof raw.permissions === 'object' ? raw.permissions : {}
+  const flag = value => (typeof value === 'boolean' ? value : null)
   return {
-    reachable: pickBool(s.reachable, s.ok_ssh),
-    driverFound: pickBool(s.driver_found, driver && driver.found, version ? true : null),
-    driverVersion: version,
-    permissions,
-    screenAwake,
-    detail: String(detail).trim()
+    ok: raw.ok === true,
+    configured: flag(raw.configured),
+    supported: flag(raw.supported),
+    reachable: flag(raw.reachable),
+    driverOk: flag(driver.ok),
+    driverVersion: typeof driver.version === 'string' ? driver.version : '',
+    permissionsOk: flag(perms.ok),
+    screenAwake: flag(raw.screen_awake),
+    error: typeof raw.error === 'string' ? raw.error.trim() : '',
+    summary: Array.isArray(raw.summary)
+      ? raw.summary.filter(line => typeof line === 'string' && line.trim()).map(line => line.trim())
+      : [],
+    cached: raw.cached === true
   }
 }
 
 /** One plain-words line for a bound machine: { tone, line }. */
 function statusWords(status) {
   if (!status) return null
-  if (status.reachable === false) {
-    return {
-      tone: 'bad',
-      line: status.detail ? `Can't reach the machine: ${status.detail}` : "Can't reach the machine"
-    }
-  }
-  const parts = []
-  const bad = []
-  if (status.reachable === true) parts.push('Reachable')
-  if (status.driverFound === false) {
-    parts.push('driver not found')
-    bad.push(true)
-  } else if (status.driverVersion) {
-    parts.push(`driver ${status.driverVersion}`)
-  }
-  if (status.permissions === false) {
-    parts.push('needs Accessibility and Screen Recording permission')
-    bad.push(true)
-  } else if (status.permissions === true) {
-    parts.push('permissions OK')
-  }
-  if (status.screenAwake === false) {
-    parts.push('screen asleep or locked')
-    bad.push(true)
-  } else if (status.screenAwake === true) {
-    parts.push('screen awake')
-  }
-  if (!parts.length) return status.detail ? { tone: 'muted', line: status.detail } : null
-  const complete =
-    status.reachable === true &&
-    status.driverFound !== false &&
-    status.permissions === true &&
-    status.screenAwake === true
-  const line = parts.join(' · ')
-  return {
-    tone: bad.length ? 'bad' : complete ? 'good' : 'muted',
-    line: line.charAt(0).toUpperCase() + line.slice(1)
-  }
+  const line = status.summary.length ? status.summary.join(' · ') : status.error
+  if (!line) return null
+  const failed =
+    status.configured === false ||
+    status.supported === false ||
+    status.reachable === false ||
+    status.driverOk === false ||
+    status.permissionsOk === false ||
+    status.screenAwake === false
+  return { tone: status.ok ? 'good' : failed || status.error ? 'bad' : 'muted', line }
 }
 
-function activeProfileName() {
-  try {
-    return (host.state.profile && host.state.profile.get()) || ''
-  } catch {
-    return ''
-  }
-}
-
-/** The default transport: the plugin's RPC methods on that bot's own gateway. */
-async function remoteCuaGatewayRequest(profile, op, params) {
-  const method = REMOTE_CUA_METHODS[op]
-  if (!method) throw new Error(`unknown remote-cua op ${op}`)
+/** The bot's REST scope: its own connection and backend profile, from the
+ *  same profile routes Hermes's registry hands plugins. */
+async function botRestScope(profile) {
   let routes = null
   try {
     routes = typeof host.profileRoutes === 'function' ? await host.profileRoutes() : null
@@ -2380,32 +2329,77 @@ async function remoteCuaGatewayRequest(profile, op, params) {
     routes = null
   }
   const route = Array.isArray(routes) ? routes.find(item => item && item.profile === profile) : null
-  if (route && typeof host.requestProfile === 'function') return host.requestProfile(route, method, params)
-  if (typeof host.request === 'function' && (!profile || profile === activeProfileName())) {
-    return host.request(method, params)
+  if (!route) return { profile }
+  return {
+    ...(route.connectionId ? { connectionId: route.connectionId } : {}),
+    profile: route.targetProfile || route.profile || profile
   }
-  if (typeof host.requestProfile === 'function') return host.requestProfile(profile, method, params)
-  throw new Error('No gateway to ask.')
+}
+
+/** Hermes Desktop's REST bridge (`window.hermesDesktop.api`, the
+ *  `hermes:api` IPC behind api/client.ts hermesApiAs). It is not part of the
+ *  plugin SDK: Grokbot Override reaches the kit's Slack add-ons the same way.
+ *  `ctx.rest` cannot be used: it is scoped to this plugin's own namespace. */
+function desktopRestBridge() {
+  const api = globalThis.window && globalThis.window.hermesDesktop && globalThis.window.hermesDesktop.api
+  if (typeof api !== 'function') throw new Error('This Hermes build has no REST bridge for plugin routes.')
+  return api
+}
+
+/** An HTTP error from the bridge arrives as "<status>: <body>". */
+function restError(error) {
+  const message = String((error && error.message) || error || '')
+  const match = /^(\d{3}): ([\s\S]*)$/.exec(message)
+  const wrapped = new Error(message || 'Request failed.')
+  wrapped.status = match ? Number(match[1]) : Number(error && error.statusCode) || 0
+  wrapped.body = null
+  if (match) {
+    try {
+      const body = JSON.parse(match[2])
+      if (body && typeof body === 'object') wrapped.body = body
+    } catch {
+      /* not JSON */
+    }
+  }
+  return wrapped
+}
+
+/** The default transport: the plugin's routes on that bot's own connection and profile. */
+async function remoteCuaRestRequest(profile, op, body, query) {
+  const route = REMOTE_CUA_ROUTES[op]
+  if (!route) throw new Error(`unknown remote-cua op ${op}`)
+  const api = desktopRestBridge()
+  const scope = await botRestScope(profile)
+  const request = {
+    ...scope,
+    priority: 'foreground',
+    path: `${REMOTE_CUA_BASE}/${route.path}${query ? `?${query}` : ''}`,
+    method: route.method,
+    ...(body === undefined ? {} : { body })
+  }
+  try {
+    return await api(request)
+  } catch (error) {
+    throw restError(error)
+  }
 }
 
 function createRemoteCuaClient(request) {
   return {
-    lease: profile => request(profile, 'lease', {}),
+    lease: profile => request(profile, 'lease'),
     take: (profile, viewer) => request(profile, 'take', { viewer }),
-    release: (profile, viewer, force) =>
-      request(profile, 'release', force ? { viewer, force: true } : { viewer }),
-    status: profile => request(profile, 'status', {})
+    release: (profile, viewer, force) => request(profile, 'release', { viewer, force: Boolean(force) }),
+    status: (profile, fresh) => request(profile, 'status', undefined, fresh ? 'fresh=1' : '')
   }
 }
 
-control.client = createRemoteCuaClient(remoteCuaGatewayRequest)
+control.client = createRemoteCuaClient(remoteCuaRestRequest)
 
 function controlErrorText(error) {
-  const message = String((error && (error.message || error.code)) || error || '')
-  const code = error && (error.code ?? error.status)
-  if (code === -32601 || /method not found|unknown method|no such method/i.test(message)) {
-    return CONTROL_TEXT.pluginMissing
-  }
+  const body = error && error.body
+  if (body && typeof body.message === 'string' && body.message.trim()) return body.message.trim()
+  if (error && error.status === 404) return CONTROL_TEXT.pluginMissing
+  const message = String((error && error.message) || error || '')
   return message || 'Request failed.'
 }
 
@@ -2477,17 +2471,22 @@ async function refreshLease() {
   try {
     const raw = await control.client.lease(state.profile)
     applyLease(key, raw)
+    // GET lease answers 200 for a profile without a remote_cua block, with the reason.
+    if (raw && raw.configured === false && $control.get().key === key) {
+      patchControl({ error: String(raw.error || 'This bot has no remote computer configured.') })
+    }
   } catch (error) {
     if ($control.get().key === key) patchControl({ error: controlErrorText(error) })
   }
 }
 
-async function refreshStatus() {
+/** GET status; `fresh` skips the plugin's 20 s cache (the Check button). */
+async function refreshStatus(fresh = false) {
   const state = $control.get()
   if (!state.key || !state.bound || !control.client) return
   const key = state.key
   try {
-    const raw = await control.client.status(state.profile)
+    const raw = await control.client.status(state.profile, fresh)
     if ($control.get().key === key) patchControl({ status: normalizeStatus(raw), statusError: '' })
   } catch (error) {
     if ($control.get().key === key) patchControl({ statusError: controlErrorText(error) })
@@ -2509,7 +2508,11 @@ async function takeOver() {
       setExpanded(true)
     }
   } catch (error) {
-    if ($control.get().key === key) patchControl({ pending: null, error: controlErrorText(error) })
+    if ($control.get().key !== key) return
+    patchControl({ pending: null })
+    // A refused take or release (409) carries the current lease: show who holds it.
+    if (error && error.body && error.body.lease) applyLease(key, error.body)
+    patchControl({ error: controlErrorText(error) })
   }
 }
 
@@ -2527,7 +2530,11 @@ async function handBack(force = false) {
     patchControl({ pending: null, evicted: false })
     applyLease(key, raw)
   } catch (error) {
-    if ($control.get().key === key) patchControl({ pending: null, error: controlErrorText(error) })
+    if ($control.get().key !== key) return
+    patchControl({ pending: null })
+    // A refused take or release (409) carries the current lease: show who holds it.
+    if (error && error.body && error.body.lease) applyLease(key, error.body)
+    patchControl({ error: controlErrorText(error) })
   }
 }
 
@@ -4827,7 +4834,7 @@ function ControlStatusLine() {
     { className: 'mt-1 flex items-center justify-center gap-1.5' },
     el(StatusDot, { tone: tone === 'good' ? 'good' : tone === 'bad' ? 'bad' : 'muted' }),
     el('p', { 'data-control-status': '', className: 'min-w-0 truncate text-[0.64rem] text-(--ui-text-tertiary)', title: line }, line),
-    el(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => void refreshStatus() }, 'Check')
+    el(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => void refreshStatus(true) }, 'Check')
   )
 }
 

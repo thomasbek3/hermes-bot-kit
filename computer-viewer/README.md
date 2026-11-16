@@ -216,10 +216,24 @@ plugin's status check: reachable, driver version, permissions, and whether
 the screen is asleep or locked (**Check** re-runs it).
 
 Take over needs the computer bound to the bot (**Endpoint for <bot>**): the
-control lease belongs to that bot's profile. The pane talks to the plugin
-through the gateway's plugin RPC (`plugin.remote-cua.lease.get` /
-`lease.take` / `lease.release` / `status`), authenticated like every other
-gateway call; it never writes the lease itself.
+control lease belongs to that bot's profile. The pane calls the plugin's
+dashboard routes on that bot's own connection and profile —
+`GET /api/plugins/remote-cua/lease`, `POST …/take {viewer}`,
+`POST …/release {viewer, force}`, `GET …/status[?fresh=1]` (shapes in
+[docs/REMOTE-CUA.md](docs/REMOTE-CUA.md)) — authenticated by Hermes like
+every other `/api/` call; it never writes the lease itself. The plugin must be
+enabled in that bot's profile, or the pane says so.
+
+**Private Hermes dependency.** Those calls go through Hermes Desktop's REST
+bridge, `window.hermesDesktop.api({connectionId?, profile, priority, path,
+method, body})` (the `hermes:api` IPC that the app's own `api/client.ts`
+`hermesApiAs` uses). It is not part of the desktop plugin SDK: the SDK's
+`ctx.rest` only reaches this plugin's own namespace. Grokbot Override reaches
+the kit's Slack add-ons the same way. If a Hermes update renames or removes the
+bridge, the chip says "This Hermes build has no REST bridge for plugin routes."
+and Take over is unavailable; viewing is unaffected. An HTTP error arrives as
+`"<status>: <body>"`, which the pane parses back into the plugin's JSON
+(`error`, `message`, `lease`).
 
 Leave Hermes's own "Open Screen when the bot uses it" off for Mac bots: the
 native pane would only say "No bot screen on this host". This pane opens on

@@ -12,6 +12,12 @@
   `orgo-hands`, Orgo API-key discovery and the Orgo session parser, `install-agent-plugin.sh`. New
   `computer-viewer/remove-orgo-computer.sh` (dry run, `--yes`) removes an installed `orgo-computer` from profiles;
   `install.sh` names it when it finds one.
+- **computer-viewer: Take over talks to remote-cua's dashboard routes (2026-11-15)**: the pane now calls
+  `/api/plugins/remote-cua/{lease,take,release,status}` on the bot's own connection and profile through Hermes
+  Desktop's REST bridge (`window.hermesDesktop.api`, a private Hermes touch point, documented in the
+  computer-viewer README), instead of gateway RPC. It reads the plugin's exact lease and status shapes, shows the
+  status `summary` lines, re-checks with `?fresh=1` on **Check**, and shows a refused take or release (409) with
+  the plugin's message and the current holder.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

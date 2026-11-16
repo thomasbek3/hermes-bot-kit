@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaGatewayRequest, REMOTE_CUA_METHODS, ControlBar, ControlStatusLine, ComputerPane, OverlayBar }\n'
+        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -974,14 +974,15 @@ test('no Orgo strings are left in the kit (history and the remover excepted)', a
 // Auto-open on Hermes's own computer_use / browser tool calls.
 // ---------------------------------------------------------------------------
 
-function boundSetup({ remoteCua = false, bind = true, profile = 'ava', client } = {}) {
+function boundSetup({ remoteCua = false, bind = true, profile = 'ava', client, api, routes } = {}) {
   const instances = []
   const loaded = loadPlugin({
-    hermesDesktop: fakeBridge(),
+    hermesDesktop: api ? { ...fakeBridge(), api } : fakeBridge(),
     importHook: async () => ({ default: fakeRfbCtorWithListeners(instances) })
   })
   const { t, context } = loaded
   context.__host.state.profile = atom(profile)
+  if (routes) context.__host.profileRoutes = () => routes
   const ctx = makeCtx()
   ctx.os.__written = []
   const registered = []
@@ -1061,33 +1062,83 @@ test('at most one wake per bot every 30 s, and a manual close holds for 30 s', (
 })
 
 // ---------------------------------------------------------------------------
-// Take over / Hand back against a fake remote-cua lease (contract shape).
+// Take over / Hand back against a fake remote-cua backend reached through the
+// desktop REST bridge, answering exactly as remote-cua/dashboard/plugin_api.py.
 // ---------------------------------------------------------------------------
 
-function fakeLeaseServer(initial = { holder: 'agent', viewer: null, since: 0, epoch: 0 }) {
-  const server = { lease: { ...initial }, calls: [], status: { reachable: true, driver_version: '0.21.0', permissions_ok: true, screen_awake: true } }
-  server.client = {
-    lease: async profile => {
-      server.calls.push(['lease', profile])
-      return { lease: { ...server.lease } }
-    },
-    take: async (profile, viewer) => {
-      server.calls.push(['take', profile, viewer])
-      server.lease = { holder: 'human', viewer, since: 1, epoch: server.lease.epoch + 1 }
-      return { lease: { ...server.lease } }
-    },
-    release: async (profile, viewer, force) => {
-      server.calls.push(['release', profile, viewer, Boolean(force)])
-      if (force || server.lease.viewer === viewer) {
-        server.lease = { holder: 'agent', viewer: null, since: 2, epoch: server.lease.epoch + 1 }
-      }
-      return { lease: { ...server.lease } }
-    },
-    status: async profile => {
-      server.calls.push(['status', profile])
-      return server.status
-    }
+const AGENT_LEASE = { holder: 'agent', viewer: null, since: 0, epoch: 0 }
+const MACHINE = { host: '100.64.0.10', user: 'you', os: 'macos', driver: '', vnc: '' }
+// GET /status fixtures, copied from the plugin's documented responses.
+const STATUS_READY = {
+  ok: true, configured: true, supported: true, machine: MACHINE, reachable: true,
+  driver: { found: true, path: '/Users/you/.hermes/tools/cua-driver-0.21.0-darwin-arm64/cua-driver', version: '0.21.0', pin: '0.21.0', ok: true, problem: '' },
+  permissions: { accessibility: true, screen_recording: true, ok: true },
+  screen_awake: true, windows: 10, logged_in: true, error: '', checked_at: 1763251200.1, cached: false,
+  summary: ['Reachable over SSH', 'Driver ready: cua-driver 0.21.0', 'Permissions OK (Accessibility and Screen Recording)', 'Screen awake']
+}
+const STATUS_UNREACHABLE = {
+  ok: false, configured: true, supported: true, machine: MACHINE, reachable: false,
+  driver: null, permissions: null, screen_awake: null, windows: null, logged_in: null,
+  error: 'could not reach you@100.64.0.10 over SSH (Permission denied (publickey).)', checked_at: 1763251200.1, cached: false,
+  summary: ['Not reachable over SSH: could not reach you@100.64.0.10 over SSH (Permission denied (publickey).)']
+}
+const STATUS_WINDOWS = {
+  ok: false, configured: true, supported: false, machine: { ...MACHINE, os: 'windows' },
+  error: 'Windows support coming: needs cua Session proxy.', summary: ['Windows support coming: needs cua Session proxy.'], checked_at: 1763251200.1
+}
+const STATUS_ASLEEP = {
+  ...STATUS_READY, ok: false, screen_awake: false, windows: 0, error: 'Screen asleep or locked: no windows are visible',
+  summary: ['Reachable over SSH', 'Driver ready: cua-driver 0.21.0', 'Permissions OK (Accessibility and Screen Recording)', 'Screen asleep or locked: no windows are visible']
+}
+
+/** The plugin's routes behind `window.hermesDesktop.api`. HTTP >= 400 rejects
+ *  the way the bridge does: Error("<status>: <body>"). */
+function fakeRemoteCua({ lease = AGENT_LEASE, status = STATUS_READY, configured = true, missing = false } = {}) {
+  const server = { lease: { ...lease }, status, calls: [] }
+  const reply = (code, body) => {
+    if (code >= 400) throw new Error(`${code}: ${JSON.stringify(body)}`)
+    return JSON.parse(JSON.stringify(body))
   }
+  const bump = next => {
+    server.lease = { ...next, since: 1763251200.5, epoch: server.lease.epoch + 1 }
+  }
+  server.api = async request => {
+    const { method, path, body, profile, connectionId, priority } = request
+    server.calls.push({ method, path, body, profile, connectionId, priority })
+    if (missing) return reply(404, { detail: 'Plugin not found' })
+    const route = path.replace('/api/plugins/remote-cua/', '')
+    if (method === 'GET' && route === 'lease') {
+      return reply(200, configured
+        ? { ok: true, lease: server.lease, configured: true, machine: MACHINE }
+        : { ok: true, lease: server.lease, configured: false, machine: null, error: 'this profile has no remote_cua block in config.yaml' })
+    }
+    if (method === 'POST' && route === 'take') {
+      const viewer = body && body.viewer
+      if (!/^[A-Za-z0-9._:-]{1,128}$/.test(String(viewer || ''))) {
+        return reply(400, { ok: false, error: 'bad_viewer', message: 'viewer must be 1-128 letters, digits, . _ : -' })
+      }
+      if (server.lease.holder === 'human' && server.lease.viewer !== viewer) {
+        return reply(409, { ok: false, error: 'held_by_other_viewer', message: 'Another viewer has control of this computer', lease: server.lease })
+      }
+      if (server.lease.viewer !== viewer) bump({ holder: 'human', viewer })
+      return reply(200, { ok: true, lease: server.lease })
+    }
+    if (method === 'POST' && route === 'release') {
+      const viewer = body && body.viewer
+      const force = Boolean(body && body.force === true)
+      if (server.lease.holder === 'human') {
+        if (!force && server.lease.viewer !== viewer) {
+          return reply(409, { ok: false, error: 'not_holder', message: 'This viewer does not hold control; use force to hand back anyway', lease: server.lease })
+        }
+        bump({ holder: 'agent', viewer: null })
+      }
+      return reply(200, { ok: true, lease: server.lease })
+    }
+    if (method === 'GET' && route.startsWith('status')) return reply(200, server.status)
+    return reply(404, { detail: 'Not Found' })
+  }
+  server.takes = () => server.calls.filter(c => c.path.endsWith('/take'))
+  server.releases = () => server.calls.filter(c => c.path.endsWith('/release'))
   return server
 }
 
@@ -1098,16 +1149,46 @@ const settle = async () => {
   for (let i = 0; i < 5; i += 1) await new Promise(resolve => setTimeout(resolve, 0))
 }
 
+const AVA_ROUTE = [{ profile: 'ava', targetProfile: 'ava', connectionId: 'conn-mini', mode: 'remote' }]
+
 async function remoteSetup(server, opts = {}) {
-  const setup = boundSetup({ remoteCua: true, client: server.client, ...opts })
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes: AVA_ROUTE, ...opts })
   setup.t.syncControlTarget()
   await setup.t.connect(setup.ep)
   await settle()
   return setup
 }
 
+test('the pane calls the plugin routes on the bot\'s own connection and profile', async () => {
+  const server = fakeRemoteCua()
+  const { t } = await remoteSetup(server)
+  await t.takeOver()
+  await t.handBack()
+  await t.refreshStatus(true)
+  // plain(): a missing body reads as null.
+  assert.deepEqual(
+    plain(server.calls.map(c => [c.method, c.path, c.body, c.profile, c.connectionId, c.priority])),
+    [
+      ['GET', '/api/plugins/remote-cua/lease', null, 'ava', 'conn-mini', 'foreground'],
+      ['GET', '/api/plugins/remote-cua/status', null, 'ava', 'conn-mini', 'foreground'],
+      ['POST', '/api/plugins/remote-cua/take', { viewer: t.control.viewerId }, 'ava', 'conn-mini', 'foreground'],
+      ['POST', '/api/plugins/remote-cua/release', { viewer: t.control.viewerId, force: false }, 'ava', 'conn-mini', 'foreground'],
+      ['GET', '/api/plugins/remote-cua/status?fresh=1', null, 'ava', 'conn-mini', 'foreground']
+    ]
+  )
+  assert.match(t.control.viewerId, /^[A-Za-z0-9._:-]{1,128}$/)
+})
+
+test('a profile without a route is asked on its own name with no connection id', async () => {
+  const server = fakeRemoteCua()
+  const { t } = await remoteSetup(server, { routes: [] })
+  assert.equal(server.calls[0].profile, 'ava')
+  assert.equal(server.calls[0].connectionId, undefined)
+  assert.ok(t)
+})
+
 test('bot in control: the pane is view-only for that machine, even expanded', async () => {
-  const server = fakeLeaseServer()
+  const server = fakeRemoteCua()
   const { t, instances } = await remoteSetup(server)
   t.$ui.set({ ...t.$ui.get(), expanded: true, viewOnly: false })
   const view = t.controlView(t.$control.get(), t.control.viewerId)
@@ -1119,10 +1200,11 @@ test('bot in control: the pane is view-only for that machine, even expanded', as
 })
 
 test('Take over gives input and the red-border state; Hand back returns it', async () => {
-  const server = fakeLeaseServer()
+  const server = fakeRemoteCua()
   const { t, instances } = await remoteSetup(server)
   await t.takeOver()
-  assert.deepEqual(server.calls.find(c => c[0] === 'take'), ['take', 'ava', t.control.viewerId])
+  assert.equal(server.lease.holder, 'human')
+  assert.equal(server.lease.viewer, t.control.viewerId)
   const view = t.controlView(t.$control.get(), t.control.viewerId)
   assert.equal(view.iHold, true)
   assert.equal(view.chip, 'You are in control')
@@ -1137,23 +1219,21 @@ test('Take over gives input and the red-border state; Hand back returns it', asy
 })
 
 test('a dropped connection keeps the human lease until reconnect', async () => {
-  const server = fakeLeaseServer()
+  const server = fakeRemoteCua()
   const { t, instances } = await remoteSetup(server)
   instances[instances.length - 1].listeners.get('connect')({})
   await t.takeOver()
-  const releasesBefore = server.calls.filter(c => c[0] === 'release').length
-  // The stream drops (not clean, not intentional).
+  const releasesBefore = server.releases().length
   instances[instances.length - 1].listeners.get('disconnect')({ detail: { clean: false } })
   await settle()
-  assert.equal(server.calls.filter(c => c[0] === 'release').length, releasesBefore)
+  assert.equal(server.releases().length, releasesBefore)
   assert.equal(server.lease.holder, 'human')
-  // Reconnected: the lease is re-read and is still ours.
   await t.refreshLease()
   assert.equal(t.controlView(t.$control.get(), t.control.viewerId).iHold, true)
 })
 
 test('closing the pane hands back; so does Disconnect', async () => {
-  const server = fakeLeaseServer()
+  const server = fakeRemoteCua()
   const a = await remoteSetup(server)
   a.t.showPane()
   await a.t.takeOver()
@@ -1161,7 +1241,7 @@ test('closing the pane hands back; so does Disconnect', async () => {
   await settle()
   assert.equal(server.lease.holder, 'agent')
 
-  const server2 = fakeLeaseServer()
+  const server2 = fakeRemoteCua()
   const b = await remoteSetup(server2)
   await b.t.takeOver()
   b.t.userDisconnect()
@@ -1170,39 +1250,60 @@ test('closing the pane hands back; so does Disconnect', async () => {
 })
 
 test('after a reload the old lease shows "Hand back (force)", which clears it', async () => {
-  const server = fakeLeaseServer({ holder: 'human', viewer: 'cv-from-before-reload', since: 1, epoch: 3 })
+  const server = fakeRemoteCua({ lease: { holder: 'human', viewer: 'cv-from-before-reload', since: 1763251100, epoch: 3 } })
   const { t } = await remoteSetup(server)
   const view = t.controlView(t.$control.get(), t.control.viewerId)
   assert.equal(view.iHold, false)
   assert.equal(view.chip, 'Another viewer is in control')
   assert.equal(view.canForce, true)
   assert.equal(t.controlLocked(), true)
-  // A plain hand back from a non-holder does nothing.
   await t.handBack(false)
-  assert.equal(server.calls.some(c => c[0] === 'release'), false)
+  assert.equal(server.releases().length, 0, 'a plain hand back from a non-holder sends nothing')
   await t.handBack(true)
-  assert.deepEqual(server.calls.find(c => c[0] === 'release'), ['release', 'ava', t.control.viewerId, true])
+  assert.deepEqual(plain(server.releases()[0].body), { viewer: t.control.viewerId, force: true })
   assert.equal(server.lease.holder, 'agent')
 })
 
+test('a refused take (409 held_by_other_viewer) shows the holder and the message', async () => {
+  const server = fakeRemoteCua()
+  const { t } = await remoteSetup(server)
+  server.lease = { holder: 'human', viewer: 'cv-other-window', since: 1763251300, epoch: 8 }
+  await t.takeOver()
+  const state = t.$control.get()
+  assert.equal(state.pending, null)
+  assert.equal(state.error, 'Another viewer has control of this computer')
+  assert.equal(t.controlView(state, t.control.viewerId).chip, 'Another viewer is in control')
+  assert.equal(t.controlLocked(), true)
+})
+
 test('another viewer taking over drops this window back to watching', async () => {
-  const server = fakeLeaseServer()
+  const server = fakeRemoteCua()
   const { t } = await remoteSetup(server)
   await t.takeOver()
-  server.lease = { holder: 'human', viewer: 'cv-other-window', since: 5, epoch: 9 }
+  server.lease = { holder: 'human', viewer: 'cv-other-window', since: 1763251300, epoch: 9 }
   await t.refreshLease()
   assert.equal(t.$control.get().evicted, true)
   assert.equal(t.controlLocked(), true)
 })
 
 test('a remote-cua computer that is only the global default cannot be taken over', async () => {
-  const server = fakeLeaseServer()
+  const server = fakeRemoteCua()
   const { t } = await remoteSetup(server, { bind: false })
   const view = t.controlView(t.$control.get(), t.control.viewerId)
   assert.equal(view.canTakeOver, false)
   assert.equal(t.controlLocked(), true)
   await t.takeOver()
   assert.equal(server.calls.length, 0)
+})
+
+test('an unconfigured profile and a missing plugin say so in plain words', async () => {
+  const unconfigured = fakeRemoteCua({ configured: false })
+  const a = await remoteSetup(unconfigured)
+  assert.equal(a.t.$control.get().error, 'this profile has no remote_cua block in config.yaml')
+  const missing = fakeRemoteCua({ missing: true })
+  const b = await remoteSetup(missing)
+  assert.match(b.t.$control.get().error, /doesn't have the remote-cua plugin enabled/)
+  assert.match(b.t.$control.get().statusError, /remote-cua plugin/)
 })
 
 test('plain VNC computers keep the manual View only switch', async () => {
@@ -1214,54 +1315,48 @@ test('plain VNC computers keep the manual View only switch', async () => {
   assert.equal(t.effectiveViewOnly(), true)
 })
 
-test('a bound machine shows GET status in plain words', async () => {
-  const server = fakeLeaseServer()
+test('a bound machine shows the plugin status summary in plain words', async () => {
+  const server = fakeRemoteCua()
   const { t } = await remoteSetup(server)
   assert.deepEqual(plain(t.statusWords(t.$control.get().status)), {
     tone: 'good',
-    line: 'Reachable · driver 0.21.0 · permissions OK · screen awake'
+    line: 'Reachable over SSH · Driver ready: cua-driver 0.21.0 · Permissions OK (Accessibility and Screen Recording) · Screen awake'
   })
-  const asleep = t.statusWords(
-    t.normalizeStatus({ reachable: true, driver: { found: true, version: '0.21.0' }, permissions: { accessibility: true, screen_recording: false }, screen: { asleep: true } })
-  )
+  const asleep = t.statusWords(t.normalizeStatus(STATUS_ASLEEP))
   assert.equal(asleep.tone, 'bad')
-  assert.match(asleep.line, /needs Accessibility and Screen Recording permission/)
-  assert.match(asleep.line, /screen asleep or locked/)
-  const down = t.statusWords(t.normalizeStatus({ reachable: false, detail: 'ssh: connect timed out' }))
-  assert.equal(down.line, "Can't reach the machine: ssh: connect timed out")
-  assert.equal(t.statusWords(t.normalizeStatus({ reachable: true, driver_found: false })).line, 'Reachable · driver not found')
+  assert.match(asleep.line, /Screen asleep or locked/)
+  const down = t.statusWords(t.normalizeStatus(STATUS_UNREACHABLE))
+  assert.equal(down.tone, 'bad')
+  assert.match(down.line, /Not reachable over SSH/)
+  const windows = t.statusWords(t.normalizeStatus(STATUS_WINDOWS))
+  assert.equal(windows.tone, 'bad')
+  assert.match(windows.line, /Windows support coming/)
+  // An answer with no summary falls back to its error.
+  assert.equal(t.statusWords(t.normalizeStatus({ ok: false, configured: null, error: 'status check failed: OSError: x' })).line, 'status check failed: OSError: x')
 })
 
-test('missing lease file reads as agent; the RPC wire names follow the plugin namespace', () => {
+test('the lease parser reads the plugin shape; no file reads as agent', () => {
   const { t } = loadPlugin()
-  assert.deepEqual(plain(t.normalizeLease(null)), { holder: 'agent', viewer: null, since: 0, epoch: 0 })
-  assert.deepEqual(plain(t.normalizeLease({ holder: 'human', viewer: 'v', since: 4, epoch: 2 })), {
-    holder: 'human', viewer: 'v', since: 4, epoch: 2
+  assert.deepEqual(plain(t.normalizeLease({ ok: true, lease: AGENT_LEASE, configured: true, machine: MACHINE })), AGENT_LEASE)
+  assert.deepEqual(plain(t.normalizeLease({ ok: true, lease: { holder: 'human', viewer: 'pane-7f3a', since: 1763251200.5, epoch: 4 } })), {
+    holder: 'human', viewer: 'pane-7f3a', since: 1763251200.5, epoch: 4
   })
-  for (const method of Object.values(t.REMOTE_CUA_METHODS)) assert.match(method, /^plugin\.remote-cua\./)
+  assert.deepEqual(plain(t.normalizeLease(null)), AGENT_LEASE)
 })
 
-test('the gateway transport routes to the bot profile and sends the contract params', async () => {
-  const { t, context } = loadPlugin()
-  const sent = []
-  context.__host.profileRoutes = () => [{ profile: 'ava', targetProfile: 'ava', connectionId: 'local', mode: 'local' }]
-  context.__host.requestProfile = async (route, method, params) => {
-    sent.push([route.profile, method, params])
-    return { lease: { holder: 'agent' } }
-  }
-  const client = t.createRemoteCuaClient(t.remoteCuaGatewayRequest)
-  await client.lease('ava')
-  await client.take('ava', 'cv-1')
-  await client.release('ava', 'cv-1', false)
-  await client.release('ava', 'cv-1', true)
-  await client.status('ava')
-  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
-    ['ava', 'plugin.remote-cua.lease.get', {}],
-    ['ava', 'plugin.remote-cua.lease.take', { viewer: 'cv-1' }],
-    ['ava', 'plugin.remote-cua.lease.release', { viewer: 'cv-1' }],
-    ['ava', 'plugin.remote-cua.lease.release', { viewer: 'cv-1', force: true }],
-    ['ava', 'plugin.remote-cua.status', {}]
-  ])
+test('the bridge error "<status>: <body>" is parsed back into its JSON body', async () => {
+  const { t, context } = loadPlugin({
+    hermesDesktop: {
+      api: async () => {
+        throw new Error('409: {"ok": false, "error": "not_holder", "message": "This viewer does not hold control; use force to hand back anyway", "lease": {"holder": "human", "viewer": "x", "since": 1, "epoch": 2}}')
+      }
+    }
+  })
+  context.__host.profileRoutes = () => []
+  await assert.rejects(
+    () => t.remoteCuaRestRequest('ava', 'release', { viewer: 'y', force: false }),
+    err => err.status === 409 && err.body.error === 'not_holder' && err.body.lease.viewer === 'x'
+  )
 })
 
 function textOf(node) {
@@ -1273,13 +1368,12 @@ function textOf(node) {
 }
 
 test('the pane and overlay render the chip, the buttons and the status line', async () => {
-  const server = fakeLeaseServer()
+  const server = fakeRemoteCua()
   const { t } = await remoteSetup(server)
   let text = textOf(t.ControlBar({})) + ' ' + textOf(t.ControlStatusLine())
   assert.match(text, /Bot is in control/)
   assert.match(text, /Take over/)
-  assert.match(text, /Reachable · driver 0\.21\.0/)
-  // The whole pane and the overlay bar build without throwing.
+  assert.match(text, /Reachable over SSH · Driver ready: cua-driver 0\.21\.0/)
   assert.ok(t.ComputerPane())
   const bar = t.OverlayBar({ iframeMode: false, connected: true, viewOnly: true, remote: true })
   assert.doesNotMatch(JSON.stringify(bar), /"View only"/)
