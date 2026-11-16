@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner }\n'
+        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner, onFocusedOwnerChange }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -974,7 +974,7 @@ test('no Orgo strings are left in the kit (history and the remover excepted)', a
 // Auto-open on Hermes's own computer_use / browser tool calls.
 // ---------------------------------------------------------------------------
 
-function boundSetup({ remoteCua = false, bind = true, profile = 'ava', client, api, routes } = {}) {
+function boundSetup({ remoteCua = false, bind = true, profile = 'ava', client, api, routes, state } = {}) {
   const instances = []
   const loaded = loadPlugin({
     hermesDesktop: api ? { ...fakeBridge(), api } : fakeBridge(),
@@ -982,11 +982,20 @@ function boundSetup({ remoteCua = false, bind = true, profile = 'ava', client, a
   })
   const { t, context } = loaded
   context.__host.state.profile = atom(profile)
-  if (routes) context.__host.profileRoutes = () => routes
+  if (state) Object.assign(context.__host.state, state)
+  if (typeof routes === 'function') context.__host.profileRoutes = routes
+  else if (routes) context.__host.profileRoutes = () => routes
   const ctx = makeCtx()
   ctx.os.__written = []
   const registered = []
-  // Scoped timers: the lease poll is cleared with the plugin, never left running.
+  // Scoped timers: the lease poll and cleanup retries run only when a test fires them.
+  ctx.timeouts = []
+  ctx.setTimeout = (fn, ms) => {
+    ctx.timeouts.push({ fn, ms })
+    return () => {}
+  }
+  ctx.disposers = []
+  ctx.onDispose = fn => ctx.disposers.push(fn)
   ctx.intervals = []
   ctx.setInterval = (fn, ms) => {
     ctx.intervals.push({ fn, ms })
@@ -1467,25 +1476,33 @@ test('R1-01: a lost release answer keeps input off until a fresh read', async ()
   assert.equal(t.controlView(t.$control.get(), t.control.viewerId).chip, 'Bot is in control', 'the reconciling read landed')
 })
 
-test('R1-01: a lost release that did NOT commit stays fenced until Take over re-confirms', async () => {
+test('R1-01: a lost release that did NOT commit stays fenced; its id is retired, Take over uses a new one', async () => {
   const server = fakeRemoteCua()
-  const { t, instances } = await heldByMe(server)
+  const { t, ctx, instances } = await heldByMe(server)
+  const oldId = t.control.viewerId
   // The request never reaches the server: the human still holds the lease.
-  const api = server.api
+  let offline = true
   t.control.client = t.createRemoteCuaClient(async (owner, op, body, query) => {
-    if (op === 'release') throw new Error('connection lost before POST')
+    if (offline && op === 'release') throw new Error('connection lost before POST')
     return t.remoteCuaRestRequest(owner, op, body, query)
   })
   await t.handBack()
   await settle()
   assert.equal(server.lease.holder, 'human')
-  assert.equal(lastRfb(instances).viewOnly, true, 'a read of the old grant does not re-enable input')
+  assert.equal(lastRfb(instances).viewOnly, true, 'no input under an id whose release may still land')
+  assert.notEqual(t.control.viewerId, oldId, 'the id is retired')
   const view = t.controlView(t.$control.get(), t.control.viewerId)
-  assert.equal(view.canTakeOver, true)
+  assert.equal(view.chip, 'Handing back…')
+  assert.equal(view.canTakeOver, false)
   assert.equal(view.canHandBack, true)
+  // Back online: the scheduled retry hands the old id back, then Take over grants the new id.
+  offline = false
+  ctx.timeouts.shift().fn()
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
   await t.takeOver()
+  assert.equal(server.lease.viewer, t.control.viewerId)
   assert.equal(lastRfb(instances).viewOnly, false)
-  assert.ok(api)
 })
 
 test('R1-02: a lease read sent before Hand back cannot resurrect control after it', async () => {
@@ -1802,11 +1819,11 @@ test('R2-03: a Take over whose answer was lost is handed back when the pane clos
   await settle()
   lost.fail(new Error('connection lost after take committed'))
   await taking
-  assert.equal(server.lease.holder, 'human', 'the take committed')
+  assert.equal(server.takes().length, 1, 'the take reached the server')
   t.hidePane()
   await settle()
   assert.equal(server.lease.holder, 'agent')
-  assert.equal(server.releases().length, 1)
+  assert.ok(server.releases().length >= 1)
 })
 
 test('R2-03: the same, closed with Disconnect, and reconciled first', async () => {
@@ -1889,4 +1906,158 @@ test('R2: a cleanup whose answer is lost is retried until the server says it is 
   timers[0].fn()
   await settle()
   assert.equal(server.lease.holder, 'agent')
+})
+
+// ---------------------------------------------------------------------------
+// Review round 3 regressions (each fails on 9f4bd96).
+// ---------------------------------------------------------------------------
+
+/** profileRoutes() whose answers the test hands out one at a time. */
+function parkedRoutes() {
+  const waiting = []
+  const fn = () =>
+    new Promise(resolve => {
+      waiting.push(resolve)
+    })
+  fn.waiting = waiting
+  fn.answerNext = routes => waiting.shift()(routes)
+  return fn
+}
+
+test('R3-01: focus moving to the same bot name on another gateway fences at once; Take over cannot reach the old one', async () => {
+  const server = fakeRemoteCua()
+  const focused = atom({ connectionId: 'conn-a', profile: 'ava' })
+  const routes = parkedRoutes()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes, state: { focusedSessionOwner: focused } })
+  routes.answerNext(TWO_AVAS)
+  await settle()
+  assert.equal(setup.t.$control.get().owner.connectionId, 'conn-a')
+  // Focus moves; its lookup is held.
+  focused.set({ connectionId: 'conn-b', profile: 'ava' })
+  assert.equal(setup.t.$control.get().owner, null, 'the old owner is dropped synchronously')
+  assert.equal(setup.t.controlView(setup.t.$control.get(), setup.t.control.viewerId).canTakeOver, false)
+  await setup.t.takeOver()
+  assert.equal(server.takes().length, 0, 'no take goes anywhere while the owner is unknown')
+  routes.answerNext(TWO_AVAS)
+  await settle()
+  await setup.t.takeOver()
+  assert.deepEqual(server.takes().map(c => c.connectionId), ['conn-b'])
+})
+
+test('R3-01: an older owner lookup that lands last cannot replace the newer owner', async () => {
+  const server = fakeRemoteCua()
+  const focused = atom({ connectionId: 'conn-a', profile: 'ava' })
+  const routes = parkedRoutes()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes, state: { focusedSessionOwner: focused } })
+  // Lookup 1 (focus A) is parked; focus moves to B and lookup 2 answers first.
+  focused.set({ connectionId: 'conn-b', profile: 'ava' })
+  assert.equal(routes.waiting.length, 2)
+  routes.waiting[1](TWO_AVAS)
+  await settle()
+  routes.waiting[0](TWO_AVAS)
+  await settle()
+  assert.equal(setup.t.$control.get().owner.connectionId, 'conn-b')
+  await setup.t.takeOver()
+  assert.deepEqual(server.takes().map(c => c.connectionId), ['conn-b'])
+})
+
+test('R3-01: an owner lookup that lands after the plugin is disposed does nothing', async () => {
+  const server = fakeRemoteCua()
+  const routes = parkedRoutes()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes })
+  setup.t.showPane()
+  for (const dispose of setup.ctx.disposers) dispose()
+  const intervalsBefore = setup.ctx.intervals.length
+  const callsBefore = server.calls.length
+  routes.answerNext(AVA_ROUTE)
+  await settle()
+  assert.equal(setup.ctx.intervals.length, intervalsBefore, 'no poll re-armed')
+  assert.equal(setup.t.control.pollStop, null)
+  assert.equal(server.calls.length, callsBefore, 'no status or lease request')
+  assert.equal(setup.t.$control.get().owner, null)
+})
+
+/** A transport that times out on the next release while the server still
+ *  runs it: the commit happens when the test says so. */
+function timeoutThenLateCommit(context, server) {
+  const late = []
+  let armed = true
+  const real = context.hermesDesktop.api
+  context.hermesDesktop.api = async request => {
+    if (armed && request.method === 'POST' && request.path.endsWith('/release')) {
+      armed = false
+      late.push(() => {
+        try {
+          return server.api.answer(request)
+        } catch (error) {
+          return error
+        }
+      })
+      throw new Error('request timed out')
+    }
+    return real(request)
+  }
+  return late
+}
+
+test('R3-02: a timed-out release that commits later cannot revoke the next Take over', async () => {
+  const server = fakeRemoteCua()
+  const { t, ctx, context, instances } = await heldByMe(server)
+  const firstId = t.control.viewerId
+  t.showPane()
+  const late = timeoutThenLateCommit(context, server)
+  t.hidePane()
+  await settle()
+  assert.equal(server.lease.viewer, firstId, 'the release has not committed')
+  t.showPane()
+  await t.takeOver()
+  await settle()
+  // The retake was refused while an old id of ours still holds it.
+  assert.equal(lastRfb(instances).viewOnly, true)
+  assertInputMatchesServer(t, server, instances, 'before the late commit')
+  // The old release commits now.
+  late[0]()
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+  assertInputMatchesServer(t, server, instances, 'after the late commit')
+  // The next poll shows it free.
+  await t.refreshLease()
+  assert.equal(t.controlView(t.$control.get(), t.control.viewerId).chip, 'Bot is in control')
+  // Take over again: granted to a NEW id, which no old release can clear.
+  await t.takeOver()
+  await settle()
+  assert.notEqual(t.control.viewerId, firstId)
+  assert.equal(server.lease.viewer, t.control.viewerId)
+  assert.equal(lastRfb(instances).viewOnly, false)
+  // Every scheduled retry for the old id runs: none of them touches the new grant.
+  while (ctx.timeouts.length) ctx.timeouts.shift().fn()
+  await settle()
+  assert.equal(server.lease.viewer, t.control.viewerId)
+  assertInputMatchesServer(t, server, instances, 'after the retries')
+})
+
+test('R3-02: a stale release landing AFTER the new grant is refused by the server, input stays correct', async () => {
+  const server = fakeRemoteCua()
+  const { t, ctx, context, instances } = await heldByMe(server)
+  t.showPane()
+  const late = timeoutThenLateCommit(context, server)
+  t.hidePane()
+  await settle()
+  // A retry gets through and hands the old id back.
+  ctx.timeouts.shift().fn()
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+  t.showPane()
+  await t.takeOver()
+  await settle()
+  const grant = { ...server.lease }
+  assert.equal(grant.viewer, t.control.viewerId)
+  assert.equal(lastRfb(instances).viewOnly, false)
+  // Now the timed-out release finally runs on the server.
+  const result = late[0]()
+  assert.match(String(result && result.message), /^409: .*not_holder/)
+  assert.deepEqual(plain(server.lease), plain(grant))
+  await t.refreshLease()
+  assertInputMatchesServer(t, server, instances, 'after the stale release')
+  assert.equal(lastRfb(instances).viewOnly, false)
 })

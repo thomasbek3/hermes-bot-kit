@@ -30,6 +30,12 @@
   whose answer was lost, is handed back (with retries) whenever the pane stops controlling that machine, including
   removing the binding; the gateway is picked by the focused chat's `focusedSessionOwner`, never the active socket,
   and fails closed when unprovable.
+- **computer-viewer: control fixes from review round 3 (2026-11-16)**: a lease change with no answer retires its
+  viewer id, so a release that commits late can never revoke a later grant (Package P's release only clears the
+  viewer it names), and Take over re-reads the lease and waits while an old id of this window holds it; a focus
+  change fences input and hands back the old gateway synchronously; owner lookups are sequenced and tied to the
+  plugin's lifetime, so a stale or post-unload lookup changes nothing and arms no polling. The README lists the
+  known limits.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

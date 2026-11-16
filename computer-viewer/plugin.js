@@ -2348,13 +2348,42 @@ const $control = atom({ ...IDLE_CONTROL })
 
 const control = {
   // Minted per plugin load, like Hermes's per-attach viewer id: a reload is a
-  // new viewer, so a lease left behind needs "Hand back (force)".
-  viewerId: newViewerId(),
+  // new viewer, so a lease left behind needs "Hand back (force)". Also
+  // replaced after any lease change whose outcome is unknown (see taint()):
+  // a release that may still commit names the OLD id, and Package P only
+  // lets a release clear the viewer it names, so it can never revoke a grant
+  // made to the new id.
+  viewerId: '',
+  // Every id this window has used: a lease naming one of them is ours to hand back.
+  ownViewers: new Set(),
   client: null,
   pollStop: null,
   // Bumped by every take, hand back, close and target change: an answer to a
   // request started before that is stale and is not applied.
-  gen: 0
+  gen: 0,
+  // Owner lookups: each gets a sequence number; only the latest may publish.
+  ownerSeq: 0,
+  // Bumped on attach and dispose: work started under an older attachment
+  // (an owner lookup, a poll, a retry) does nothing.
+  attachment: 0,
+  disposed: false
+}
+
+function mintViewer() {
+  control.viewerId = newViewerId()
+  control.ownViewers.add(control.viewerId)
+  return control.viewerId
+}
+mintViewer()
+
+/** A lease change for `viewer` ended without an answer: it may still commit
+ *  later. Stop using that id for new grants. */
+function taint(viewer) {
+  if (viewer && viewer === control.viewerId) mintViewer()
+}
+
+function isOwnOldViewer(viewer) {
+  return Boolean(viewer && viewer !== control.viewerId && control.ownViewers.has(viewer))
 }
 
 function normalizeLease(raw) {
@@ -2556,20 +2585,30 @@ const CONTROL_BUSY_TEXT = {
 }
 
 /** Pure view of the control state for one viewer. */
-function controlView(state, viewerId) {
+function controlView(state, viewerId, ownViewers = control.ownViewers) {
   const lease = state && state.lease
   const held = leaseHeldBy(lease, viewerId)
   const iHold = held && !state.fence
-  const humanOther = Boolean(lease && lease.holder === 'human' && !held)
+  // Still held under an id this window retired after an unknown outcome:
+  // being handed back; not another viewer, and not input for us.
+  const oldSelf = Boolean(lease && lease.holder === 'human' && !held && lease.viewer && ownViewers.has(lease.viewer))
+  const humanOther = Boolean(lease && lease.holder === 'human' && !held && !oldSelf)
   const ready = Boolean(state && state.bound && state.owner)
-  const busy = state && state.pending ? CONTROL_BUSY_TEXT[state.pending] : state && state.fence ? CONTROL_BUSY_TEXT.fence : ''
+  const busy = state && state.pending
+    ? CONTROL_BUSY_TEXT[state.pending]
+    : oldSelf
+      ? CONTROL_BUSY_TEXT.release
+      : state && state.fence
+        ? CONTROL_BUSY_TEXT.fence
+        : ''
   return {
     iHold,
     humanOther,
+    oldSelf,
     chip: busy || (iHold ? CONTROL_TEXT.youControl : humanOther ? CONTROL_TEXT.otherControls : CONTROL_TEXT.agentControls),
     // Fenced while the lease still names this window: Take over re-confirms it.
-    canTakeOver: Boolean(ready && !state.iframe && !state.pending && (!held || state.fence)),
-    canHandBack: Boolean(ready && held && !state.pending),
+    canTakeOver: Boolean(ready && !state.iframe && !state.pending && !oldSelf && (!held || state.fence)),
+    canHandBack: Boolean(ready && (held || oldSelf) && !state.pending),
     canForce: Boolean(ready && humanOther && !state.pending),
     inputEnabled: Boolean(iHold && !state.iframe && !state.pending)
   }
@@ -2619,26 +2658,33 @@ function applyLease(key, gen, raw, { read = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Two rules keep the lease safe whatever order requests land in:
+// Rules that keep the lease safe whatever order requests land in:
 //
 // 1. Every lease change for one owner (take, hand back, cleanup release)
-//    goes through that owner's queue, one at a time, so a cleanup release can
-//    never commit after a later Take over. Reads are not queued (a hung read
-//    must not delay a hand back); a read is only sent while no change is in
-//    flight for that owner, and its answer is dropped if anything changed
-//    since it was sent.
-// 2. `possiblyHeld` remembers every owner this window may hold a lease on:
-//    set when a take is sent, cleared only by an answer that shows the lease
-//    is not ours. Whenever the pane stops being in control of that owner
-//    (close, Disconnect, unload, unbinding, switching bot or gateway,
-//    becoming watch-only) the owner is "retired": a release is queued, and
-//    retried until an answer says the lease is not ours.
+//    goes through that owner's queue, one at a time. Reads are not queued (a
+//    hung read must not delay a hand back); a read is only sent while no
+//    change is in flight, and its answer is dropped if anything changed.
+// 2. A change whose answer never came (timeout, dropped connection) has an
+//    unknown outcome: the gateway may still commit it later, after the next
+//    request. So its viewer id is retired (taint) and never used for a new
+//    grant. A late release names the old id and Package P refuses to let it
+//    clear another viewer's lease; it cannot revoke the new grant.
+// 3. `possiblyHeld` records every (owner, viewer id) this window may hold:
+//    set when a take is sent, cleared only by an answer that shows that id
+//    does not hold it. Whenever the pane stops controlling that machine, or
+//    an id is retired, the hold is handed back with a release naming exactly
+//    that id, retried a bounded number of times (RETIRE_RETRY_MS).
+// 4. Input is on only while the latest answer names the CURRENT id.
 // ---------------------------------------------------------------------------
 
 const ownerQueues = new Map()
 const ownerInFlight = new Map()
 const possiblyHeld = new Map()
 const RETIRE_RETRY_MS = [2000, 5000, 15000, 30000]
+
+function holdKey(owner, viewer) {
+  return `${owner.key}\u0001${viewer}`
+}
 
 function queued(owner, run) {
   const key = owner.key
@@ -2668,14 +2714,30 @@ function queued(owner, run) {
   return next
 }
 
-/** Track what an answer says about this window's hold on `owner`. */
-function noteHold(owner, raw) {
+/** What an answer says about this window's holds on `owner`: the id it names
+ *  (if one of ours) holds it; `viewer`, the id the request was about, does
+ *  not unless named. */
+function noteHold(owner, raw, viewer) {
   if (!owner || !raw || typeof raw !== 'object' || !raw.lease) return
-  if (leaseHeldBy(normalizeLease(raw), control.viewerId)) possiblyHeld.set(owner.key, owner)
-  else possiblyHeld.delete(owner.key)
+  const lease = normalizeLease(raw)
+  const named = lease.holder === 'human' ? lease.viewer : null
+  if (viewer && viewer !== named) possiblyHeld.delete(holdKey(owner, viewer))
+  for (const entry of [...possiblyHeld.values()]) {
+    if (entry.owner.key === owner.key && entry.viewer !== named) possiblyHeld.delete(holdKey(owner, entry.viewer))
+  }
+  if (named && control.ownViewers.has(named)) possiblyHeld.set(holdKey(owner, named), { owner, viewer: named })
+}
+
+function markPossiblyHeld(owner, viewer) {
+  possiblyHeld.set(holdKey(owner, viewer), { owner, viewer })
+}
+
+function definitive(error) {
+  return Boolean(error && error.body && error.body.lease)
 }
 
 function scheduleLater(fn, ms) {
+  if (control.disposed) return null
   const ctx = pluginCtx
   if (ctx && typeof ctx.setTimeout === 'function') return ctx.setTimeout(fn, ms)
   if (typeof setTimeout === 'function') {
@@ -2685,47 +2747,69 @@ function scheduleLater(fn, ms) {
   return null
 }
 
-/** Release whatever this window may hold on `owner`, until an answer proves it is not ours. */
+/** Hand back one possible hold: a release naming exactly that viewer id. */
 const retiring = new Map()
-function retire(owner, attempt = 0) {
-  if (!owner || !control.client || !possiblyHeld.has(owner.key)) return Promise.resolve()
-  // One cleanup per owner at a time; a take queued after it re-arms it.
-  if (retiring.has(owner.key)) return retiring.get(owner.key)
+function retireHold(entry, attempt = 0) {
+  const { owner, viewer } = entry
+  const key = holdKey(owner, viewer)
+  if (!owner || !control.client || !possiblyHeld.has(key)) return Promise.resolve()
+  if (retiring.has(key)) return retiring.get(key)
   const done = queued(owner, () => {
-    retiring.delete(owner.key)
-    if (!possiblyHeld.has(owner.key)) return null
-    return control.client.release(owner, control.viewerId, false)
-  })
-  retiring.set(owner.key, done)
-  return done.then(
+    retiring.delete(key)
+    if (!possiblyHeld.has(key)) return null
+    return control.client.release(owner, viewer, false)
+  }).then(
     raw => {
-      if (raw) noteHold(owner, raw)
+      if (raw) {
+        noteHold(owner, raw, viewer)
+        refreshShownLease(owner)
+      }
     },
     error => {
-      if (error && error.body && error.body.lease) {
-        noteHold(owner, error.body)
+      if (definitive(error)) {
+        noteHold(owner, error.body, viewer)
+        refreshShownLease(owner)
         return
       }
-      // Outcome unknown: try again later, unless a new Take over claimed it.
+      // Unknown outcome: this id may be released later, or not at all. Never
+      // grant under it again, and try again a bounded number of times.
+      taint(viewer)
       if (attempt < RETIRE_RETRY_MS.length) {
+        // Safe whatever happened since: it names only this (retired) id.
         scheduleLater(() => {
-          const state = $control.get()
-          if (state.owner && state.owner.key === owner.key && controlView(state, control.viewerId).iHold) return
-          void retire(owner, attempt + 1)
+          if (control.disposed) return
+          void retireHold(entry, attempt + 1)
         }, RETIRE_RETRY_MS[attempt])
       }
     }
   )
+  retiring.set(key, done)
+  return done
 }
 
-/** Retire every owner this window may hold, except `keepKey` (still in control). */
-function retireAll(keepKey = '') {
-  for (const owner of [...possiblyHeld.values()]) {
-    if (owner.key !== keepKey) void retire(owner)
+/** After a cleanup on the owner the pane shows, show the lease as it is now. */
+function refreshShownLease(owner) {
+  const state = $control.get()
+  if (state.owner && state.owner.key === owner.key) void refreshLease()
+}
+
+/** Retire every possible hold, except the current id on `keepOwnerKey`
+ *  (still in control there). Holds under retired ids always go. */
+function retireAll(keepOwnerKey = '') {
+  for (const entry of [...possiblyHeld.values()]) {
+    if (entry.owner.key === keepOwnerKey && entry.viewer === control.viewerId) continue
+    void retireHold(entry)
+  }
+}
+
+function retireOldIds(owner) {
+  for (const entry of [...possiblyHeld.values()]) {
+    if (entry.owner.key === owner.key && entry.viewer !== control.viewerId) void retireHold(entry)
   }
 }
 
 async function refreshLease() {
+  if (control.disposed) return
   const state = $control.get()
   if (!state.key || !state.bound || !state.owner || state.pending || !control.client) return
   const { key, owner } = state
@@ -2734,8 +2818,9 @@ async function refreshLease() {
   const gen = control.gen
   try {
     const raw = await control.client.lease(owner)
-    if (control.gen !== gen || ownerInFlight.has(owner.key)) return
+    if (control.gen !== gen || ownerInFlight.has(owner.key) || control.disposed) return
     noteHold(owner, raw)
+    retireOldIds(owner)
     if (!applyLease(key, gen, raw, { read: true })) return
     // GET lease answers 200 for a profile without a remote_cua block, with the reason.
     if (raw && raw.configured === false) {
@@ -2748,6 +2833,7 @@ async function refreshLease() {
 
 /** GET status; `fresh` skips the plugin's 20 s cache (the Check button). */
 async function refreshStatus(fresh = false) {
+  if (control.disposed) return
   const state = $control.get()
   if (!state.key || !state.bound || !state.owner || !control.client) return
   const { key, owner } = state
@@ -2764,46 +2850,62 @@ async function refreshStatus(fresh = false) {
 /** Still the same attachment: same machine, same owner, nothing reset since `gen`. */
 function sameAttachment(key, owner, gen) {
   const state = $control.get()
-  return state.key === key && state.owner === owner && control.gen === gen
+  return !control.disposed && state.key === key && state.owner === owner && control.gen === gen
 }
 
 async function takeOver() {
   const state = $control.get()
-  if (!controlView(state, control.viewerId).canTakeOver || !control.client) return
+  if (control.disposed || !controlView(state, control.viewerId).canTakeOver || !control.client) return
   const { key, owner } = state
   const gen = ++control.gen
+  const viewer = control.viewerId
   patchControl({ pending: 'take', error: '', evicted: false })
   let raw
   try {
-    raw = await queued(owner, () => {
-      possiblyHeld.set(owner.key, owner)
-      return control.client.take(owner, control.viewerId)
+    raw = await queued(owner, async () => {
+      // A lease change for this owner ended without an answer: read the lease
+      // first, behind it in the queue. Refuse while an old id of ours still
+      // holds it (it is being handed back).
+      const unknown = [...possiblyHeld.values()].some(e => e.owner.key === owner.key && e.viewer !== viewer)
+      if (unknown) {
+        const current = await control.client.lease(owner)
+        noteHold(owner, current)
+        const lease = normalizeLease(current)
+        if (lease.holder === 'human' && isOwnOldViewer(lease.viewer)) {
+          const busy = new Error('Still handing back the previous control. Try again in a moment.')
+          busy.body = current
+          throw busy
+        }
+      }
+      markPossiblyHeld(owner, viewer)
+      return control.client.take(owner, viewer)
     })
   } catch (error) {
-    const definitive = Boolean(error && error.body && error.body.lease)
-    if (definitive) noteHold(owner, error.body)
+    const sure = definitive(error)
+    if (sure) noteHold(owner, error.body, viewer)
+    else taint(viewer)
     if (!sameAttachment(key, owner, gen)) {
-      // Abandoned while in flight: whatever it did, give it back.
-      void retire(owner)
+      retireAll()
       return
     }
     patchControl({ pending: null })
-    if (definitive) {
+    if (sure) {
       // A refused take (409) carries the current lease: show who holds it.
       applyLease(key, gen, error.body)
+      retireOldIds(owner)
       patchControl({ error: controlErrorText(error) })
       return
     }
-    // The take may have committed: keep the possible hold on record and ask.
+    // The take may have committed under the retired id: hand that back.
     patchControl({ error: controlErrorText(error) })
-    void refreshLease()
+    retireOldIds(owner)
     return
   }
-  noteHold(owner, raw)
-  if (!sameAttachment(key, owner, gen)) {
+  noteHold(owner, raw, viewer)
+  if (!sameAttachment(key, owner, gen) || viewer !== control.viewerId) {
     // The pane closed, disconnected or moved on while the take was in flight:
     // hand it straight back on the gateway it was taken on, and stay closed.
-    void retire(owner)
+    retireAll()
     return
   }
   patchControl({ pending: null })
@@ -2819,10 +2921,12 @@ async function takeOver() {
  *  commits, before its answer arrives. */
 async function handBack(force = false) {
   const state = $control.get()
-  if (!state.key || !state.owner || !control.client || state.pending) return
+  if (control.disposed || !state.key || !state.owner || !control.client || state.pending) return
   const view = controlView(state, control.viewerId)
-  if (force ? !view.canForce : !leaseHeldBy(state.lease, control.viewerId)) return
+  if (force ? !view.canForce : !view.canHandBack) return
   const { key, owner } = state
+  // Hand back the id the lease names: ours now, or one this window retired.
+  const viewer = !force && state.lease && isOwnOldViewer(state.lease.viewer) ? state.lease.viewer : control.viewerId
   const gen = ++control.gen
   patchControl({
     pending: force ? 'force' : 'release',
@@ -2833,23 +2937,28 @@ async function handBack(force = false) {
   refreshInputGate()
   let raw
   try {
-    raw = await queued(owner, () => control.client.release(owner, control.viewerId, force))
+    raw = await queued(owner, () => control.client.release(owner, viewer, force))
   } catch (error) {
-    if (error && error.body && error.body.lease) noteHold(owner, error.body)
+    const sure = definitive(error)
+    if (sure) noteHold(owner, error.body, viewer)
+    else {
+      // It may still commit later: never grant under this id again.
+      taint(viewer)
+      if (!force) markPossiblyHeld(owner, viewer)
+    }
     if (!sameAttachment(key, owner, gen)) return
     patchControl({ pending: null })
-    if (error && error.body && error.body.lease) {
+    if (sure) {
       applyLease(key, gen, error.body)
       patchControl({ error: controlErrorText(error) })
       return
     }
-    // Outcome unknown (the release may have committed): input stays off until
-    // a fresh read of the lease says this window still holds it.
     patchControl({ error: controlErrorText(error) })
+    retireOldIds(owner)
     void refreshLease()
     return
   }
-  noteHold(owner, raw)
+  noteHold(owner, raw, viewer)
   if (!sameAttachment(key, owner, gen)) return
   patchControl({ pending: null, evicted: false })
   applyLease(key, gen, raw)
@@ -2885,6 +2994,7 @@ function resetControl(next) {
 /** Follow the pane to the machine it shows. Any change of machine, bot,
  *  binding or watch-only state starts a new attachment. */
 function syncControlTarget() {
+  if (control.disposed) return
   const target = controlTarget()
   const state = $control.get()
   const key = target ? target.key : ''
@@ -2904,12 +3014,51 @@ function syncControlTarget() {
   if (target.bound) void resolveControlOwner()
 }
 
-/** (Re)resolve the bot's gateway, then read the lease. A different owner for
- *  the same bot name is a different machine owner: a new attachment. */
+function focusedSnapshot() {
+  const focused = focusedOwner()
+  return focused === undefined ? 'n/a' : focused ? `${focused.connectionId || ''}\u0000${focused.profile}` : 'null'
+}
+
+/** The focused chat moved (maybe to the same bot name on another gateway).
+ *  Synchronously, before any lookup: if the current owner is not provably the
+ *  focused one any more, input goes off and the old owner is retired. */
+function onFocusedOwnerChange() {
+  if (control.disposed) return
+  syncConnection()
+  syncControlTarget()
+  const state = $control.get()
+  if (!state.key || !state.bound) return
+  const focused = focusedOwner()
+  const stillOwner =
+    state.owner &&
+    focused &&
+    focused.profile === state.profile &&
+    sameSource(state.owner.connectionId, focused.connectionId)
+  if (state.owner && !stillOwner) {
+    resetControl({ ...state, owner: null, ownerError: '', lease: null, fence: false, pending: null, status: null, evicted: false, error: '', minGrantEpoch: 0 })
+  }
+  void resolveControlOwner()
+}
+
+/** (Re)resolve the bot's gateway, then read the lease. Each lookup has its
+ *  own sequence number and attachment token; a result is used only if it is
+ *  the latest lookup, the plugin is still attached, and the machine and the
+ *  focused chat's owner are what they were when it started. */
 async function resolveControlOwner() {
+  if (control.disposed) return
   const { key, profile } = $control.get()
   if (!key) return
+  const seq = ++control.ownerSeq
+  const attachment = control.attachment
+  const focusedAt = focusedSnapshot()
   const result = await resolveOwner(profile)
+  if (
+    control.disposed ||
+    control.attachment !== attachment ||
+    control.ownerSeq !== seq ||
+    focusedSnapshot() !== focusedAt
+  )
+    return
   const state = $control.get()
   if (state.key !== key) return
   if (result.error) {
@@ -2939,9 +3088,11 @@ async function resolveControlOwner() {
 /** Poll the lease only while a bound remote-cua machine is on screen, so the
  *  chip follows a Take over from another window or a forced hand back. */
 function syncLeasePoll() {
-  const want = Boolean($control.get().bound)
+  const want = Boolean($control.get().bound) && !control.disposed
   if (want && !control.pollStop) {
+    const attachment = control.attachment
     const tick = () => {
+      if (control.disposed || control.attachment !== attachment) return
       if (engine.paneVisible && $control.get().bound) void resolveControlOwner()
     }
     const ctx = pluginCtx
@@ -2970,6 +3121,8 @@ function stopLeasePoll() {
 
 function attachEngine(ctx) {
   pluginCtx = ctx
+  control.attachment += 1
+  control.disposed = false
   loadSettingsFrom(ctx)
   const unsubs = []
   const stopAgentActivity = watchAgentActivity(ctx)
@@ -2980,13 +3133,8 @@ function attachEngine(ctx) {
     syncControlTarget()
   }
   if (host.state.focusedSessionOwner && typeof host.state.focusedSessionOwner.listen === 'function') {
-    // Tile focus can move to the same bot name on another gateway: re-resolve.
-    unsubs.push(
-      host.state.focusedSessionOwner.listen(() => {
-        follow()
-        if ($control.get().bound) void resolveControlOwner()
-      })
-    )
+    // Tile focus can move to the same bot name on another gateway.
+    unsubs.push(host.state.focusedSessionOwner.listen(onFocusedOwnerChange))
   }
   if (host.state.focusedSessionProfile && typeof host.state.focusedSessionProfile.listen === 'function') {
     unsubs.push(host.state.focusedSessionProfile.listen(follow))
@@ -3017,6 +3165,10 @@ function attachEngine(ctx) {
   }
   const dispose = () => {
     handBackOnClose()
+    // Nothing started under this attachment may act after this point.
+    control.disposed = true
+    control.attachment += 1
+    control.ownerSeq += 1
     for (const stop of unsubs) {
       try {
         stop()

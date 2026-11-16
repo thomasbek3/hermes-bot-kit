@@ -224,12 +224,24 @@ input):
 - Lease changes for one bot's gateway (take, hand back, cleanup) are sent one
   at a time, so a hand back from a closed pane can never land after the next
   Take over.
+- A take or hand back whose answer never came (timeout, dropped connection)
+  may still be carried out by the gateway later. The pane therefore stops
+  using that viewer id: the next Take over is made under a new one. The
+  plugin only lets a release clear the viewer it names, so a late release of
+  the old id cannot take control away from the new one. While an old id of
+  this window still holds the lease, the chip says "Handing back…" and Take
+  over waits; Take over also re-reads the lease first.
 - The pane remembers every lease it *may* hold (a take was sent and no answer
   has proved otherwise, including a take whose answer was lost). Whenever it
   stops being in control of that machine (close, Disconnect, unload,
   removing the binding, switching bot or gateway, becoming watch-only) it
-  hands those back, retrying a lost hand back, until the gateway answers that
-  the lease is not this window's. A refused take (409) is not a possible hold.
+  hands those back with a release naming exactly that id. A refused take
+  (409) is not a possible hold.
+- When the focused chat moves (for example to a bot with the same name on
+  another gateway), input goes off and the old gateway's lease is handed back
+  at once, before the new gateway is looked up. Each lookup is numbered and
+  tied to the plugin's lifetime: an older lookup, or one that lands after the
+  plugin was disabled or reloaded, changes nothing and starts no polling.
 - The lease is asked of the bot's own gateway: the `(connectionId, profile)`
   route Hermes lists for it. The focused chat's connection-qualified owner
   (`host.state.focusedSessionOwner`) picks it; the active gateway socket is
@@ -268,6 +280,31 @@ and Take over is unavailable; viewing is unaffected. An HTTP error arrives as
 Leave Hermes's own "Open Screen when the bot uses it" off for Mac bots: the
 native pane would only say "No bot screen on this host". This pane opens on
 the bot's `computer_use` / browser calls instead.
+
+### Known limits
+
+- **Cleanup retries are bounded.** A hand back that gets no answer is retried
+  four times (after 2, 5, 15 and 30 seconds), not forever, and not after the
+  plugin is disabled or reloaded. If the gateway stays unreachable for longer,
+  the bot can stay blocked (`human_has_control`) until you open the pane and
+  click **Hand back** after it reconnects, or **Hand back (force)** after a
+  reload. Nothing can release a lease while its gateway is unreachable.
+- **A reload is a new viewer.** The pane picks a new viewer id each time the
+  plugin loads (and after an unanswered lease change, above). A lease left
+  from before a reload shows **Hand back (force)**; it is never silently
+  reclaimed.
+- **Embedded viewer pages are watch-only** for bot-driven computers: Take over
+  needs the VNC (WebSocket) path, where the pane can switch input off.
+  Ordinary (not bot-driven) embedded pages keep their input.
+- **Private Hermes touch points.** The lease calls use Hermes Desktop's REST
+  bridge (see above), and the per-bot binding is stored by profile name, not
+  by `(connectionId, profile)`; connection-qualified bindings belong to the
+  separate binding work. Duplicate bot names across gateways are handled by
+  failing closed, not by the binding.
+- **Not verified live.** These rules are covered by unit tests against a fake
+  gateway and a fake VNC client. No real desktop, two viewers on one
+  machine, real network drop, app reload, or Chromium keyboard-focus check
+  has been run.
 
 ### Upgrading from the old agent plugin
 
