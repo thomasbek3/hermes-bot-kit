@@ -36,36 +36,41 @@ const GMAIL = 'https://mail.google.com/mail/u/0/#all/18c0ffee0000abcd'
 
 // ---- host table ----
 
+// Each service's own URLs (the first is its sample in the render test).
+const SERVICE_URLS = {
+  slack: [SLACK, 'https://app.slack.com/client/T0EXAMPLE1/C0123ABCD', 'slack://channel?team=T0EXAMPLE1&id=C0123ABCD'],
+  gmail: [GMAIL],
+  googledocs: ['https://docs.google.com/document/d/abc123/edit'],
+  googlesheets: ['https://docs.google.com/spreadsheets/d/abc123/edit#gid=0'],
+  googleslides: ['https://docs.google.com/presentation/d/abc123/edit'],
+  googledrive: ['https://drive.google.com/file/d/abc123/view', 'https://docs.google.com/forms/d/abc/viewform'],
+  googlecalendar: ['https://calendar.google.com/calendar/u/0/r/eventedit/abc'],
+  googlemeet: ['https://meet.google.com/abc-defg-hij'],
+  github: ['https://github.com/example/repo/pull/12'],
+  notion: ['https://www.notion.so/example/Page-abc123', 'https://example.notion.site/Page'],
+  linear: ['https://linear.app/example/issue/ENG-12/title'],
+  figma: ['https://www.figma.com/design/abc/File'],
+  zoom: ['https://us02web.zoom.us/j/123456789'],
+  outlook: ['https://outlook.office.com/mail/inbox/id/AAQk', 'https://outlook.live.com/mail/0/'],
+  office365: ['https://www.office.com/launch/word', 'https://example.sharepoint.com/sites/x'],
+  dropbox: ['https://www.dropbox.com/s/abc/file.pdf'],
+  zoho: ['https://mail.zoho.com/zm/#mail/folder/inbox', 'https://crm.zoho.eu/crm/tab/Leads', 'https://voice.zohocloud.ca/x'],
+  stripe: ['https://dashboard.stripe.com/payments/pi_123'],
+  hubspot: ['https://app.hubspot.com/contacts/123/record/0-1/456'],
+  airtable: ['https://airtable.com/appABC/tblDEF'],
+  trello: ['https://trello.com/c/abc123/1-card'],
+  asana: ['https://app.asana.com/0/123/456'],
+  calendly: ['https://calendly.com/example/30min'],
+  loom: ['https://www.loom.com/share/abc123'],
+  youtube: ['https://www.youtube.com/watch?v=abc', 'https://youtu.be/abc'],
+  x: ['https://x.com/example/status/1', 'https://twitter.com/example/status/1'],
+  linkedin: ['https://www.linkedin.com/in/example'],
+  t3code: ['https://app.t3.codes/threads/x', 'https://app.t3.codes/threads/abc123?view=chat', 'https://t3.codes/']
+}
+const sampleUrl = Object.fromEntries(Object.entries(SERVICE_URLS).map(([id, urls]) => [id, urls[0]]))
+
 test('sourceLinks: every listed service matches its own URLs', () => {
-  const cases = {
-    slack: [SLACK, 'https://app.slack.com/client/T0EXAMPLE1/C0123ABCD', 'slack://channel?team=T0EXAMPLE1&id=C0123ABCD'],
-    gmail: [GMAIL],
-    googledocs: ['https://docs.google.com/document/d/abc123/edit'],
-    googlesheets: ['https://docs.google.com/spreadsheets/d/abc123/edit#gid=0'],
-    googleslides: ['https://docs.google.com/presentation/d/abc123/edit'],
-    googledrive: ['https://drive.google.com/file/d/abc123/view', 'https://docs.google.com/forms/d/abc/viewform'],
-    googlecalendar: ['https://calendar.google.com/calendar/u/0/r/eventedit/abc'],
-    googlemeet: ['https://meet.google.com/abc-defg-hij'],
-    github: ['https://github.com/example/repo/pull/12'],
-    notion: ['https://www.notion.so/example/Page-abc123', 'https://example.notion.site/Page'],
-    linear: ['https://linear.app/example/issue/ENG-12/title'],
-    figma: ['https://www.figma.com/design/abc/File'],
-    zoom: ['https://us02web.zoom.us/j/123456789'],
-    outlook: ['https://outlook.office.com/mail/inbox/id/AAQk', 'https://outlook.live.com/mail/0/'],
-    office365: ['https://www.office.com/launch/word', 'https://example.sharepoint.com/sites/x'],
-    dropbox: ['https://www.dropbox.com/s/abc/file.pdf'],
-    zoho: ['https://mail.zoho.com/zm/#mail/folder/inbox', 'https://crm.zoho.eu/crm/tab/Leads', 'https://voice.zohocloud.ca/x'],
-    stripe: ['https://dashboard.stripe.com/payments/pi_123'],
-    hubspot: ['https://app.hubspot.com/contacts/123/record/0-1/456'],
-    airtable: ['https://airtable.com/appABC/tblDEF'],
-    trello: ['https://trello.com/c/abc123/1-card'],
-    asana: ['https://app.asana.com/0/123/456'],
-    calendly: ['https://calendly.com/example/30min'],
-    loom: ['https://www.loom.com/share/abc123'],
-    youtube: ['https://www.youtube.com/watch?v=abc', 'https://youtu.be/abc'],
-    x: ['https://x.com/example/status/1', 'https://twitter.com/example/status/1'],
-    linkedin: ['https://www.linkedin.com/in/example']
-  }
+  const cases = SERVICE_URLS
   assert.deepEqual(Object.keys(cases).sort(), SOURCE_SERVICES.map(s => s.id).sort(), 'every service has a case')
   for (const [id, urls] of Object.entries(cases)) {
     for (const url of urls) assert.equal(serviceFor(url)?.id, id, url)
@@ -81,7 +86,10 @@ test('sourceLinks: lookalike hosts are not matched; case, ports and subdomains a
     'https://notgithub.com/x',
     'https://example.com/?u=https://github.com/a',
     'https://fakezoho.com/',
-    'https://youtube.co/watch'
+    'https://youtube.co/watch',
+    'https://t3.codes.evil.io/threads/x',
+    'https://app.t3.codes.evil.io/threads/x',
+    'https://nott3.codes/'
   ]) {
     assert.equal(serviceFor(url), null, url)
   }
@@ -295,6 +303,27 @@ test('render: dark-mode class on marks that need the light ink; the CSS switches
   assert.match(m.CSS, /\.gbo-src-icon:where[^{]*\{[^}]*width: ([\d.]+)px; height: \1px;/, 'a fixed icon box: no layout shift')
   assert.match(m.CSS, /a\.gbo-src[^{]*\{[^}]*text-decoration: none/, 'the icon is not underlined')
   assert.match(m.CSS, /\.gbo-src-text:where[^{]*\{[^}]*text-decoration: underline/, 'the text is')
+})
+
+test('render: every listed service draws its own mark (never the globe); T3 Code is its own favicon, inlined', { skip }, async t => {
+  assert.deepEqual(SOURCE_SERVICES.filter(s => !sampleUrl[s.id]).map(s => s.id), [], 'every service has a sample URL')
+  const bubble = await botBubble(t, SOURCE_SERVICES.map(s => `[${s.name}](${sampleUrl[s.id]})`).join(' and '))
+  for (const { id } of SOURCE_SERVICES) {
+    const icon = bubble.querySelector(`a.gbo-src[data-service="${id}"] .gbo-src-icon`)
+    assert.ok(icon, id)
+    assert.ok(!icon.classList.contains('is-web'), `${id}: a brand mark, not the globe`)
+    assert.ok(icon.querySelector('svg')?.firstElementChild, `${id}: the mark has content`)
+  }
+  const t3 = bubble.querySelector('a.gbo-src[data-service="t3code"] .gbo-src-icon')
+  assert.match(t3.getAttribute('style'), /--gbo-src-color:\s*#1E1B4B/)
+  assert.ok(!t3.classList.contains('is-light-on-dark'))
+  const image = t3.querySelector('svg image')
+  assert.ok(image, 'an SVG <image>, not an HTML <img>')
+  assert.equal(image.namespaceURI, 'http://www.w3.org/2000/svg')
+  assert.match(image.getAttribute('href'), /^data:image\/png;base64,[A-Za-z0-9+/=]+$/, 'inlined, never fetched')
+  assert.equal(t3.querySelector('img'), null)
+  const bare = await botBubble(t, 'See https://app.t3.codes/threads/abc123?view=chat for the thread.')
+  assert.equal(bare.querySelector('a.gbo-src[data-service="t3code"] .gbo-src-text').textContent, 'T3 Code')
 })
 
 test('render: streaming shows no raw half link, and the finished chip matches', { skip }, async t => {

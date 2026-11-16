@@ -151,7 +151,7 @@ the plugin's `/email-drafts` command through `slash.exec`), sent once on **Send*
 Beyond stock: **source links**. A link in bot prose (streaming or finished) whose host is a known service
 (Slack, Gmail, Google Docs/Sheets/Slides/Drive/Calendar/Meet, GitHub, Notion, Linear, Figma, Zoom,
 Outlook/Office 365, Dropbox, Zoho, Stripe, HubSpot, Airtable, Trello, Asana, Calendly, Loom, YouTube, X,
-LinkedIn) draws as a bundled logo plus its text; other public hosts get a neutral globe; a bare URL gets a
+LinkedIn, T3 Code) draws as a bundled logo plus its text; other public hosts get a neutral globe; a bare URL gets a
 short label. It hooks the SDK renderer's `decorateText` prop, so the renderer's own safe-link rules still
 apply (no chip for `javascript:`, `data:`, `mailto:`, private hosts or code). Links in headings and table
 headers (which the host renders without `decorateText`) are enhanced in place, after each render and on

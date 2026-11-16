@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **grokbot-override: T3 Code links get the T3 Code logo (2026-11-16)**: a source link to `t3.codes` (e.g. `app.t3.codes/threads/…`) draws with T3 Code's own favicon, inlined as a data: PNG, instead of the neutral globe; lookalike hosts such as `t3.codes.evil.io` stay a globe.
 - **grokbot-override: the "delivery unknown" composer note clears itself (2026-11-16)**: after a send whose answer
   was lost (e.g. the connection was torn down and respawned mid-send), the line under the composer now follows the
   chat's history check: "Checking whether your message went through…", gone as soon as the message is found in the

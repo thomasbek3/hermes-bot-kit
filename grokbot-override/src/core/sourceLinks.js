@@ -40,7 +40,8 @@ export const SOURCE_SERVICES = Object.freeze([
   { id: 'loom', name: 'Loom', domains: ['loom.com'] },
   { id: 'youtube', name: 'YouTube', domains: ['youtube.com', 'youtu.be'] },
   { id: 'x', name: 'X', domains: ['x.com', 'twitter.com'] },
-  { id: 'linkedin', name: 'LinkedIn', domains: ['linkedin.com'] }
+  { id: 'linkedin', name: 'LinkedIn', domains: ['linkedin.com'] },
+  { id: 't3code', name: 'T3 Code', domains: ['t3.codes'] }
 ])
 
 const SERVICE_BY_ID = new Map(SOURCE_SERVICES.map(service => [service.id, service]))

@@ -197,6 +197,16 @@ test('SL24-05: a heading link and a table-header link get the logo and the full-
   assert.equal(container.querySelectorAll('[data-gbo-src-icon]').length, 2, 'one logo each, no duplicates')
 })
 
+test('SL24-05: a heading T3 Code link gets the inlined favicon as an SVG-namespace <image>', { skip }, async t => {
+  const { container } = await mountProse(t, '## [The thread](https://app.t3.codes/threads/x)\n\nBody.')
+  const heading = container.querySelector('h2 a[href]')
+  assert.equal(heading.getAttribute('data-service'), 't3code')
+  const image = heading.querySelector('.gbo-src-icon svg image')
+  assert.ok(image)
+  assert.equal(image.namespaceURI, 'http://www.w3.org/2000/svg', 'innerHTML on an <svg> parses as SVG')
+  assert.match(image.getAttribute('href'), /^data:image\/png;base64,/)
+})
+
 test('SL24-05: a heading-link click opens through openSource; the host anchor click never runs', { skip }, async t => {
   const calls = await stubOpener(t)
   const { container } = await mountProse(t, HEAD_MD)

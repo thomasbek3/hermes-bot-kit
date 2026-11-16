@@ -90,6 +90,7 @@ Google Meet, GitHub, Notion, Linear, Figma, Zoom, Dropbox, Zoho, Stripe, HubSpot
 Calendly, Loom, YouTube and X. The Slack and Gmail marks are those paths split into their pieces and filled
 with each brand's own colours. Outlook, Office 365 and LinkedIn are not in Simple Icons; their marks are
 plain drawings original to this kit (a coloured tile with a simple glyph). The neutral globe is original too.
+The T3 Code mark is T3 Code's own 32x32 favicon, embedded unchanged as a data: PNG to identify links to it.
 Brand names and logos are trademarks of their owners; they appear only to identify the service a link opens,
 and no endorsement is implied. CC0 grants no trademark rights.
 
