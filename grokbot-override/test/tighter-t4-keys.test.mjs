@@ -144,7 +144,7 @@ test('r2-01: a send confirmed only by order still pairs with its own row, not a 
   assert.equal(key('h:5'), undefined)
 })
 
-test('r2-01: the DOM nodes of the confirmed turn survive the refresh at the right rows', async t => {
+test('r2-01: the DOM nodes of the confirmed turn survive the refresh at the right rows', { skip: !READY && 'dev dependencies not installed' }, async t => {
   const { JSDOM } = await import('jsdom')
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const keys = ['window', 'document', 'HTMLElement', 'Node']
