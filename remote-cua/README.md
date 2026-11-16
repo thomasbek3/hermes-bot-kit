@@ -35,8 +35,10 @@ Per Hermes run, on the remote Mac, the gateway:
    `ssh -T -o BatchMode=yes -o ServerAliveInterval=15 user@host '… exec <bin> mcp --no-overlay
    --embedded --socket /tmp/hc-<token>.sock'`.
 4. Records each daemon in `<profile home>/remote-cua/daemons.json` **before** launching it, and
-   forgets it only once the Mac confirms it is gone (`stop`, then its socket no longer answers; only
-   then is the socket file removed). It stops the daemon on session end, at gateway exit, and if the
+   forgets it only once the Mac proves it is gone: the driver runs, and its `status --socket` says
+   "not running" (Hermes's own rule). Only then is the socket file removed. A missing driver, a status
+   that still answers or fails any other way is not proof. The record file is updated under a file lock
+   (`daemons.lock`), so the gateway and `hermes remote-cua check` never overwrite each other's entries. It stops the daemon on session end, at gateway exit, and if the
    SSH session drops mid-start (a remote trap). A stop that cannot be confirmed (network down) is kept
    as `pending` and retried by the next stop, at exit and at the next start, as are daemons a crashed
    gateway process left behind.
@@ -110,9 +112,10 @@ pane instead.
 The lease lives at `<profile home>/remote-cua/lease.json`
 (`{"holder": "agent"|"human", "viewer": …, "since": …, "epoch": …}`; no file = the bot). While you hold
 it, `computer_use` is refused with `human_has_control`, captures included, and a result that comes
-back after you took over is discarded. The fence covers a whole action: if you take over at any point
-during one (even take over and hand back between two of its driver calls, such as a capture's
-fallback re-fetch), the rest of that action is refused. Screenshots only ever come back inline; a file
+back after you took over is discarded. The fence covers a whole action: every send to the driver is checked right
+before it goes out (Hermes's own retries and replays included), and if you take over at any point
+during an action (even take over and hand back between two of its driver calls) nothing more is sent
+and its result is not returned. Screenshots only ever come back inline; a file
 path in the driver's answer names a file on the Mac and is ignored, never read on the gateway. The pane changes it through `/api/plugins/remote-cua/`
 (`lease`, `take`, `release`, `status`); request and response:
 [computer-viewer/docs/REMOTE-CUA.md](../computer-viewer/docs/REMOTE-CUA.md). It is a tool-level fence:

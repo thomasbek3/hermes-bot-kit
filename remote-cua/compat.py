@@ -32,6 +32,7 @@ PRIVATE_IMPORTS: tuple[tuple[str, str, str], ...] = (
     ("tools.computer_use.cua_backend_daemon", "_CUA_DRIVER_TEAM_IDS", "team_ids"),
     ("tools.computer_use.permissions", "CUA_DRIVER_BUNDLE_ID", "bundle_id"),
     ("pm", "ensure_import", "ensure_import"),
+    ("tools.bot_desktop.lease", "HumanHasControl", "HumanHasControl"),
 )
 
 _VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?")

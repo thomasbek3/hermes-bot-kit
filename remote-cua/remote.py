@@ -33,7 +33,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from .settings import RemoteCuaConfig
 
@@ -277,14 +277,24 @@ def serve_command(info: DriverInfo, sock: str) -> str:
                      *(shlex.quote(a) for a in args)])
 
 
+STOP_POLL_STEPS = 30  # x 0.1 s for the daemon to report itself gone after ``stop``
+
+
 def stop_command(binary: str, sock: str, mark: str = "stopped") -> str:
-    """Stop the daemon at ``sock`` and say whether it is gone: ``RCUA:<mark>=1`` once its socket no longer
-    answers (only then is the socket file removed), ``RCUA:<mark>=0`` while it still answers. A failed
-    ``stop`` never unlinks a live daemon's socket."""
+    """Stop the daemon at ``sock``; ``RCUA:<mark>=1`` only on positive proof it is gone, else ``=0``.
+
+    Proof = the driver itself runs and its ``status --socket`` exits non-zero saying "not running" (the
+    same rule as Hermes's ``cua_daemon_listening``). A missing or unrunnable driver, a status that still
+    answers, or any other status failure (permission, crash, unknown text) is NOT proof: the socket file
+    is kept and the caller keeps the record for a retry. One line, so it can sit in a trap."""
     b, k = shlex.quote(binary), shlex.quote(sock)
-    return (f"{b} stop --socket {k} >/dev/null 2>&1 </dev/null; "
-            f"if {b} status --socket {k} >/dev/null 2>&1 </dev/null; "
-            f'then echo "{MARK}{mark}=0"; else rm -f {k}; echo "{MARK}{mark}=1"; fi')
+    return (f"if [ -x {b} ]; then {b} stop --socket {k} >/dev/null 2>&1 </dev/null; rcua_gone=0; rcua_n=0; "
+            f"while [ $rcua_n -lt {STOP_POLL_STEPS} ]; do "
+            f"rcua_out=$({b} status --socket {k} 2>&1 </dev/null); rcua_st=$?; "
+            f"if [ $rcua_st -eq 0 ]; then sleep 0.1; rcua_n=$((rcua_n+1)); continue; fi; "
+            f"if printf '%s' \"$rcua_out\" | grep -qi 'not running'; then rcua_gone=1; fi; break; done; "
+            f'if [ $rcua_gone = 1 ]; then rm -f {k}; echo "{MARK}{mark}=1"; else echo "{MARK}{mark}=0"; fi; '
+            f'else echo "{MARK}{mark}=0"; fi')
 
 
 def sweep_script(stale: list[tuple[str, str]]) -> str:
@@ -333,7 +343,28 @@ def call_remote_command(binary: str, sock: str, tool: str, args: dict[str, Any])
 # marks an entry whose owner gave up on it (start or stop could not be confirmed): any later start
 # sweeps it, even from the same live process. Entries of a dead gateway process are swept too.
 
-_registry_lock = threading.Lock()
+_registry_lock = threading.RLock()
+
+
+@contextlib.contextmanager
+def _registry_txn(home: Path) -> Iterator[None]:
+    """One whole read-modify-write of ``daemons.json``, serialized across threads AND processes (the
+    gateway, plugin hosts and ``hermes remote-cua check`` share it): an flock on a stable side file,
+    ``daemons.lock``, which is never replaced (the JSON file itself is, by rename). Not re-entrant."""
+    lock_path = _registry_path(home).with_suffix(".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with _registry_lock:
+        try:
+            import fcntl
+        except ImportError:  # Windows gateway: threads only (Windows remotes are refused anyway)
+            yield
+            return
+        with open(lock_path, "a+") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _registry_path(home: Path) -> Path:
@@ -355,11 +386,22 @@ def _write_registry(home: Path, entries: list[dict[str, Any]]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(entries, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+
+
+def _update_registry(home: Path, change: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]) -> None:
+    """The only way the registry is written: read, ``change``, write, all inside one locked transaction."""
+    with _registry_txn(home):
+        entries = _read_registry(home)
+        updated = change(list(entries))
+        if updated != entries:
+            _write_registry(home, updated)
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -373,27 +415,27 @@ def _pid_alive(pid: Any) -> bool:
 def stale_entries(home: Path, destination: str, *, alive: Callable[[Any], bool] = _pid_alive) -> list[tuple[str, str]]:
     """``(bin, socket)`` of daemons on ``destination`` to sweep: pending ones, and those of a gateway process
     that is gone. Nothing is removed here; :func:`forget` runs per daemon once its stop is confirmed."""
-    with _registry_lock:
+    with _registry_txn(home):
         entries = _read_registry(home)
     return [(str(e["bin"]), str(e["socket"])) for e in entries
             if e.get("destination") == destination and e.get("bin") and e.get("socket")
             and (e.get("pending") is True or not alive(e.get("pid")))]
 
 
+def _same(entry: dict[str, Any], destination: str, sock: str) -> bool:
+    return entry.get("socket") == sock and entry.get("destination") == destination
+
+
 def record(home: Path, destination: str, binary: str, sock: str, *, pending: bool = False) -> None:
-    with _registry_lock:
-        entries = [e for e in _read_registry(home) if e.get("socket") != sock or e.get("destination") != destination]
-        entries.append({"destination": destination, "bin": binary, "socket": sock, "pid": os.getpid(),
-                        "started": time.time(), "pending": pending})
-        _write_registry(home, entries)
+    def change(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        kept = [e for e in entries if not _same(e, destination, sock)]
+        return kept + [{"destination": destination, "bin": binary, "socket": sock, "pid": os.getpid(),
+                        "started": time.time(), "pending": pending}]
+    _update_registry(home, change)
 
 
 def forget(home: Path, destination: str, sock: str) -> None:
-    with _registry_lock:
-        entries = _read_registry(home)
-        kept = [e for e in entries if not (e.get("socket") == sock and e.get("destination") == destination)]
-        if kept != entries:
-            _write_registry(home, kept)
+    _update_registry(home, lambda entries: [e for e in entries if not _same(e, destination, sock)])
 
 
 def sweep(cfg: RemoteCuaConfig, runner: SSHRunner, home: Path) -> None:

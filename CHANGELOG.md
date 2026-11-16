@@ -23,6 +23,11 @@
   retried); the status probe runs on that managed lifecycle and is READY only with both permissions and
   a visible window; the installer checks the Hermes version before copying and enables through
   `hermes plugins enable`.
+  Review round 2: every send to the driver is lease-checked right before it goes out, Hermes's own
+  reconnect and ended-session replays included, and an action whose lease moved raises Hermes's
+  `HumanHasControl` instead of returning; a daemon counts as stopped only when its driver says "not
+  running" (a missing driver or any other status failure keeps the record and socket); the daemon
+  record file is updated under an inter-process file lock.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

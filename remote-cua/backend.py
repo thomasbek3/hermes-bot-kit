@@ -36,10 +36,26 @@ def _operation_methods(cls: type) -> list[str]:
 
 
 def _as_operation(fn: Any) -> Any:
+    """Run a public backend method as one fenced operation: refused up front while a human holds the
+    lease, and its result never returned if control changed hands at any point before it returns (the
+    cached target is disarmed). Raises Hermes's own ``HumanHasControl``, which its computer_use tool turns
+    into ``{"code": "human_has_control"}``."""
     @functools.wraps(fn)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        with self._session.operation():
-            return fn(self, *args, **kwargs)
+        session = self._session
+        with session.operation():
+            session.require_admitted(lease.REFUSAL)
+            try:
+                result = fn(self, *args, **kwargs)
+            except Exception as exc:
+                if not session.admitted():
+                    self._clear_active_target()
+                    raise session.human_has_control(lease.DISCARDED) from exc
+                raise
+            if not session.admitted():
+                self._clear_active_target()
+                raise session.human_has_control(lease.DISCARDED)
+            return result
     return wrapper
 
 
@@ -95,10 +111,9 @@ def classes() -> tuple[type, type]:
 
         @contextlib.contextmanager
         def operation(self) -> Iterator[None]:
-            """One backend operation (a capture, a click ...). Its admission epoch is taken once, at the
-            outermost entry, and every transport call inside it, MCP or CLI fallback, is checked against
-            it: a take-over at any point, even a full take-over and hand-back between two calls, voids the
-            rest of the operation."""
+            """One operation: a public backend method, or one session call made outside of one. Its
+            admission epoch is read once, at the outermost entry; every dispatch inside it is checked
+            against it (see :meth:`_dispatch_refusal`)."""
             if self._op_depth == 0:
                 self._op_epoch = lease.read(self._lease_home).epoch
             self._op_depth += 1
@@ -109,23 +124,50 @@ def classes() -> tuple[type, type]:
                 if self._op_depth == 0:
                     self._op_epoch = None
 
-        def _fenced(self, name: str, call: Any) -> dict[str, Any]:
-            """Refuse while a human holds the lease; refuse/discard when it moved since admission."""
+        def admitted(self) -> bool:
+            """The agent holds the lease and it has not moved since this operation was admitted."""
+            now = lease.read(self._lease_home)
+            return now.holder != lease.HUMAN and (self._op_epoch is None or now.epoch == self._op_epoch)
+
+        @staticmethod
+        def human_has_control(message: str) -> Exception:
+            return priv.HumanHasControl(message)
+
+        def require_admitted(self, message: str) -> None:
+            if not self.admitted():
+                raise priv.HumanHasControl(message)
+
+        def _dispatch_refusal(self, name: str) -> Optional[dict[str, Any]]:
+            """Checked immediately before EVERY send to the driver: Hermes's first send, its reconnect
+            replay, its ended-session replay (all go through ``_call_tool_async``), and the CLI fallback.
+            Lifecycle calls (start/end_session) only label the driver session and are exempt."""
+            if name in self._LIFECYCLE_CALLS:
+                return None
             now = lease.read(self._lease_home)
             if now.holder == lease.HUMAN:
                 return _refused(priv, name, lease.REFUSAL)
-            admitted = self._op_epoch if self._op_epoch is not None else now.epoch
-            if now.epoch != admitted:
+            if self._op_epoch is not None and now.epoch != self._op_epoch:
                 return _refused(priv, name, lease.DISCARDED)
-            result = call()
-            if lease.read(self._lease_home).epoch != admitted:
+            return None
+
+        def _after_dispatch(self, name: str, result: dict[str, Any]) -> dict[str, Any]:
+            if name not in self._LIFECYCLE_CALLS and not self.admitted():
                 return _refused(priv, name, lease.DISCARDED)
             return result
 
+        async def _call_tool_async(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+            refusal = self._dispatch_refusal(name)
+            if refusal is not None:
+                return refusal
+            return self._after_dispatch(name, await super()._call_tool_async(name, args))
+
         def _call_tool_via_cli(self, name: str, args: dict[str, Any], timeout: float) -> dict[str, Any]:
-            # Hermes's capture code reaches this directly (its empty-result refetch), not via call_tool,
-            # so it is fenced here too.
-            return self._fenced(name, lambda: self._cli_unfenced(name, args, timeout))
+            # Hermes's capture code reaches this directly (its empty-result re-fetch), not via call_tool.
+            with self.operation():
+                refusal = self._dispatch_refusal(name)
+                if refusal is not None:
+                    return refusal
+                return self._after_dispatch(name, self._cli_unfenced(name, args, timeout))
 
         def _cli_unfenced(self, name: str, args: dict[str, Any], timeout: float) -> dict[str, Any]:
             call_args = {k: v for k, v in dict(args).items() if k not in _REMOTE_PATH_FIELDS}
@@ -139,7 +181,11 @@ def classes() -> tuple[type, type]:
         def call_tool(self, name: str, args: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
             if name in self._LIFECYCLE_CALLS:
                 return super().call_tool(name, args, timeout)
-            return self._fenced(name, lambda: super(RemoteCuaSession, self).call_tool(name, args, timeout))
+            with self.operation():
+                refusal = self._dispatch_refusal(name)
+                if refusal is not None:
+                    return refusal
+                return self._after_dispatch(name, super().call_tool(name, args, timeout))
 
     class RemoteCuaBackend(priv.CuaDriverBackend):
         """``CuaDriverBackend`` driving a remote Mac. Always cua-driver's ``standard`` permission mode on

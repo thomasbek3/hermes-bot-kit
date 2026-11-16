@@ -54,8 +54,10 @@ def test_r1_001_refetch_after_takeover_is_refused(home, tmp_path, monkeypatch):
             lease.take("pane-1", home)  # the human takes over right after the empty MCP answer
             return out
         monkeypatch.setattr(type(b), "_call_capture_tool", take_after)
-        windows = b.list_windows()
-        assert daemon_.cli_calls == [] and windows == []
+        from tools.bot_desktop.lease import HumanHasControl
+        with pytest.raises(HumanHasControl):  # round 2: the operation itself is refused, not just emptied
+            b.list_windows()
+        assert daemon_.cli_calls == []
     finally:
         lease.release(None, home, force=True)
         b.stop()
@@ -74,7 +76,10 @@ def test_r1_001_full_takeover_cycle_between_calls_voids_the_refetch(home, tmp_pa
             lease.release("pane-1", home)  # handed back before the refetch: still the human's turn
             return out
         monkeypatch.setattr(type(b), "_call_capture_tool", cycle_after)
-        assert b.list_windows() == [] and daemon_.cli_calls == []
+        from tools.bot_desktop.lease import HumanHasControl
+        with pytest.raises(HumanHasControl):
+            b.list_windows()
+        assert daemon_.cli_calls == []
         monkeypatch.setattr(type(b), "_call_capture_tool", real)
         out = b._session.call_tool("list_windows", {})
         assert out["isError"] is False
@@ -187,7 +192,9 @@ def test_r1_004_failed_stop_keeps_the_record_and_retries(home, monkeypatch):
 
 def _stub(tmp_path, stop_rc, status_rc):
     stub = tmp_path / "cua-driver-stub"
-    stub.write_text(f"#!/bin/sh\ncase \"$1\" in stop) exit {stop_rc};; status) exit {status_rc};; esac\nexit 0\n")
+    # A stopped daemon's status says so (what Hermes's cua_daemon_listening relies on).
+    gone = 'echo "cua-driver daemon is not running"; ' if status_rc else ""
+    stub.write_text(f"#!/bin/sh\ncase \"$1\" in stop) exit {stop_rc};; status) {gone}exit {status_rc};; esac\nexit 0\n")
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     return stub
 

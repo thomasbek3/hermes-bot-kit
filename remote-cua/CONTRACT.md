@@ -20,6 +20,7 @@ below is imported at plugin load time.
 | `tools.computer_use.cua_backend_daemon` | `_CUA_DRIVER_TEAM_IDS` | accepted signing teams for CuaDriver.app |
 | `tools.computer_use.permissions` | `CUA_DRIVER_BUNDLE_ID` | expected app identifier |
 | `pm` | `ensure_import` | lazily install the MCP client SDK, as Hermes does |
+| `tools.bot_desktop.lease` | `HumanHasControl` | raised by a fenced operation; Hermes's computer_use tool turns it into `code: human_has_control` |
 
 Also read, not imported: `pm/lock.json` → `packages.cua-driver.version` (the gateway's pin).
 
@@ -34,8 +35,12 @@ version is refused, never assumed supported.
   remote-cua` (remote-cua ships a `plugin.yaml`, so the CLI knows it). No private Hermes import.
 
 `CuaDriverBackend`'s public methods (everything not starting with `_` except `start`, `stop`,
-`is_available`) are wrapped so each is one lease-fenced operation; `_CaptureMixin` reaches
-`_session._call_tool_via_cli` directly for its re-fetch, which is why that method is fenced too.
+`is_available`) are wrapped so each is one lease-fenced operation: refused up front while a human holds
+control, and raising `HumanHasControl` instead of returning when control changed hands before it returns.
+Every send to the driver is checked immediately before it goes out: `_CuaDriverSession._call_tool_async`
+(overridden) is the one coroutine Hermes uses for its first send, its reconnect replay and its
+ended-session replay; `_call_tool_via_cli` (overridden) is the CLI fallback, which `_CaptureMixin`'s
+re-fetch reaches directly. Only `start_session`/`end_session` are exempt.
 `_cli_result` reads `screenshot_file_path` from a local path, so remote answers are stripped of it first.
 
 `_CuaDriverSession` attributes the subclass relies on: `_embedded_daemon`, `_lifecycle_coro` (overridden),
