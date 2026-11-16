@@ -343,6 +343,26 @@ export function rowIdentity(row, index = 0) {
   return `t:${row?.timestamp ?? ''}:${row?.role ?? ''}:${index}`
 }
 
+// Which stored row confirmed each sent bubble: send id -> stored item id
+// (`h:<row id>`). Written by confirmedSends, read by carryKeys, so the React
+// identity of a sent bubble goes to exactly the row that confirmed it (never
+// to another surface's row that arrived in between). Send ids are unique
+// (`local:<time>:<random>`), so one map serves every open chat; bounded.
+const CONFIRMED_MAX = 256
+const confirmedRows = new Map()
+
+function rememberConfirmed(sendId, itemId) {
+  if (!sendId || !itemId) return
+  confirmedRows.delete(sendId)
+  confirmedRows.set(sendId, itemId)
+  while (confirmedRows.size > CONFIRMED_MAX) confirmedRows.delete(confirmedRows.keys().next().value)
+}
+
+/** The stored item (`h:<row id>`) that confirmed send `sendId`, if any. */
+export function confirmedRowOf(sendId) {
+  return confirmedRows.get(sendId)
+}
+
 /** Which sent (optimistic) user bubbles the stored rows now hold, so the
  *  local bubble can give way to the stored copy without a duplicate, and
  *  never earlier (a transcript read before the gateway stored the turn shows
@@ -361,7 +381,7 @@ export function confirmedSends(sends, rows) {
   const users = []
   ;(Array.isArray(rows) ? rows : []).forEach((row, index) => {
     if (row?.role !== 'user' || row.display_kind === 'hidden') return
-    users.push({ key: rowIdentity(row, index), text: rowText(row).trim() })
+    users.push({ key: rowIdentity(row, index), itemId: rowId(row, index, PERSISTED_PREFIX), text: rowText(row).trim() })
   })
   const claimed = new Set()
   const done = new Set()
@@ -369,6 +389,7 @@ export function confirmedSends(sends, rows) {
   const claim = (send, user) => {
     claimed.add(user.key)
     done.add(send.id)
+    rememberConfirmed(send.id, user.itemId)
   }
   const list = Array.isArray(sends) ? sends : []
   for (const send of list) {
@@ -429,47 +450,74 @@ const sameText = (a, b) => String(a || '').trim() === String(b || '').trim()
  *  already shown keeps the `renderKey` it had. The durable `id` never
  *  changes (reactions, edit and rewind address the stored row).
  *
- *  `current`: the items on screen; `next`: the rebuilt items. The replaced
- *  items are the newest this view drew, so they are matched against the
- *  newly stored rows newest first: another surface's rows that arrived in
- *  between (older) never take their keys. Exact matches are reserved first
- *  (an assistant by its text, a user bubble by its text); then a user bubble
- *  still unmatched takes the newest unclaimed stored user row (the gateway
- *  may store an expanded skill or an @mention note). Each replaced item and
- *  each stored row is used once, and pairs keep their order: a stored row
- *  never takes the key of an item drawn after one already paired with a
- *  newer row. Returns `next`, with new objects only where a key was carried. */
-export function carryKeys(current, next) {
+ *  Pairing is by evidence only, never by guessing which rows are newest:
+ *   - a sent bubble goes to the stored row that confirmed it
+ *     (confirmedSends, `confirmedRowOf`), whatever its stored text is;
+ *   - a live reply goes to a stored assistant row of ITS turn: the rows
+ *     after the stored copy of the user message before it (a confirmed send,
+ *     or a row already on screen) up to the next user row. Same text first;
+ *     inside a confirmed turn, the rest pair in order.
+ *  Anything else (no confirmed anchor, no candidate) keeps no key: a
+ *  remount is better than identity on the wrong message. Returns `next`,
+ *  with new objects only where a key was carried. */
+export function carryKeys(current, next, confirmedOf = confirmedRowOf) {
   const before = Array.isArray(current) ? current : []
   const list = Array.isArray(next) ? next : []
   if (!before.length || !list.length) return list
   const shown = new Map(before.map(item => [item.id, item]))
-  const nextIds = new Set(list.map(item => item.id))
-  // Replaced items (newest first) and newly stored rows (newest first).
-  const dropped = before
-    .map((item, order) => ({ item, order }))
-    .filter(({ item }) => !nextIds.has(item.id) && !isPersistedItem(item) && (item.kind === 'assistant' || item.kind === 'user'))
-    .reverse()
-  const fresh = list
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => !shown.has(item.id) && isPersistedItem(item) && (item.kind === 'assistant' || item.kind === 'user'))
-    .reverse()
-  const keys = new Map() // next index -> carried key
-  const pairs = [] // { order, index }
-  const fits = (order, index) => pairs.every(p => (p.order < order) === (p.index < index))
-  const pair = (exact, kind) => {
-    for (const old of dropped) {
-      if (old.used || (kind && old.item.kind !== kind)) continue
-      const hit = fresh.find(row => !row.used && row.item.kind === old.item.kind && (!exact || sameText(row.item.text, old.item.text)) && fits(old.order, row.index))
-      if (!hit) continue
-      old.used = true
-      hit.used = true
-      pairs.push({ order: old.order, index: hit.index })
-      keys.set(hit.index, keyOf(old.item))
-    }
+  const at = new Map(list.map((item, index) => [item.id, index]))
+  const isFresh = index => {
+    const item = list[index]
+    return item && !shown.has(item.id) && isPersistedItem(item)
   }
-  pair(true)
-  pair(false, 'user')
+  const keys = new Map() // next index -> carried key
+  const gone = item => !at.has(item.id) && !isPersistedItem(item)
+
+  // Sent bubbles: to the row that confirmed them.
+  const userAt = new Map() // current user item id -> its index in next
+  for (const item of before) {
+    if (item.kind !== 'user') continue
+    if (at.has(item.id)) {
+      userAt.set(item.id, at.get(item.id))
+      continue
+    }
+    if (!gone(item)) continue
+    const target = confirmedOf(item.id)
+    const index = target !== undefined ? at.get(target) : undefined
+    if (index === undefined || !isFresh(index) || keys.has(index) || list[index].kind !== 'user') continue
+    keys.set(index, keyOf(item))
+    userAt.set(item.id, index)
+  }
+
+  // Live replies: inside their own turn.
+  const turns = new Map() // anchor user id -> { confirmed, items: [] }
+  let anchor = null
+  for (const item of before) {
+    if (item.kind === 'user') anchor = item
+    if (item.kind !== 'assistant' || !gone(item) || !anchor) continue
+    if (!turns.has(anchor.id)) turns.set(anchor.id, { confirmed: !isPersistedItem(anchor), items: [] })
+    turns.get(anchor.id).items.push(item)
+  }
+  for (const [userId, turn] of turns) {
+    const start = userAt.get(userId)
+    if (start === undefined) continue
+    const candidates = []
+    for (let i = start + 1; i < list.length && list[i].kind !== 'user'; i += 1) {
+      if (list[i].kind === 'assistant' && isFresh(i) && !keys.has(i)) candidates.push(i)
+    }
+    const left = []
+    for (const item of turn.items) {
+      const hit = candidates.find(i => !keys.has(i) && sameText(list[i].text, item.text))
+      if (hit !== undefined) keys.set(hit, keyOf(item))
+      else left.push(item)
+    }
+    if (!turn.confirmed) continue
+    const rest = candidates.filter(i => !keys.has(i))
+    left.forEach((item, n) => {
+      if (rest[n] !== undefined) keys.set(rest[n], keyOf(item))
+    })
+  }
+
   let changed = false
   const out = list.map((item, index) => {
     const prev = shown.get(item.id)

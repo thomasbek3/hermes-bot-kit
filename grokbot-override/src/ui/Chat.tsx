@@ -335,7 +335,7 @@ function Item({
       return <NewLine />
     case 'user':
       return (
-        <div className="gbo-msg is-user">
+        <div className="gbo-msg is-user" {...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }}>
           {item.attachments?.length ? (
             <div className="gbo-attach-chips">
               {item.attachments.map((a: any, i: number) => (
@@ -360,7 +360,7 @@ function Item({
       )
     case 'assistant':
       return (
-        <div className="gbo-msg is-bot">
+        <div className="gbo-msg is-bot" {...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }}>
           {item.reasoning ? <Thinking text={item.reasoning} /> : null}
           {item.text ? <AssistantBody item={item} bot={bot} pos={pos} /> : null}
           <Reactions item={item} onReact={react} />
@@ -559,12 +559,8 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
           // Tail corners count the group's bubbles only (a reasoning-only
           // reply draws none).
           const bubbles = entry.items.filter((item: any) => item.text)
-          // Its last item's key: an older page can join bubbles at the
-          // group's front (a new group key), never at its end, so "Show
-          // earlier messages" finds the reader's row again (stickToBottom.ts).
-          const last = entry.items[entry.items.length - 1]
           return (
-            <div key={entry.id} className={`group is-${entry.side}`} {...{ [ANCHOR_ATTR]: String(last?.renderKey ?? last?.id ?? '') }}>
+            <div key={entry.id} className={`group is-${entry.side}`}>
               {entry.items.map((item: any) => (
                 <Item key={item.renderKey ?? item.id} item={item} {...props} pos={item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : ''} />
               ))}

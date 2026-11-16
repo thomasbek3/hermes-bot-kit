@@ -25,6 +25,9 @@ test('rebuildItems: the stored copy of a live reply takes renderKey live:x; the 
     { id: 2, role: 'user', content: 'plan my week', timestamp: t0 + 5 },
     { id: 3, role: 'assistant', content: 'Here is **the plan**.', timestamp: t0 + 6 }
   ]
+  // The send is confirmed by row 2 (session.js keepingSends -> confirmedSends).
+  const done = confirmedSends([{ id: 'local:1:abc', text: 'plan my week', submitted: 'plan my week', known: new Set(['id:1']), byOrder: true }], rows)
+  assert.ok(done.has('local:1:abc'))
   const next = rebuildItems(current, rowsToItems(rows), keepLocal)
   assert.equal(next.length, 3)
   const [first, user, reply] = next
@@ -46,7 +49,7 @@ test('rebuildItems: the stored copy of a live reply takes renderKey live:x; the 
   assert.deepEqual(groups.map(g => g.id), ['group:h:1', 'group:live:x'])
 })
 
-test('carryKeys: different text does not match an assistant; a user bubble falls back to order; each old key is used once', () => {
+test('carryKeys: a sent bubble goes to the row that confirmed it; replies pair inside its turn (text first, then order); a reply without a confirmed turn keeps no key', () => {
   const current = [
     { kind: 'user', id: 'local:a', text: '/skill weekly' },
     { kind: 'assistant', id: 'live:1', text: 'one' },
@@ -55,12 +58,15 @@ test('carryKeys: different text does not match an assistant; a user bubble falls
   const next = [
     { kind: 'user', id: 'h:5', text: 'expanded weekly skill text' },
     { kind: 'assistant', id: 'h:6', text: 'two' },
-    { kind: 'assistant', id: 'h:7', text: 'something else' }
+    { kind: 'assistant', id: 'h:7', text: 'one, edited by the gateway' }
   ]
-  const out = carryKeys(current, next)
-  assert.equal(out[0].renderKey, 'local:a', 'the expanded skill row takes the sent bubble by order')
-  assert.equal(out[1].renderKey, 'live:2', 'matched by text')
-  assert.equal(out[2].renderKey, undefined, 'no match, no key')
+  const confirmed = id => (id === 'local:a' ? 'h:5' : undefined)
+  const out = carryKeys(current, next, confirmed)
+  assert.equal(out[0].renderKey, 'local:a', 'the confirming row, whatever its stored text')
+  assert.equal(out[1].renderKey, 'live:2', 'same text first')
+  assert.equal(out[2].renderKey, 'live:1', 'the rest of the turn in order')
+  const none = carryKeys(current, next, () => undefined)
+  assert.deepEqual(none.map(item => item.renderKey), [undefined, undefined, undefined], 'nothing confirmed: no identity moves')
   const same = [{ kind: 'assistant', id: 'h:9', text: 'x' }]
   assert.equal(carryKeys([{ kind: 'assistant', id: 'h:9', text: 'x' }], same), same, 'nothing carried: the same array')
 })
@@ -97,18 +103,86 @@ test('r1-01: rows another surface stored in between never take the keys; the rea
   assert.equal(new Set(groups.map(g => g.id)).size, groups.length, 'no duplicate React keys')
 })
 
-test('r1-01: an exact match is reserved before the order fallback', () => {
-  const current = [
-    { kind: 'user', id: 'local:skill', text: '/weekly' },
-    { kind: 'user', id: 'local:plain', text: 'thanks' }
-  ]
-  const next = [
-    { kind: 'user', id: 'h:7', text: 'Run the weekly skill: ...' },
-    { kind: 'user', id: 'h:8', text: 'thanks' }
-  ]
-  const out = carryKeys(current, next)
-  assert.equal(out[1].renderKey, 'local:plain', 'exact text first')
-  assert.equal(out[0].renderKey, 'local:skill', 'the expanded skill row by order')
+// The reviewer's round-2 case: this view sent `/weekly` (stored expanded)
+// and got `Done.`; another surface then added a whole turn ending in the same
+// `Done.` before the refresh landed.
+const R2_ROWS = [
+  { id: 1, role: 'user', content: 'old question', timestamp: t0 },
+  { id: 2, role: 'user', content: 'Run the weekly skill: expanded instructions', timestamp: t0 + 30 },
+  { id: 3, role: 'assistant', content: 'Done.', timestamp: t0 + 31 },
+  { id: 4, role: 'user', content: 'Other surface question', timestamp: t0 + 40 },
+  { id: 5, role: 'assistant', content: 'Done.', timestamp: t0 + 41 }
+]
+const r2Current = () => [
+  ...rowsToItems(R2_ROWS.slice(0, 1)),
+  { kind: 'user', id: 'local:r2', text: '/weekly', at: (t0 + 30) * 1000 },
+  { kind: 'assistant', id: 'live:r2', text: 'Done.', at: (t0 + 31) * 1000 }
+]
+
+test('r2-01: a later external turn never takes the keys; the confirmed turn does (expanded submission, repeated reply text)', () => {
+  const done = confirmedSends([{ id: 'local:r2', text: '/weekly', submitted: 'Run the weekly skill: expanded instructions', known: new Set(['id:1']), byOrder: true }], R2_ROWS)
+  assert.ok(done.has('local:r2'))
+  const keep = item => item.kind === 'user' && !item.id.startsWith('h:') && !done.has(item.id)
+  const next = rebuildItems(r2Current(), rowsToItems(R2_ROWS), keep)
+  const key = id => next.find(item => item.id === id)?.renderKey
+  assert.equal(key('h:2'), 'local:r2', 'the expanded row that confirmed the send')
+  assert.equal(key('h:3'), 'live:r2', 'the reply of that turn')
+  assert.equal(key('h:4'), undefined, 'the other surface question')
+  assert.equal(key('h:5'), undefined, 'the other surface reply with the same text')
+})
+
+test('r2-01: a send confirmed only by order still pairs with its own row, not a later one', () => {
+  const rows = [...R2_ROWS.slice(0, 2), R2_ROWS[2], R2_ROWS[3], R2_ROWS[4]].map(r => (r.id === 2 ? { ...r, content: 'The weekly skill ran with a note' } : r))
+  const done = confirmedSends([{ id: 'local:r2b', text: '/weekly', submitted: '/weekly', known: new Set(['id:1']), byOrder: true }], rows)
+  assert.ok(done.has('local:r2b'))
+  const current = r2Current().map(item => (item.id === 'local:r2' ? { ...item, id: 'local:r2b' } : item.id === 'live:r2' ? { ...item, id: 'live:r2b' } : item))
+  const next = rebuildItems(current, rowsToItems(rows), item => item.kind === 'user' && !item.id.startsWith('h:') && !done.has(item.id))
+  const key = id => next.find(item => item.id === id)?.renderKey
+  assert.equal(key('h:2'), 'local:r2b')
+  assert.equal(key('h:3'), 'live:r2b')
+  assert.equal(key('h:4'), undefined)
+  assert.equal(key('h:5'), undefined)
+})
+
+test('r2-01: the DOM nodes of the confirmed turn survive the refresh at the right rows', async t => {
+  const { JSDOM } = await import('jsdom')
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const keys = ['window', 'document', 'HTMLElement', 'Node']
+  const saved = keys.map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)])
+  for (const k of keys) Object.defineProperty(globalThis, k, { value: dom.window[k === 'window' ? 'window' : k], configurable: true, writable: true })
+  globalThis.IS_REACT_ACT_ENVIRONMENT = false
+  t.after(() => {
+    for (const [k, d] of saved) d ? Object.defineProperty(globalThis, k, d) : delete globalThis[k]
+    dom.window.close()
+  })
+  const React = (await import('react')).default
+  const { flushSync } = await import('react-dom')
+  const { createRoot } = await import('react-dom/client')
+  // Keyed like Chat.tsx Transcript: groups by their key, items by renderKey ?? id.
+  const View = ({ items }) =>
+    React.createElement(
+      'div',
+      null,
+      groupMessages(items).map(entry =>
+        entry.kind === 'group'
+          ? React.createElement('div', { key: entry.id, className: 'group' }, entry.items.map(item => React.createElement('p', { key: item.renderKey ?? item.id, 'data-text': item.text }, item.text)))
+          : null
+      )
+    )
+  const root = createRoot(dom.window.document.getElementById('root'))
+  const current = r2Current().map(item => ({ ...item, id: item.id.replace('r2', 'r2c') }))
+  flushSync(() => root.render(React.createElement(View, { items: current })))
+  const mine = dom.window.document.querySelector('p[data-text="/weekly"]')
+  const reply = dom.window.document.querySelector('p[data-text="Done."]')
+  const done = confirmedSends([{ id: 'local:r2c', text: '/weekly', submitted: 'Run the weekly skill: expanded instructions', known: new Set(['id:1']), byOrder: true }], R2_ROWS)
+  const next = rebuildItems(current, rowsToItems(R2_ROWS), item => item.kind === 'user' && !item.id.startsWith('h:') && !done.has(item.id))
+  flushSync(() => root.render(React.createElement(View, { items: next })))
+  const ps = [...dom.window.document.querySelectorAll('p')]
+  assert.equal(ps.length, 5)
+  assert.equal(ps[1], mine, 'row 2 is the node that showed /weekly')
+  assert.equal(ps[2], reply, 'row 3 is the node that showed the live reply')
+  assert.notEqual(ps[4], reply, 'the other surface reply is a node of its own')
+  root.unmount()
 })
 
 const CARD = {

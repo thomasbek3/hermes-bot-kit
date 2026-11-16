@@ -19,8 +19,19 @@ const skip = !ready && 'dev dependencies not installed'
 const ENTRY = `
 import * as React from 'react'
 import { OverlayScroll } from './src/ui/OverlayScroll'
-import { STICK_PX, useStickToBottom } from './src/ui/stickToBottom'
-export { STICK_PX }
+import { ANCHOR_ATTR, JUMP_MAX_MS, STICK_PX, useStickToBottom } from './src/ui/stickToBottom'
+import { groupMessages } from './src/core/groups.js'
+export { JUMP_MAX_MS, STICK_PX }
+// Rows as Chat.tsx draws them: messages (kind user/assistant) fold into
+// groups (the real groupMessages, keyed by the group id), each message root
+// carrying its React identity in ANCHOR_ATTR; any other row stands alone.
+const message = i => React.createElement('div', { key: i.renderKey ?? i.id, 'data-id': i.id, [ANCHOR_ATTR]: String(i.renderKey ?? i.id) }, i.id)
+const rowsView = items =>
+  groupMessages(items).map(entry =>
+    entry.kind === 'group'
+      ? React.createElement('div', { key: entry.id, className: 'group' }, entry.items.map(message))
+      : React.createElement('div', { key: entry.id, 'data-id': entry.id }, entry.id)
+  )
 export function Harness({ items, api }) {
   const mine = items.filter(i => i.mine).map(i => i.id).pop() || ''
   const latest = items.length ? items[items.length - 1].id : ''
@@ -35,7 +46,7 @@ export function Harness({ items, api }) {
       onContentResize: s.onContentResize,
       overlay: s.unseen ? React.createElement('button', { className: 'jump-btn', onClick: s.jump }, 'v') : null
     },
-    React.createElement('div', { className: 'transcript__col' }, items.map(i => React.createElement('div', { key: i.id, 'data-id': i.id }, i.id)))
+    React.createElement('div', { className: 'transcript__col' }, rowsView(items))
   )
 }
 `
@@ -73,8 +84,23 @@ async function setup(t) {
 
   // Layout model: every row is ROW px plus `extra` (a late-growing image);
   // the scroller shows VIEW px and clamps its scrollTop like a browser.
-  const layout = { extra: 0 }
-  const content = el => el.querySelectorAll('[data-id]').length * ROW + layout.extra
+  // Every message/row is ROW px plus layout.heights[id]; the LAST one also
+  // holds `extra` (the live reply or an image growing at the tail).
+  const layout = { extra: 0, heights: {} }
+  const units = scroller => [...scroller.querySelectorAll('[data-id]')]
+  const heightOf = (el, list) => ROW + (layout.heights[el.getAttribute('data-id')] || 0) + (el === list[list.length - 1] ? layout.extra : 0)
+  const content = el => {
+    const list = units(el)
+    return list.reduce((sum, u) => sum + heightOf(u, list), 0)
+  }
+  const unitTop = (el, list) => {
+    let y = 0
+    for (const u of list) {
+      if (u === el) return y
+      y += heightOf(u, list)
+    }
+    return y
+  }
   const tops = new WeakMap()
   const proto = w.HTMLElement.prototype
   Object.defineProperty(proto, 'scrollHeight', { configurable: true, get() { return this.classList.contains('transcript') ? Math.max(VIEW, content(this)) : 0 } })
@@ -84,20 +110,21 @@ async function setup(t) {
     get() { return tops.get(this) || 0 },
     set(v) { tops.set(this, Math.max(0, Math.min(Number(v) || 0, this.scrollHeight - this.clientHeight))) }
   })
-  // Row geometry: row i starts at i * ROW; the last row also holds `extra`
-  // (the live reply or an image growing at the tail). The scroller's
-  // viewport starts at 0.
+  // Geometry: units stack in document order; a group spans its messages.
+  // The scroller's viewport starts at 0.
+  const zero = { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0 }
   Object.defineProperty(proto, 'getBoundingClientRect', {
     configurable: true,
     value() {
       if (this.classList.contains('transcript')) return { top: 0, bottom: VIEW, height: VIEW, left: 0, right: 0, width: 0 }
       const scroller = this.closest('.transcript')
-      if (!scroller || !this.hasAttribute('data-id')) return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0 }
-      const all = [...this.parentElement.children]
-      const index = all.indexOf(this)
-      const height = ROW + (index === all.length - 1 ? layout.extra : 0)
-      const top = index * ROW - scroller.scrollTop
-      return { top, bottom: top + height, height, left: 0, right: 0, width: 0 }
+      if (!scroller) return zero
+      const list = units(scroller)
+      const span = this.hasAttribute('data-id') ? [this] : [...this.querySelectorAll('[data-id]')]
+      if (!span.length) return zero
+      const top = unitTop(span[0], list) - scroller.scrollTop
+      const bottom = unitTop(span[span.length - 1], list) + heightOf(span[span.length - 1], list) - scroller.scrollTop
+      return { top, bottom, height: bottom - top, left: 0, right: 0, width: 0 }
     }
   })
   // Element.scrollTo: an instant jump by default (one scroll event); with
@@ -385,5 +412,136 @@ test('r1-03: the reader scrolling while the older page loads keeps what they scr
   await pending
   await settle()
   assert.equal(view.container.querySelector('[data-id="r106"]').getBoundingClientRect().top, at)
+  view.unmount()
+})
+
+// ---- review r2 regressions (grouped DOM, as Chat.tsx draws it) ----
+
+const T = 1_762_560_000_000
+/** A run of bot messages one minute apart: one group. */
+const botRun = (n, from, prefix = 'a', start = T) => Array.from({ length: n }, (_, i) => ({ kind: 'assistant', id: `${prefix}${from + i}`, at: start + (from + i) * 1000 }))
+
+test('r2-02: reading inside a tall bot group whose last bubble streams: growth below never moves the reader, nor does the prepend', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.heights = {}
+  const items = [{ kind: 'user', id: 'u1', at: T }, ...botRun(30, 100)]
+  const view = mount(e, items)
+  await settle()
+  const el = view.scroller()
+  assert.equal(view.container.querySelectorAll('.group').length, 2, 'a user group and one 1200px bot group')
+  view.scrollTo(100)
+  await settle()
+  const offset = id => view.container.querySelector(`[data-id="${id}"]`).getBoundingClientRect().top
+  const before = offset('a102')
+  assert.equal(before, 20)
+  let release
+  const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
+  await settle()
+  e.layout.extra = 300 // the group's last (live) bubble grows below the viewport
+  e.fireResize()
+  assert.equal(el.scrollTop, 100, 'not moved by growth below')
+  assert.equal(offset('a102'), before)
+  view.draw([...Array.from({ length: 50 }, (_, i) => ({ kind: i % 2 ? 'assistant' : 'user', id: `o${i}`, at: T - 3_600_000 + i * 1000 })), ...view.items()])
+  await settle(2)
+  release()
+  await pending
+  await settle()
+  assert.equal(offset('a102'), before, 'same message, same offset after 50 older rows')
+  assert.equal(el.scrollTop, 2100)
+  view.unmount()
+})
+
+test('r2-02: older bot bubbles joining the front of the reader’s group (group re-created) keep the reader’s message in place', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.heights = {}
+  const view = mount(e, botRun(30, 100))
+  await settle()
+  const el = view.scroller()
+  view.scrollTo(100)
+  await settle()
+  const node = () => view.container.querySelector('[data-id="a103"]')
+  const first = node()
+  const before = first.getBoundingClientRect().top
+  let release
+  const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
+  await settle()
+  e.layout.extra = 200
+  e.fireResize()
+  // 50 older bot bubbles, a minute apart: they join the same group at its
+  // front, so the group gets a new key and is re-created.
+  view.draw([...botRun(50, 50), ...view.items()])
+  await settle(2)
+  release()
+  await pending
+  await settle()
+  assert.equal(view.container.querySelectorAll('.group').length, 1, 'one group')
+  assert.notEqual(node(), first, 'the group was re-created (new DOM)')
+  assert.equal(node().getBoundingClientRect().top, before, 'found again by its key, same offset')
+  assert.equal(el.scrollTop, 100 + 50 * ROW)
+  view.unmount()
+})
+
+test('r2-02: reading inside one tall streaming bubble: its growth does not move the reader', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.heights = { a109: 1000 }
+  const view = mount(e, [{ kind: 'user', id: 'u1', at: T }, ...botRun(10, 100)])
+  await settle()
+  const el = view.scroller()
+  view.scrollTo(500) // inside a109 (top 400, 1040 tall)
+  await settle()
+  const top = () => view.container.querySelector('[data-id="a109"]').getBoundingClientRect().top
+  const before = top()
+  let release
+  const pending = view.api.current.keepPlace(() => new Promise(resolve => (release = resolve)))
+  await settle()
+  e.layout.extra = 400 // a109 is the last bubble: it streams on
+  e.fireResize()
+  assert.equal(el.scrollTop, 500)
+  assert.equal(top(), before)
+  view.draw([...botRun(20, 50, 'a', T - 3_600_000), ...view.items()])
+  await settle(2)
+  release()
+  await pending
+  await settle()
+  assert.equal(top(), before)
+  view.unmount()
+})
+
+test('r2-03: a jump still animating at its time limit settles at the bottom and keeps following', { skip }, async t => {
+  const e = await setup(t)
+  e.layout.extra = 0
+  e.layout.heights = {}
+  e.layout.manualSmooth = true
+  e.layout.reduced = false
+  const view = mount(e, rows(30))
+  await settle()
+  const el = view.scroller()
+  view.scrollTo(100)
+  await settle()
+  view.draw([...view.items(), { id: 'live3' }])
+  await settle()
+  view.container.querySelector('.jump-btn').click()
+  await settle()
+  const gap = () => el.scrollHeight - el.scrollTop - el.clientHeight
+  // A sustained reply: every 100 ms the animation advances 60px and the
+  // reply grows 60px, so it never arrives before the limit.
+  const started = Date.now()
+  while (Date.now() - started < e.m.JUMP_MAX_MS + 100) {
+    el.scrollTop += 60
+    el.dispatchEvent(new window.Event('scroll'))
+    e.layout.extra += 60
+    e.fireResize()
+    await new Promise(r => setTimeout(r, 100))
+  }
+  await settle()
+  assert.equal(gap(), 0, 'settled at the bottom at the limit')
+  assert.equal(view.container.querySelector('.jump-btn'), null, 'no button: nothing unseen')
+  e.layout.scrollCalls.length = 0
+  e.layout.extra += 300
+  e.fireResize()
+  assert.equal(gap(), 0, 'still pinned: later growth follows')
   view.unmount()
 })

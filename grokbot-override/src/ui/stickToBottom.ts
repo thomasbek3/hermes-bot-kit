@@ -20,9 +20,10 @@ export const STICK_PX = 16
 /** Longest a jump-to-latest animation may take before it is settled. */
 export const JUMP_MAX_MS = 1200
 
-/** Marks a transcript row with a key that survives an older page landing
- *  (a group's LAST item: older bubbles can join a group at its front). */
-export const ANCHOR_ATTR = 'data-gbo-last'
+/** Marks each message (a user or bot bubble's root) with its React identity,
+ *  so the reader's message is found again when its group is re-created (an
+ *  older page can join bubbles at a group's front, which re-keys the group). */
+export const ANCHOR_ATTR = 'data-gbo-key'
 
 const fromBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight
 
@@ -35,35 +36,46 @@ function reducedMotion(): boolean {
   }
 }
 
-type Anchor = { el: Element; key: string | null; bottom: number }
+type Anchor = { el: Element; key: string | null; top: number }
 
-/** The rows of the transcript column (its direct children). */
-function rowsOf(scroller: HTMLElement): Element[] {
+/** The reading units of the transcript: every message inside a group (a
+ *  group is one row of the column but can be taller than the viewport and
+ *  grow at its end), and every other row of the column (dividers, tool rows,
+ *  cards) as itself. The "Show earlier messages" button is no reading place. */
+function unitsOf(scroller: HTMLElement): Element[] {
   const column = scroller.firstElementChild
-  return column ? Array.from(column.children) : []
+  if (!column) return []
+  const out: Element[] = []
+  for (const row of Array.from(column.children)) {
+    if (row.classList.contains('gbo-more')) continue
+    const messages = row.classList.contains('group') ? Array.from(row.children) : []
+    if (messages.length) out.push(...messages)
+    else out.push(row)
+  }
+  return out
 }
 
-/** The first row whose bottom edge is inside the viewport, with that edge's
- *  distance from the viewport top. The bottom edge, not the top: older
- *  bubbles joining the row's group grow it at its top. */
+/** The first unit with any part inside the viewport, and the distance of
+ *  its TOP edge from the viewport top (negative when it starts above). The
+ *  top edge, because a unit only ever grows at its end (a streaming reply,
+ *  an image decoding): growth there must not move the reader. */
 function captureAnchor(scroller: HTMLElement): Anchor | null {
   const top = scroller.getBoundingClientRect().top
-  for (const row of rowsOf(scroller)) {
-    // The "Show earlier messages" button stays first: it is no reading place.
-    if (row.classList.contains('gbo-more')) continue
-    const bottom = row.getBoundingClientRect().bottom - top
-    if (bottom > 0) return { el: row, key: row.getAttribute(ANCHOR_ATTR), bottom }
+  for (const unit of unitsOf(scroller)) {
+    const rect = unit.getBoundingClientRect()
+    if (rect.bottom - top > 0) return { el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top }
   }
   return null
 }
 
-/** Where the anchor row is now (the same element, or the row now carrying
- *  its key when its group was re-created), relative to the viewport top. */
-function anchorBottom(scroller: HTMLElement, anchor: Anchor): number | null {
-  let row: Element | null = anchor.el.isConnected ? anchor.el : null
-  if (!row && anchor.key !== null) row = rowsOf(scroller).find(r => r.getAttribute(ANCHOR_ATTR) === anchor.key) || null
-  if (!row) return null
-  return row.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top
+/** Where the anchor's top edge is now (the same element, or the message now
+ *  carrying its key when its group was re-created), relative to the
+ *  viewport top. */
+function anchorTop(scroller: HTMLElement, anchor: Anchor): number | null {
+  let unit: Element | null = anchor.el.isConnected ? anchor.el : null
+  if (!unit && anchor.key) unit = unitsOf(scroller).find(u => u.getAttribute(ANCHOR_ATTR) === anchor.key) || null
+  if (!unit) return null
+  return unit.getBoundingClientRect().top - scroller.getBoundingClientRect().top
 }
 
 /** `dep`: what changes when the transcript changes (its items). `mine`: the id
@@ -95,9 +107,9 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
     const el = ref.current
     const anchor = keep.current
     if (!el || !anchor) return
-    const now = anchorBottom(el, anchor)
+    const now = anchorTop(el, anchor)
     if (now === null) return
-    const shift = now - anchor.bottom
+    const shift = now - anchor.top
     if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift)
   }
 
@@ -112,6 +124,19 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
       }
     }
     setTop(el, top)
+  }
+
+  /** The time limit: elapsed time is not the reader taking over. Settle at
+   *  the current bottom at once and stay pinned (later growth follows). */
+  const finishJump = () => {
+    const run = jumping.current
+    if (!run) return
+    jumping.current = null
+    clearTimeout(run.timer)
+    stick.current = true
+    setUnseen(false)
+    const el = ref.current
+    if (el) setTop(el, el.scrollHeight)
   }
 
   const endJump = () => {
@@ -238,7 +263,7 @@ export function useStickToBottom(dep: unknown, mine: string, latest = '') {
     if (!el) return
     const smooth = !reducedMotion() && typeof el.scrollTo === 'function'
     if (jumping.current) clearTimeout(jumping.current.timer)
-    jumping.current = smooth ? { timer: setTimeout(endJump, JUMP_MAX_MS) } : null
+    jumping.current = smooth ? { timer: setTimeout(finishJump, JUMP_MAX_MS) } : null
     scrollToBottom(el, smooth)
   }
 

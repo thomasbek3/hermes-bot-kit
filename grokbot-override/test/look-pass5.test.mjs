@@ -135,7 +135,7 @@ test('transcript: grouped bubbles with tail corners and hover times; markdown in
   const html = bodyOf(render({ theme: 'light', botIndex: 1, items: MD_ITEMS, busy: false, hasMore: false }))
   assert.match(html, /class="transcript__col gbo-column"/)
   // a2 and a3 are one group: first and last corners.
-  assert.match(html, /<div class="group is-left" data-gbo-last="[^"]+"><div class="gbo-msg is-bot"><div class="bubble-wrap is-left"><div class="bubble is-agent is-first">/)
+  assert.match(html, /<div class="group is-left"><div class="gbo-msg is-bot" data-gbo-key="[^"]+"><div class="bubble-wrap is-left"><div class="bubble is-agent is-first">/)
   assert.match(html, /class="bubble is-agent is-last"><div class="md"><div class="aui-md /)
   assert.match(html, /class="bubble is-user"><div class="bubble__plain">Hello!<\/div><\/div><span class="bubble__time">\d{1,2}:\d{2}/)
   assert.ok(html.includes('<strong>This week</strong>'))

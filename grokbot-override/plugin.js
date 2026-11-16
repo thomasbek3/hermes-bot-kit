@@ -41862,11 +41862,22 @@ function rowIdentity(row, index = 0) {
   if (durable !== void 0 && durable !== null && durable !== "") return `id:${durable}`;
   return `t:${row?.timestamp ?? ""}:${row?.role ?? ""}:${index}`;
 }
+var CONFIRMED_MAX = 256;
+var confirmedRows = /* @__PURE__ */ new Map();
+function rememberConfirmed(sendId, itemId) {
+  if (!sendId || !itemId) return;
+  confirmedRows.delete(sendId);
+  confirmedRows.set(sendId, itemId);
+  while (confirmedRows.size > CONFIRMED_MAX) confirmedRows.delete(confirmedRows.keys().next().value);
+}
+function confirmedRowOf(sendId) {
+  return confirmedRows.get(sendId);
+}
 function confirmedSends(sends, rows) {
   const users = [];
   (Array.isArray(rows) ? rows : []).forEach((row, index) => {
     if (row?.role !== "user" || row.display_kind === "hidden") return;
-    users.push({ key: rowIdentity(row, index), text: rowText(row).trim() });
+    users.push({ key: rowIdentity(row, index), itemId: rowId(row, index, PERSISTED_PREFIX), text: rowText(row).trim() });
   });
   const claimed = /* @__PURE__ */ new Set();
   const done = /* @__PURE__ */ new Set();
@@ -41874,6 +41885,7 @@ function confirmedSends(sends, rows) {
   const claim = (send, user) => {
     claimed.add(user.key);
     done.add(send.id);
+    rememberConfirmed(send.id, user.itemId);
   };
   const list = Array.isArray(sends) ? sends : [];
   for (const send of list) {
@@ -41912,30 +41924,59 @@ function rowsToItems(rows) {
 }
 var keyOf = (item) => item?.renderKey ?? item?.id;
 var sameText = (a2, b2) => String(a2 || "").trim() === String(b2 || "").trim();
-function carryKeys(current, next) {
+function carryKeys(current, next, confirmedOf = confirmedRowOf) {
   const before = Array.isArray(current) ? current : [];
   const list = Array.isArray(next) ? next : [];
   if (!before.length || !list.length) return list;
   const shown = new Map(before.map((item) => [item.id, item]));
-  const nextIds = new Set(list.map((item) => item.id));
-  const dropped = before.map((item, order) => ({ item, order })).filter(({ item }) => !nextIds.has(item.id) && !isPersistedItem(item) && (item.kind === "assistant" || item.kind === "user")).reverse();
-  const fresh = list.map((item, index) => ({ item, index })).filter(({ item }) => !shown.has(item.id) && isPersistedItem(item) && (item.kind === "assistant" || item.kind === "user")).reverse();
-  const keys2 = /* @__PURE__ */ new Map();
-  const pairs = [];
-  const fits = (order, index) => pairs.every((p) => p.order < order === p.index < index);
-  const pair = (exact, kind) => {
-    for (const old of dropped) {
-      if (old.used || kind && old.item.kind !== kind) continue;
-      const hit = fresh.find((row) => !row.used && row.item.kind === old.item.kind && (!exact || sameText(row.item.text, old.item.text)) && fits(old.order, row.index));
-      if (!hit) continue;
-      old.used = true;
-      hit.used = true;
-      pairs.push({ order: old.order, index: hit.index });
-      keys2.set(hit.index, keyOf(old.item));
-    }
+  const at = new Map(list.map((item, index) => [item.id, index]));
+  const isFresh = (index) => {
+    const item = list[index];
+    return item && !shown.has(item.id) && isPersistedItem(item);
   };
-  pair(true);
-  pair(false, "user");
+  const keys2 = /* @__PURE__ */ new Map();
+  const gone = (item) => !at.has(item.id) && !isPersistedItem(item);
+  const userAt = /* @__PURE__ */ new Map();
+  for (const item of before) {
+    if (item.kind !== "user") continue;
+    if (at.has(item.id)) {
+      userAt.set(item.id, at.get(item.id));
+      continue;
+    }
+    if (!gone(item)) continue;
+    const target = confirmedOf(item.id);
+    const index = target !== void 0 ? at.get(target) : void 0;
+    if (index === void 0 || !isFresh(index) || keys2.has(index) || list[index].kind !== "user") continue;
+    keys2.set(index, keyOf(item));
+    userAt.set(item.id, index);
+  }
+  const turns = /* @__PURE__ */ new Map();
+  let anchor = null;
+  for (const item of before) {
+    if (item.kind === "user") anchor = item;
+    if (item.kind !== "assistant" || !gone(item) || !anchor) continue;
+    if (!turns.has(anchor.id)) turns.set(anchor.id, { confirmed: !isPersistedItem(anchor), items: [] });
+    turns.get(anchor.id).items.push(item);
+  }
+  for (const [userId, turn] of turns) {
+    const start2 = userAt.get(userId);
+    if (start2 === void 0) continue;
+    const candidates2 = [];
+    for (let i = start2 + 1; i < list.length && list[i].kind !== "user"; i += 1) {
+      if (list[i].kind === "assistant" && isFresh(i) && !keys2.has(i)) candidates2.push(i);
+    }
+    const left = [];
+    for (const item of turn.items) {
+      const hit = candidates2.find((i) => !keys2.has(i) && sameText(list[i].text, item.text));
+      if (hit !== void 0) keys2.set(hit, keyOf(item));
+      else left.push(item);
+    }
+    if (!turn.confirmed) continue;
+    const rest = candidates2.filter((i) => !keys2.has(i));
+    left.forEach((item, n) => {
+      if (rest[n] !== void 0) keys2.set(rest[n], keyOf(item));
+    });
+  }
   let changed = false;
   const out = list.map((item, index) => {
     const prev = shown.get(item.id);
@@ -55053,7 +55094,7 @@ function EmailDraftCard({ item, bot, controller: controller2 }) {
 import * as React13 from "react";
 var STICK_PX = 16;
 var JUMP_MAX_MS = 1200;
-var ANCHOR_ATTR = "data-gbo-last";
+var ANCHOR_ATTR = "data-gbo-key";
 var fromBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight;
 function reducedMotion() {
   try {
@@ -55063,24 +55104,31 @@ function reducedMotion() {
     return false;
   }
 }
-function rowsOf(scroller) {
+function unitsOf(scroller) {
   const column = scroller.firstElementChild;
-  return column ? Array.from(column.children) : [];
+  if (!column) return [];
+  const out = [];
+  for (const row of Array.from(column.children)) {
+    if (row.classList.contains("gbo-more")) continue;
+    const messages = row.classList.contains("group") ? Array.from(row.children) : [];
+    if (messages.length) out.push(...messages);
+    else out.push(row);
+  }
+  return out;
 }
 function captureAnchor(scroller) {
   const top = scroller.getBoundingClientRect().top;
-  for (const row of rowsOf(scroller)) {
-    if (row.classList.contains("gbo-more")) continue;
-    const bottom = row.getBoundingClientRect().bottom - top;
-    if (bottom > 0) return { el: row, key: row.getAttribute(ANCHOR_ATTR), bottom };
+  for (const unit of unitsOf(scroller)) {
+    const rect = unit.getBoundingClientRect();
+    if (rect.bottom - top > 0) return { el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top };
   }
   return null;
 }
-function anchorBottom(scroller, anchor) {
-  let row = anchor.el.isConnected ? anchor.el : null;
-  if (!row && anchor.key !== null) row = rowsOf(scroller).find((r) => r.getAttribute(ANCHOR_ATTR) === anchor.key) || null;
-  if (!row) return null;
-  return row.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top;
+function anchorTop(scroller, anchor) {
+  let unit = anchor.el.isConnected ? anchor.el : null;
+  if (!unit && anchor.key) unit = unitsOf(scroller).find((u) => u.getAttribute(ANCHOR_ATTR) === anchor.key) || null;
+  if (!unit) return null;
+  return unit.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
 }
 function useStickToBottom(dep, mine, latest = "") {
   const ref = React13.useRef(null);
@@ -55099,9 +55147,9 @@ function useStickToBottom(dep, mine, latest = "") {
     const el = ref.current;
     const anchor = keep.current;
     if (!el || !anchor) return;
-    const now = anchorBottom(el, anchor);
+    const now = anchorTop(el, anchor);
     if (now === null) return;
-    const shift = now - anchor.bottom;
+    const shift = now - anchor.top;
     if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift);
   };
   const scrollToBottom = (el, smooth) => {
@@ -55114,6 +55162,16 @@ function useStickToBottom(dep, mine, latest = "") {
       }
     }
     setTop(el, top);
+  };
+  const finishJump = () => {
+    const run = jumping.current;
+    if (!run) return;
+    jumping.current = null;
+    clearTimeout(run.timer);
+    stick.current = true;
+    setUnseen(false);
+    const el = ref.current;
+    if (el) setTop(el, el.scrollHeight);
   };
   const endJump = () => {
     const run = jumping.current;
@@ -55217,7 +55275,7 @@ function useStickToBottom(dep, mine, latest = "") {
     if (!el) return;
     const smooth = !reducedMotion() && typeof el.scrollTo === "function";
     if (jumping.current) clearTimeout(jumping.current.timer);
-    jumping.current = smooth ? { timer: setTimeout(endJump, JUMP_MAX_MS) } : null;
+    jumping.current = smooth ? { timer: setTimeout(finishJump, JUMP_MAX_MS) } : null;
     scrollToBottom(el, smooth);
   };
   return { ref, onScroll, onContentResize, pin, stick, keepPlace, jump, unseen };
@@ -59485,7 +59543,7 @@ function Item({
     case "new":
       return /* @__PURE__ */ jsx27(NewLine, {});
     case "user":
-      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-user", children: [
+      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-user", ...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }, children: [
         item.attachments?.length ? /* @__PURE__ */ jsx27("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx27("span", { className: "gbo-chip", children: a2.name || a2.kind }, i)) }) : null,
         item.text ? /* @__PURE__ */ jsxs25("div", { className: "bubble-wrap is-right", children: [
           /* @__PURE__ */ jsx27("div", { className: `bubble is-user${pos}`, children: /* @__PURE__ */ jsx27("div", { className: "bubble__plain", children: item.text }) }),
@@ -59496,7 +59554,7 @@ function Item({
         /* @__PURE__ */ jsx27(UserActions, { item, controller: controller2, busy, onPrefill })
       ] });
     case "assistant":
-      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-bot", children: [
+      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-bot", ...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }, children: [
         item.reasoning ? /* @__PURE__ */ jsx27(Thinking, { text: item.reasoning }) : null,
         item.text ? /* @__PURE__ */ jsx27(AssistantBody, { item, bot, pos }) : null,
         /* @__PURE__ */ jsx27(Reactions, { item, onReact: react }),
@@ -59629,8 +59687,7 @@ function Transcript({ state, bot, meta, onPrefill }) {
           const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
           if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.renderKey ?? entry.id);
           const bubbles = entry.items.filter((item) => item.text);
-          const last = entry.items[entry.items.length - 1];
-          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, ...{ [ANCHOR_ATTR]: String(last?.renderKey ?? last?.id ?? "") }, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.renderKey ?? item.id)) }, entry.id);
+          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.renderKey ?? item.id)) }, entry.id);
         }),
         state.chat.waiting ? /* @__PURE__ */ jsx27(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
         activity2 ? /* @__PURE__ */ jsxs25("div", { className: "activity-line gbo-activity", role: "status", children: [
