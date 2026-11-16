@@ -441,7 +441,7 @@ var init_sheetGrid = __esm({
   }
 });
 
-// ../../kit-ov-integrate/grokbot-override/node_modules/xlsx/xlsx.mjs
+// node_modules/xlsx/xlsx.mjs
 function reset_ansi() {
   set_ansi(1252);
 }
@@ -14776,7 +14776,7 @@ function sheet_set_array_formula(ws, range, formula, dynamic) {
 }
 var XLSX, current_codepage, current_ansi, $cptable, VALID_ANSI, CS2CP, set_ansi, set_cp, debom, _getchar, _getansi, DENSE, DIF_XL, Base64_map, has_buf, Buffer_from, buf_utf16le, s2a, bconcat, chr0, chr1, p2_32, days, months, table_fmt, SSF_default_map, SSF_default_str, pct1, frac1, dec1, closeparen, phone, SSF_abstime, cfregex2, SSFImplicit, dateNFregex, bad_formats, CRC32, CFB, _fs, dnthresh, dnthresh1, dnthresh2, pdre1, pdre2, pdre3, FDRE1, FDRE2, FDISO, utc_append_works, lower_months, split_regex, xml_boundary, str_match_xml_ns, str_match_xml_ns_g, str_remove_xml_ns_g, str_match_xml_ig, XML_HEADER, attregexg, tagregex1, tagregex2, tagregex, nsregex, nsregex2, encodings, rencoding, unescapexml, decregex, htmlcharegex, xlml_fixstr, utf8corpus, utf8read, utf8write, htmldecode, vtvregex, vtmregex, wtregex, xlmlregex, XMLNS, XMLNS_main, ___toBuffer, __toBuffer, ___utf16le, __utf16le, ___hexlify, __hexlify, ___utf8, __utf8, ___lpstr, __lpstr, ___cpstr, __cpstr, ___lpwstr, __lpwstr, ___lpp4, __lpp4, ___8lpp4, __8lpp4, ___double, __double, is_buf, __readUInt8, __readUInt16LE, __readInt16LE, __readUInt32LE, __readInt32LE, __readInt32BE, __writeUInt32LE, __writeInt32LE, __writeUInt16LE, parse_BrtCommentText, parse_XLSBCodeName, parse_XLNameWideString, parse_RelID, parse_UncheckedRfX, VT_I2, VT_I4, VT_BOOL, VT_VARIANT, VT_UI4, VT_FILETIME, VT_BLOB, VT_CF, VT_VECTOR_VARIANT, VT_VECTOR_LPSTR, VT_STRING, VT_USTR, VT_CUSTOM, DocSummaryPIDDSI, SummaryPIDSI, CountryEnum, XLSFillPattern, _XLSIcv, XLSIcv, BErr, RBErr, XLSLblBuiltIn, ct2type, RELS, CT_ODS, CORE_PROPS, EXT_PROPS, custregex, XLMLDocPropsMap, evert_XLMLDPM, parse_Ref, FtTab, parse_BIFF2Format, parse_XLHeaderFooter, parse_BIFF5OT, parse_Blank, parse_Scl, parse_String, DBF_SUPPORTED_VERSIONS, DBF, SYLK, DIF, ETH, PRN, WK_, parse_rs, rs_to_html, sitregex, sirregex, sstr1, sstr2, crypto_CreateXorArray_Method1, crypto_DecryptData_Method1, crypto_MakeXorDecryptor, DEF_MDW, MAX_MDW, MIN_MDW, MDW, DEF_PPI, PPI, XLMLPatternTypeMap, cellXF_uint, cellXF_bool, parse_sty_xml, parse_BrtFill, parse_BrtBorder, XLSXThemeClrScheme, parse_BrtCommentAuthor, CT_VBA, rc_to_a1, crefregex, a1_to_rc, parse_PtgMemErr, parse_PtgMemNoMem, parse_PtgTbl, parse_PtgElfCol, parse_PtgElfColS, parse_PtgElfColSV, parse_PtgElfColV, parse_PtgElfRadical, parse_PtgElfRadicalLel, parse_PtgElfRadicalS, parse_PtgElfRw, parse_PtgElfRwV, PtgListRT, PtgTypes, PtgDupes, Ptg18, Ptg19, PtgBinOp, parse_XLSBArrayParsedFormula, parse_XLSBCellParsedFormula, parse_XLSBNameParsedFormula, parse_XLSBSharedParsedFormula, Cetab, Ftab, FtabArgc, strs, _ssfopts, mergecregex, hlinkregex, dimregex, colregex, afregex, marginregex, sheetprregex, sviewregex, parse_ws_xml_data, parse_BrtWsDim, parse_BrtMergeCell, BrtMarginKeys, WBPropsDef, WBViewDef, SheetDef, CalcPrDef, badchars, wbnsregex, attregexg2, attregex2, XLMLFormatMap, CONTINUE_RT, PSCLSID, XLSBRecordEnum, XLSRecordEnum, HTML_BEGIN, HTML_END, subarray, numbers_lut_new, qreg, utils, version;
 var init_xlsx = __esm({
-  "../../kit-ov-integrate/grokbot-override/node_modules/xlsx/xlsx.mjs"() {
+  "node_modules/xlsx/xlsx.mjs"() {
     /*! xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */
     XLSX = {};
     XLSX.version = "0.20.3";
