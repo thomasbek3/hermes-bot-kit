@@ -3,16 +3,19 @@
 ## Unreleased
 
 - **grokbot-override: light background polling on a struggling remote gateway (2026-11-16)**: the own roster read
-  (`profiles.list` with session summaries + `host.agents()`) runs at most once per 60 s instead of every ~15 s; the
-  roster read, source re-list, room list and the open chat's idle refresh never run at once on one connection; a
-  poll that fails or takes more than 2 s doubles its interval (cap 5 min) and a fast success resets it; nothing polls
-  while the window is hidden, and one refresh runs when it is visible again. Foreground calls (switch bot, open a
-  chat, send, a write's re-read, Retry) are never delayed. The full `profiles.list` stays because previews, unread
-  dots, activity toasts and the Bot Chat a click opens come only from its session fields, and the handler has no
-  lighter option than `include_sessions: false` (see PARITY, Architecture notes). Idle with one remote connection
-  and an open chat: about 17 requests a minute (3.3 full roster reads) before, about 11 (1 full roster read) after,
-  none while hidden. New `src/core/backgroundPolls.js`, tests `test/light-roster.test.mjs`.
-
+  (`profiles.list` with session summaries + `host.agents()`) runs at most once per 60 s instead of every ~15 s. All
+  background polls (roster, source re-list, room list, one idle-refresh pass per connection over every open chat) go
+  through one scheduler: never two at once on a connection (the union roster also waits for every non-SSH source it
+  reads), a failure, a failed source or a > 2 s answer doubles the interval (cap 5 min) and a fast success resets it,
+  a run past 30 s frees its connection and its late answer is dropped, nothing polls while the window is hidden, and
+  every poll is due once when it is visible again (also when the visibility event never arrives). Older background
+  answers never overwrite a newer foreground read; stopping the plugin drops late answers and follow-ups. Foreground
+  calls (switch bot, open a chat, send, a write's re-read, Retry, create/disband a room) are never delayed. The full
+  `profiles.list` stays because previews, unread dots, activity toasts and the Bot Chat a click opens come only from
+  its session fields, and the handler has no lighter option than `include_sessions: false` (see PARITY,
+  Architecture notes). Idle with one remote connection and an open chat: about 17 requests a minute (3.3 full
+  roster reads) before, about 11 (1 full roster read) after, none while hidden. New `src/core/backgroundPolls.js`,
+  tests `test/light-roster.test.mjs`.
 - **computer-viewer: native computer_use, Take over / Hand back, Orgo removed (2026-11-15)**: the pane now opens on
   Hermes's own `computer_use` and `browser_*` tool calls (live `tool.start` only, never replayed, once per bot per
   30 s, a manual close holds 30 s) for a bot with its own bound computer, instead of on Orgo tool rows. Computers the

@@ -9,10 +9,10 @@
 //                                                  open (routing.js retainBotRoute);
 //                                                  rejects when it cannot be held
 //   setTimer(fn, ms) -> cancel, now(), isVisible() optional
-//   backgroundPoll(type, bot, baseMs, fn, { force }) optional: the idle refresh
-//                                                  runs through it (one background
-//                                                  poll per connection at a time,
-//                                                  backoff; core/backgroundPolls.js)
+//   idleByHost optional: true = the controller runs no idle-refresh timer of
+//                                                  its own; the host calls idleRefresh()
+//                                                  from its background pass (src/ui/app.ts,
+//                                                  core/backgroundPolls.js)
 //
 // Route lifetime: a bot on a secondary (pooled) connection is reached through
 // host.requestProfile, and each call is its own lease. At zero leases the
@@ -120,7 +120,7 @@ export const HISTORY_PAGE = 120
 export const CHECKING_TEXT = 'this chat is still being checked, try again in a moment'
 const RESUME_TIMEOUT_MS = 180_000
 const APPROVAL_POLL_MS = 2_000
-const IDLE_REFRESH_MS = 15_000
+export const IDLE_REFRESH_MS = 15_000
 // Busy watchdog: first check after this much silence, doubling to the max.
 const WATCH_FIRST_MS = 10_000
 const WATCH_MAX_MS = 60_000
@@ -1039,12 +1039,15 @@ export function createChatController(bot, deps, options = {}) {
     await refreshTail()
   }
 
-  /** refresh(), reporting a failed read (false) to the idle poll's backoff. */
-  async function refreshTail() {
+  /** refresh() for a background pass: false = the read failed; `live()`
+   *  false when it answers (the pass ran past its deadline, or the plugin
+   *  stopped) = the answer is dropped. */
+  async function refreshTail(live) {
     if (!state.storedId || state.chat.busy || state.phase !== 'ready' || state.loadingMore) return true
     try {
       const tail = await readPage(0)
       if (disposed || state.chat.busy || state.loadingMore) return true
+      if (typeof live === 'function' && !live()) return true
       mergeTail(tail, keepLocal)
       resolveUnknownFrom(tail)
       return true
@@ -1054,61 +1057,22 @@ export function createChatController(bot, deps, options = {}) {
     }
   }
 
-  // The idle refresh is a BACKGROUND poll: it stops while the window is
-  // hidden (wake() resumes it with one refresh), and with deps.backgroundPoll
-  // it never runs beside another background poll on the bot's connection and
-  // backs off while that connection is slow or failing.
-  const idleBaseMs = () => options.idleRefreshMs ?? IDLE_REFRESH_MS
-  let idlePaused = false
-
-  async function idleTick(force = false) {
-    const gate = deps.backgroundPoll
-    if (typeof gate !== 'function') {
-      await refreshTail()
-      return { nextMs: idleBaseMs() }
-    }
-    try {
-      return (await gate('idle', state.bot, idleBaseMs(), refreshTail, { force })) || { nextMs: idleBaseMs() }
-    } catch {
-      return { nextMs: idleBaseMs() }
-    }
+  /** The host's background pass (deps.idleByHost): one idle refresh, never
+   *  while the chat is retiring or disposed. */
+  async function idleRefresh(live) {
+    if (disposed || retiring) return true
+    return refreshTail(live)
   }
 
-  function scheduleIdleRefresh(delayMs) {
-    if (disposed || retiring) return
+  function scheduleIdleRefresh() {
+    if (disposed || retiring || deps.idleByHost) return
     idleCancel?.()
-    idlePaused = false
     idleCancel = setTimer(async () => {
       idleCancel = null
       if (disposed || retiring) return
-      if (!visible()) {
-        idlePaused = true
-        return
-      }
-      const result = await idleTick()
-      if (idleCancel || disposed || retiring) return
-      if (result?.hidden) {
-        idlePaused = true
-        return
-      }
-      scheduleIdleRefresh(Math.max(1, Number(result?.nextMs) || idleBaseMs()))
-    }, delayMs ?? idleBaseMs())
-  }
-
-  /** The window is visible again: an idle refresh that stopped while it was
-   *  hidden runs once now and the idle timer resumes. */
-  function wake() {
-    if (!idlePaused || disposed || retiring || state.phase !== 'ready' || !visible()) return
-    idlePaused = false
-    void (async () => {
-      const result = await idleTick(true)
-      if (idleCancel || disposed || retiring) return
-      if (result?.hidden) {
-        idlePaused = true
-        return
-      }
-      scheduleIdleRefresh(Math.max(1, Number(result?.nextMs) || idleBaseMs()))
-    })()
+      await refresh()
+      scheduleIdleRefresh()
+    }, options.idleRefreshMs ?? IDLE_REFRESH_MS)
   }
 
   function onTurnSettled() {
@@ -2423,7 +2387,7 @@ export function createChatController(bot, deps, options = {}) {
     attach: guard(attach, rejected),
     loadEarlier: guard(loadEarlier, nothing),
     refresh: guard(refresh, nothing),
-    wake,
+    idleRefresh: guard(idleRefresh, () => Promise.resolve(true)),
     reconcile: guard(reconcile, nothing),
     send: guard(send, () => Promise.resolve(false)),
     sendDraft: guard(sendDraft, notSent),

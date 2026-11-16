@@ -44722,11 +44722,12 @@ function createChatController(bot, deps, options = {}) {
   async function refresh() {
     await refreshTail();
   }
-  async function refreshTail() {
+  async function refreshTail(live) {
     if (!state.storedId || state.chat.busy || state.phase !== "ready" || state.loadingMore) return true;
     try {
       const tail = await readPage(0);
       if (disposed || state.chat.busy || state.loadingMore) return true;
+      if (typeof live === "function" && !live()) return true;
       mergeTail(tail, keepLocal);
       resolveUnknownFrom(tail);
       return true;
@@ -44734,52 +44735,19 @@ function createChatController(bot, deps, options = {}) {
       return false;
     }
   }
-  const idleBaseMs = () => options.idleRefreshMs ?? IDLE_REFRESH_MS;
-  let idlePaused = false;
-  async function idleTick(force = false) {
-    const gate = deps.backgroundPoll;
-    if (typeof gate !== "function") {
-      await refreshTail();
-      return { nextMs: idleBaseMs() };
-    }
-    try {
-      return await gate("idle", state.bot, idleBaseMs(), refreshTail, { force }) || { nextMs: idleBaseMs() };
-    } catch {
-      return { nextMs: idleBaseMs() };
-    }
+  async function idleRefresh(live) {
+    if (disposed || retiring2) return true;
+    return refreshTail(live);
   }
-  function scheduleIdleRefresh(delayMs) {
-    if (disposed || retiring2) return;
+  function scheduleIdleRefresh() {
+    if (disposed || retiring2 || deps.idleByHost) return;
     idleCancel?.();
-    idlePaused = false;
     idleCancel = setTimer2(async () => {
       idleCancel = null;
       if (disposed || retiring2) return;
-      if (!visible2()) {
-        idlePaused = true;
-        return;
-      }
-      const result = await idleTick();
-      if (idleCancel || disposed || retiring2) return;
-      if (result?.hidden) {
-        idlePaused = true;
-        return;
-      }
-      scheduleIdleRefresh(Math.max(1, Number(result?.nextMs) || idleBaseMs()));
-    }, delayMs ?? idleBaseMs());
-  }
-  function wake() {
-    if (!idlePaused || disposed || retiring2 || state.phase !== "ready" || !visible2()) return;
-    idlePaused = false;
-    void (async () => {
-      const result = await idleTick(true);
-      if (idleCancel || disposed || retiring2) return;
-      if (result?.hidden) {
-        idlePaused = true;
-        return;
-      }
-      scheduleIdleRefresh(Math.max(1, Number(result?.nextMs) || idleBaseMs()));
-    })();
+      await refresh();
+      scheduleIdleRefresh();
+    }, options.idleRefreshMs ?? IDLE_REFRESH_MS);
   }
   function onTurnSettled() {
     stopApprovalPoll();
@@ -45818,7 +45786,7 @@ ${body}` : body);
     attach: guard(attach, rejected),
     loadEarlier: guard(loadEarlier, nothing),
     refresh: guard(refresh, nothing),
-    wake,
+    idleRefresh: guard(idleRefresh, () => Promise.resolve(true)),
     reconcile: guard(reconcile, nothing),
     send: guard(send, () => Promise.resolve(false)),
     sendDraft: guard(sendDraft, notSent),
@@ -46619,6 +46587,7 @@ async function createRoom(requestRoom2, route, name, bots) {
 // src/core/backgroundPolls.js
 var SLOW_POLL_MS = 2e3;
 var POLL_BACKOFF_MAX_MS = 5 * 6e4;
+var POLL_DEADLINE_MS = 3e4;
 function createBackgroundPolls(deps = {}) {
   const now = typeof deps.now === "function" ? deps.now : () => Date.now();
   const visible2 = () => {
@@ -46628,65 +46597,113 @@ function createBackgroundPolls(deps = {}) {
       return true;
     }
   };
-  const lanes = /* @__PURE__ */ new Map();
-  function laneOf(key) {
-    const id = String(key || "local");
-    let lane = lanes.get(id);
-    if (!lane) {
-      lane = { busy: "", polls: /* @__PURE__ */ new Map() };
-      lanes.set(id, lane);
-    }
-    return lane;
-  }
-  function pollOf(lane, type, baseMs) {
-    const base4 = Math.max(0, Number(baseMs) || 0);
-    let poll = lane.polls.get(type);
+  let generation2 = 0;
+  const owners = /* @__PURE__ */ new Map();
+  const polls2 = /* @__PURE__ */ new Map();
+  const laneId = (key) => String(key || "local");
+  function pollOf(key, type, baseMs) {
+    const id = `${laneId(key)}
+${type}`;
+    let poll = polls2.get(id);
     if (!poll) {
-      poll = { base: base4, interval: base4, last: -Infinity };
-      lane.polls.set(type, poll);
+      poll = { base: 0, interval: 0, last: -Infinity, resume: false };
+      polls2.set(id, poll);
     }
-    if (poll.base !== base4) {
-      poll.base = base4;
-      if (poll.interval < base4) poll.interval = base4;
+    if (baseMs !== void 0) {
+      const base4 = Math.max(0, Number(baseMs) || 0);
+      if (poll.base !== base4) {
+        poll.base = base4;
+        if (poll.interval < base4) poll.interval = base4;
+      }
     }
     return poll;
   }
-  function wait(key, type, baseMs) {
-    const poll = pollOf(laneOf(key), type, baseMs);
-    return Math.max(0, poll.last + poll.interval - now());
+  const backoff = (poll) => Math.min(Math.max(poll.interval, poll.base, 1) * 2, POLL_BACKOFF_MAX_MS);
+  const expired = (run2) => now() - run2.start >= POLL_DEADLINE_MS;
+  const isLive = (run2) => !run2.done && !run2.retired && run2.generation === generation2 && !expired(run2);
+  function retire(run2) {
+    if (run2.retired || run2.done) return;
+    run2.retired = true;
+    run2.poll.interval = backoff(run2.poll);
+    for (const id of run2.lanes) if (owners.get(id) === run2) owners.delete(id);
   }
-  function due(key, type, baseMs) {
-    const lane = laneOf(key);
-    return visible2() && !lane.busy && wait(key, type, baseMs) === 0;
+  function holder(id) {
+    const run2 = owners.get(id);
+    if (!run2) return null;
+    if (run2.generation !== generation2) {
+      owners.delete(id);
+      return null;
+    }
+    if (expired(run2)) {
+      retire(run2);
+      return null;
+    }
+    return run2;
   }
-  async function run(key, type, baseMs, fn, { force = false } = {}) {
-    const lane = laneOf(key);
-    const poll = pollOf(lane, type, baseMs);
-    if (!visible2()) return { ran: false, hidden: true, nextMs: poll.interval };
-    if (lane.busy) return { ran: false, busy: true, nextMs: Math.min(poll.interval, Math.max(1, poll.base)) };
-    if (!force && wait(key, type, baseMs) > 0) return { ran: false, nextMs: wait(key, type, baseMs) };
-    lane.busy = type;
-    const start2 = now();
-    poll.last = start2;
+  function waitOf(poll, resumeMinMs = 0) {
+    const gap = poll.resume ? Math.max(0, Number(resumeMinMs) || 0) : poll.interval;
+    return Math.max(0, poll.last + gap - now());
+  }
+  async function run(key, type, baseMs, fn, { force = false, lanes = [], resumeMinMs = 0 } = {}) {
+    const main = laneId(key);
+    const ids = [.../* @__PURE__ */ new Set([main, ...lanes.map(laneId)])];
+    const poll = pollOf(main, type, baseMs);
+    if (!visible2()) return { ran: false, hidden: true, nextMs: waitOf(poll, resumeMinMs) };
+    if (ids.some((id) => holder(id))) return { ran: false, busy: true, nextMs: Math.max(1, Math.min(poll.interval, poll.base)) };
+    const wait = waitOf(poll, resumeMinMs);
+    if (!force && wait > 0) return { ran: false, nextMs: wait };
+    const job = { type, poll, lanes: ids, start: now(), generation: generation2, done: false, retired: false };
+    for (const id of ids) owners.set(id, job);
+    poll.last = job.start;
+    poll.resume = false;
     let ok = true;
     try {
-      ok = await fn() !== false;
+      ok = await fn(() => isLive(job)) !== false;
     } catch {
       ok = false;
-    } finally {
-      lane.busy = "";
     }
-    const slow = now() - start2 > SLOW_POLL_MS;
-    poll.interval = ok && !slow ? poll.base : Math.min(Math.max(poll.interval, poll.base, 1) * 2, POLL_BACKOFF_MAX_MS);
+    const stale = !isLive(job);
+    for (const id of ids) if (owners.get(id) === job) owners.delete(id);
+    if (stale) {
+      if (!job.retired && job.generation === generation2) poll.interval = backoff(poll);
+      job.done = true;
+      return { ran: true, ok: false, stale: true, nextMs: poll.interval };
+    }
+    job.done = true;
+    const slow = now() - job.start > SLOW_POLL_MS;
+    poll.interval = ok && !slow ? poll.base : backoff(poll);
     return { ran: true, ok, slow, nextMs: poll.interval };
   }
+  function resume() {
+    for (const poll of polls2.values()) poll.resume = true;
+  }
+  function want(key, type) {
+    pollOf(key, type).resume = true;
+  }
+  function reset() {
+    generation2 += 1;
+    owners.clear();
+    polls2.clear();
+  }
+  function due(key, type, baseMs, { lanes = [], resumeMinMs = 0 } = {}) {
+    const ids = [laneId(key), ...lanes.map(laneId)];
+    return visible2() && !ids.some((id) => holder(id)) && waitOf(pollOf(key, type, baseMs), resumeMinMs) === 0;
+  }
   function interval(key, type, baseMs) {
-    return pollOf(laneOf(key), type, baseMs).interval;
+    return pollOf(key, type, baseMs).interval;
   }
   function busy(key) {
-    return laneOf(key).busy;
+    return holder(laneId(key))?.type || "";
   }
-  return { run, due, wait, interval, busy };
+  return { run, resume, want, reset, due, interval, busy };
+}
+async function refreshInTurn(chats, live, isVisible2 = () => true) {
+  let ok = true;
+  for (const chat of Array.isArray(chats) ? chats : []) {
+    if (!live() || !isVisible2()) break;
+    if (await chat.idleRefresh(live) === false) ok = false;
+  }
+  return ok;
 }
 
 // src/ui/sdk.ts
@@ -51072,6 +51089,7 @@ var lastOwnRead = 0;
 var liveNames = /* @__PURE__ */ new Map();
 var pollClock = () => Date.now();
 var polls = createBackgroundPolls({ now: () => pollClock(), isVisible: () => isVisible() });
+var pollEpoch = 0;
 function activeLane() {
   return activeConnectionId() || "local";
 }
@@ -51084,21 +51102,44 @@ function botLane(bot) {
   if (bot?.connectionId) return String(bot.connectionId);
   return isLocalBot(bot, activeConnectionId()) ? "local" : activeLane();
 }
-async function verifySources() {
+function unionLanes() {
+  const ids = /* @__PURE__ */ new Set();
+  for (const source of app.roster.get().sources || []) {
+    const id = String(source?.connectionId || "").trim();
+    if (id && String(source?.kind || "") !== "ssh") ids.add(id);
+  }
+  return [...ids];
+}
+function unionHealthy(union) {
+  return !(Array.isArray(union?.sources) ? union.sources : []).some(
+    (source) => source?.error && String(source.error) !== "connect-on-demand" && String(source?.kind || "") !== "ssh"
+  );
+}
+var rosterGen = 0;
+var rosterFgGen = 0;
+function beginRosterRead(foreground) {
+  rosterGen += 1;
+  if (foreground) rosterFgGen += 1;
+  const gen = rosterGen;
+  const fg = rosterFgGen;
+  return () => foreground ? fg === rosterFgGen : gen === rosterGen;
+}
+async function verifySources(live = () => true) {
   if (typeof host2?.agents !== "function") return true;
+  const current = beginRosterRead(false);
   try {
     const union = await host2.agents();
+    if (!current() || !live()) return true;
     liveNames = liveRosterNames(union);
     app.roster.set((s) => {
       const rows = dropDeadRows(s.rows, liveNames);
       return rows.length === s.rows.length ? s : { ...s, rows };
     });
-    return true;
+    return unionHealthy(union);
   } catch {
     return false;
   }
 }
-var ownSeq = 0;
 var raf = 0;
 var unwatchPane = null;
 var unwatchComputer = null;
@@ -51153,20 +51194,24 @@ function mergeRosterState(s, patch) {
   }
   return changed ? next : s;
 }
-async function fetchOwnRoster() {
-  const seq = ++ownSeq;
+async function fetchOwnRoster({ foreground = false, live = () => true } = {}) {
+  const current = beginRosterRead(foreground);
+  const fresh = () => current() && live();
   try {
     const active = activeConnectionId();
     const local = await host2.request("profiles.list", { ...OWN_ROSTER_PARAMS });
     let union = null;
+    let unionOk = true;
     if (typeof host2.agents === "function") {
       try {
         union = await host2.agents();
+        unionOk = unionHealthy(union);
       } catch {
         union = null;
+        unionOk = false;
       }
     }
-    if (seq !== ownSeq) return true;
+    if (!fresh()) return true;
     if (union) liveNames = liveRosterNames(union);
     const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames);
     lastOwnRead = Date.now();
@@ -51174,9 +51219,9 @@ async function fetchOwnRoster() {
       return mergeRosterState(s, { rows, sources: union?.sources || [], origin: "own", error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) });
     });
     trackActivity();
-    return true;
+    return unionOk;
   } catch (error) {
-    if (seq !== ownSeq) return false;
+    if (!fresh()) return false;
     const message = String(error?.message || error);
     app.roster.set((s) => s.error === message ? s : { ...s, error: message });
     return false;
@@ -51195,7 +51240,9 @@ var activity = createActivityTracker({
   },
   toastsEnabled: () => readPluginStorage("hermes-bots", "activity-toasts", false) === true,
   notify: (n) => host2?.notify?.(n),
-  refreshOpen: () => void controller?.refresh?.()
+  // Activity on the open chat: a background re-read (coalesced, on its
+  // connection's lane, never while hidden), not a direct read.
+  refreshOpen: () => requestOpenRefresh()
 });
 var activityPaused = false;
 function trackActivity() {
@@ -51238,22 +51285,54 @@ function refreshRoster() {
   } else {
     app.roster.set((s) => mergeRosterState(s, side));
   }
+  ownReadWanted = !cached2 || !cached2.fresh;
+  noteVisibility();
   trackActivity();
-  if (!isVisible()) return;
-  void backgroundTick(!cached2 || !cached2.fresh);
+  pumpPolls();
 }
-var tickInFlight = false;
-async function backgroundTick(ownRead) {
-  if (tickInFlight) return;
-  tickInFlight = true;
-  try {
-    const lane = activeLane();
-    if (ownRead) await polls.run(lane, "roster", OWN_FETCH_MIN_MS, fetchOwnRoster);
-    else await polls.run(lane, "verify", OWN_VERIFY_MS, verifySources);
-    await refreshRooms();
-  } finally {
-    tickInFlight = false;
+var ownReadWanted = true;
+var lastSeenVisible = true;
+function noteVisibility() {
+  const visible2 = isVisible();
+  if (visible2 && !lastSeenVisible) polls.resume();
+  lastSeenVisible = visible2;
+}
+function pumpPolls() {
+  if (!isVisible()) return;
+  const epoch = pollEpoch;
+  const after = (result) => void result.then((r) => {
+    if (r?.ran && epoch === pollEpoch) pumpPolls();
+  });
+  const lane = activeLane();
+  const lanes = unionLanes();
+  if (ownReadWanted) {
+    after(polls.run(lane, "roster", OWN_FETCH_MIN_MS, (live) => fetchOwnRoster({ live }), { lanes, resumeMinMs: OWN_FETCH_MIN_MS }));
+  } else {
+    after(polls.run(lane, "verify", OWN_VERIFY_MS, (live) => verifySources(live), { lanes }));
   }
+  after(polls.run(lane, "rooms", ROOM_LIST_MS, (live) => listRoomsNow(live)));
+  for (const [chatLane, chats] of idleChatsByLane()) {
+    after(polls.run(chatLane, "idle", IDLE_REFRESH_MS, (live) => refreshInTurn(chats, live, isVisible)));
+  }
+}
+function idleChatsByLane() {
+  const byLane = /* @__PURE__ */ new Map();
+  const add2 = (chat) => {
+    if (!chat || chat.isDisposed?.() || chat.isRetiring?.() || typeof chat.idleRefresh !== "function") return;
+    const lane = botLane(chat.get?.()?.bot);
+    const list = byLane.get(lane) || [];
+    if (!list.includes(chat)) list.push(chat);
+    byLane.set(lane, list);
+  };
+  add2(controller);
+  for (const tab of tabs.values()) add2(tab.controller);
+  return byLane;
+}
+function requestOpenRefresh() {
+  const bot = controller?.get?.()?.bot;
+  if (!bot) return;
+  polls.want(botLane(bot), "idle");
+  pumpPolls();
 }
 function metaFor(bot) {
   return effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get());
@@ -51262,7 +51341,7 @@ function activeConnection() {
   return activeConnectionId();
 }
 function reloadRoster() {
-  void fetchOwnRoster();
+  void fetchOwnRoster({ foreground: true });
 }
 function sections() {
   const r = app.roster.get();
@@ -51360,11 +51439,8 @@ function isVisible() {
     return true;
   }
 }
-function backgroundPoll(type, bot, baseMs, fn, options) {
-  return polls.run(botLane(bot), type, baseMs, fn, options);
-}
 function chatDeps() {
-  return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible, backgroundPoll };
+  return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible, idleByHost: true };
 }
 var SEED_MAX = 8;
 var chatSeeds = /* @__PURE__ */ new Map();
@@ -51655,7 +51731,7 @@ function openBotInNewTab(bot) {
   return true;
 }
 var requestRoom = null;
-var roomListInFlight = false;
+var roomSeq = 0;
 var roomTabs = /* @__PURE__ */ new Map();
 function activeRoomRoute() {
   let profile = "";
@@ -51671,28 +51747,26 @@ async function refreshRooms(force = false) {
     await listRoomsNow();
     return;
   }
-  if (!isVisible()) return;
-  await polls.run(activeLane(), "rooms", ROOM_LIST_MS, listRoomsNow);
+  await polls.run(activeLane(), "rooms", ROOM_LIST_MS, (live) => listRoomsNow(live));
 }
-async function listRoomsNow() {
-  if (roomListInFlight) return true;
+async function listRoomsNow(live = () => true) {
   const route = activeRoomRoute();
   if (!route) return true;
-  roomListInFlight = true;
+  const seq = ++roomSeq;
+  const epoch = pollEpoch;
+  const fresh = () => seq === roomSeq && epoch === pollEpoch && live();
   requestRoom ??= createRoomRequester(host2);
   try {
     const rooms = await listRooms(requestRoom, route);
-    app.rooms.set({ route, rooms, error: null, loaded: true });
+    if (fresh()) app.rooms.set({ route, rooms, error: null, loaded: true });
     return true;
   } catch (error) {
     if (looksUnsupported(error)) {
-      app.rooms.set({ route, rooms: [], error: null, loaded: true });
+      if (fresh()) app.rooms.set({ route, rooms: [], error: null, loaded: true });
       return true;
     }
-    app.rooms.set((s) => ({ ...s, route, error: String(error?.message || error), loaded: true }));
+    if (fresh()) app.rooms.set((s) => ({ ...s, route, error: String(error?.message || error), loaded: true }));
     return false;
-  } finally {
-    roomListInFlight = false;
   }
 }
 var roomStateHooks = /* @__PURE__ */ new Set();
@@ -52056,16 +52130,6 @@ var unwatchDocument = null;
 function onDocumentVisible() {
   if (!app.enabled.get() || !isVisible()) return;
   refreshRoster();
-  try {
-    controller?.wake?.();
-  } catch {
-  }
-  for (const tab of tabs.values()) {
-    try {
-      tab.controller?.wake?.();
-    } catch {
-    }
-  }
 }
 function watchDocumentVisibility() {
   unwatchDocument?.();
@@ -52136,6 +52200,11 @@ function disable() {
   rosterTimer = null;
   unwatchDocument?.();
   unwatchDocument = null;
+  pollEpoch += 1;
+  polls.reset();
+  rosterGen += 1;
+  rosterFgGen += 1;
+  roomSeq += 1;
   stopRemoteAvatars();
   unwatchPane?.();
   unwatchPane = null;
@@ -52404,7 +52473,7 @@ async function selfCheck({ notify: notify2 = true } = {}) {
     step("stock-roster-cache", Boolean(cached2), { rows: cached2?.profiles?.length ?? 0, fresh: cached2?.fresh ?? false });
     let rows = cached2?.profiles || [];
     if (!rows.length) {
-      await fetchOwnRoster();
+      await fetchOwnRoster({ foreground: true });
       rows = app.roster.get().rows;
     } else {
       app.roster.set((s) => mergeRosterState(s, { ...readSideData(), rows: annotateSources(cached2.profiles, cached2.sources), origin: "stock" }));
