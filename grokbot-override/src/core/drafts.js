@@ -87,23 +87,76 @@ export const DRAFT_OWNERS_MAX = 20
 
 export function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
   const map = new Map()
-  return {
+  // A refused send restored while no composer of that bot was on screen:
+  // owner → { text, clientId, note }, consumed by the next composer that
+  // mounts with exactly that text (review C-R2-01).
+  const pending = new Map()
+  // Live composers per owner: (text, info) → true when it took the text.
+  const listeners = new Map()
+  const api = {
     get(owner) {
       return (owner && map.get(owner)) || ''
     },
     set(owner, text) {
       if (!owner) return
       const value = typeof text === 'string' ? text : ''
+      if (pending.has(owner) && pending.get(owner).text !== value) pending.delete(owner)
       map.delete(owner)
       if (!value.trim()) return
       map.set(owner, value)
-      while (map.size > maxOwners) map.delete(map.keys().next().value)
+      while (map.size > maxOwners) {
+        const oldest = map.keys().next().value
+        map.delete(oldest)
+        pending.delete(oldest)
+      }
     },
     clear(owner) {
       map.delete(owner)
+      pending.delete(owner)
     },
-    size: () => map.size
+    size: () => map.size,
+    /** Give a definitely refused send's text back to `owner`'s draft: to a
+     *  live composer of that bot if one takes it (an empty one), else into the
+     *  store with a pending record for the next composer that mounts. Never
+     *  over a newer draft. Returns true when the text found a home. */
+    restore(owner, text, info = {}) {
+      const value = typeof text === 'string' ? text : ''
+      if (!owner || !value.trim() || api.get(owner).trim()) return false
+      const live = listeners.get(owner)
+      if (live && live.size) {
+        for (const fn of [...live]) {
+          try {
+            if (fn(value, info)) return true
+          } catch {
+            /* next */
+          }
+        }
+        return false
+      }
+      api.set(owner, value)
+      pending.set(owner, { text: value, ...info })
+      return true
+    },
+    /** The pending restore for `owner` if the composer now shows `text`;
+     *  consumed either way. */
+    take(owner, text) {
+      const record = pending.get(owner)
+      pending.delete(owner)
+      return record && record.text === text ? record : null
+    },
+    /** A live composer for `owner`; returns the unsubscribe. */
+    subscribe(owner, fn) {
+      if (!owner || typeof fn !== 'function') return () => undefined
+      let set = listeners.get(owner)
+      if (!set) listeners.set(owner, (set = new Set()))
+      set.add(fn)
+      return () => {
+        set.delete(fn)
+        if (!set.size && listeners.get(owner) === set) listeners.delete(owner)
+      }
+    }
   }
+  return api
 }
 
 /** The composer's shared draft texts (one per app session). */

@@ -204,12 +204,33 @@ export function Composer({
     reads.current.clear()
   }
 
+  const onRestoredRef = React.useRef(onRestored)
+  onRestoredRef.current = onRestored
+
   React.useEffect(() => {
-    setText(draftTexts.get(owner))
+    const draft = draftTexts.get(owner)
+    setText(draft)
     setFiles([])
-    setNote('')
     setOptions([])
-    return abortReads
+    // A refused send restored while this bot's composer was not on screen
+    // (review C-R1-02 / C-R2-01): show why, and drop its failed bubble now
+    // that the composer holds the text.
+    const restored = draftTexts.take(owner, draft)
+    setNote(restored?.note || '')
+    if (restored?.clientId) onRestoredRef.current?.(restored.clientId)
+    // A refusal that lands while this composer is on screen but was sent
+    // from an earlier one (A → B → A before the answer): take it here.
+    const off = draftTexts.subscribe(owner, (value: string, info: any) => {
+      if (textRef.current.trim() || filesRef.current.length) return false
+      setText(value)
+      setNote(info?.note || '')
+      if (info?.clientId) onRestoredRef.current?.(info.clientId)
+      return true
+    })
+    return () => {
+      off()
+      abortReads()
+    }
   }, [owner])
 
   // Remember what is typed for this bot; an empty composer (a send) clears it.
@@ -346,14 +367,21 @@ export function Composer({
     setNote('')
     setOptions([])
     const result = await onSend(sending, attachments, apiText ? { apiText } : undefined)
-    // A definite refusal (nothing admitted) after the user moved to another
-    // bot: this composer can no longer show it, so the text goes back to that
-    // bot's draft, unless something newer was typed there (review C-R1-02).
-    // An `unknown` delivery is never restored: it may have reached the bot.
-    if (!result.ok && result.delivery === 'not-sent' && (!mountedRef.current || ownerRef.current !== sentOwner) && !draftTexts.get(sentOwner).trim()) {
-      draftTexts.set(sentOwner, sending)
+    // This composer is gone or shows another bot (the user switched while
+    // the send was out). Nothing more happens HERE: a definite refusal
+    // (nothing admitted) goes to that bot's draft, to its live composer if
+    // one is on screen and empty, else to the store for the next one (review
+    // C-R1-02, C-R2-01); that composer then drops the failed bubble. A send
+    // with attachments keeps its failed bubble as the recovery route (the
+    // draft store holds text only), as does a refusal that finds a newer
+    // draft. An `unknown` delivery is never restored: it may have reached
+    // the bot.
+    if (!mountedRef.current || ownerRef.current !== sentOwner) {
+      if (!result.ok && result.delivery === 'not-sent' && !attachments.length) {
+        draftTexts.restore(sentOwner, sending, { clientId: result.clientId || '', note: failureNote(result, true) })
+      }
+      return
     }
-    if (ownerRef.current !== sentOwner) return
     if (!result.ok) {
       const restore = restoreAfterFailure({ result, sentOwner, currentOwner: ownerRef.current, currentText: textRef.current, currentFiles: filesRef.current })
       if (restore) {

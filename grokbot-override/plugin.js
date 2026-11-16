@@ -43064,23 +43064,71 @@ function failureNote(result, restored) {
 var DRAFT_OWNERS_MAX = 20;
 function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
   const map = /* @__PURE__ */ new Map();
-  return {
+  const pending = /* @__PURE__ */ new Map();
+  const listeners = /* @__PURE__ */ new Map();
+  const api = {
     get(owner) {
       return owner && map.get(owner) || "";
     },
     set(owner, text3) {
       if (!owner) return;
       const value = typeof text3 === "string" ? text3 : "";
+      if (pending.has(owner) && pending.get(owner).text !== value) pending.delete(owner);
       map.delete(owner);
       if (!value.trim()) return;
       map.set(owner, value);
-      while (map.size > maxOwners) map.delete(map.keys().next().value);
+      while (map.size > maxOwners) {
+        const oldest = map.keys().next().value;
+        map.delete(oldest);
+        pending.delete(oldest);
+      }
     },
     clear(owner) {
       map.delete(owner);
+      pending.delete(owner);
     },
-    size: () => map.size
+    size: () => map.size,
+    /** Give a definitely refused send's text back to `owner`'s draft: to a
+     *  live composer of that bot if one takes it (an empty one), else into the
+     *  store with a pending record for the next composer that mounts. Never
+     *  over a newer draft. Returns true when the text found a home. */
+    restore(owner, text3, info = {}) {
+      const value = typeof text3 === "string" ? text3 : "";
+      if (!owner || !value.trim() || api.get(owner).trim()) return false;
+      const live = listeners.get(owner);
+      if (live && live.size) {
+        for (const fn of [...live]) {
+          try {
+            if (fn(value, info)) return true;
+          } catch {
+          }
+        }
+        return false;
+      }
+      api.set(owner, value);
+      pending.set(owner, { text: value, ...info });
+      return true;
+    },
+    /** The pending restore for `owner` if the composer now shows `text`;
+     *  consumed either way. */
+    take(owner, text3) {
+      const record = pending.get(owner);
+      pending.delete(owner);
+      return record && record.text === text3 ? record : null;
+    },
+    /** A live composer for `owner`; returns the unsubscribe. */
+    subscribe(owner, fn) {
+      if (!owner || typeof fn !== "function") return () => void 0;
+      let set = listeners.get(owner);
+      if (!set) listeners.set(owner, set = /* @__PURE__ */ new Set());
+      set.add(fn);
+      return () => {
+        set.delete(fn);
+        if (!set.size && listeners.get(owner) === set) listeners.delete(owner);
+      };
+    }
   };
+  return api;
 }
 var draftTexts = createDraftTexts();
 
@@ -53055,12 +53103,27 @@ function Composer({
     for (const controller2 of reads.current) controller2.abort();
     reads.current.clear();
   };
+  const onRestoredRef = React5.useRef(onRestored);
+  onRestoredRef.current = onRestored;
   React5.useEffect(() => {
-    setText(draftTexts.get(owner));
+    const draft = draftTexts.get(owner);
+    setText(draft);
     setFiles([]);
-    setNote("");
     setOptions([]);
-    return abortReads;
+    const restored = draftTexts.take(owner, draft);
+    setNote(restored?.note || "");
+    if (restored?.clientId) onRestoredRef.current?.(restored.clientId);
+    const off = draftTexts.subscribe(owner, (value, info) => {
+      if (textRef.current.trim() || filesRef.current.length) return false;
+      setText(value);
+      setNote(info?.note || "");
+      if (info?.clientId) onRestoredRef.current?.(info.clientId);
+      return true;
+    });
+    return () => {
+      off();
+      abortReads();
+    };
   }, [owner]);
   React5.useEffect(() => {
     draftTexts.set(ownerRef.current, text3);
@@ -53182,10 +53245,12 @@ ${value}`);
     setNote("");
     setOptions([]);
     const result = await onSend(sending, attachments, apiText ? { apiText } : void 0);
-    if (!result.ok && result.delivery === "not-sent" && (!mountedRef.current || ownerRef.current !== sentOwner) && !draftTexts.get(sentOwner).trim()) {
-      draftTexts.set(sentOwner, sending);
+    if (!mountedRef.current || ownerRef.current !== sentOwner) {
+      if (!result.ok && result.delivery === "not-sent" && !attachments.length) {
+        draftTexts.restore(sentOwner, sending, { clientId: result.clientId || "", note: failureNote(result, true) });
+      }
+      return;
     }
-    if (ownerRef.current !== sentOwner) return;
     if (!result.ok) {
       const restore = restoreAfterFailure({ result, sentOwner, currentOwner: ownerRef.current, currentText: textRef.current, currentFiles: filesRef.current });
       if (restore) {
