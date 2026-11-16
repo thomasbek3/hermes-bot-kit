@@ -110,3 +110,23 @@ test('a new chat is a baseline: switching bots or runtimes never notifies what w
   const done = st({ items: [user('u1'), reply('a1', 'ok')] })
   assert.equal(nativeNotifications(busy, done, { focused: false, seen: createSeen() })[0].title, 'scout')
 })
+
+// Review C-R1-03: freshness is item identity, not text.
+test('a new background reply with the same text as the previous one still notifies; a live → stored swap does not', () => {
+  const seen = createSeen()
+  const idle = st({ items: [user('u1'), reply('14', 'Done.')] })
+  const busy = st({ busy: true, items: [user('u1'), reply('14', 'Done.')] })
+  const streaming = st({ busy: true, items: [user('u1'), reply('14', 'Done.'), reply('live:a:1', 'Done.', { streaming: true })] })
+  const done = st({ items: [user('u1'), reply('14', 'Done.'), reply('live:a:1', 'Done.')] })
+  const out = run([idle, busy, streaming, done], away(seen))
+  assert.deepEqual(out.map(n => n.id), ['done:live:a:1'], 'the distinct background reply notifies')
+  // The stored row then replaces the live one; a later empty turn: nothing.
+  const stored = st({ items: [user('u1'), reply('14', 'Done.'), reply('15', 'Done.')] })
+  assert.deepEqual(run([done, stored, st({ ...stored.chat, busy: true }), st({ ...stored.chat })], away(seen)), [])
+  // A turn that starts on the live item and ends on its stored row: nothing.
+  const seen2 = createSeen()
+  const liveIdle = st({ items: [user('u1'), reply('live:a:2', 'Ok')] })
+  const liveBusy = st({ busy: true, items: liveIdle.chat.items })
+  const swapped = st({ items: [user('u1'), reply('16', 'Ok')] })
+  assert.deepEqual(run([liveIdle, liveBusy, swapped], away(seen2)), [])
+})

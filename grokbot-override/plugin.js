@@ -47543,6 +47543,13 @@ function finishedReply(items) {
   }
   return null;
 }
+var isLiveId = (id) => String(id || "").startsWith("live:");
+function sameReply(base4, reply) {
+  if (!base4 || !reply) return false;
+  const id = String(reply.id || "");
+  if (base4.id === id) return true;
+  return isLiveId(base4.id) && !isLiveId(id) && base4.text === String(reply.text || "").trim();
+}
 var pendingApprovals = (items) => items.filter((item) => item?.kind === "approval" && item.status === "pending");
 function inputKey(waiting) {
   if (!waiting || typeof waiting !== "object") return "";
@@ -47569,14 +47576,14 @@ function nativeNotifications(prev, next, { focused, seen, name = "", keyOf } = {
   const identity = chatIdentity(next, keyOf);
   if (!chatOf(prev)?.busy && chatOf(next).busy) {
     const before = finishedReply(itemsOf(prev));
-    seen.base.set(identity, before ? String(before.text || "").trim() : "");
+    seen.base.set(identity, before ? { id: String(before.id || ""), text: String(before.text || "").trim() } : null);
     if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value);
   }
   if (chatOf(prev)?.busy && !chatOf(next).busy) {
     const reply = finishedReply(items);
     const base4 = seen.base.get(identity);
     seen.base.delete(identity);
-    const fresh = reply && !(base4 && base4 === String(reply.text || "").trim());
+    const fresh = reply && !sameReply(base4, reply);
     if (fresh && remember(seen, `done:${reply.id}`)) out.push({ id: `done:${reply.id}`, kind: "done", title, body: BODIES.done });
     else if (reply) remember(seen, `done:${reply.id}`);
   }

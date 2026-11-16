@@ -12,9 +12,11 @@
 //  - only while the Hermes window is not focused (`focused` false); what
 //    arrives while it is focused is marked seen, never notified later;
 //  - at most once per item (the `seen` tracker, keyed by kind and item id),
-//    and a turn's reply counts only when it is not the reply that was already
-//    there when the turn started (a stored row replacing a live one changes
-//    the id, never the text);
+//    and a turn's reply counts only when it is not the ITEM that was already
+//    there when the turn started: the same id, or the stored row that
+//    replaced that live item (a live id, then a stored id with the same text).
+//    A new item with the same text as an older reply (a background turn that
+//    says "Done." again) still notifies (review C-R1-03);
 //  - a new chat (another bot or runtime) is a baseline: what it already
 //    holds is marked seen, nothing fires;
 //  - never for a silent reply ([SILENT], NO_REPLY, …) or a failed turn;
@@ -79,6 +81,17 @@ export function finishedReply(items) {
   return null
 }
 
+const isLiveId = id => String(id || '').startsWith('live:')
+
+/** Is `reply` the item `base` recorded at turn start: the same id, or the
+ *  stored row that replaced that live item (same text, live id → stored id)? */
+function sameReply(base, reply) {
+  if (!base || !reply) return false
+  const id = String(reply.id || '')
+  if (base.id === id) return true
+  return isLiveId(base.id) && !isLiveId(id) && base.text === String(reply.text || '').trim()
+}
+
 const pendingApprovals = items => items.filter(item => item?.kind === 'approval' && item.status === 'pending')
 
 function inputKey(waiting) {
@@ -115,7 +128,7 @@ export function nativeNotifications(prev, next, { focused, seen, name = '', keyO
   // A turn starts: remember the reply already on screen.
   if (!chatOf(prev)?.busy && chatOf(next).busy) {
     const before = finishedReply(itemsOf(prev))
-    seen.base.set(identity, before ? String(before.text || '').trim() : '')
+    seen.base.set(identity, before ? { id: String(before.id || ''), text: String(before.text || '').trim() } : null)
     if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value)
   }
   // Turn done: busy → idle with a finished, non-silent, new reply.
@@ -123,7 +136,7 @@ export function nativeNotifications(prev, next, { focused, seen, name = '', keyO
     const reply = finishedReply(items)
     const base = seen.base.get(identity)
     seen.base.delete(identity)
-    const fresh = reply && !(base && base === String(reply.text || '').trim())
+    const fresh = reply && !sameReply(base, reply)
     if (fresh && remember(seen, `done:${reply.id}`)) out.push({ id: `done:${reply.id}`, kind: 'done', title, body: BODIES.done })
     else if (reply) remember(seen, `done:${reply.id}`)
   }

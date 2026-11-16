@@ -59,4 +59,16 @@ test('native notifications: one per finished turn while Hermes is in the backgro
   // Clicking it opens the bot (no throw, the workspace stays).
   sent[0].onActivate()
   assert.ok(workspaces.get('grokbot-override'))
+
+  // Review C-R1-03: two background follow-ups with the same text, no new user
+  // row: each is a new item, so each notifies.
+  emit({ type: 'approval.settled', session_id: 'rt-security', payload: { request_id: 'ap1' } })
+  emit({ type: 'message.complete', session_id: 'rt-security', payload: { text: 'Done.' } })
+  await waitFor(() => sent.length === 3, 'the first Done.')
+  emit({ type: 'message.start', session_id: 'rt-security', payload: {} })
+  emit({ type: 'message.delta', session_id: 'rt-security', payload: { text: 'Done.' } })
+  emit({ type: 'message.complete', session_id: 'rt-security', payload: { text: 'Done.' } })
+  await waitFor(() => [...chatEl.querySelectorAll('*')].filter(el => el.children.length === 0 && el.textContent === 'Done.').length >= 2 || sent.length === 4, 'the second Done.')
+  await waitFor(() => sent.length === 4, 'the second Done. notifies too')
+  assert.equal(sent[3].body, 'Replied.')
 })
