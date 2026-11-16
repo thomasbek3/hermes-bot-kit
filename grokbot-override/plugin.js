@@ -43190,13 +43190,24 @@ function appendDraft(current, text3) {
 
 ${add2}` : add2;
 }
+var CHECKING_DELIVERY_NOTE = "Checking whether your message went through…";
+var UNCONFIRMED_DELIVERY_NOTE = "Couldn’t confirm this message was sent. Check the chat before resending.";
 function failureNote(result, restored) {
   if (!result || result.ok) return "";
   const why = result.error ? `: ${result.error}` : "";
   if (result.delivery === "not-sent") {
     return restored ? `Not sent${why}. Your message is back in the composer.` : `Not sent${why}. Retry it from the chat.`;
   }
-  return "Delivery unknown: it may already have reached the bot, so it will not be sent again from here. Check the chat, or open it in Hermes Bot Mode.";
+  return UNCONFIRMED_DELIVERY_NOTE;
+}
+function unknownSendId(result) {
+  return result && !result.ok && result.delivery === "unknown" && result.clientId ? String(result.clientId) : "";
+}
+function deliveryNote(items, clientId) {
+  if (!clientId) return "";
+  const item = (Array.isArray(items) ? items : []).find((entry) => entry?.id === clientId);
+  if (!item || !item.failed || item.delivery !== "unknown") return "";
+  return item.checked ? UNCONFIRMED_DELIVERY_NOTE : CHECKING_DELIVERY_NOTE;
 }
 var DRAFT_OWNERS_MAX = 20;
 function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
@@ -54404,11 +54415,13 @@ function Composer({
   onStop,
   draftRef,
   answering = false,
-  onAnswer
+  onAnswer,
+  items
 }) {
   const [text3, setText] = React5.useState(() => draftTexts.get(draftOwnerKey(bot)));
   const [files, setFiles] = React5.useState([]);
   const [note, setNote] = React5.useState("");
+  const [unknownId, setUnknownId] = React5.useState("");
   const [options, setOptions] = React5.useState([]);
   const [active, setActive] = React5.useState(0);
   const [caret, setCaret] = React5.useState(0);
@@ -54441,6 +54454,7 @@ function Composer({
     setFiles([]);
     setOptions([]);
     setNote(draftTexts.takeNote(owner));
+    setUnknownId("");
     const off = draftTexts.subscribe(owner, (value, message) => {
       setText((current) => appendDraft(current, value));
       if (message) setNote(message);
@@ -54485,8 +54499,8 @@ ${value}`);
       return void 0;
     }
     if (token.kind === "@") {
-      const items = mentionCompletions(roster, bot, token.query, (row) => displayName(row, metaFor(row)));
-      setOptions(items.map((item) => ({ insert: item.insert, display: item.display, meta: item.meta, from: token.from })));
+      const items2 = mentionCompletions(roster, bot, token.query, (row) => displayName(row, metaFor(row)));
+      setOptions(items2.map((item) => ({ insert: item.insert, display: item.display, meta: item.meta, from: token.from })));
       setActive(0);
       return void 0;
     }
@@ -54535,6 +54549,7 @@ ${value}`);
     if (slash && !files.length) {
       setText("");
       setNote("");
+      setUnknownId("");
       setOptions([]);
       const result2 = await onSlash?.(sending);
       if (ownerRef.current !== sentOwner) return;
@@ -54553,6 +54568,7 @@ ${value}`);
       }
       setText("");
       setNote("");
+      setUnknownId("");
       setOptions([]);
       const result2 = await onAnswer(sending);
       if (!result2?.ok) draftTexts.recover(sentOwner, sending, `Your answer was not sent${result2?.error ? `: ${result2.error}` : ""}.`);
@@ -54564,6 +54580,7 @@ ${value}`);
     setText("");
     setFiles([]);
     setNote("");
+    setUnknownId("");
     setOptions([]);
     const result = await onSend(sending, attachments, apiText ? { apiText } : void 0);
     const here = mountedRef.current && ownerRef.current === sentOwner;
@@ -54574,7 +54591,9 @@ ${value}`);
       draftTexts.recover(sentOwner, sending, `${failureNote(result, true)}${reattach ? " Attach the files again." : ""}`);
       if (result.clientId) onRestored?.(result.clientId);
     } else if (!result.ok && here) {
-      setNote(failureNote(result, false));
+      const followed = unknownSendId(result);
+      if (followed) setUnknownId(followed);
+      else setNote(failureNote(result, false));
     }
     if (here) inputRef.current?.focus();
   };
@@ -54694,10 +54713,10 @@ ${value}`);
                 },
                 onSelect: (event) => setCaret(event.target.selectionStart ?? 0),
                 onPaste: (event) => {
-                  const items = event.clipboardData?.files;
-                  if (items && items.length) {
+                  const items2 = event.clipboardData?.files;
+                  if (items2 && items2.length) {
                     event.preventDefault();
-                    void addFiles(items);
+                    void addFiles(items2);
                   }
                 },
                 onKeyDown: (event) => {
@@ -54731,7 +54750,7 @@ ${value}`);
             busy && !canSend ? /* @__PURE__ */ jsx5("button", { type: "button", className: "composer__cta gbo-round is-stop", title: "Stop", "aria-label": "Stop", onClick: onStop, children: /* @__PURE__ */ jsx5(IconStop, {}) }) : /* @__PURE__ */ jsx5("button", { type: "button", className: "composer__cta gbo-round is-send", title: "Send (Enter)", "aria-label": "Send", disabled: !canSend, onClick: () => void submit(), children: /* @__PURE__ */ jsx5(IconArrowUp, {}) })
           ] })
         ] }),
-        /* @__PURE__ */ jsx5(ComposerNote, { mentionNames, blocked, stopError, note, onOpen: stockHandoffProblem(bot) ? void 0 : () => void openInBotMode(bot) })
+        /* @__PURE__ */ jsx5(ComposerNote, { mentionNames, blocked, stopError, note: deliveryNote(items, unknownId) || note, onOpen: stockHandoffProblem(bot) ? void 0 : () => void openInBotMode(bot) })
       ]
     }
   );
@@ -62037,7 +62056,8 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
           onDiscard: (id) => void controller2?.discardStaged([id]),
           onStop: () => void controller2?.interrupt(),
           answering: state.chat.waiting?.kind === "clarify",
-          onAnswer: (text3) => controller2?.answerClarifyText(text3) ?? Promise.resolve({ ok: false, error: "This chat is closed" })
+          onAnswer: (text3) => controller2?.answerClarifyText(text3) ?? Promise.resolve({ ok: false, error: "This chat is closed" }),
+          items: state.chat.items
         },
         rowKey(bot)
       )

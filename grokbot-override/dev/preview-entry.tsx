@@ -269,7 +269,7 @@ export { CARDS_DEMO_FILES, CARDS_DEMO_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CAR
 // Test seams (review r2): the real app module and UI pieces, on the fake SDK.
 export * as appApi from '../src/ui/app'
 export * as fakeSdk from '@hermes/plugin-sdk'
-export { ComposerNote } from '../src/ui/Composer'
+export { Composer, ComposerNote } from '../src/ui/Composer'
 export { ProfilePanel } from '../src/ui/Profile'
 export { AssistantBody, STICK_PX, STREAM_RENDER_MS, UserMeta, useStreamText } from '../src/ui/Chat'
 export { DirectiveBlock, DirectiveContext } from '../src/ui/Directives'

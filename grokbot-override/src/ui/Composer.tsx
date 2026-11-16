@@ -18,7 +18,7 @@
 
 import * as React from 'react'
 
-import { appendDraft, draftOwnerKey, draftTexts, failureNote, isRecoverableRefusal, readDraftFiles } from '../core/drafts.js'
+import { appendDraft, deliveryNote, draftOwnerKey, draftTexts, failureNote, isRecoverableRefusal, readDraftFiles, unknownSendId } from '../core/drafts.js'
 import { mentionCompletions, mentionedBots, mentionNote } from '../core/mentions.js'
 import { displayName } from '../core/roster.js'
 import { metaFor, openInBotMode, stockHandoffProblem } from './app'
@@ -147,7 +147,8 @@ export function Composer({
   onStop,
   draftRef,
   answering = false,
-  onAnswer
+  onAnswer,
+  items
 }: {
   bot: any
   name: string
@@ -168,11 +169,17 @@ export function Composer({
    *  not sent as a message. */
   answering?: boolean
   onAnswer?: (text: string) => Promise<{ ok: boolean; error?: string }>
+  /** The chat's items: a "delivery unknown" note follows its bubble. */
+  items?: any[]
 }) {
   // T8: the typed text is kept per bot across switches (core/drafts.js).
   const [text, setText] = React.useState(() => draftTexts.get(draftOwnerKey(bot)))
   const [files, setFiles] = React.useState<DraftAttachment[]>([])
   const [note, setNote] = React.useState('')
+  // A "delivery unknown" send whose bubble the note follows (deliveryNote):
+  // it clears itself once the chat confirms the message, and on the next send
+  // or a bot switch.
+  const [unknownId, setUnknownId] = React.useState('')
   const [options, setOptions] = React.useState<Completion[]>([])
   const [active, setActive] = React.useState(0)
   const [caret, setCaret] = React.useState(0)
@@ -211,6 +218,7 @@ export function Composer({
     // A recovery that landed while this bot's composer was not on screen
     // left its note behind; the text is already in the draft.
     setNote(draftTexts.takeNote(owner))
+    setUnknownId('')
     // Recoveries while this composer is on screen: appended to what it shows.
     const off = draftTexts.subscribe(owner, (value: string, message: string) => {
       setText(current => appendDraft(current, value))
@@ -319,6 +327,7 @@ export function Composer({
     if (slash && !files.length) {
       setText('')
       setNote('')
+      setUnknownId('')
       setOptions([])
       const result = await onSlash?.(sending)
       if (ownerRef.current !== sentOwner) return
@@ -339,6 +348,7 @@ export function Composer({
       }
       setText('')
       setNote('')
+      setUnknownId('')
       setOptions([])
       const result = await onAnswer(sending)
       // Not taken: back into this bot's draft (whichever composer shows it).
@@ -351,6 +361,7 @@ export function Composer({
     setText('')
     setFiles([])
     setNote('')
+    setUnknownId('')
     setOptions([])
     const result = await onSend(sending, attachments, apiText ? { apiText } : undefined)
     const here = mountedRef.current && ownerRef.current === sentOwner
@@ -367,8 +378,11 @@ export function Composer({
       draftTexts.recover(sentOwner, sending, `${failureNote(result, true)}${reattach ? ' Attach the files again.' : ''}`)
       if (result.clientId) onRestored?.(result.clientId)
     } else if (!result.ok && here) {
-      // Delivery unknown: never re-armed (it may have reached the bot).
-      setNote(failureNote(result, false))
+      // Delivery unknown: never re-armed (it may have reached the bot). The
+      // note follows the bubble's history check (deliveryNote).
+      const followed = unknownSendId(result)
+      if (followed) setUnknownId(followed)
+      else setNote(failureNote(result, false))
     }
     if (here) inputRef.current?.focus()
   }
@@ -536,7 +550,7 @@ export function Composer({
           )}
         </div>
       </div>
-      <ComposerNote mentionNames={mentionNames} blocked={blocked} stopError={stopError} note={note} onOpen={stockHandoffProblem(bot) ? undefined : () => void openInBotMode(bot)} />
+      <ComposerNote mentionNames={mentionNames} blocked={blocked} stopError={stopError} note={deliveryNote(items, unknownId) || note} onOpen={stockHandoffProblem(bot) ? undefined : () => void openInBotMode(bot)} />
     </div>
   )
 }

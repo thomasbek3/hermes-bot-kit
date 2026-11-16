@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **grokbot-override: the "delivery unknown" composer note clears itself (2026-11-16)**: after a send whose answer
+  was lost (e.g. the connection was torn down and respawned mid-send), the line under the composer now follows the
+  chat's history check: "Checking whether your message went through…", gone as soon as the message is found in the
+  history, "Couldn’t confirm this message was sent. Check the chat before resending." when it is not found or the
+  history cannot be read. The next send or a bot switch clears it. It still never offers a resend; a definite
+  refusal still puts the text back in the composer. Tests `test/delivery-unknown-note.test.mjs`.
 - **grokbot-override: light background polling on a struggling remote gateway (2026-11-16)**: the own roster read
   (`profiles.list` with session summaries + `host.agents()`) runs at most once per 60 s instead of every ~15 s. All
   background polls (roster, source re-list, room list, one idle-refresh pass per connection over every open chat) go

@@ -866,6 +866,7 @@ export function ChatWorkspace({ slot = mainSlot }: { slot?: ChatSlot } = {}) {
           onStop={() => void controller?.interrupt()}
           answering={state.chat.waiting?.kind === 'clarify'}
           onAnswer={text => controller?.answerClarifyText(text) ?? Promise.resolve({ ok: false, error: 'This chat is closed' })}
+          items={state.chat.items}
         />
       </main>
       {extra ? null : narrow ? drawerOpen ? <ProfileDrawer bot={bot} onClose={closeDrawer} backgroundRef={chatRef} /> : null : panelOpen ? (

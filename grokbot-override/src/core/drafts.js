@@ -68,15 +68,40 @@ export function appendDraft(current, text) {
   return cur.trim() ? `${cur.replace(/\s+$/, '')}\n\n${add}` : add
 }
 
+// The composer's line for a "delivery unknown" send while the chat checks
+// its stored history (session.js checkDelivery / the idle tail refresh), and
+// once that check could not find it. Neither invites a resend (review r3 #1,
+// #2): the message may already have reached the bot.
+export const CHECKING_DELIVERY_NOTE = 'Checking whether your message went through…'
+export const UNCONFIRMED_DELIVERY_NOTE = 'Couldn’t confirm this message was sent. Check the chat before resending.'
+
 /** The composer's note after a failed send (`restored`: the draft came back).
- *  "Delivery unknown" never invites a resend (review r3 #1, #2). */
+ *  "Delivery unknown" never invites a resend (review r3 #1, #2); with a
+ *  bubble to follow, the composer shows deliveryNote() instead. */
 export function failureNote(result, restored) {
   if (!result || result.ok) return ''
   const why = result.error ? `: ${result.error}` : ''
   if (result.delivery === 'not-sent') {
     return restored ? `Not sent${why}. Your message is back in the composer.` : `Not sent${why}. Retry it from the chat.`
   }
-  return 'Delivery unknown: it may already have reached the bot, so it will not be sent again from here. Check the chat, or open it in Hermes Bot Mode.'
+  return UNCONFIRMED_DELIVERY_NOTE
+}
+
+/** The bubble a "delivery unknown" send left behind, for the composer to
+ *  follow ('' when there is none to follow). */
+export function unknownSendId(result) {
+  return result && !result.ok && result.delivery === 'unknown' && result.clientId ? String(result.clientId) : ''
+}
+
+/** The composer's note for the unknown send `clientId`, read from the chat's
+ *  items: '' once it is confirmed (markDelivered drops the bubble, or a retry
+ *  made it pending or sent), "checking" while the history check runs, and
+ *  "couldn't confirm" once the check found nothing or could not read it. */
+export function deliveryNote(items, clientId) {
+  if (!clientId) return ''
+  const item = (Array.isArray(items) ? items : []).find(entry => entry?.id === clientId)
+  if (!item || !item.failed || item.delivery !== 'unknown') return ''
+  return item.checked ? UNCONFIRMED_DELIVERY_NOTE : CHECKING_DELIVERY_NOTE
 }
 
 // ── typed text kept per bot (T8) ─────────────────────────────────────────

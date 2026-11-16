@@ -39,6 +39,6 @@ test('r3 #1/#2 a delivery-unknown bubble never offers a resend, in any check sta
 test('r3 #1/#2 the composer note never invites a resend of an unknown delivery', () => {
   const note = failureNote({ ok: false, delivery: 'unknown', error: 'did not confirm your message in time' }, false)
   assert.ok(!/retry|send again/i.test(note), note)
-  assert.match(note, /will not be sent again/)
+  assert.match(note, /Couldn’t confirm this message was sent/)
   assert.match(failureNote({ ok: false, delivery: 'not-sent', error: 'session busy' }, true), /back in the composer/)
 })
