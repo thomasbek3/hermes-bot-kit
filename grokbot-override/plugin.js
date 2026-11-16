@@ -50881,6 +50881,8 @@ function disposeController({ hard = false } = {}) {
   if (hard) {
     for (const chat of retiring.values()) chat.dispose();
     retiring.clear();
+    for (const chat of orphanedChats) chat.dispose();
+    orphanedChats.clear();
     clearSeeds();
   }
 }
@@ -50890,7 +50892,13 @@ function adopt(next, key) {
   offController = next.subscribe((state) => app.chat.set(state));
   app.chat.set(next.get());
 }
-function selectBot(bot, { openWorkspace = true } = {}) {
+function holdsOtherChat(chat, storedId) {
+  if (!storedId) return false;
+  const state = chat?.get?.();
+  return !canonicalIds(state?.canonical).includes(storedId);
+}
+var orphanedChats = /* @__PURE__ */ new Set();
+function selectBot(bot, { openWorkspace = true, session = "" } = {}) {
   const key = rowKey(bot);
   if (key !== app.selectedKey.get()) app.drawerOpen.set(false);
   app.selectedKey.set(key);
@@ -50899,15 +50907,25 @@ function selectBot(bot, { openWorkspace = true } = {}) {
   ackBot(bot);
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot));
   else retitleWorkspace(chatTabTitle(bot));
-  if (controllerKey === key && controller) {
+  if (controllerKey === key && controller && !holdsOtherChat(controller, session)) {
     const phase = controller.get().phase;
     if (phase === "no-chat" && openWorkspace) void controller.create();
     else if (phase === "error" || phase === "no-chat") void controller.open();
     return;
   }
   disposeController();
-  const parked = retiring.get(key);
+  let parked = retiring.get(key);
   retiring.delete(key);
+  if (parked && holdsOtherChat(parked, session)) {
+    for (const chat of orphanedChats) if (chat.isDisposed?.()) orphanedChats.delete(chat);
+    orphanedChats.add(parked);
+    parked = null;
+  }
+  let seed = seedFor(bot, key);
+  if (seed && session && !canonicalIds(seed.canonical).includes(session)) {
+    chatSeeds.delete(key);
+    seed = null;
+  }
   if (parked && parked.revive()) {
     adopt(parked, key);
   } else {
@@ -50917,7 +50935,7 @@ function selectBot(bot, { openWorkspace = true } = {}) {
       // chat tab restoring the remembered bot never mints one.
       createIfMissing: openWorkspace,
       // The transcript this bot showed last, on screen at once (T9).
-      seed: seedFor(bot, key),
+      seed,
       onDispose: () => {
         if (retiring.get(key) === next) {
           retiring.delete(key);
@@ -51346,9 +51364,9 @@ function botForFocus(value) {
   const state = controller?.get?.();
   return botForSession(app.roster.get().rows, String(value ?? ""), state ? { bot: state.bot, canonical: state.canonical } : null);
 }
-function routeToBot(bot) {
+function routeToBot(bot, storedId) {
   hermesView = null;
-  selectBot(bot);
+  selectBot(bot, { session: storedId });
   try {
     host2?.revealPane?.(MAIN_PANE_ID);
   } catch {
@@ -51363,7 +51381,7 @@ function onSessionFocus(value) {
     return;
   }
   const bot = botForFocus(value);
-  if (bot) return routeToBot(bot);
+  if (bot) return routeToBot(bot, String(value ?? ""));
   if (!visible(MAIN_PANE_ID)) hermesView = String(value ?? "");
   else scheduleClaim();
 }
@@ -51381,7 +51399,7 @@ function settleMainPane() {
   }
   const value = focused.get();
   const bot = botForFocus(value);
-  if (bot) routeToBot(bot);
+  if (bot) routeToBot(bot, String(value ?? ""));
   else hermesView = String(value ?? "");
 }
 function claimMainPane() {

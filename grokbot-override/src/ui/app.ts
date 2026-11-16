@@ -573,6 +573,8 @@ function disposeController({ hard = false } = {}) {
   if (hard) {
     for (const chat of retiring.values()) chat.dispose()
     retiring.clear()
+    for (const chat of orphanedChats) chat.dispose()
+    orphanedChats.clear()
     clearSeeds()
   }
 }
@@ -584,7 +586,20 @@ function adopt(next: any, key: string) {
   app.chat.set(next.get())
 }
 
-export function selectBot(bot: any, { openWorkspace = true } = {}) {
+/** Whether a chat controller holds another Bot Chat than `storedId` (a
+ *  replacement opened through Hermes): it may not be reused for it (review
+ *  tighter-b r3 #1). No requested session: any. */
+function holdsOtherChat(chat: any, storedId: string) {
+  if (!storedId) return false
+  const state = chat?.get?.()
+  return !canonicalIds(state?.canonical).includes(storedId)
+}
+
+// Retiring chats of a Bot Chat that was replaced while they finish: kept so
+// turning the override off still disposes them.
+const orphanedChats = new Set<any>()
+
+export function selectBot(bot: any, { openWorkspace = true, session = '' }: { openWorkspace?: boolean; session?: string } = {}) {
   const key = rowKey(bot)
   if (key !== app.selectedKey.get()) app.drawerOpen.set(false)
   app.selectedKey.set(key)
@@ -593,15 +608,27 @@ export function selectBot(bot: any, { openWorkspace = true } = {}) {
   ackBot(bot)
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot))
   else retitleWorkspace(chatTabTitle(bot))
-  if (controllerKey === key && controller) {
+  if (controllerKey === key && controller && !holdsOtherChat(controller, session)) {
     const phase = controller.get().phase
     if (phase === 'no-chat' && openWorkspace) void controller.create()
     else if (phase === 'error' || phase === 'no-chat') void controller.open()
     return
   }
   disposeController()
-  const parked = retiring.get(key)
+  let parked = retiring.get(key)
   retiring.delete(key)
+  if (parked && holdsOtherChat(parked, session)) {
+    // It finishes its own turn on the old chat; never revived for the new one.
+    for (const chat of orphanedChats) if (chat.isDisposed?.()) orphanedChats.delete(chat)
+    orphanedChats.add(parked)
+    parked = null
+  }
+  // A remembered transcript of another Bot Chat is not shown for this one.
+  let seed = seedFor(bot, key)
+  if (seed && session && !canonicalIds(seed.canonical).includes(session)) {
+    chatSeeds.delete(key)
+    seed = null
+  }
   if (parked && parked.revive()) {
     // Came back before its background turn finished: same chat, same stream.
     adopt(parked, key)
@@ -612,7 +639,7 @@ export function selectBot(bot: any, { openWorkspace = true } = {}) {
       // chat tab restoring the remembered bot never mints one.
       createIfMissing: openWorkspace,
       // The transcript this bot showed last, on screen at once (T9).
-      seed: seedFor(bot, key),
+      seed,
       onDispose: () => {
         // A chat that finished its turn in the background leaves its last state.
         if (retiring.get(key) === next) {
@@ -1190,9 +1217,11 @@ function botForFocus(value: unknown) {
 }
 
 /** A Bot Chat opened through Hermes: shown in the override instead. */
-function routeToBot(bot: any) {
+function routeToBot(bot: any, storedId: string) {
   hermesView = null
-  selectBot(bot)
+  // The very Bot Chat that was opened: a controller on an older one is not
+  // reused for it (review tighter-b r3 #1).
+  selectBot(bot, { session: storedId })
   try {
     host?.revealPane?.(MAIN_PANE_ID)
   } catch {
@@ -1212,7 +1241,7 @@ function onSessionFocus(value: unknown) {
     return
   }
   const bot = botForFocus(value)
-  if (bot) return routeToBot(bot)
+  if (bot) return routeToBot(bot, String(value ?? ''))
   // Not a Bot Chat: Hermes's view stays, once it is the one on screen.
   if (!visible(MAIN_PANE_ID)) hermesView = String(value ?? '')
   else scheduleClaim()
@@ -1238,7 +1267,7 @@ function settleMainPane() {
   }
   const value = focused.get()
   const bot = botForFocus(value)
-  if (bot) routeToBot(bot)
+  if (bot) routeToBot(bot, String(value ?? ''))
   else hermesView = String(value ?? '')
 }
 
