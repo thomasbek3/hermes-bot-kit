@@ -54,7 +54,7 @@ test('LF-R2-002: complete links, autolinks, bare URLs, MEDIA tags and directives
     'See [w](https://e.com/Foo_(bar_)) now',
     'See [t](https://e.com/x "a *title") now',
     'See [t](<https://e.com/a b_>) now',
-    'Mail <https://e.com/_x_> and <me@e.com>',
+    'Mail <https://e.com/_x_> and <me@example.com>',
     'Bare https://e.com/_init_/a*b ok',
     'Image ![a_b](/tmp/_x.png) ok',
     'Ref [x][r_] ok\n\n[r_]: https://e.com/_y',

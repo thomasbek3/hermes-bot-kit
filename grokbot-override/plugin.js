@@ -51919,7 +51919,6 @@ var MEDIA_WHOLE = /^[\t ]*[`"']?(?:M|ME|MED|MEDI|MEDIA|MEDIA:.*)$/;
 var MEDIA_TOKEN = /^[`"']?MEDIA:\s*(?:`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|[^\s`"]+)[`"']?/;
 var DIRECTIVE_TOKEN = /^::(?:card|preview)\{[^{}\n]*\}/;
 var AUTOLINK = /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>]+)(>?)/;
-var isSpace = (ch) => ch === void 0 || /\s/.test(ch);
 var isWord = (ch) => ch !== void 0 && /[\p{L}\p{N}]/u.test(ch);
 var oddBackticks = (s) => (s.match(/`/g) || []).length % 2 === 1;
 var spaces = (s) => /^ */.exec(s)[0].length;
@@ -51950,8 +51949,27 @@ function cloneState(st) {
     leaf: st.leaf && st.leaf.ranges ? { ...st.leaf, ranges: [...st.leaf.ranges] } : st.leaf
   };
 }
+function expandTabs(line) {
+  if (!line.includes("	")) return { text: line, at: (pos) => pos };
+  let text3 = "";
+  const map = [];
+  for (let k = 0; k < line.length; k += 1) {
+    if (line[k] === "	") {
+      const width = 4 - text3.length % 4;
+      for (let x = 0; x < width; x += 1) map.push(k);
+      text3 += " ".repeat(width);
+    } else {
+      map.push(k);
+      text3 += line[k];
+    }
+  }
+  map.push(line.length);
+  return { text: text3, at: (pos) => map[Math.min(pos, map.length - 1)] };
+}
 function scanLine(st, raw, offset) {
-  const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+  const plain = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+  const { text: line, at } = expandTabs(plain);
+  const span = (pos2) => [offset + at(pos2), offset + plain.length, offset];
   const { containers } = st;
   let leaf = st.leaf;
   if (leaf && (leaf.type === "heading" || leaf.type === "def")) st.leaf = leaf = null;
@@ -51989,7 +52007,7 @@ function scanLine(st, raw, offset) {
     return info;
   }
   if (matched < containers.length && leaf && leaf.type === "para" && !interrupts(rest)) {
-    leaf.ranges.push([offset + pos, offset + line.length, offset]);
+    leaf.ranges.push(span(pos));
     info.leaf = leaf;
     return info;
   }
@@ -52033,7 +52051,7 @@ function scanLine(st, raw, offset) {
     info.blank = true;
     return info;
   }
-  const range = [offset + pos, offset + line.length, offset];
+  const range = span(pos);
   if (spaces(rest) >= 4) {
     if (leaf && leaf.type === "para") {
       leaf.ranges.push(range);
@@ -52103,6 +52121,21 @@ function openMediaTag(line) {
     if (!path || path[0].length === rest.length) return match.index;
   }
   return -1;
+}
+function openMediaTagIn(text3) {
+  const at = text3.lastIndexOf("MEDIA:");
+  if (at < 0) return -1;
+  const start2 = at > 0 && "`\"'".includes(text3[at - 1]) ? at - 1 : at;
+  const rest = text3.slice(at + 6).replace(/^\s*/, "");
+  if (!rest) return start2;
+  const q = rest[0];
+  if (q === "`" || q === '"' || q === "'") {
+    const close = rest.indexOf(q, 1);
+    const nl = rest.indexOf("\n");
+    return close < 0 && nl < 0 ? start2 : -1;
+  }
+  const path = /^[^\s`"]+/.exec(rest);
+  return path && path[0].length === rest.length ? start2 : -1;
 }
 function typedAttrs(body) {
   let text3 = body;
@@ -52176,8 +52209,43 @@ function linkTail(t, k) {
   }
   return t[k] === ")" ? k + 1 : -1;
 }
+var isWS = (ch) => ch === void 0 || /\s/u.test(ch);
+var isPunct = (ch) => ch !== void 0 && /[\p{P}\p{S}]/u.test(ch);
+function delimiterRun(t, i, j) {
+  const ch = t[i];
+  const prev = t[i - 1];
+  const next = t[j];
+  const left = !isWS(next) && (!isPunct(next) || isWS(prev) || isPunct(prev));
+  const right = !isWS(prev) && (!isPunct(prev) || isWS(next) || isPunct(next));
+  const canOpen = ch === "_" ? left && (!right || isPunct(prev)) : left;
+  const canClose = ch === "_" ? right && (!left || isPunct(next)) : right;
+  return { ch, start: i, end: j, count: j - i, rem: j - i, canOpen, canClose, removed: false };
+}
+function processEmphasis(list) {
+  for (let ci = 0; ci < list.length; ci += 1) {
+    const c2 = list[ci];
+    while (!c2.removed && c2.canClose && c2.rem > 0) {
+      let oi = ci - 1;
+      for (; oi >= 0; oi -= 1) {
+        const d2 = list[oi];
+        if (d2.removed || d2.rem === 0 || d2.ch !== c2.ch || !d2.canOpen) continue;
+        if (c2.ch === "~") {
+          if (d2.count !== c2.count) continue;
+        } else if ((d2.canClose || c2.canOpen) && (d2.count + c2.count) % 3 === 0 && !(d2.count % 3 === 0 && c2.count % 3 === 0)) continue;
+        break;
+      }
+      if (oi < 0) break;
+      const o = list[oi];
+      if (c2.firstOpener === void 0) c2.firstOpener = oi;
+      const use = c2.ch === "~" ? Math.min(o.rem, c2.rem) : o.rem >= 2 && c2.rem >= 2 ? 2 : 1;
+      o.rem -= use;
+      c2.rem -= use;
+      for (let k = oi + 1; k < ci; k += 1) list[k].removed = true;
+    }
+  }
+}
 function inlineScan(t, defs) {
-  const stack = [];
+  const delims = [];
   const brackets = [];
   let code = null;
   let cut2 = -1;
@@ -52274,7 +52342,7 @@ function inlineScan(t, defs) {
       continue;
     }
     if (ch === "[" || ch === "!" && t[i + 1] === "[") {
-      brackets.push({ at: i, depth: stack.length });
+      brackets.push({ at: i, depth: delims.length });
       i += ch === "!" ? 2 : 1;
       continue;
     }
@@ -52283,7 +52351,9 @@ function inlineScan(t, defs) {
       const label = t.slice(t[b2.at] === "!" ? b2.at + 2 : b2.at + 1, i);
       const next = t[i + 1];
       const confine = () => {
-        if (stack.length > b2.depth) stack.length = b2.depth;
+        const inner = delims.slice(b2.depth);
+        processEmphasis(inner);
+        for (const d2 of inner) d2.removed = true;
       };
       if (next === "(") {
         const end = linkTail(t, i + 2);
@@ -52329,35 +52399,7 @@ function inlineScan(t, defs) {
     if (ch === "*" || ch === "_" || ch === "~") {
       let j = i;
       while (t[j] === ch) j += 1;
-      const len = j - i;
-      const prev = t[i - 1];
-      const next = t[j];
-      if (ch === "_" && isWord(prev) && isWord(next) || ch === "~" && len > 2) {
-        i = j;
-        continue;
-      }
-      let rest = len;
-      if (!isSpace(prev)) {
-        while (rest > 0) {
-          let k = stack.length - 1;
-          while (k >= 0 && stack[k].ch !== ch) k -= 1;
-          if (k < 0) break;
-          stack.length = k + 1;
-          const top = stack[k];
-          if (rest >= top.len) {
-            rest -= top.len;
-            stack.pop();
-          } else {
-            top.len -= rest;
-            rest = 0;
-          }
-        }
-      }
-      if (next === void 0) {
-        if (rest > 0) cut2 = j - rest;
-        break;
-      }
-      if (rest > 0 && !isSpace(next)) stack.push({ ch, len: Math.min(rest, ch === "~" ? 2 : 3) });
+      if (!(ch === "~" && j - i > 2)) delims.push(delimiterRun(t, i, j));
       i = j;
       continue;
     }
@@ -52370,10 +52412,33 @@ function inlineScan(t, defs) {
     }
   }
   if (cut2 < 0 && code && !t.slice(code.content).trim()) cut2 = code.at;
+  let open = delims.filter((d2) => !d2.removed && d2.end <= (cut2 < 0 ? n : cut2));
+  let paired = false;
+  const last = open[open.length - 1];
+  if (cut2 < 0 && !code && last && last.end === n) {
+    const now = open.map((d2) => ({ ...d2 }));
+    processEmphasis(now);
+    const grown = open.map((d2) => ({ ...d2 }));
+    const tip = grown[grown.length - 1];
+    tip.count += 1;
+    tip.rem += 1;
+    processEmphasis(grown);
+    const settled = now[now.length - 1].firstOpener === tip.firstOpener;
+    if (!settled) cut2 = last.start;
+    else if (now[now.length - 1].rem > 0) cut2 = n - now[now.length - 1].rem;
+    else {
+      open = now;
+      paired = true;
+    }
+  }
   if (cut2 >= 0) return { cut: cut2, closers: "", code: false };
+  if (!paired) processEmphasis(open);
   let closers = "";
   if (code) closers += "`".repeat(code.len);
-  for (let k = stack.length - 1; k >= 0; k -= 1) closers += stack[k].ch.repeat(stack[k].len);
+  for (let k = open.length - 1; k >= 0; k -= 1) {
+    const d2 = open[k];
+    if (!d2.removed && d2.rem > 0 && d2.canOpen && !d2.canClose) closers += d2.ch.repeat(d2.ch === "~" ? d2.rem : Math.min(d2.rem, 3));
+  }
   return { cut: -1, closers, code: Boolean(code) };
 }
 function leafText(source, ranges, limit) {
@@ -52440,6 +52505,12 @@ function safeParts(input) {
         if (tag >= 0) cut2 = lastStart + tag;
       }
     } else if (info.closedFence) {
+    } else if (info.leaf && info.leaf.type === "indented") {
+      const tokens = holdTokens(lastRaw);
+      if (tokens.at >= 0) {
+        cut2 = lastStart + tokens.at;
+        pending = tokens.pending;
+      }
     } else if (info.openedFence || info.blank || /^ {0,3}#{1,6}[ \t]*$/.test(rest) || /^\d{1,9}[.)]?$/.test(rest.trim()) || /^ {0,3}(?:`{1,2}|~{1,2})$/.test(rest) || info.rule || // A reference definition is invisible once it has a destination
     // (it only resolves links); before that it would show as text.
     info.leaf && info.leaf.type === "def" && !info.defComplete || MEDIA_WHOLE.test(rest) || MEDIA_WHOLE.test(lastRaw)) {
@@ -52459,6 +52530,11 @@ function safeParts(input) {
         pending = tokens.pending;
       }
     }
+  }
+  const media = openMediaTagIn(source);
+  if (media >= 0 && media < cut2) {
+    cut2 = media;
+    pending = null;
   }
   if (cut2 === lastStart && before && before.type === "para") {
     const head = before.ranges[before.ranges.length - 1];

@@ -103,9 +103,33 @@ function cloneState(st) {
   }
 }
 
-/** Place one line (`raw`, starting at `offset`) in the block structure. */
+/** The line with its tabs expanded to CommonMark's tab stops (every 4
+ *  columns), and a map from each expanded position back to the raw line. */
+function expandTabs(line) {
+  if (!line.includes('\t')) return { text: line, at: pos => pos }
+  let text = ''
+  const map = []
+  for (let k = 0; k < line.length; k += 1) {
+    if (line[k] === '\t') {
+      const width = 4 - (text.length % 4)
+      for (let x = 0; x < width; x += 1) map.push(k)
+      text += ' '.repeat(width)
+    } else {
+      map.push(k)
+      text += line[k]
+    }
+  }
+  map.push(line.length)
+  return { text, at: pos => map[Math.min(pos, map.length - 1)] }
+}
+
+/** Place one line (`raw`, starting at `offset`) in the block structure.
+ *  Indentation is measured in columns (tabs to tab stops), as CommonMark
+ *  does; ranges point back into the raw text. */
 function scanLine(st, raw, offset) {
-  const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
+  const plain = raw.endsWith('\r') ? raw.slice(0, -1) : raw
+  const { text: line, at } = expandTabs(plain)
+  const span = pos => [offset + at(pos), offset + plain.length, offset]
   const { containers } = st
   let leaf = st.leaf
   if (leaf && (leaf.type === 'heading' || leaf.type === 'def')) st.leaf = leaf = null
@@ -143,7 +167,7 @@ function scanLine(st, raw, offset) {
     return info
   }
   if (matched < containers.length && leaf && leaf.type === 'para' && !interrupts(rest)) {
-    leaf.ranges.push([offset + pos, offset + line.length, offset])
+    leaf.ranges.push(span(pos))
     info.leaf = leaf
     return info
   }
@@ -189,7 +213,7 @@ function scanLine(st, raw, offset) {
     info.blank = true
     return info
   }
-  const range = [offset + pos, offset + line.length, offset]
+  const range = span(pos)
   if (spaces(rest) >= 4) {
     if (leaf && leaf.type === 'para') {
       leaf.ranges.push(range)
@@ -264,6 +288,27 @@ function openMediaTag(line) {
     if (!path || path[0].length === rest.length) return match.index
   }
   return -1
+}
+
+/** The start of a `MEDIA:` tag anywhere in the text whose path is not
+ *  terminated yet, or -1. The grammar is core/media.js MEDIA_TAG_RE: any
+ *  whitespace after the colon, newlines included, then a quoted path (one
+ *  line) or a bare one ended by whitespace or a quote. Only the last tag can
+ *  still be open. */
+function openMediaTagIn(text) {
+  const at = text.lastIndexOf('MEDIA:')
+  if (at < 0) return -1
+  const start = at > 0 && '`"\''.includes(text[at - 1]) ? at - 1 : at
+  const rest = text.slice(at + 6).replace(/^\s*/, '')
+  if (!rest) return start
+  const q = rest[0]
+  if (q === '`' || q === '"' || q === "'") {
+    const close = rest.indexOf(q, 1)
+    const nl = rest.indexOf('\n')
+    return close < 0 && nl < 0 ? start : -1
+  }
+  const path = /^[^\s`"]+/.exec(rest)
+  return path && path[0].length === rest.length ? start : -1
 }
 
 /** The attributes typed so far in a half directive body; a value still
@@ -349,10 +394,54 @@ function linkTail(t, k) {
   return t[k] === ')' ? k + 1 : -1
 }
 
+const isWS = ch => ch === undefined || /\s/u.test(ch)
+const isPunct = ch => ch !== undefined && /[\p{P}\p{S}]/u.test(ch)
+
+/** A `*` / `_` / `~` delimiter run at `i..j` with CommonMark's flanking
+ *  rules (the end of the text counts as whitespace). */
+function delimiterRun(t, i, j) {
+  const ch = t[i]
+  const prev = t[i - 1]
+  const next = t[j]
+  const left = !isWS(next) && (!isPunct(next) || isWS(prev) || isPunct(prev))
+  const right = !isWS(prev) && (!isPunct(prev) || isWS(next) || isPunct(next))
+  const canOpen = ch === '_' ? left && (!right || isPunct(prev)) : left
+  const canClose = ch === '_' ? right && (!left || isPunct(next)) : right
+  return { ch, start: i, end: j, count: j - i, rem: j - i, canOpen, canClose, removed: false }
+}
+
+/** CommonMark's "process emphasis" over delimiter runs, in order: each
+ *  closer pairs with the nearest eligible opener of its character (the
+ *  multiple-of-3 rule; GFM strikethrough pairs equal runs of one or two
+ *  tildes), consuming from both and removing every delimiter between them. */
+function processEmphasis(list) {
+  for (let ci = 0; ci < list.length; ci += 1) {
+    const c = list[ci]
+    while (!c.removed && c.canClose && c.rem > 0) {
+      let oi = ci - 1
+      for (; oi >= 0; oi -= 1) {
+        const d = list[oi]
+        if (d.removed || d.rem === 0 || d.ch !== c.ch || !d.canOpen) continue
+        if (c.ch === '~') {
+          if (d.count !== c.count) continue
+        } else if ((d.canClose || c.canOpen) && (d.count + c.count) % 3 === 0 && !(d.count % 3 === 0 && c.count % 3 === 0)) continue
+        break
+      }
+      if (oi < 0) break
+      const o = list[oi]
+      if (c.firstOpener === undefined) c.firstOpener = oi
+      const use = c.ch === '~' ? Math.min(o.rem, c.rem) : o.rem >= 2 && c.rem >= 2 ? 2 : 1
+      o.rem -= use
+      c.rem -= use
+      for (let k = oi + 1; k < ci; k += 1) list[k].removed = true
+    }
+  }
+}
+
 /** Inline structure of the open leaf's text `t`: where to cut (a trailing
  *  delimiter or an unfinished construct), and closers for open runs. */
 function inlineScan(t, defs) {
-  const stack = []
+  const delims = []
   const brackets = []
   let code = null
   let cut = -1
@@ -453,7 +542,7 @@ function inlineScan(t, defs) {
       continue
     }
     if (ch === '[' || (ch === '!' && t[i + 1] === '[')) {
-      brackets.push({ at: i, depth: stack.length })
+      brackets.push({ at: i, depth: delims.length })
       i += ch === '!' ? 2 : 1
       continue
     }
@@ -461,8 +550,12 @@ function inlineScan(t, defs) {
       const b = brackets.pop()
       const label = t.slice(t[b.at] === '!' ? b.at + 2 : b.at + 1, i)
       const next = t[i + 1]
+      // A finished link's label is its own inline scope: its delimiters
+      // pair among themselves and never with anything outside it.
       const confine = () => {
-        if (stack.length > b.depth) stack.length = b.depth
+        const inner = delims.slice(b.depth)
+        processEmphasis(inner)
+        for (const d of inner) d.removed = true
       }
       if (next === '(') {
         const end = linkTail(t, i + 2)
@@ -509,39 +602,8 @@ function inlineScan(t, defs) {
     if (ch === '*' || ch === '_' || ch === '~') {
       let j = i
       while (t[j] === ch) j += 1
-      const len = j - i
-      const prev = t[i - 1]
-      const next = t[j]
-      // Intraword `_` is literal; so is a run of 3+ tildes (GFM strikethrough
-      // takes one or two).
-      if ((ch === '_' && isWord(prev) && isWord(next)) || (ch === '~' && len > 2)) {
-        i = j
-        continue
-      }
-      let rest = len
-      if (!isSpace(prev)) {
-        // Closes as many open runs of this character as it covers; any
-        // other delimiter opened inside them stays literal.
-        while (rest > 0) {
-          let k = stack.length - 1
-          while (k >= 0 && stack[k].ch !== ch) k -= 1
-          if (k < 0) break
-          stack.length = k + 1
-          const top = stack[k]
-          if (rest >= top.len) {
-            rest -= top.len
-            stack.pop()
-          } else {
-            top.len -= rest
-            rest = 0
-          }
-        }
-      }
-      if (next === undefined) {
-        if (rest > 0) cut = j - rest
-        break
-      }
-      if (rest > 0 && !isSpace(next)) stack.push({ ch, len: Math.min(rest, ch === '~' ? 2 : 3) })
+      // A run of 3+ tildes is literal (GFM strikethrough takes one or two).
+      if (!(ch === '~' && j - i > 2)) delims.push(delimiterRun(t, i, j))
       i = j
       continue
     }
@@ -557,10 +619,40 @@ function inlineScan(t, defs) {
   // Open code whose content is still only spaces: CommonMark strips that
   // padding once the span closes, so it waits.
   if (cut < 0 && code && !t.slice(code.content).trim()) cut = code.at
+  // A delimiter run at the very end is paired as it stands, unless one
+  // more character of the same kind would pair it with a different opener
+  // (`**2*3*` closes the inner star now, `**2*3**` the outer pair): then
+  // its pairing is not settled and the whole run waits. A settled run is
+  // kept, and only its unused part waits.
+  let open = delims.filter(d => !d.removed && d.end <= (cut < 0 ? n : cut))
+  let paired = false
+  const last = open[open.length - 1]
+  if (cut < 0 && !code && last && last.end === n) {
+    const now = open.map(d => ({ ...d }))
+    processEmphasis(now)
+    const grown = open.map(d => ({ ...d }))
+    const tip = grown[grown.length - 1]
+    tip.count += 1
+    tip.rem += 1
+    processEmphasis(grown)
+    const settled = now[now.length - 1].firstOpener === tip.firstOpener
+    if (!settled) cut = last.start
+    else if (now[now.length - 1].rem > 0) cut = n - now[now.length - 1].rem
+    else {
+      open = now
+      paired = true
+    }
+  }
   if (cut >= 0) return { cut, closers: '', code: false }
+  if (!paired) processEmphasis(open)
   let closers = ''
   if (code) closers += '`'.repeat(code.len)
-  for (let k = stack.length - 1; k >= 0; k -= 1) closers += stack[k].ch.repeat(stack[k].len)
+  // Close only runs that can only open. A run that could also close (a `*`
+  // between two letters, as in 2*3) is ambiguous and stays as typed.
+  for (let k = open.length - 1; k >= 0; k -= 1) {
+    const d = open[k]
+    if (!d.removed && d.rem > 0 && d.canOpen && !d.canClose) closers += d.ch.repeat(d.ch === '~' ? d.rem : Math.min(d.rem, 3))
+  }
   return { cut: -1, closers, code: Boolean(code) }
 }
 
@@ -646,6 +738,15 @@ function safeParts(input) {
       }
     } else if (info.closedFence) {
       // The closing fence is complete: shown as it is.
+    } else if (info.leaf && info.leaf.type === 'indented') {
+      // Indented code is shown exactly as typed: no structural holds and no
+      // inline repair (only directive and MEDIA tokens, which the renderer
+      // lifts out of code too).
+      const tokens = holdTokens(lastRaw)
+      if (tokens.at >= 0) {
+        cut = lastStart + tokens.at
+        pending = tokens.pending
+      }
     } else if (
       info.openedFence ||
       info.blank ||
@@ -680,6 +781,14 @@ function safeParts(input) {
     }
   }
 
+  // A MEDIA tag whose path is still arriving (also across a line break,
+  // which extractMedia accepts) waits from its start: no marker, no
+  // truncated path reaches the media reader.
+  const media = openMediaTagIn(source)
+  if (media >= 0 && media < cut) {
+    cut = media
+    pending = null
+  }
   // A held last line may still turn into a table separator: a paragraph
   // line with a pipe above it (a possible header) waits with it.
   if (cut === lastStart && before && before.type === 'para') {
