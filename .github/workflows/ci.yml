@@ -59,10 +59,11 @@ jobs:
 
       # A fake ssh and a fake driver: nothing leaves the runner. The tests that need a Hermes
       # checkout (the private-import contract, the backend on Hermes's real session) skip here;
-      # run them locally with Hermes's venv (remote-cua/README.md).
+      # run them locally with Hermes's venv (remote-cua/README.md). PyYAML: the route fixtures and the
+      # standalone CLI read config.yaml (Hermes's venv has it; a clean runner does not).
       - name: remote-cua tests
         run: |
-          python3 -m pip install --disable-pip-version-check --quiet pytest fastapi httpx
+          python3 -m pip install --disable-pip-version-check --quiet pytest fastapi httpx pyyaml
           python3 -m pytest -p no:cacheprovider -q remote-cua/tests
 
       # -n 1: without it xargs passes every later path as an ARGUMENT to the
