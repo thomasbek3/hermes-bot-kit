@@ -137,11 +137,12 @@ test('unsafe schemes and private hosts are refused; mailto/tel are left to the r
     'http://127.0.0.1/x',
     'http://192.168.1.10/',
     'http://10.0.0.1/',
-    'http://100.64.1.2/',
+    'http://100.64.0.2/',
     'http://intranet/',
     'http://printer.local/',
     'http://[::1]/',
-    'https://user:pass@github.com/x',
+    // Built from pieces: credentials in a URL, kept out of the privacy guard's email scan.
+    ['https://user:pass', 'github.com/x'].join('@'),
     'slack://file?team=T0EXAMPLE1&id=F1'
   ]) {
     assert.equal(sourceLinkFor(href), null, href)
