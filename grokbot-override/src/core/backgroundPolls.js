@@ -13,7 +13,11 @@
 //   union roster, which Electron reads from every registered non-SSH
 //   connection, including ones the plugin has not seen yet) needs every lane
 //   free except the ones it names as untouched, and holds them all, also
-//   lanes first used while it runs.
+//   lanes first used while it runs. Once a global run is due but blocked it
+//   holds a reservation: running jobs settle, but no NEW background job
+//   starts on a lane it needs until it has run (so staggered per-connection
+//   polls can never starve it). Hiding the window or reset() drops the
+//   reservation.
 // - A deadline: a run older than POLL_DEADLINE_MS stops holding its lanes
 //   against OTHER poll types (the next claim retires it and backs it off) and
 //   its `live()` turns false, so its late answer is dropped and it starts no
@@ -70,6 +74,8 @@ export function createBackgroundPolls(deps = {}) {
   const polls = new Map()
   // `${lane}\n${type}` of runs whose work has not settled (kept across reset)
   const unsettled = new Set()
+  // a due global run waiting for its lanes: { id, except }
+  let reserved = null
 
   const laneId = key => String(key || 'local')
   const pollKey = (key, type) => `${laneId(key)}\n${type}`
@@ -149,13 +155,25 @@ export function createBackgroundPolls(deps = {}) {
     const except = global ? new Set((global.except || []).map(laneId).filter(id => id !== main)) : null
     const poll = pollOf(main, type, baseMs)
     const id = pollKey(main, type)
-    if (!visible()) return { ran: false, hidden: true, nextMs: waitOf(poll, resumeMinMs) }
-    if (unsettled.has(id)) return { ran: false, busy: true, pending: true, nextMs: Math.max(1, poll.base) }
-    if (ids.some(lane => holder(lane)) || (except && globalBlocked(except))) {
-      return { ran: false, busy: true, nextMs: Math.max(1, Math.min(poll.interval, poll.base)) }
+    if (!visible()) {
+      reserved = null
+      return { ran: false, hidden: true, nextMs: waitOf(poll, resumeMinMs) }
     }
+    const busyResult = { ran: false, busy: true, nextMs: Math.max(1, Math.min(poll.interval, poll.base)) }
+    if (unsettled.has(id)) return { ran: false, busy: true, pending: true, nextMs: Math.max(1, poll.base) }
     const wait = waitOf(poll, resumeMinMs)
-    if (!force && wait > 0) return { ran: false, nextMs: wait }
+    if (except) {
+      if (!force && wait > 0) return { ran: false, nextMs: wait }
+      if (ids.some(lane => holder(lane)) || globalBlocked(except)) {
+        reserved = { id, except }
+        return busyResult
+      }
+    } else {
+      if (ids.some(lane => holder(lane))) return busyResult
+      if (reserved && reserved.id !== id && ids.some(lane => !reserved.except.has(lane))) return { ...busyResult, reserved: true }
+      if (!force && wait > 0) return { ran: false, nextMs: wait }
+    }
+    if (reserved?.id === id) reserved = null
     // Claimed synchronously, before the first await: a second run() in the
     // same tick sees the lanes busy.
     const job = { type, poll, lanes: ids, except: except || new Set(), start: now(), generation, done: false, retired: false }
@@ -203,6 +221,7 @@ export function createBackgroundPolls(deps = {}) {
     generation += 1
     owners.clear()
     globalJob = null
+    reserved = null
     polls.clear()
   }
 
@@ -226,32 +245,50 @@ export function createBackgroundPolls(deps = {}) {
     return unsettled.has(pollKey(key, type))
   }
 
-  return { run, resume, want, reset, due, interval, busy, pending }
+  /** Whether a due global run holds a reservation. */
+  function reservedFor() {
+    return reserved ? reserved.id : ''
+  }
+
+  return { run, resume, want, reset, due, interval, busy, pending, reservedFor }
 }
 
 /**
  * Idle-refresh passes, one per connection, fair across passes: each pass
  * re-reads the open chats' tails in turn starting after the last chat whose
- * read was applied, so a slow connection whose pass runs past its deadline
- * still reaches every chat over the next passes (a streaming chat skips only
- * its own read). A pass stops when `live()` or `isVisible()` turns false.
- * Resolves false when any read failed (the pass backs off).
+ * read was ATTEMPTED and settled (applied, failed, or answered past the
+ * deadline and dropped), so a chat that keeps timing out never holds the
+ * others back (a streaming chat skips only its own read). A pass stops when
+ * `live()` or `isVisible()` turns false; a pass from before reset() moves no
+ * cursor. Resolves false when any read failed (the pass backs off).
  */
 export function createIdleRotation() {
   const served = new Map()
+  let generation = 0
   async function pass(lane, chats, live, isVisible = () => true) {
+    const mine = generation
     const list = Array.isArray(chats) ? chats.filter(Boolean) : []
     const start = list.indexOf(served.get(lane)) + 1
     let ok = true
     for (let i = 0; i < list.length; i += 1) {
       if (!live() || !isVisible()) break
       const chat = list[(start + i) % list.length]
-      if ((await chat.idleRefresh(live)) === false) ok = false
-      if (live()) served.set(lane, chat)
+      let result = true
+      try {
+        result = await chat.idleRefresh(live)
+      } catch {
+        result = false
+      }
+      if (result === false) ok = false
+      if (mine === generation) served.set(lane, chat)
     }
     return ok
   }
-  return { pass, reset: () => served.clear() }
+  function reset() {
+    generation += 1
+    served.clear()
+  }
+  return { pass, reset }
 }
 
 /** One pass over `chats` from the first (no rotation). */

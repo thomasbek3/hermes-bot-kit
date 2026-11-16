@@ -291,12 +291,17 @@ across polls, so a slow connection never holds another one's):
 - **Lanes, one per connection.** The roster read, the source re-list, the room list and the idle refresh never run at
   once on one connection; a poll whose lanes are busy waits for a later tick. The union roster (`host.agents()`)
   reads `/api/profiles` from every registered non-SSH connection, also ones the plugin has not seen yet, and a plugin
-  cannot list the registry: so that read waits until no other background poll runs anywhere and holds every lane
-  while it runs, except lanes known to be SSH sources (from the last union answer, roster rows and open chats; they
-  answer from an inventory probe, not their gateway).
+  cannot list the registry: so that read is its own poll (every 60 s) that waits until no other background poll runs
+  anywhere and holds every lane while it runs, except lanes known to be SSH sources (from the last union answer,
+  roster rows and open chats; they answer from an inventory probe, not their gateway). Once it is due it holds a
+  reservation: polls already running finish, no new one starts on a lane it needs until it has run, so busy
+  connections cannot starve it (the reservation is dropped while the window is hidden). The active connection's rich
+  `profiles.list` is a separate poll on that connection's lane only, so other connections never hold it up; each
+  repaints the roster with the other's last answer.
 - **Idle refresh is one pass per connection:** every open chat on it (main chat and extra tabs) has its tail re-read in
-  turn every 15 s, starting after the last chat whose read was applied, so a slow pass that runs past its deadline
-  still reaches every chat over the next passes; a streaming chat skips only its own read. The chat
+  turn every 15 s, starting after the last chat whose read was attempted and settled (applied, failed, or dropped
+  past the deadline), so a chat that keeps timing out never holds the others back; a streaming chat skips only its
+  own read. The chat
   controllers keep no idle timer of their own (`idleByHost`). Activity on the open chat (the unread/toast tracker's
   "refresh the open chat") marks that pass due once instead of reading directly; unread marks and toasts are still
   kept while the window is hidden.
@@ -304,7 +309,8 @@ across polls, so a slow connection never holds another one's):
   than 2 s (cap 5 min) and resets after a fast success. A roster read counts as failed when its union roster failed
   or a non-SSH source in it reported an error (what did answer is still painted). A run older than 30 s is backed
   off, lets the other poll types on its lanes go on, starts no further request (the roster read checks between
-  `profiles.list` and `host.agents()`, a paged room list between pages) and its late answer is dropped; the same poll
+  `profiles.list` and `host.agents()` of a foreground read, a paged room list between pages, also stopping a
+  background list when the window is hidden) and its late answer is dropped; the same poll
   on that connection is not started again until the old request settles, because a plugin cannot cancel a Desktop
   request: this relies on the Desktop's own transport timeouts (its REST bridge aborts a fetch after 30 s, gateway
   RPCs time out). Until then the other chats' idle reads on that connection wait too.

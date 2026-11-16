@@ -562,26 +562,27 @@ test('LR1-07: the union roster read waits while a connection it touches is busy 
   appApi.refreshRoster()
   await settle()
   assert.equal(count('agents'), 0, 'no union read beside B’s background read')
-  assert.equal(count('profiles.list'), 0)
+  assert.equal(count('profiles.list'), 1, 'the active connection’s own rich read is never held by another connection (R3-02)')
   gate.resolve(true)
   await settle()
   await tickFor(3_000)
   assert.equal(count('agents'), 1, 'it runs once B is free, although the SSH lane is busy')
 })
 
-test('LR1-08: a failed union read, or a source that errored, backs the roster poll off', { skip }, async t => {
+test('LR1-08: a failed union read, or a source that errored, backs the union poll off', { skip }, async t => {
   const { appApi, handlers, count, tickFor } = await loadApp(t)
   handlers.agents = () => Promise.reject(new Error('enumeration timed out'))
   appApi.refreshRoster()
   await settle()
-  assert.equal(count('profiles.list'), 1)
-  assert.equal(appApi.polls.interval('A', 'roster'), 120_000)
+  assert.equal(count('agents'), 1)
+  assert.equal(appApi.polls.interval(appApi.UNION_LANE, 'union'), 120_000)
   await tickFor(60_000)
-  assert.equal(count('profiles.list'), 1, 'no full read at +60 s')
+  assert.equal(count('agents'), 1, 'no union read at +60 s')
+  assert.equal(count('profiles.list'), 2, 'the rich read keeps its own 60 s cadence')
   handlers.agents = () => ({ agents: [], sources: [{ connectionId: 'B', kind: 'remote', reachable: false, error: 'HTTP 503' }] })
   await tickFor(60_000)
-  assert.equal(count('profiles.list'), 2)
-  assert.equal(appApi.polls.interval('A', 'roster'), 240_000, 'a per-source error does not reset the backoff')
+  assert.equal(count('agents'), 2)
+  assert.equal(appApi.polls.interval(appApi.UNION_LANE, 'union'), 240_000, 'a per-source error does not reset the backoff')
 })
 
 test('LR1-10: stop() during pending roster, re-list and room reads: nothing late is painted and no follow-up read starts', { skip }, async t => {
@@ -695,11 +696,13 @@ test('R2-01a: stop() between profiles.list and the union read starts no union re
   appApi.refreshRoster()
   await settle()
   assert.equal(count('profiles.list'), 1, 'the same roster read is not issued twice while the old one is unresolved')
+  const agents = count('agents')
   first.resolve({ profiles: [{ name: 'late' }] })
   await settle()
-  assert.equal(count('agents'), 0, 'the stopped run starts no union read')
+  assert.equal(count('agents'), agents, 'the stopped run starts no union read')
+  assert.ok(!appApi.app.roster.get().rows.some(r => r.name === 'late'))
   await tickFor(3_000)
-  assert.deepEqual([count('profiles.list'), count('agents')], [2, 1], 'the new instance reads once the old one settled')
+  assert.equal(count('profiles.list'), 2, 'the new instance reads once the old one settled')
 })
 
 test('R2-01b: the window hidden between profiles.list and the union read: no union read starts while hidden', { skip }, async t => {
@@ -715,24 +718,21 @@ test('R2-01b: the window hidden between profiles.list and the union read: no uni
   assert.equal(count('groups.list'), 0)
 })
 
-test('R2-01c: a roster run past its deadline starts no union read once its answer comes, while a room poll holds the lane', { skip }, async t => {
-  const { appApi, handlers, clock, count } = await loadApp(t)
+test('R2-01c: a roster read past its deadline starts nothing and paints nothing once its answer comes', { skip }, async t => {
+  const { appApi, handlers, clock, count, calls } = await loadApp(t)
   const list = deferred()
-  const rooms = deferred()
   handlers['profiles.list'] = () => list.promise
-  handlers['groups.list'] = () => rooms.promise
   appApi.refreshRoster()
   await settle()
   clock.advance(30_000)
   appApi.refreshRoster()
   await settle()
-  assert.equal(appApi.polls.busy('A'), 'rooms')
-  list.resolve({ profiles: [] })
+  const issued = calls.length
+  list.resolve({ profiles: [{ name: 'late' }] })
   await settle()
-  assert.equal(count('agents'), 0)
+  assert.equal(calls.length, issued, 'no request follows the expired answer')
   assert.equal(count('profiles.list'), 1)
-  rooms.resolve({ rooms: [] })
-  await settle()
+  assert.ok(!appApi.app.roster.get().rows.some(r => r.name === 'late'))
 })
 
 test('R2-02: a hung history read is never issued again while unresolved (peak one outstanding), other polls go on', { skip }, async t => {
@@ -888,4 +888,204 @@ test('R2-02 core: past the deadline other poll types proceed, the same poll stay
   await settle()
   assert.equal((await polls.run('A', 'idle', 15_000, work)).ran, true)
   assert.equal(issued, 2)
+})
+
+// ── review round 3 (R3-01..03) ───────────────────────────────────────────
+
+test('R3-01: a first chat whose read always fails at the 30 s deadline never holds the other chats back', async () => {
+  const clock = fakeClock()
+  const polls = createBackgroundPolls({ now: clock.now })
+  const rotation = createIdleRotation()
+  const chats = []
+  const reads = {}
+  let opened = false
+  for (const name of ['alpha', 'beta', 'gamma']) {
+    reads[name] = 0
+    const gw = gateway({
+      REST: () => {
+        const n = (reads[name] += 1)
+        return { session_id: 'tip', messages: [{ id: n, role: 'assistant', content: `${name} ${n}`, timestamp: 1762560000 + n }], pagination: { limit: 120, offset: 0, order: 'latest', returned: 1 } }
+      }
+    })
+    const inner = gw.deps.readHistory
+    gw.deps.readHistory = async (...args) => {
+      if (opened && name === 'alpha') {
+        reads.alpha += 1
+        clock.advance(POLL_DEADLINE_MS)
+        throw new Error('request timed out')
+      }
+      return inner(...args)
+    }
+    const bot = { ...BOT, name, route: { ...BOT.route, profile: name, targetProfile: name } }
+    const chat = createChatController(bot, { ...gw.deps, now: clock.now, idleByHost: true }, { attachOnOpen: false })
+    await chat.open()
+    chats.push(chat)
+  }
+  opened = true
+  const base = { ...reads }
+  for (let i = 0; i < 10; i += 1) {
+    clock.advance(300_000)
+    await polls.run('home-server', 'idle', 15_000, live => rotation.pass('home-server', chats, live))
+  }
+  assert.ok(reads.alpha - base.alpha >= 3, `alpha is still tried (${reads.alpha - base.alpha})`)
+  for (const [i, name] of [[1, 'beta'], [2, 'gamma']]) {
+    assert.ok(reads[name] - base[name] >= 3, `${name} gets reads (${reads[name] - base[name]})`)
+    assert.match(chats[i].get().chat.items.map(item => item.text).join(' | '), new RegExp(`${name} ([2-9]|\\d\\d)`), `${name}: a later read applied`)
+  }
+  for (const chat of chats) chat.dispose()
+})
+
+test('R3-01 core: a pass from before reset() moves no cursor', async () => {
+  const rotation = createIdleRotation()
+  const gate = deferred()
+  const order = []
+  const chat = name => ({ idleRefresh: async () => (order.push(name), name === 'a' && !order.includes('gate') ? (order.push('gate'), gate.promise) : true) })
+  const a = chat('a')
+  const b = chat('b')
+  const old = rotation.pass('L', [a, b], () => true)
+  await settle()
+  rotation.reset()
+  gate.resolve(true)
+  await old
+  order.length = 0
+  await rotation.pass('L', [a, b], () => true)
+  assert.deepEqual(order.filter(x => x !== 'gate'), ['a', 'b'], 'the next pass starts at the first chat again')
+})
+
+test('R3-01 app: main chat whose reads time out at 30 s, extra tab on the same connection still refreshes', { skip }, async t => {
+  const { appApi, handlers, clock, calls } = await loadApp(t)
+  appApi.app.enabled.set(true)
+  appApi.selectBot(remoteBot('alpha'))
+  assert.equal(appApi.openBotInNewTab(remoteBot('beta')), true)
+  await settle()
+  const reads = profile => calls.filter(c => c.method === 'REST' && c.profile === profile).length
+  const start = { alpha: reads('alpha'), beta: reads('beta') }
+  handlers.REST = req => {
+    if (req.profile !== 'alpha') return { messages: [{ id: 9, role: 'assistant', content: 'beta new', timestamp: 9 }], pagination: { returned: 1 } }
+    clock.advance(POLL_DEADLINE_MS)
+    return Promise.reject(new Error('request timed out'))
+  }
+  for (let i = 0; i < 10; i += 1) {
+    clock.advance(300_000)
+    appApi.refreshRoster()
+    await settle()
+  }
+  assert.ok(reads('alpha') - start.alpha >= 3)
+  assert.ok(reads('beta') - start.beta >= 3, `beta refreshed (${reads('beta') - start.beta})`)
+})
+
+test('R3-02 core: a due global run reserves its lanes: new jobs wait, running ones settle, then it runs; hiding drops the reservation', async () => {
+  let visible = true
+  const polls = createBackgroundPolls({ now: () => 0, isVisible: () => visible })
+  const b = deferred()
+  void polls.run('B', 'idle', 15_000, () => b.promise)
+  let union = 0
+  const unionRun = () => polls.run('*union', 'union', 60_000, async () => ((union += 1), true), { global: { except: ['S'] } })
+  assert.equal((await unionRun()).ran, false)
+  assert.equal(polls.reservedFor(), '*union\nunion')
+  assert.equal((await polls.run('C', 'idle', 15_000, async () => true)).reserved, true, 'a new job on another lane waits')
+  assert.equal((await polls.run('S', 'idle', 15_000, async () => true)).ran, true, 'an SSH lane is not reserved')
+  b.resolve(true)
+  await settle()
+  assert.equal((await unionRun()).ran, true)
+  assert.equal(union, 1)
+  assert.equal((await polls.run('C', 'idle', 15_000, async () => true)).ran, true)
+  // hide clears it
+  const c = deferred()
+  void polls.run('B', 'rooms', 10_000, () => c.promise)
+  await polls.run('*union', 'union2', 60_000, async () => true, { global: { except: [] } })
+  assert.ok(polls.reservedFor())
+  visible = false
+  await polls.run('C', 'x', 1, async () => true)
+  assert.equal(polls.reservedFor(), '')
+  visible = true
+  c.resolve(true)
+})
+
+test('R3-02: many connections with staggered 29 s idle reads for an hour: the roster keeps refreshing (rich read and union)', { skip }, async t => {
+  const { appApi, handlers, clock, count } = await loadApp(t)
+  appApi.app.enabled.set(true)
+  // Sol's pattern (finite 29 s reads staggered across connections, below the
+  // deadline, settling at the 300 s backoff cap); 20 connections opened 15 s
+  // apart keep some idle read running at every instant in this harness, which
+  // starved the all-lanes-free claim completely (0 roster reads in an hour).
+  const LANES = 20
+  const STAGGER = 15
+  const lanes = Array.from({ length: LANES }, (_, i) => `C${i + 1}`)
+  let phase = 'before'
+  const rosterBot = () => ({ name: 'roster-bot', last_session: { id: 's', preview: phase, last_active: phase === 'before' ? 1 : 2 } })
+  handlers['profiles.list'] = () => ({ profiles: phase === 'before' ? [rosterBot()] : [rosterBot(), { name: 'new-bot' }] })
+  handlers.agents = () => ({
+    agents: [
+      { profile: 'roster-bot', connectionId: 'A', connectionKind: 'remote' },
+      ...(phase === 'before' ? [] : [{ profile: 'new-bot', connectionId: 'A', connectionKind: 'remote' }])
+    ],
+    sources: [{ connectionId: 'A', kind: 'remote', reachable: true }, ...lanes.map(id => ({ connectionId: id, kind: 'remote', reachable: true }))]
+  })
+  const timers = []
+  const opened = new Set()
+  handlers.REST = req => {
+    if (!opened.has(req.profile)) {
+      opened.add(req.profile)
+      return { messages: [], pagination: {} }
+    }
+    return new Promise(resolve => timers.push({ at: clock.now() + 29_000, resolve: () => resolve({ messages: [], pagination: {} }) }))
+  }
+  let completions = 0
+  let ms = 0
+  const step = async () => {
+    clock.advance(1_000)
+    ms += 1_000
+    for (const timer of timers.splice(0)) {
+      if (timer.at <= clock.now()) {
+        completions += 1
+        timer.resolve()
+      } else timers.push(timer)
+    }
+    if (ms % 3_000 === 0) appApi.refreshRoster()
+    await settle(4)
+  }
+  appApi.refreshRoster()
+  await settle()
+  for (const [i, lane] of lanes.entries()) {
+    assert.equal(appApi.openBotInNewTab({ ...remoteBot(`bot${i}`, lane), connectionKind: 'remote' }), true)
+    for (let s = 0; s < STAGGER; s += 1) await step()
+  }
+  phase = 'after'
+  const before = { list: count('profiles.list'), agents: count('agents') }
+  for (let s = 0; s < 3_600; s += 1) await step()
+  assert.ok(completions > 100, `idle reads keep completing (${completions})`)
+  assert.ok(count('profiles.list') - before.list >= 30, `rich reads went on (${count('profiles.list') - before.list})`)
+  assert.ok(count('agents') - before.agents >= 10, `union reads went on (${count('agents') - before.agents})`)
+  const rows = appApi.app.roster.get().rows
+  assert.ok(rows.some(r => r.name === 'new-bot'), 'new-bot appeared')
+  assert.equal(rows.find(r => r.name === 'roster-bot')?.last_session?.preview, 'after')
+})
+
+test('R3-03: a background room list hidden between pages starts no next page; visible again lists once', { skip }, async t => {
+  const { appApi, handlers, count, setVisible } = await loadApp(t)
+  appApi.app.enabled.set(true)
+  const page0 = deferred()
+  let n = 0
+  handlers['groups.list'] = params => (++n === 1 ? page0.promise : { rooms: [{ room_id: `r${params.offset}` }] })
+  const listing = appApi.refreshRooms()
+  await settle()
+  setVisible(false)
+  appApi.onDocumentVisible()
+  page0.resolve({ rooms: [{ room_id: 'p0' }], next_offset: 100 })
+  await listing
+  await settle()
+  assert.equal(count('groups.list'), 1, 'no second page while hidden')
+  assert.equal(appApi.app.rooms.get().error, null, 'no error painted')
+  setVisible(true)
+  appApi.onDocumentVisible()
+  await settle()
+  assert.equal(count('groups.list'), 2, 'one current list on visible')
+  assert.deepEqual(appApi.app.rooms.get().rooms.map(r => r.room_id), ['r0'])
+  // A forced (foreground) list is not stopped by a hidden window.
+  setVisible(false)
+  let m = 0
+  handlers['groups.list'] = () => (++m === 1 ? { rooms: [{ room_id: 'f0' }], next_offset: 100 } : { rooms: [{ room_id: 'f1' }] })
+  await appApi.refreshRooms(true)
+  assert.equal(m, 2)
 })

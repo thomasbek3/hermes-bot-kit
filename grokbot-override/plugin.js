@@ -46602,6 +46602,7 @@ function createBackgroundPolls(deps = {}) {
   let globalJob = null;
   const polls2 = /* @__PURE__ */ new Map();
   const unsettled = /* @__PURE__ */ new Set();
+  let reserved = null;
   const laneId = (key) => String(key || "local");
   const pollKey = (key, type) => `${laneId(key)}
 ${type}`;
@@ -46668,13 +46669,25 @@ ${type}`;
     const except = global ? new Set((global.except || []).map(laneId).filter((id2) => id2 !== main)) : null;
     const poll = pollOf(main, type, baseMs);
     const id = pollKey(main, type);
-    if (!visible2()) return { ran: false, hidden: true, nextMs: waitOf(poll, resumeMinMs) };
-    if (unsettled.has(id)) return { ran: false, busy: true, pending: true, nextMs: Math.max(1, poll.base) };
-    if (ids.some((lane) => holder(lane)) || except && globalBlocked(except)) {
-      return { ran: false, busy: true, nextMs: Math.max(1, Math.min(poll.interval, poll.base)) };
+    if (!visible2()) {
+      reserved = null;
+      return { ran: false, hidden: true, nextMs: waitOf(poll, resumeMinMs) };
     }
+    const busyResult = { ran: false, busy: true, nextMs: Math.max(1, Math.min(poll.interval, poll.base)) };
+    if (unsettled.has(id)) return { ran: false, busy: true, pending: true, nextMs: Math.max(1, poll.base) };
     const wait = waitOf(poll, resumeMinMs);
-    if (!force && wait > 0) return { ran: false, nextMs: wait };
+    if (except) {
+      if (!force && wait > 0) return { ran: false, nextMs: wait };
+      if (ids.some((lane) => holder(lane)) || globalBlocked(except)) {
+        reserved = { id, except };
+        return busyResult;
+      }
+    } else {
+      if (ids.some((lane) => holder(lane))) return busyResult;
+      if (reserved && reserved.id !== id && ids.some((lane) => !reserved.except.has(lane))) return { ...busyResult, reserved: true };
+      if (!force && wait > 0) return { ran: false, nextMs: wait };
+    }
+    if (reserved?.id === id) reserved = null;
     const job = { type, poll, lanes: ids, except: except || /* @__PURE__ */ new Set(), start: now(), generation: generation2, done: false, retired: false };
     for (const lane of ids) owners.set(lane, job);
     if (except) globalJob = job;
@@ -46712,6 +46725,7 @@ ${type}`;
     generation2 += 1;
     owners.clear();
     globalJob = null;
+    reserved = null;
     polls2.clear();
   }
   function due(key, type, baseMs, { lanes = [], resumeMinMs = 0 } = {}) {
@@ -46727,23 +46741,38 @@ ${type}`;
   function pending(key, type) {
     return unsettled.has(pollKey(key, type));
   }
-  return { run, resume, want, reset, due, interval, busy, pending };
+  function reservedFor() {
+    return reserved ? reserved.id : "";
+  }
+  return { run, resume, want, reset, due, interval, busy, pending, reservedFor };
 }
 function createIdleRotation() {
   const served = /* @__PURE__ */ new Map();
+  let generation2 = 0;
   async function pass(lane, chats, live, isVisible2 = () => true) {
+    const mine = generation2;
     const list = Array.isArray(chats) ? chats.filter(Boolean) : [];
     const start2 = list.indexOf(served.get(lane)) + 1;
     let ok = true;
     for (let i = 0; i < list.length; i += 1) {
       if (!live() || !isVisible2()) break;
       const chat = list[(start2 + i) % list.length];
-      if (await chat.idleRefresh(live) === false) ok = false;
-      if (live()) served.set(lane, chat);
+      let result = true;
+      try {
+        result = await chat.idleRefresh(live);
+      } catch {
+        result = false;
+      }
+      if (result === false) ok = false;
+      if (mine === generation2) served.set(lane, chat);
     }
     return ok;
   }
-  return { pass, reset: () => served.clear() };
+  function reset() {
+    generation2 += 1;
+    served.clear();
+  }
+  return { pass, reset };
 }
 
 // src/ui/sdk.ts
@@ -51164,26 +51193,66 @@ function unionHealthy(union) {
     (source) => source?.error && String(source.error) !== "connect-on-demand" && String(source?.kind || "") !== "ssh"
   );
 }
-var rosterGen = 0;
-var rosterFgGen = 0;
-function beginRosterRead(foreground) {
-  rosterGen += 1;
-  if (foreground) rosterFgGen += 1;
-  const gen = rosterGen;
-  const fg = rosterFgGen;
-  return () => foreground ? fg === rosterFgGen : gen === rosterGen;
+var readGens = { rich: { all: 0, fg: 0 }, union: { all: 0, fg: 0 } };
+function beginRead(kinds, foreground) {
+  const snap = kinds.map((kind) => {
+    readGens[kind].all += 1;
+    if (foreground) readGens[kind].fg += 1;
+    return { kind, all: readGens[kind].all, fg: readGens[kind].fg };
+  });
+  return () => snap.every(({ kind, all, fg }) => foreground ? fg === readGens[kind].fg : all === readGens[kind].all);
 }
-async function verifySources(live = () => true) {
+function supersedeReads() {
+  for (const gen of Object.values(readGens)) {
+    gen.all += 1;
+    gen.fg += 1;
+  }
+}
+var lastLocal = null;
+var lastUnion = null;
+function paintOwn(local, union, active) {
+  const sources = union ? Array.isArray(union.sources) ? union.sources : [] : app.roster.get().sources || [];
+  const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), sources), liveNames);
+  lastOwnRead = Date.now();
+  app.roster.set((s) => {
+    return mergeRosterState(s, { rows, sources, origin: "own", error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) });
+  });
+  trackActivity();
+}
+async function readRich(live = () => true) {
+  const current = beginRead(["rich"], false);
+  const fresh = () => current() && live();
+  const active = activeConnectionId();
+  try {
+    const local = await host2.request("profiles.list", { ...OWN_ROSTER_PARAMS });
+    if (!fresh()) return true;
+    lastLocal = { connection: active, data: local };
+    paintOwn(local, lastUnion, active);
+    return true;
+  } catch (error) {
+    if (!fresh()) return false;
+    const message = String(error?.message || error);
+    app.roster.set((s) => s.error === message ? s : { ...s, error: message });
+    return false;
+  }
+}
+async function readUnion(live = () => true) {
   if (typeof host2?.agents !== "function") return true;
-  const current = beginRosterRead(false);
+  const current = beginRead(["union"], false);
   try {
     const union = await host2.agents();
     if (!current() || !live()) return true;
+    lastUnion = union;
     liveNames = liveRosterNames(union);
-    app.roster.set((s) => {
-      const rows = dropDeadRows(s.rows, liveNames);
-      return rows.length === s.rows.length ? s : { ...s, rows };
-    });
+    const active = activeConnectionId();
+    if (app.roster.get().origin === "own" && lastLocal && lastLocal.connection === active) {
+      paintOwn(lastLocal.data, union, active);
+    } else {
+      app.roster.set((s) => {
+        const rows = dropDeadRows(s.rows, liveNames);
+        return rows.length === s.rows.length ? s : { ...s, rows };
+      });
+    }
     return unionHealthy(union);
   } catch {
     return false;
@@ -51244,7 +51313,7 @@ function mergeRosterState(s, patch) {
   return changed ? next : s;
 }
 async function fetchOwnRoster({ foreground = false, live = () => true } = {}) {
-  const current = beginRosterRead(foreground);
+  const current = beginRead(["rich", "union"], foreground);
   const fresh = () => current() && live();
   try {
     const active = activeConnectionId();
@@ -51262,13 +51331,12 @@ async function fetchOwnRoster({ foreground = false, live = () => true } = {}) {
       }
     }
     if (!fresh()) return true;
-    if (union) liveNames = liveRosterNames(union);
-    const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames);
-    lastOwnRead = Date.now();
-    app.roster.set((s) => {
-      return mergeRosterState(s, { rows, sources: union?.sources || [], origin: "own", error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) });
-    });
-    trackActivity();
+    lastLocal = { connection: active, data: local };
+    if (union) {
+      lastUnion = union;
+      liveNames = liveRosterNames(union);
+    }
+    paintOwn(local, union, active);
     return unionOk;
   } catch (error) {
     if (!fresh()) return false;
@@ -51341,6 +51409,7 @@ function refreshRoster() {
   pumpPolls();
 }
 var ownReadWanted = true;
+var UNION_LANE = "*union";
 var lastSeenVisible = true;
 var idleRotation = createIdleRotation();
 function noteVisibility() {
@@ -51355,13 +51424,9 @@ function pumpPolls() {
     if (r?.ran && epoch === pollEpoch) pumpPolls();
   });
   const lane = activeLane();
-  const global = { except: sshLanes() };
-  if (ownReadWanted) {
-    after(polls.run(lane, "roster", OWN_FETCH_MIN_MS, (live) => fetchOwnRoster({ live }), { global, resumeMinMs: OWN_FETCH_MIN_MS }));
-  } else {
-    after(polls.run(lane, "verify", OWN_VERIFY_MS, (live) => verifySources(live), { global }));
-  }
-  after(polls.run(lane, "rooms", ROOM_LIST_MS, (live) => listRoomsNow(live)));
+  if (ownReadWanted) after(polls.run(lane, "roster", OWN_FETCH_MIN_MS, (live) => readRich(live), { resumeMinMs: OWN_FETCH_MIN_MS }));
+  after(polls.run(UNION_LANE, "union", OWN_VERIFY_MS, (live) => readUnion(live), { global: { except: sshLanes() } }));
+  after(polls.run(lane, "rooms", ROOM_LIST_MS, (live) => listRoomsNow(live, true)));
   for (const [chatLane, chats] of idleChatsByLane()) {
     after(polls.run(chatLane, "idle", IDLE_REFRESH_MS, (live) => idleRotation.pass(chatLane, chats, live, isVisible)));
   }
@@ -51798,21 +51863,27 @@ async function refreshRooms(force = false) {
     await listRoomsNow();
     return;
   }
-  await polls.run(activeLane(), "rooms", ROOM_LIST_MS, (live) => listRoomsNow(live));
+  await polls.run(activeLane(), "rooms", ROOM_LIST_MS, (live) => listRoomsNow(live, true));
 }
-async function listRoomsNow(live = () => true) {
+async function listRoomsNow(live = () => true, background = false) {
   const route = activeRoomRoute();
   if (!route) return true;
   const seq = ++roomSeq;
   const epoch = pollEpoch;
   const fresh = () => seq === roomSeq && epoch === pollEpoch && live();
   requestRoom ??= createRoomRequester(host2);
-  const request2 = (...args) => fresh() ? requestRoom(...args) : Promise.reject(new Error("room list superseded"));
+  let stopped = false;
+  const request2 = (...args) => {
+    if (fresh() && (!background || isVisible())) return requestRoom(...args);
+    stopped = true;
+    return Promise.reject(new Error("room list superseded"));
+  };
   try {
     const rooms = await listRooms(request2, route);
     if (fresh()) app.rooms.set({ route, rooms, error: null, loaded: true });
     return true;
   } catch (error) {
+    if (stopped) return true;
     if (looksUnsupported(error)) {
       if (fresh()) app.rooms.set({ route, rooms: [], error: null, loaded: true });
       return true;
@@ -52256,8 +52327,8 @@ function disable() {
   pollEpoch += 1;
   polls.reset();
   idleRotation.reset();
-  rosterGen += 1;
-  rosterFgGen += 1;
+  supersedeReads();
+  lastLocal = null;
   roomSeq += 1;
   stopRemoteAvatars();
   unwatchPane?.();

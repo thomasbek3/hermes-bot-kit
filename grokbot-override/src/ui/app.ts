@@ -61,9 +61,14 @@ export const PLUGIN_ID = 'grokbot-override'
 export const WORKSPACE_ID = 'grokbot-override'
 const ROSTER_TICK_MS = 3_000
 // The own roster read: the FULL `profiles.list` (with each profile's session
-// summaries) on the active gateway, plus host.agents. At most once per 60 s
-// while the window is visible, never while it is hidden, backed off while the
-// gateway is slow or failing (core/backgroundPolls.js).
+// summaries) on the active gateway, at most once per 60 s while the window is
+// visible (and Bot Mode's own snapshot is not fresh), never while it is
+// hidden, backed off while the gateway is slow or failing
+// (core/backgroundPolls.js). In the background it is two separate polls: the
+// rich read on the active connection's lane only (other connections never
+// hold it up), and the union roster (host.agents) as a global poll every
+// 60 s; each repaints with the other's last answer. A foreground read (a
+// write's re-read, Retry) does both at once.
 //
 // Why the full payload and not `{ include_sessions: false }`: the roster's
 // previews (roster.js previewOf), unread dots and activity toasts
@@ -74,9 +79,8 @@ const ROSTER_TICK_MS = 3_000
 // tui_gateway/methods_profiles.py "profiles.list": a boolean, no limit; the
 // gateway already reads just the Bot Chat row and the newest session per
 // profile). A light read would blank all of those, so the session data is
-// fetched less often instead of lighter. The cheap structural re-list
-// (verifySources: host.agents only, no profiles.list) runs on the same 60 s
-// cadence while Bot Mode's own snapshot is fresh.
+// fetched less often instead of lighter. While Bot Mode's own snapshot is
+// fresh only the union poll runs (it prunes deleted bots, dropDeadRows).
 export const OWN_FETCH_MIN_MS = 60_000
 // Even while the stock snapshot is fresh, re-list the sources this often so
 // bots deleted on a machine leave the roster (dropDeadRows).
@@ -246,30 +250,85 @@ function unionHealthy(union: any) {
 // later read supersedes a background read; only a later foreground read (or
 // disable) supersedes a foreground one, so a slow background answer never
 // undoes a write's re-read (or a Retry).
-let rosterGen = 0
-let rosterFgGen = 0
-function beginRosterRead(foreground: boolean) {
-  rosterGen += 1
-  if (foreground) rosterFgGen += 1
-  const gen = rosterGen
-  const fg = rosterFgGen
-  return () => (foreground ? fg === rosterFgGen : gen === rosterGen)
+// One freshness order per kind of read (the rich `profiles.list`, the union
+// roster): an answer applies only if nothing newer of its kind superseded
+// it. Any later read supersedes a background read; only a later foreground
+// read (or disable) supersedes a foreground one, so a slow background answer
+// never undoes a write's re-read (or a Retry).
+type ReadKind = 'rich' | 'union'
+const readGens: Record<ReadKind, { all: number; fg: number }> = { rich: { all: 0, fg: 0 }, union: { all: 0, fg: 0 } }
+function beginRead(kinds: ReadKind[], foreground: boolean) {
+  const snap = kinds.map(kind => {
+    readGens[kind].all += 1
+    if (foreground) readGens[kind].fg += 1
+    return { kind, all: readGens[kind].all, fg: readGens[kind].fg }
+  })
+  return () => snap.every(({ kind, all, fg }) => (foreground ? fg === readGens[kind].fg : all === readGens[kind].all))
+}
+function supersedeReads() {
+  for (const gen of Object.values(readGens)) {
+    gen.all += 1
+    gen.fg += 1
+  }
+}
+// The last answers of each kind, so either poll can repaint the merged roster.
+let lastLocal: null | { connection: null | string; data: any } = null
+let lastUnion: any = null
+
+/** Paint the own roster from a rich read and a union answer (either may be
+ *  the last one known). */
+function paintOwn(local: any, union: any, active: null | string) {
+  // No union answer yet: keep the sources already known (never forget them).
+  const sources = union ? (Array.isArray(union.sources) ? union.sources : []) : app.roster.get().sources || []
+  const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), sources), liveNames)
+  lastOwnRead = Date.now()
+  app.roster.set(s => {
+    // updatedAt moves only with a real change; lastOwnRead says how fresh it is.
+    return mergeRosterState(s, { rows, sources, origin: 'own', error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) })
+  })
+  trackActivity()
 }
 
-/** Re-list the sources (host.agents) while the stock snapshot is in use, and
- *  drop the rows a source no longer returns. Read-only; rows are never added
- *  here (the snapshot or the own read does that). False: the read failed. */
-async function verifySources(live: () => boolean = () => true): Promise<boolean> {
+/** The background rich read: `profiles.list` on the active connection only. */
+async function readRich(live: () => boolean = () => true): Promise<boolean> {
+  const current = beginRead(['rich'], false)
+  const fresh = () => current() && live()
+  const active = activeConnectionId()
+  try {
+    const local = await host.request('profiles.list', { ...OWN_ROSTER_PARAMS })
+    if (!fresh()) return true
+    lastLocal = { connection: active, data: local }
+    paintOwn(local, lastUnion, active)
+    return true
+  } catch (error: any) {
+    if (!fresh()) return false
+    const message = String(error?.message || error)
+    app.roster.set(s => (s.error === message ? s : { ...s, error: message }))
+    return false
+  }
+}
+
+/** The background union read (host.agents): repaints the own roster with the
+ *  last rich read of the active connection, or, while the stock snapshot is
+ *  in use, drops the rows a source no longer returns (rows are never added
+ *  from it alone). False: the read failed or a non-SSH source errored. */
+async function readUnion(live: () => boolean = () => true): Promise<boolean> {
   if (typeof host?.agents !== 'function') return true
-  const current = beginRosterRead(false)
+  const current = beginRead(['union'], false)
   try {
     const union = await host.agents()
     if (!current() || !live()) return true
+    lastUnion = union
     liveNames = liveRosterNames(union)
-    app.roster.set(s => {
-      const rows = dropDeadRows(s.rows, liveNames)
-      return rows.length === s.rows.length ? s : { ...s, rows }
-    })
+    const active = activeConnectionId()
+    if (app.roster.get().origin === 'own' && lastLocal && lastLocal.connection === active) {
+      paintOwn(lastLocal.data, union, active)
+    } else {
+      app.roster.set(s => {
+        const rows = dropDeadRows(s.rows, liveNames)
+        return rows.length === s.rows.length ? s : { ...s, rows }
+      })
+    }
     return unionHealthy(union)
   } catch {
     return false
@@ -351,7 +410,7 @@ function mergeRosterState(s: RosterState, patch: Partial<RosterState>): RosterSt
  *  errored): whatever answered is still painted, the background poll backs
  *  off. `live()` false or a newer read = the answer is dropped. */
 async function fetchOwnRoster({ foreground = false, live = () => true }: { foreground?: boolean; live?: () => boolean } = {}): Promise<boolean> {
-  const current = beginRosterRead(foreground)
+  const current = beginRead(['rich', 'union'], foreground)
   const fresh = () => current() && live()
   try {
     const active = activeConnectionId()
@@ -371,14 +430,12 @@ async function fetchOwnRoster({ foreground = false, live = () => true }: { foreg
       }
     }
     if (!fresh()) return true
-    if (union) liveNames = liveRosterNames(union)
-    const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames)
-    lastOwnRead = Date.now()
-    app.roster.set(s => {
-      // updatedAt moves only with a real change; lastOwnRead says how fresh it is.
-      return mergeRosterState(s, { rows, sources: union?.sources || [], origin: 'own', error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) })
-    })
-    trackActivity()
+    lastLocal = { connection: active, data: local }
+    if (union) {
+      lastUnion = union
+      liveNames = liveRosterNames(union)
+    }
+    paintOwn(local, union, active)
     return unionOk
   } catch (error: any) {
     if (!fresh()) return false
@@ -479,6 +536,8 @@ export function refreshRoster() {
 // connection never holds another one's polls.
 
 let ownReadWanted = true
+// The union poll's own key (it is not tied to one connection).
+export const UNION_LANE = '*union'
 let lastSeenVisible = true
 const idleRotation = createIdleRotation()
 
@@ -499,13 +558,11 @@ function pumpPolls() {
       if (r?.ran && epoch === pollEpoch) pumpPolls()
     })
   const lane = activeLane()
-  const global = { except: sshLanes() }
-  if (ownReadWanted) {
-    after(polls.run(lane, 'roster', OWN_FETCH_MIN_MS, live => fetchOwnRoster({ live }), { global, resumeMinMs: OWN_FETCH_MIN_MS }))
-  } else {
-    after(polls.run(lane, 'verify', OWN_VERIFY_MS, live => verifySources(live), { global }))
-  }
-  after(polls.run(lane, 'rooms', ROOM_LIST_MS, live => listRoomsNow(live)))
+  // The rich read holds only the active connection; the union read is a
+  // global poll that, once due, reserves its lanes (core/backgroundPolls.js).
+  if (ownReadWanted) after(polls.run(lane, 'roster', OWN_FETCH_MIN_MS, live => readRich(live), { resumeMinMs: OWN_FETCH_MIN_MS }))
+  after(polls.run(UNION_LANE, 'union', OWN_VERIFY_MS, live => readUnion(live), { global: { except: sshLanes() } }))
+  after(polls.run(lane, 'rooms', ROOM_LIST_MS, live => listRoomsNow(live, true)))
   for (const [chatLane, chats] of idleChatsByLane()) {
     after(polls.run(chatLane, 'idle', IDLE_REFRESH_MS, live => idleRotation.pass(chatLane, chats, live, isVisible)))
   }
@@ -1103,13 +1160,13 @@ export async function refreshRooms(force = false) {
     await listRoomsNow()
     return
   }
-  await polls.run(activeLane(), 'rooms', ROOM_LIST_MS, live => listRoomsNow(live))
+  await polls.run(activeLane(), 'rooms', ROOM_LIST_MS, live => listRoomsNow(live, true))
 }
 
 /** List the rooms now. A forced list (create, disband) is issued at once
  *  even while a background list is pending; whichever list started last
  *  paints, an older answer is dropped. */
-async function listRoomsNow(live: () => boolean = () => true): Promise<boolean> {
+async function listRoomsNow(live: () => boolean = () => true, background = false): Promise<boolean> {
   const route = activeRoomRoute()
   if (!route) return true
   const seq = ++roomSeq
@@ -1117,13 +1174,20 @@ async function listRoomsNow(live: () => boolean = () => true): Promise<boolean> 
   const fresh = () => seq === roomSeq && epoch === pollEpoch && live()
   requestRoom ??= createRoomRequester(host)
   // A paged list starts no further page once it is stale (stopped, newer list,
-  // past its deadline).
-  const request = (...args: any[]) => (fresh() ? requestRoom(...args) : Promise.reject(new Error('room list superseded')))
+  // past its deadline) or, in the background, once the window is hidden: the
+  // list is dropped and the resume on visible lists again.
+  let stopped = false
+  const request = (...args: any[]) => {
+    if (fresh() && (!background || isVisible())) return requestRoom(...args)
+    stopped = true
+    return Promise.reject(new Error('room list superseded'))
+  }
   try {
     const rooms = await listRooms(request, route)
     if (fresh()) app.rooms.set({ route, rooms, error: null, loaded: true })
     return true
   } catch (error: any) {
+    if (stopped) return true
     if (looksUnsupported(error)) {
       if (fresh()) app.rooms.set({ route, rooms: [], error: null, loaded: true })
       return true
@@ -1700,8 +1764,8 @@ function disable() {
   pollEpoch += 1
   polls.reset()
   idleRotation.reset()
-  rosterGen += 1
-  rosterFgGen += 1
+  supersedeReads()
+  lastLocal = null
   roomSeq += 1
   stopRemoteAvatars()
   unwatchPane?.()

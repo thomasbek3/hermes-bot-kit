@@ -6,10 +6,11 @@
   (`profiles.list` with session summaries + `host.agents()`) runs at most once per 60 s instead of every ~15 s. All
   background polls (roster, source re-list, room list, one idle-refresh pass per connection over every open chat) go
   through one scheduler: never two at once on a connection (the union roster, which reads every registered non-SSH
-  connection, waits until no other background poll runs and holds them all), a failure, a failed source or a > 2 s
+  connection, is its own poll that waits until no other background poll runs, reserving its lanes once due so busy
+  connections cannot starve it; the active connection's rich read only holds that connection), a failure, a failed source or a > 2 s
   answer doubles the interval (cap 5 min) and a fast success resets it, a run past 30 s lets other polls go on, starts
   no further request and has its late answer dropped (the same read is not reissued until it settles), the idle pass
-  rotates so a slow connection still reaches every open chat, nothing polls while the window is hidden, and every
+  rotates past every attempted chat so a slow or timing-out chat never holds the others back, nothing polls while the window is hidden, and every
   poll is due once when it is visible again (however short the hide, also when the visibility event never arrives). Older background
   answers never overwrite a newer foreground read; stopping the plugin drops late answers and follow-ups. Foreground
   calls (switch bot, open a chat, send, a write's re-read, Retry, create/disband a room) are never delayed. The full
