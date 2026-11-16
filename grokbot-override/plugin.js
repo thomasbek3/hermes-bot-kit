@@ -53033,6 +53033,13 @@ function Composer({
   textRef.current = text3;
   const filesRef = React5.useRef(files);
   filesRef.current = files;
+  const mountedRef = React5.useRef(true);
+  React5.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const reads = React5.useRef(/* @__PURE__ */ new Set());
   const completionSeq = React5.useRef(0);
   const completeRef = React5.useRef(onCompleteSlash);
@@ -53168,6 +53175,9 @@ ${value}`);
     setNote("");
     setOptions([]);
     const result = await onSend(sending, attachments, apiText ? { apiText } : void 0);
+    if (!result.ok && result.delivery === "not-sent" && (!mountedRef.current || ownerRef.current !== sentOwner) && !draftTexts.get(sentOwner).trim()) {
+      draftTexts.set(sentOwner, sending);
+    }
     if (ownerRef.current !== sentOwner) return;
     if (!result.ok) {
       const restore = restoreAfterFailure({ result, sentOwner, currentOwner: ownerRef.current, currentText: textRef.current, currentFiles: filesRef.current });

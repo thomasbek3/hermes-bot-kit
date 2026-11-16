@@ -186,6 +186,14 @@ export function Composer({
   textRef.current = text
   const filesRef = React.useRef(files)
   filesRef.current = files
+  // False once this composer unmounts (a bot switch remounts it by key).
+  const mountedRef = React.useRef(true)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const reads = React.useRef(new Set<AbortController>())
   const completionSeq = React.useRef(0)
   const completeRef = React.useRef(onCompleteSlash)
@@ -338,6 +346,13 @@ export function Composer({
     setNote('')
     setOptions([])
     const result = await onSend(sending, attachments, apiText ? { apiText } : undefined)
+    // A definite refusal (nothing admitted) after the user moved to another
+    // bot: this composer can no longer show it, so the text goes back to that
+    // bot's draft, unless something newer was typed there (review C-R1-02).
+    // An `unknown` delivery is never restored: it may have reached the bot.
+    if (!result.ok && result.delivery === 'not-sent' && (!mountedRef.current || ownerRef.current !== sentOwner) && !draftTexts.get(sentOwner).trim()) {
+      draftTexts.set(sentOwner, sending)
+    }
     if (ownerRef.current !== sentOwner) return
     if (!result.ok) {
       const restore = restoreAfterFailure({ result, sentOwner, currentOwner: ownerRef.current, currentText: textRef.current, currentFiles: filesRef.current })
