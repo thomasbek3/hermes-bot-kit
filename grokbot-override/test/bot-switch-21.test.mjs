@@ -21,7 +21,7 @@ test('seedFromState / chatSeed: only a loaded chat leaves a seed', () => {
   assert.equal(seedFromState({ phase: 'loading', storedId: 's', canonical: { id: 's' }, rows: [] }), null)
   assert.equal(seedFromState({ phase: 'ready', storedId: '', canonical: { id: 's' }, rows: [] }), null)
   const seed = seedFromState({ phase: 'ready', storedId: 's', canonical: { id: 's' }, rows: [{ id: 1 }], hasMore: true })
-  assert.deepEqual(seed, { storedId: 's', canonical: { id: 's' }, rows: [{ id: 1 }], hasMore: true })
+  assert.deepEqual(seed, { storedId: 's', canonical: { id: 's' }, rows: [{ id: 1 }], items: [], hasMore: true })
   assert.deepEqual(chatSeed(seed), seed)
   assert.equal(chatSeed(null), null)
   assert.equal(chatSeed({ storedId: 's', rows: [] }), null, 'no canonical row')

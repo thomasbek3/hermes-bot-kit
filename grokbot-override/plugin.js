@@ -43895,11 +43895,17 @@ var TEXT_EVENTS = /* @__PURE__ */ new Set(["message.delta", "message.interim", "
 function chatSeed(seed) {
   const storedId = String(seed?.storedId || "");
   if (!storedId || !seed?.canonical || !Array.isArray(seed?.rows)) return null;
-  return { storedId, canonical: seed.canonical, rows: seed.rows, hasMore: Boolean(seed.hasMore) };
+  const items = Array.isArray(seed.items) ? seed.items : [];
+  return { storedId, canonical: seed.canonical, rows: seed.rows, items, hasMore: Boolean(seed.hasMore) };
 }
+var STORED_ITEM = /^(?:h|r):/;
 function seedFromState(state) {
   if (state?.phase !== "ready" || !state?.storedId || !state?.canonical || !Array.isArray(state?.rows)) return null;
-  return { storedId: state.storedId, canonical: state.canonical, rows: state.rows, hasMore: Boolean(state.hasMore) };
+  const items = state.rows.length ? [] : (state.chat?.items || []).filter((item) => STORED_ITEM.test(String(item?.id || "")));
+  return { storedId: state.storedId, canonical: state.canonical, rows: state.rows, items, hasMore: Boolean(state.hasMore) };
+}
+function seedItems(seed) {
+  return seed.rows.length ? rowsToItems(seed.rows) : seed.items;
 }
 function createChatController(bot, deps, options = {}) {
   const attachOnOpen = options.attachOnOpen !== false;
@@ -43952,7 +43958,7 @@ function createChatController(bot, deps, options = {}) {
     turnRetry: null,
     // A remembered transcript that is still being checked (T9).
     checking: Boolean(seed),
-    chat: initialChatState(seed ? rowsToItems(seed.rows) : [])
+    chat: initialChatState(seed ? seedItems(seed) : [])
   };
   const listeners = /* @__PURE__ */ new Set();
   let attachFlight = null;

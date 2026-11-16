@@ -193,13 +193,26 @@ const TEXT_EVENTS = new Set(['message.delta', 'message.interim', 'reasoning.delt
 export function chatSeed(seed) {
   const storedId = String(seed?.storedId || '')
   if (!storedId || !seed?.canonical || !Array.isArray(seed?.rows)) return null
-  return { storedId, canonical: seed.canonical, rows: seed.rows, hasMore: Boolean(seed.hasMore) }
+  const items = Array.isArray(seed.items) ? seed.items : []
+  return { storedId, canonical: seed.canonical, rows: seed.rows, items, hasMore: Boolean(seed.hasMore) }
 }
 
-/** What a chat's state leaves behind for chatSeed, or null (not loaded). */
+// Stored transcript items: from REST pages ('h:') or from a session.resume
+// history fallback ('r:'); never live, local or in-flight ones.
+const STORED_ITEM = /^(?:h|r):/
+
+/** What a chat's state leaves behind for chatSeed, or null (not loaded). A
+ *  chat whose history came from the session.resume fallback (no REST rows)
+ *  keeps its stored items instead (review tighter-b r3 #2). */
 export function seedFromState(state) {
   if (state?.phase !== 'ready' || !state?.storedId || !state?.canonical || !Array.isArray(state?.rows)) return null
-  return { storedId: state.storedId, canonical: state.canonical, rows: state.rows, hasMore: Boolean(state.hasMore) }
+  const items = state.rows.length ? [] : (state.chat?.items || []).filter(item => STORED_ITEM.test(String(item?.id || '')))
+  return { storedId: state.storedId, canonical: state.canonical, rows: state.rows, items, hasMore: Boolean(state.hasMore) }
+}
+
+/** The items a seed paints: its REST rows, else its fallback items. */
+function seedItems(seed) {
+  return seed.rows.length ? rowsToItems(seed.rows) : seed.items
 }
 
 export function createChatController(bot, deps, options = {}) {
@@ -262,7 +275,7 @@ export function createChatController(bot, deps, options = {}) {
     turnRetry: null,
     // A remembered transcript that is still being checked (T9).
     checking: Boolean(seed),
-    chat: initialChatState(seed ? rowsToItems(seed.rows) : [])
+    chat: initialChatState(seed ? seedItems(seed) : [])
   }
   const listeners = new Set()
   let attachFlight = null

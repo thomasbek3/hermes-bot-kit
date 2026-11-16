@@ -10,7 +10,9 @@
   the normal way. The remembered transcript is only a picture: until the registry check and history read are done
   the composer is disabled (as on any open) and any action is refused at once, never queued; a failed check shows
   the usual error and forgets the remembered chat, so nothing can reach a replaced Bot Chat. The fresh read merges
-  into the remembered rows, keeping earlier pages.
+  into the remembered rows, keeping earlier pages. A chat whose history came from the `session.resume` fallback (no
+  REST history bridge) is remembered too. Opening a replacement of the open bot's Bot Chat through Hermes opens
+  the replacement, never the old chat still on screen.
 - **grokbot-override: Hermes's own session views work again (T3, 2026-11-15)**: the override claimed the main
   pane back on every session focus, so session search, a notification click, a cron run's "open", ⌘N and artifact
   links were undone at once. Start-up and reload still land on the override's chat tab. After that (the first
