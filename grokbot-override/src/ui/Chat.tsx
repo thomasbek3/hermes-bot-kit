@@ -839,7 +839,7 @@ export function ChatWorkspace({ slot = mainSlot }: { slot?: ChatSlot } = {}) {
           bot={bot}
           name={name}
           busy={Boolean(state.chat.busy)}
-          disabled={!ready}
+          disabled={!ready || Boolean(state.checking)}
           roster={roster.rows}
           stopError={state.stopError}
           blocked={state.sendBlocked}
