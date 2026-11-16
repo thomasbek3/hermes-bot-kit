@@ -191,9 +191,10 @@ logo plus your label, and a click opens that exact item.
 
 Getting the permalink:
 
-- Slack: `https://<workspace>.slack.com/archives/<channel_id>/p<ts without the dot>`
+- Slack: always the https permalink `https://<workspace>.slack.com/archives/<channel_id>/p<ts without the dot>`
   (ts `1762560000.123456` becomes `p1762560000123456`). For a reply in a thread, append
-  `?thread_ts=<parent ts>&cid=<channel_id>`. Or call `chat.getPermalink`.
+  `?thread_ts=<parent ts>&cid=<channel_id>`. Or call `chat.getPermalink`. This opens the exact message.
+  Never a `slack://` link: the Desktop chat can only open it at the channel, not the message.
 - Gmail: `https://mail.google.com/mail/u/0/#all/<message id>`, or the thread link the tool returns.
 - Anything else: the URL the tool returned. Plain and short; never invent one.
 

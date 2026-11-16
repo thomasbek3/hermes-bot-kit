@@ -188,6 +188,18 @@ C25) into `feature/grokbot-override-v2` and wiring them together. The five **Par
 R14, R15) do their job natively; each Notes cell names the stock detail that is not equal or not ported.
 Nothing hands off to stock Bot Mode in normal use; none of the rows is live-qualified.)
 
+## Known limits
+
+- **`slack://` source links open the channel, not the message.** Hermes Desktop's external opener admits
+  only `http:`, `https:` and `mailto:` (`apps/shared/src/external-url.ts`), so `ctx.os.openExternal` refuses
+  a `slack://channel?team=…&id=…&message=…` deep link and the click falls back to
+  `https://app.slack.com/client/<team>/<channel>`, which hands off to the Slack app at the channel. No
+  documented https URL addresses a message from a team id, channel id and ts alone, and the plugin does not
+  guess a workspace or bypass the opener. Slack **https permalinks**
+  (`https://<workspace>.slack.com/archives/<channel>/p<ts without the dot>`) open the exact message, and the
+  agent-cards skill tells bots to use them. If a future Hermes opener admits `slack:`, the deep link is
+  already tried first.
+
 ## Architecture notes
 
 **Two panes, Bot Mode's own zones.** Bot Mode puts its roster in the sidebar zone (tab **BOTS**) and its
