@@ -18,6 +18,13 @@
   computer-viewer README), instead of gateway RPC. It reads the plugin's exact lease and status shapes, shows the
   status `summary` lines, re-checks with `?fresh=1` on **Check**, and shows a refused take or release (409) with
   the plugin's message and the current holder.
+- **computer-viewer: control fixes from review (2026-11-15)**: input goes off when Hand back starts and stays off
+  after a lost answer until a fresh lease read; stale lease answers (older epoch, or sent before a take, hand back,
+  close or switch) are ignored; closing, Disconnect or switching bots during a pending Take over hands the late grant
+  back without reopening the pane; the lease is asked of the bot's own `(connectionId, profile)` route and the pane
+  fails closed when that is ambiguous or unknown; tool calls from another gateway no longer wake it; a bot-driven
+  computer shown as an embedded page is `inert` and watch-only. `remove-orgo-computer.sh` now refuses (exit 3, no
+  changes for that profile) any config form it cannot rewrite safely, and validates its edit before replacing.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

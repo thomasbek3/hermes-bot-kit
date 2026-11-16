@@ -1265,14 +1265,43 @@ function ensureIframeEl() {
   frame.style.border = '0'
   frame.style.background = 'rgb(0, 0, 0)'
   engine.iframeEl = frame
+  fenceIframe(frame)
   return frame
+}
+
+/** An embedded viewer page cannot be told to go view-only, so a locked
+ *  machine's iframe gets no focus and no input at all: `inert` (no focus, no
+ *  keys, no clicks, not in the tab order), and focus is taken back if it is
+ *  inside. CSS pointer-events alone would leave the keyboard live. */
+function fenceIframe(frame) {
+  if (!frame) return
+  const locked = controlLocked()
+  if (locked) {
+    frame.inert = true
+    frame.setAttribute('inert', '')
+    frame.setAttribute('tabindex', '-1')
+    try {
+      if (document.activeElement === frame && typeof frame.blur === 'function') frame.blur()
+    } catch {
+      /* no document focus to take back */
+    }
+  } else if (frame.inert || (typeof frame.getAttribute === 'function' && frame.getAttribute('inert') != null)) {
+    frame.inert = false
+    if (typeof frame.removeAttribute === 'function') {
+      frame.removeAttribute('inert')
+      frame.removeAttribute('tabindex')
+    }
+  }
 }
 
 function syncSurfacePointer() {
   const expanded = $ui.get().expanded
   if (engine.surfaceEl) engine.surfaceEl.style.pointerEvents = expanded ? 'auto' : 'none'
   // An embedded page cannot be told to ignore input, so a locked machine gets none.
-  if (engine.iframeEl) engine.iframeEl.style.pointerEvents = expanded && !controlLocked() ? 'auto' : 'none'
+  if (engine.iframeEl) {
+    engine.iframeEl.style.pointerEvents = expanded && !controlLocked() ? 'auto' : 'none'
+    fenceIframe(engine.iframeEl)
+  }
 }
 
 /** Input goes to the remote only in the expanded view, and for a remote-cua
@@ -2138,6 +2167,43 @@ function boundEndpointFor(profile) {
   return settings.endpoints.find(item => item.id === id) || null
 }
 
+/** A tool event belongs to the bot only when it came from that bot's own
+ *  gateway: the same profile name on another source is another bot. */
+function eventFromBotSource(event, profile, endpoint) {
+  const source = event.connectionId == null ? null : String(event.connectionId)
+  if (endpoint.remoteCua) {
+    // Only once this machine's owner (connection + profile) is known.
+    const state = $control.get()
+    if (state.profile !== profile || !state.owner) return false
+    return sameSource(source, state.owner.connectionId)
+  }
+  const active = activeConnection()
+  if (source == null || active == null) return true
+  return sameSource(source, active)
+}
+
+function sameSource(a, b) {
+  const x = a == null || a === '' ? null : String(a)
+  const y = b == null || b === '' ? null : String(b)
+  return x === y || (x === 'local' && y === null) || (x === null && y === 'local')
+}
+
+/** The connection the focused chat runs on, when this Hermes build says. */
+function activeConnection() {
+  try {
+    const atomLike = host.state && host.state.connectionId
+    if (atomLike && typeof atomLike.get === 'function') return atomLike.get() || null
+  } catch {
+    /* older SDK */
+  }
+  try {
+    if (typeof host.activeConnectionId === 'function') return host.activeConnectionId() || null
+  } catch {
+    /* older SDK */
+  }
+  return null
+}
+
 function shouldWake(profile, now) {
   if (paneClosedAt && now - paneClosedAt < AUTO_WAKE_COOLDOWN_MS) return false
   const last = wakeState.get(profile) || 0
@@ -2154,6 +2220,7 @@ function handleToolStart(event, now = Date.now()) {
   if (profile !== shown) return false
   const endpoint = boundEndpointFor(profile)
   if (!endpoint) return false
+  if (!eventFromBotSource(event, profile, endpoint)) return false
   if (!shouldWake(profile, now)) return false
   wakeState.set(profile, now)
   wakeForAgentActivity(endpoint)
@@ -2230,6 +2297,8 @@ const CONTROL_TEXT = {
   otherControls: 'Another viewer is in control',
   agentControls: 'Bot is in control',
   controlTaken: 'Another viewer took control. Watching only.',
+  iframe:
+    "Watching only: an embedded viewer page can't be limited to view-only, so Take over needs this computer's VNC (WebSocket) address.",
   unbound: profile => `Bind this computer to ${profile} (Settings → Endpoint for ${profile}) to take over.`,
   pluginMissing: "This bot's gateway doesn't have the remote-cua plugin enabled, so control can't be checked."
 }
@@ -2250,7 +2319,18 @@ const IDLE_CONTROL = {
   profile: '',
   endpointId: '',
   bound: false,
+  // An embedded viewer page: watch only, never Take over (see fenceIframe).
+  iframe: false,
+  // The bot's gateway route { connectionId, profile, key }; null until resolved.
+  owner: null,
+  ownerError: '',
   lease: null,
+  // Input stays off while a hand back is in flight or its outcome is unknown,
+  // until a lease read or answer says otherwise.
+  fence: false,
+  // After a hand back of lease epoch N, a READ saying this window still holds
+  // an epoch below N + 1 may predate the release: it keeps the fence on.
+  minGrantEpoch: 0,
   status: null,
   statusError: '',
   pending: null,
@@ -2265,7 +2345,10 @@ const control = {
   // new viewer, so a lease left behind needs "Hand back (force)".
   viewerId: newViewerId(),
   client: null,
-  pollStop: null
+  pollStop: null,
+  // Bumped by every take, hand back, close and target change: an answer to a
+  // request started before that is stale and is not applied.
+  gen: 0
 }
 
 function normalizeLease(raw) {
@@ -2319,20 +2402,43 @@ function statusWords(status) {
   return { tone: status.ok ? 'good' : failed || status.error ? 'bad' : 'muted', line }
 }
 
-/** The bot's REST scope: its own connection and backend profile, from the
- *  same profile routes Hermes's registry hands plugins. */
-async function botRestScope(profile) {
-  let routes = null
-  try {
-    routes = typeof host.profileRoutes === 'function' ? await host.profileRoutes() : null
-  } catch {
-    routes = null
+/** The bot's gateway route: the (connectionId, profile) pair Hermes's registry
+ *  names it by. Never picked by list order: one match, or the focused chat's
+ *  connection among several, else no owner and no control (fail closed). */
+async function resolveOwner(profile) {
+  if (typeof host.profileRoutes !== 'function') {
+    // Older desktop, one local gateway: the profile name is the whole scope.
+    return { owner: { connectionId: null, profile, key: `\u0000${profile}` } }
   }
-  const route = Array.isArray(routes) ? routes.find(item => item && item.profile === profile) : null
-  if (!route) return { profile }
+  let routes
+  try {
+    routes = await host.profileRoutes()
+  } catch {
+    return { error: "Couldn't list the gateways, so this bot's computer can't be controlled right now." }
+  }
+  const matches = (Array.isArray(routes) ? routes : []).filter(item => item && item.profile === profile)
+  let route = null
+  if (matches.length === 1) {
+    route = matches[0]
+  } else if (matches.length > 1) {
+    const active = activeConnection()
+    const same = active == null ? [] : matches.filter(item => sameSource(item.connectionId, active))
+    if (same.length !== 1) {
+      return {
+        error: `More than one gateway has a bot named ${profile}. Open a chat with the one this computer belongs to, so the pane knows which to control.`
+      }
+    }
+    route = same[0]
+  } else {
+    return { error: `Couldn't find ${profile}'s gateway, so its computer can't be controlled.` }
+  }
+  const connectionId = route.connectionId ? String(route.connectionId) : null
   return {
-    ...(route.connectionId ? { connectionId: route.connectionId } : {}),
-    profile: route.targetProfile || route.profile || profile
+    owner: {
+      connectionId,
+      profile: route.targetProfile || route.profile || profile,
+      key: `${connectionId || ''}\u0000${route.profile}`
+    }
   }
 }
 
@@ -2364,14 +2470,15 @@ function restError(error) {
   return wrapped
 }
 
-/** The default transport: the plugin's routes on that bot's own connection and profile. */
-async function remoteCuaRestRequest(profile, op, body, query) {
+/** The default transport: the plugin's routes on the owner's own connection and profile. */
+async function remoteCuaRestRequest(owner, op, body, query) {
   const route = REMOTE_CUA_ROUTES[op]
   if (!route) throw new Error(`unknown remote-cua op ${op}`)
+  if (!owner || !owner.profile) throw new Error("This bot's gateway is not known.")
   const api = desktopRestBridge()
-  const scope = await botRestScope(profile)
   const request = {
-    ...scope,
+    ...(owner.connectionId ? { connectionId: owner.connectionId } : {}),
+    profile: owner.profile,
     priority: 'foreground',
     path: `${REMOTE_CUA_BASE}/${route.path}${query ? `?${query}` : ''}`,
     method: route.method,
@@ -2386,10 +2493,10 @@ async function remoteCuaRestRequest(profile, op, body, query) {
 
 function createRemoteCuaClient(request) {
   return {
-    lease: profile => request(profile, 'lease'),
-    take: (profile, viewer) => request(profile, 'take', { viewer }),
-    release: (profile, viewer, force) => request(profile, 'release', { viewer, force: Boolean(force) }),
-    status: (profile, fresh) => request(profile, 'status', undefined, fresh ? 'fresh=1' : '')
+    lease: owner => request(owner, 'lease'),
+    take: (owner, viewer) => request(owner, 'take', { viewer }),
+    release: (owner, viewer, force) => request(owner, 'release', { viewer, force: Boolean(force) }),
+    status: (owner, fresh) => request(owner, 'status', undefined, fresh ? 'fresh=1' : '')
   }
 }
 
@@ -2410,34 +2517,47 @@ function controlTarget() {
   const profile = readProfileName()
   const settings = $settings.get()
   const bound = Boolean(settings.perBotEndpoint && settings.perBotEndpoint[profile] === endpoint.id)
-  return { profile, endpoint, bound, key: `${profile}\u0000${endpoint.id}` }
+  const live = engine.endpoint && engine.endpoint.id === endpoint.id ? engine.endpoint : null
+  const iframe = endpoint.mode === 'iframe' || Boolean(live && live.mode === 'iframe')
+  return { profile, endpoint, bound, iframe, key: `${profile}\u0000${endpoint.id}` }
 }
 
 function leaseHeldBy(lease, viewer) {
   return Boolean(lease && lease.holder === 'human' && viewer && lease.viewer === viewer)
 }
 
+const CONTROL_BUSY_TEXT = {
+  take: 'Taking over…',
+  release: 'Handing back…',
+  force: 'Handing back…',
+  fence: 'Checking who is in control…'
+}
+
 /** Pure view of the control state for one viewer. */
 function controlView(state, viewerId) {
   const lease = state && state.lease
-  const iHold = leaseHeldBy(lease, viewerId)
-  const humanOther = Boolean(lease && lease.holder === 'human' && !iHold)
+  const held = leaseHeldBy(lease, viewerId)
+  const iHold = held && !state.fence
+  const humanOther = Boolean(lease && lease.holder === 'human' && !held)
+  const ready = Boolean(state && state.bound && state.owner)
+  const busy = state && state.pending ? CONTROL_BUSY_TEXT[state.pending] : state && state.fence ? CONTROL_BUSY_TEXT.fence : ''
   return {
     iHold,
     humanOther,
-    chip: iHold ? CONTROL_TEXT.youControl : humanOther ? CONTROL_TEXT.otherControls : CONTROL_TEXT.agentControls,
-    canTakeOver: Boolean(state && state.bound && !iHold && !state.pending),
-    canHandBack: Boolean(iHold && !state.pending),
-    canForce: Boolean(state && state.bound && humanOther && !state.pending),
-    inputEnabled: iHold
+    chip: busy || (iHold ? CONTROL_TEXT.youControl : humanOther ? CONTROL_TEXT.otherControls : CONTROL_TEXT.agentControls),
+    // Fenced while the lease still names this window: Take over re-confirms it.
+    canTakeOver: Boolean(ready && !state.iframe && !state.pending && (!held || state.fence)),
+    canHandBack: Boolean(ready && held && !state.pending),
+    canForce: Boolean(ready && humanOther && !state.pending),
+    inputEnabled: Boolean(iHold && !state.iframe && !state.pending)
   }
 }
 
 function iHoldControl() {
   const target = controlTarget()
   const state = $control.get()
-  if (!target || state.key !== target.key) return false
-  return leaseHeldBy(state.lease, control.viewerId)
+  if (!target || state.key !== target.key || target.iframe) return false
+  return controlView(state, control.viewerId).inputEnabled
 }
 
 /** True when the pane must not send input: a remote-cua machine the human does not hold. */
@@ -2449,107 +2569,161 @@ function patchControl(partial) {
   $control.set({ ...$control.get(), ...partial })
 }
 
-function applyLease(key, raw) {
-  const state = $control.get()
-  if (state.key !== key) return
-  const lease = normalizeLease(raw)
-  const had = leaseHeldBy(state.lease, control.viewerId)
-  const has = leaseHeldBy(lease, control.viewerId)
-  // Another viewer's Take over wins; this window drops back to watching.
-  let evicted = state.evicted
-  if (had && !has) evicted = lease.holder === 'human'
-  if (has || lease.holder !== 'human') evicted = false
-  patchControl({ lease, error: '', evicted })
+function refreshInputGate() {
   applyRfbDisplay()
   syncSurfacePointer()
 }
 
+/** Apply a lease answer for `key` at generation `gen`. A read (`read: true`)
+ *  is dropped while a take or hand back is in flight. A stale answer that
+ *  would hand this window input (its epoch older than the lease already
+ *  shown) is dropped; one that takes input away is always applied. */
+function applyLease(key, gen, raw, { read = false } = {}) {
+  const state = $control.get()
+  if (state.key !== key || control.gen !== gen) return false
+  if (read && state.pending) return false
+  const lease = normalizeLease(raw)
+  const has = leaseHeldBy(lease, control.viewerId)
+  if (has && state.lease && lease.epoch < state.lease.epoch) return false
+  const had = leaseHeldBy(state.lease, control.viewerId) && !state.fence
+  const fence = read && has && lease.epoch < state.minGrantEpoch
+  // Another viewer's Take over wins; this window drops back to watching.
+  let evicted = state.evicted
+  if (had && !has) evicted = lease.holder === 'human'
+  if (has || lease.holder !== 'human') evicted = false
+  patchControl({ lease, fence, error: '', evicted, ...(read ? {} : { minGrantEpoch: has ? 0 : state.minGrantEpoch }) })
+  refreshInputGate()
+  return true
+}
+
 async function refreshLease() {
   const state = $control.get()
-  if (!state.key || !state.bound || !control.client) return
-  const key = state.key
+  if (!state.key || !state.bound || !state.owner || state.pending || !control.client) return
+  const { key, owner } = state
+  const gen = control.gen
   try {
-    const raw = await control.client.lease(state.profile)
-    applyLease(key, raw)
+    const raw = await control.client.lease(owner)
+    if (!applyLease(key, gen, raw, { read: true })) return
     // GET lease answers 200 for a profile without a remote_cua block, with the reason.
-    if (raw && raw.configured === false && $control.get().key === key) {
+    if (raw && raw.configured === false) {
       patchControl({ error: String(raw.error || 'This bot has no remote computer configured.') })
     }
   } catch (error) {
-    if ($control.get().key === key) patchControl({ error: controlErrorText(error) })
+    if ($control.get().key === key && control.gen === gen) patchControl({ error: controlErrorText(error) })
   }
 }
 
 /** GET status; `fresh` skips the plugin's 20 s cache (the Check button). */
 async function refreshStatus(fresh = false) {
   const state = $control.get()
-  if (!state.key || !state.bound || !control.client) return
-  const key = state.key
+  if (!state.key || !state.bound || !state.owner || !control.client) return
+  const { key, owner } = state
   try {
-    const raw = await control.client.status(state.profile, fresh)
-    if ($control.get().key === key) patchControl({ status: normalizeStatus(raw), statusError: '' })
+    const raw = await control.client.status(owner, fresh)
+    const now = $control.get()
+    if (now.key === key && now.owner === owner) patchControl({ status: normalizeStatus(raw), statusError: '' })
   } catch (error) {
-    if ($control.get().key === key) patchControl({ statusError: controlErrorText(error) })
+    const now = $control.get()
+    if (now.key === key && now.owner === owner) patchControl({ statusError: controlErrorText(error) })
   }
 }
 
 async function takeOver() {
   const state = $control.get()
-  if (!state.key || !state.bound || state.pending || !control.client) return
-  const key = state.key
+  if (!controlView(state, control.viewerId).canTakeOver || !control.client) return
+  const { key, owner } = state
+  const gen = ++control.gen
   patchControl({ pending: 'take', error: '', evicted: false })
+  let raw
   try {
-    const raw = await control.client.take(state.profile, control.viewerId)
-    if ($control.get().key !== key) return
-    patchControl({ pending: null })
-    applyLease(key, raw)
-    if (leaseHeldBy($control.get().lease, control.viewerId)) {
-      setUi({ viewOnly: false })
-      setExpanded(true)
-    }
+    raw = await control.client.take(owner, control.viewerId)
   } catch (error) {
-    if ($control.get().key !== key) return
+    if ($control.get().key !== key || control.gen !== gen) {
+      // Abandoned (closed or switched) and the outcome is unknown: make sure
+      // nothing is left held on the machine this window no longer shows.
+      releaseQuietly(owner)
+      return
+    }
     patchControl({ pending: null })
-    // A refused take or release (409) carries the current lease: show who holds it.
-    if (error && error.body && error.body.lease) applyLease(key, error.body)
+    // A refused take (409) carries the current lease: show who holds it.
+    if (error && error.body && error.body.lease) applyLease(key, gen, error.body)
     patchControl({ error: controlErrorText(error) })
+    return
+  }
+  if ($control.get().key !== key || control.gen !== gen) {
+    // The pane closed, disconnected or moved on while the take was in flight:
+    // hand it straight back on the gateway it was taken on, and stay closed.
+    if (leaseHeldBy(normalizeLease(raw), control.viewerId)) releaseQuietly(owner)
+    return
+  }
+  patchControl({ pending: null })
+  applyLease(key, gen, raw)
+  if (iHoldControl()) {
+    setUi({ viewOnly: false })
+    setExpanded(true)
   }
 }
 
-/** Hand control back. `force` clears a lease this window does not hold. */
+function releaseQuietly(owner) {
+  if (!owner || !control.client) return
+  Promise.resolve()
+    .then(() => control.client.release(owner, control.viewerId, false))
+    .catch(() => {})
+}
+
+/** Hand control back. `force` clears a lease this window does not hold.
+ *  Input goes off before the request: the bot resumes the moment the release
+ *  commits, before its answer arrives. */
 async function handBack(force = false) {
   const state = $control.get()
-  if (!state.key || !control.client) return
-  if (!force && !leaseHeldBy(state.lease, control.viewerId)) return
-  if (force && !state.bound) return
-  const key = state.key
-  patchControl({ pending: force ? 'force' : 'release', error: '' })
+  if (!state.key || !state.owner || !control.client || state.pending) return
+  const view = controlView(state, control.viewerId)
+  if (force ? !view.canForce : !leaseHeldBy(state.lease, control.viewerId)) return
+  const { key, owner } = state
+  const gen = ++control.gen
+  patchControl({
+    pending: force ? 'force' : 'release',
+    fence: true,
+    error: '',
+    minGrantEpoch: Math.max(state.minGrantEpoch, ((state.lease && state.lease.epoch) || 0) + 1)
+  })
+  refreshInputGate()
+  let raw
   try {
-    const raw = await control.client.release(state.profile, control.viewerId, force)
-    if ($control.get().key !== key) return
-    patchControl({ pending: null, evicted: false })
-    applyLease(key, raw)
+    raw = await control.client.release(owner, control.viewerId, force)
   } catch (error) {
-    if ($control.get().key !== key) return
+    if ($control.get().key !== key || control.gen !== gen) return
     patchControl({ pending: null })
-    // A refused take or release (409) carries the current lease: show who holds it.
-    if (error && error.body && error.body.lease) applyLease(key, error.body)
+    if (error && error.body && error.body.lease) {
+      applyLease(key, gen, error.body)
+      patchControl({ error: controlErrorText(error) })
+      return
+    }
+    // Outcome unknown (the release may have committed): input stays off until
+    // a fresh read of the lease says this window still holds it.
     patchControl({ error: controlErrorText(error) })
+    void refreshLease()
+    return
   }
+  if ($control.get().key !== key || control.gen !== gen) return
+  patchControl({ pending: null, evicted: false })
+  applyLease(key, gen, raw)
 }
 
-/** Closing the pane (or Disconnect) hands back. A dropped connection does not. */
+/** Closing the pane (or Disconnect) hands back. A dropped connection does not.
+ *  A take still in flight is abandoned and handed back when it lands. */
 function handBackOnClose() {
   const state = $control.get()
-  if (!state.key || !leaseHeldBy(state.lease, control.viewerId) || !control.client) return
-  const { profile } = state
-  // Fire and forget: the pane is going away, the gateway still gets the release.
-  patchControl({ lease: { ...state.lease, holder: 'agent', viewer: null } })
-  Promise.resolve()
-    .then(() => control.client.release(profile, control.viewerId, false))
-    .catch(() => {})
-  applyRfbDisplay()
-  syncSurfacePointer()
+  if (!state.key) return
+  control.gen += 1
+  const held = leaseHeldBy(state.lease, control.viewerId) && !state.fence
+  patchControl({
+    pending: null,
+    fence: held || state.fence,
+    minGrantEpoch: held ? Math.max(state.minGrantEpoch, (state.lease.epoch || 0) + 1) : state.minGrantEpoch
+  })
+  if (held) releaseQuietly(state.owner)
+  refreshInputGate()
 }
 
 /** Follow the pane to the machine it shows; a machine left behind is handed back. */
@@ -2557,13 +2731,13 @@ function syncControlTarget() {
   const target = controlTarget()
   const state = $control.get()
   const key = target ? target.key : ''
-  if (state.key === key && (!target || state.bound === target.bound)) return
+  if (state.key === key && (!target || (state.bound === target.bound && state.iframe === target.iframe))) return
   if (state.key && state.key !== key) handBackOnClose()
+  control.gen += 1
   if (!target) {
     $control.set({ ...IDLE_CONTROL })
     syncLeasePoll()
-    applyRfbDisplay()
-    syncSurfacePointer()
+    refreshInputGate()
     return
   }
   $control.set({
@@ -2571,15 +2745,40 @@ function syncControlTarget() {
     key,
     profile: target.profile,
     endpointId: target.endpoint.id,
-    bound: target.bound
+    bound: target.bound,
+    iframe: target.iframe
   })
   syncLeasePoll()
-  applyRfbDisplay()
-  syncSurfacePointer()
-  if (target.bound) {
-    void refreshLease()
+  refreshInputGate()
+  if (target.bound) void resolveControlOwner()
+}
+
+/** (Re)resolve the bot's gateway, then read the lease. A changed gateway for
+ *  the same bot name is a different machine owner: hand the old one back. */
+async function resolveControlOwner() {
+  const { key, profile } = $control.get()
+  if (!key) return
+  const result = await resolveOwner(profile)
+  const state = $control.get()
+  if (state.key !== key) return
+  if (result.error) {
+    if (state.owner) handBackOnClose()
+    patchControl({ owner: null, ownerError: result.error, lease: null, fence: false, status: null })
+    refreshInputGate()
+    return
+  }
+  const changed = !state.owner || state.owner.key !== result.owner.key
+  if (changed && state.owner) {
+    handBackOnClose()
+    patchControl({ lease: null, fence: false, status: null, evicted: false, error: '' })
+  }
+  if (changed) {
+    control.gen += 1
+    patchControl({ owner: result.owner, ownerError: '' })
+    refreshInputGate()
     void refreshStatus()
   }
+  await refreshLease()
 }
 
 /** Poll the lease only while a bound remote-cua machine is on screen, so the
@@ -2588,7 +2787,7 @@ function syncLeasePoll() {
   const want = Boolean($control.get().bound)
   if (want && !control.pollStop) {
     const tick = () => {
-      if (engine.paneVisible && $control.get().bound) void refreshLease()
+      if (engine.paneVisible && $control.get().bound) void resolveControlOwner()
     }
     const ctx = pluginCtx
     if (ctx && typeof ctx.setInterval === 'function') {
@@ -4524,7 +4723,7 @@ function ComputerOverlay({ iframeMode }) {
   const controlState = useValue($control)
   useValue($settings)
   const remote = Boolean(controlTarget())
-  const inControl = remote && leaseHeldBy(controlState.lease, control.viewerId)
+  const inControl = remote && iHoldControl() && controlView(controlState, control.viewerId).inputEnabled
   const overlayRef = useRef(null)
   const mountRef = useRef(null)
   useEffect(() => {
@@ -4750,6 +4949,17 @@ function ControlBar({ onDark }) {
       CONTROL_TEXT.unbound(target.profile)
     )
   }
+  const note = (text, tone) =>
+    el(
+      'p',
+      {
+        'data-control-note': '',
+        className: cn('text-[0.64rem] leading-4', onDark ? (tone === 'warn' ? 'px-1 text-amber-200' : 'px-1 text-white/80') : 'text-center text-(--ui-text-tertiary)')
+      },
+      text
+    )
+  if (state.ownerError) return note(state.ownerError, 'warn')
+  if (state.iframe) return note(CONTROL_TEXT.iframe, 'warn')
   const view = controlView(state, control.viewerId)
   const ghost = onDark ? 'text-white hover:bg-white/15 hover:text-white disabled:text-white/40' : undefined
   const chip = el(
@@ -4767,7 +4977,8 @@ function ControlBar({ onDark }) {
     },
     view.chip
   )
-  const buttons = view.iHold
+  const held = leaseHeldBy(state.lease, control.viewerId)
+  const buttons = held
     ? [
         el(Button, {
           key: 'hand-back',
@@ -4777,7 +4988,18 @@ function ControlBar({ onDark }) {
           className: ghost,
           disabled: !view.canHandBack,
           onClick: () => void handBack(false)
-        }, CONTROL_TEXT.handBack)
+        }, CONTROL_TEXT.handBack),
+        // Fenced after an unsure hand back: Take over re-confirms the lease.
+        state.fence && view.canTakeOver
+          ? el(Button, {
+              key: 'take-over',
+              type: 'button',
+              size: 'xs',
+              variant: onDark ? 'ghost' : undefined,
+              className: ghost,
+              onClick: () => void takeOver()
+            }, CONTROL_TEXT.takeOver)
+          : null
       ]
     : [
         view.humanOther
@@ -4853,7 +5075,7 @@ function ComputerPane() {
   const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profileName] : null
   const endpointId = overrideId || settings.globalEndpointId
   const endpoint = endpointId ? settings.endpoints.find(item => item.id === endpointId) || null : null
-  const inControl = Boolean(endpoint && endpoint.remoteCua) && leaseHeldBy(controlState.lease, control.viewerId)
+  const inControl = Boolean(endpoint && endpoint.remoteCua) && iHoldControl() && controlView(controlState, control.viewerId).inputEnabled
   const slotRef = useRef(null)
   const iframeMode = Boolean(endpoint && endpoint.mode === 'iframe')
   const aspect = conn.fbW && conn.fbH ? `${conn.fbW} / ${conn.fbH}` : '16 / 10'

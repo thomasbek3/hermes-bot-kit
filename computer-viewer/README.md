@@ -211,6 +211,28 @@ Copied from Hermes's Bot Screen, for the Mac:
    holds control, **Hand back (force)** clears it. When another window takes
    over, this one drops back to watching.
 
+Safety rules the pane follows (the bot resumes the moment a hand back
+reaches the gateway, so the pane never trusts an old answer to give you
+input):
+
+- Input goes off as soon as you click **Hand back**, before the answer
+  arrives. If the answer is lost, input stays off until a fresh read of the
+  lease; if that read still names you, **Take over** re-confirms it.
+- An answer to a request sent before a Take over, Hand back, close or bot
+  switch is ignored, and a lease older (by `epoch`) than the one shown can
+  never turn input back on.
+- Closing the pane, Disconnect or switching bots while a Take over is in
+  flight hands the late grant straight back, on the gateway it was taken on,
+  without reopening the pane.
+- The lease is asked of the bot's own gateway: the `(connectionId, profile)`
+  route Hermes lists for it. If two gateways have a bot with that name, the
+  focused chat's connection decides; if it cannot, or the route list is not
+  available, the pane stays view-only and says why. Tool calls from another
+  gateway with the same bot name do not open the pane.
+- A bot-driven computer added as an embedded viewer page (or one whose
+  address fell back to the page) is watch-only: the page is made `inert` (no
+  focus, no keys, no clicks) and Take over needs its VNC (WebSocket) address.
+
 Below the chip, the pane shows the machine's health in plain words from the
 plugin's status check: reachable, driver version, permissions, and whether
 the screen is asleep or locked (**Check** re-runs it).
@@ -249,6 +271,13 @@ is deleted, `.env` is left alone):
 bash remove-orgo-computer.sh          # what it would do
 bash remove-orgo-computer.sh --yes    # do it, then restart the gateway
 ```
+
+It only rewrites a `plugins.enabled` list written one item per line or as a
+one-line `[a, b]` list, removes just that item, and checks the result (with
+Ruby or PyYAML when installed) before replacing the file. A profile whose
+config names the plugin any other way (a list over several lines,
+`plugins: {enabled: [...]}`) is left untouched, plugin folder included; the
+script prints the manual steps and exits 3.
 
 ## High-performance mode (optional)
 

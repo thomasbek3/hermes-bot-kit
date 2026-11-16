@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar }\n'
+        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -1102,7 +1102,36 @@ function fakeRemoteCua({ lease = AGENT_LEASE, status = STATUS_READY, configured 
   const bump = next => {
     server.lease = { ...next, since: 1763251200.5, epoch: server.lease.epoch + 1 }
   }
+  // server.hold(route): the next request to that route is committed on the
+  // server now, and its answer is held until .deliver() (or .fail(error)).
+  server.held = new Map()
+  server.hold = route => {
+    let open
+    const gate = new Promise(resolve => {
+      open = resolve
+    })
+    const entry = { gate, error: null, deliver: () => open(), fail: error => { entry.error = error; open() } }
+    server.held.set(route, entry)
+    return entry
+  }
   server.api = async request => {
+    const route = request.path.replace('/api/plugins/remote-cua/', '').replace(/\?.*$/, '')
+    const entry = server.held.get(route)
+    if (entry) server.held.delete(route)
+    let outcome
+    try {
+      outcome = { value: answer(request) }
+    } catch (error) {
+      outcome = { error }
+    }
+    if (entry) {
+      await entry.gate
+      if (entry.error) throw entry.error
+    }
+    if (outcome.error) throw outcome.error
+    return outcome.value
+  }
+  const answer = request => {
     const { method, path, body, profile, connectionId, priority } = request
     server.calls.push({ method, path, body, profile, connectionId, priority })
     if (missing) return reply(404, { detail: 'Plugin not found' })
@@ -1137,6 +1166,7 @@ function fakeRemoteCua({ lease = AGENT_LEASE, status = STATUS_READY, configured 
     if (method === 'GET' && route.startsWith('status')) return reply(200, server.status)
     return reply(404, { detail: 'Not Found' })
   }
+  server.api.answer = answer
   server.takes = () => server.calls.filter(c => c.path.endsWith('/take'))
   server.releases = () => server.calls.filter(c => c.path.endsWith('/release'))
   return server
@@ -1169,8 +1199,8 @@ test('the pane calls the plugin routes on the bot\'s own connection and profile'
   assert.deepEqual(
     plain(server.calls.map(c => [c.method, c.path, c.body, c.profile, c.connectionId, c.priority])),
     [
-      ['GET', '/api/plugins/remote-cua/lease', null, 'ava', 'conn-mini', 'foreground'],
       ['GET', '/api/plugins/remote-cua/status', null, 'ava', 'conn-mini', 'foreground'],
+      ['GET', '/api/plugins/remote-cua/lease', null, 'ava', 'conn-mini', 'foreground'],
       ['POST', '/api/plugins/remote-cua/take', { viewer: t.control.viewerId }, 'ava', 'conn-mini', 'foreground'],
       ['POST', '/api/plugins/remote-cua/release', { viewer: t.control.viewerId, force: false }, 'ava', 'conn-mini', 'foreground'],
       ['GET', '/api/plugins/remote-cua/status?fresh=1', null, 'ava', 'conn-mini', 'foreground']
@@ -1179,9 +1209,9 @@ test('the pane calls the plugin routes on the bot\'s own connection and profile'
   assert.match(t.control.viewerId, /^[A-Za-z0-9._:-]{1,128}$/)
 })
 
-test('a profile without a route is asked on its own name with no connection id', async () => {
+test('an older desktop without route inventory asks the single gateway by profile name', async () => {
   const server = fakeRemoteCua()
-  const { t } = await remoteSetup(server, { routes: [] })
+  const { t } = await remoteSetup(server, { routes: null })
   assert.equal(server.calls[0].profile, 'ava')
   assert.equal(server.calls[0].connectionId, undefined)
   assert.ok(t)
@@ -1354,7 +1384,7 @@ test('the bridge error "<status>: <body>" is parsed back into its JSON body', as
   })
   context.__host.profileRoutes = () => []
   await assert.rejects(
-    () => t.remoteCuaRestRequest('ava', 'release', { viewer: 'y', force: false }),
+    () => t.remoteCuaRestRequest({ connectionId: null, profile: 'ava' }, 'release', { viewer: 'y', force: false }),
     err => err.status === 409 && err.body.error === 'not_holder' && err.body.lease.viewer === 'x'
   )
 })
@@ -1386,4 +1416,262 @@ test('the pane and overlay render the chip, the buttons and the status line', as
   text = textOf(t.ControlBar({}))
   assert.match(text, /Another viewer is in control/)
   assert.match(text, /Hand back \(force\)/)
+})
+
+// ---------------------------------------------------------------------------
+// Review round 1 regressions (each fails on 605da23).
+// ---------------------------------------------------------------------------
+
+const lastRfb = instances => instances[instances.length - 1]
+
+async function heldByMe(server) {
+  const setup = await remoteSetup(server)
+  lastRfb(setup.instances).listeners.get('connect')({})
+  await setup.t.takeOver()
+  assert.equal(lastRfb(setup.instances).viewOnly, false, 'precondition: this window drives the machine')
+  return setup
+}
+
+test('R1-01: input goes off when Hand back starts, before the release answer arrives', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await heldByMe(server)
+  const held = server.hold('release')
+  const pending = t.handBack()
+  await settle()
+  assert.equal(server.lease.holder, 'agent', 'the server has already given the bot control')
+  assert.equal(t.$control.get().pending, 'release')
+  assert.equal(lastRfb(instances).viewOnly, true, 'no human input while the release is in flight')
+  assert.equal(t.controlLocked(), true)
+  held.deliver()
+  await pending
+  assert.equal(lastRfb(instances).viewOnly, true)
+})
+
+test('R1-01: a lost release answer keeps input off until a fresh read', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await heldByMe(server)
+  const held = server.hold('release')
+  const pending = t.handBack()
+  await settle()
+  held.fail(new Error('connection lost after POST'))
+  await pending
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+  assert.equal(lastRfb(instances).viewOnly, true)
+  assert.equal(t.controlLocked(), true)
+  assert.equal(t.controlView(t.$control.get(), t.control.viewerId).chip, 'Bot is in control', 'the reconciling read landed')
+})
+
+test('R1-01: a lost release that did NOT commit stays fenced until Take over re-confirms', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await heldByMe(server)
+  // The request never reaches the server: the human still holds the lease.
+  const api = server.api
+  t.control.client = t.createRemoteCuaClient(async (owner, op, body, query) => {
+    if (op === 'release') throw new Error('connection lost before POST')
+    return t.remoteCuaRestRequest(owner, op, body, query)
+  })
+  await t.handBack()
+  await settle()
+  assert.equal(server.lease.holder, 'human')
+  assert.equal(lastRfb(instances).viewOnly, true, 'a read of the old grant does not re-enable input')
+  const view = t.controlView(t.$control.get(), t.control.viewerId)
+  assert.equal(view.canTakeOver, true)
+  assert.equal(view.canHandBack, true)
+  await t.takeOver()
+  assert.equal(lastRfb(instances).viewOnly, false)
+  assert.ok(api)
+})
+
+test('R1-02: a lease read sent before Hand back cannot resurrect control after it', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await heldByMe(server)
+  const epochHeld = server.lease.epoch
+  const parked = server.hold('lease')
+  const read = t.refreshLease()
+  await settle()
+  await t.handBack()
+  assert.equal(server.lease.holder, 'agent')
+  parked.deliver()
+  await read
+  const state = t.$control.get()
+  assert.equal(state.lease.holder, 'agent')
+  assert.ok(state.lease.epoch > epochHeld)
+  assert.equal(lastRfb(instances).viewOnly, true)
+})
+
+test('R1-02: an older-epoch grant is ignored even without a mutation in between', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await heldByMe(server)
+  // Another window forced it back and the bot works; then an old answer lands.
+  server.lease = { holder: 'agent', viewer: null, since: 1763251400, epoch: 10 }
+  await t.refreshLease()
+  assert.equal(lastRfb(instances).viewOnly, true)
+  const stale = { ok: true, lease: { holder: 'human', viewer: t.control.viewerId, since: 1, epoch: 3 } }
+  server.lease = stale.lease
+  await t.refreshLease()
+  assert.equal(t.$control.get().lease.epoch, 10)
+  assert.equal(lastRfb(instances).viewOnly, true)
+})
+
+test('R1-03: closing the pane during Take over hands the late grant back and stays closed', async () => {
+  const server = fakeRemoteCua()
+  const { t, registered } = await remoteSetup(server)
+  t.showPane()
+  const shown = registered.length
+  const held = server.hold('take')
+  const taking = t.takeOver()
+  await settle()
+  assert.equal(server.lease.holder, 'human', 'the server granted it')
+  t.hidePane()
+  held.deliver()
+  await taking
+  await settle()
+  assert.equal(server.lease.holder, 'agent', 'the late grant was handed back')
+  assert.equal(server.releases().length, 1)
+  assert.equal(registered.length, shown, 'the pane was not reopened')
+  assert.equal(t.$ui.get().expanded, false)
+  assert.equal(t.$control.get().pending, null)
+})
+
+test('R1-03: Disconnect during Take over hands the late grant back', async () => {
+  const server = fakeRemoteCua()
+  const { t } = await remoteSetup(server)
+  const held = server.hold('take')
+  const taking = t.takeOver()
+  await settle()
+  t.userDisconnect()
+  held.deliver()
+  await taking
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+  assert.equal(t.$ui.get().expanded, false)
+})
+
+test('R1-03: switching bots during Take over hands back on the old bot\'s gateway', async () => {
+  const server = fakeRemoteCua()
+  const { t, ctx, context } = await remoteSetup(server)
+  const held = server.hold('take')
+  const taking = t.takeOver()
+  await settle()
+  context.__host.state.profile.set('bob')
+  ctx.storage.get('perBotEndpoint')
+  t.syncControlTarget()
+  held.deliver()
+  await taking
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+  const release = server.releases()[0]
+  assert.equal(release.connectionId, 'conn-mini')
+  assert.equal(release.profile, 'ava')
+})
+
+const TWO_AVAS = [
+  { profile: 'ava', targetProfile: 'ava', connectionId: 'conn-a', mode: 'remote' },
+  { profile: 'ava', targetProfile: 'ava', connectionId: 'conn-b', mode: 'remote', primary: true }
+]
+
+test('R1-05: two gateways with the same bot name: the focused connection decides, never list order', async () => {
+  const server = fakeRemoteCua()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes: TWO_AVAS })
+  setup.context.__host.state.connectionId = atom('conn-b')
+  setup.t.syncControlTarget()
+  await settle()
+  await setup.t.takeOver()
+  assert.ok(server.calls.length > 0)
+  for (const call of server.calls) assert.equal(call.connectionId, 'conn-b')
+})
+
+test('R1-05: ambiguous owner fails closed: no requests, no Take over, a plain reason', async () => {
+  const server = fakeRemoteCua()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes: TWO_AVAS })
+  setup.t.syncControlTarget()
+  await settle()
+  await setup.t.takeOver()
+  assert.equal(server.calls.length, 0)
+  assert.match(setup.t.$control.get().ownerError, /More than one gateway has a bot named ava/)
+  assert.equal(setup.t.controlLocked(), true)
+  setup.t.$ui.set({ ...setup.t.$ui.get(), expanded: true })
+  assert.equal(setup.t.effectiveViewOnly(), true)
+})
+
+test('R1-05: a route inventory failure fails closed instead of an unpinned request', async () => {
+  const server = fakeRemoteCua()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes: [] })
+  setup.context.__host.profileRoutes = async () => {
+    throw new Error('registry unavailable')
+  }
+  await setup.t.resolveControlOwner()
+  await settle()
+  await setup.t.takeOver()
+  assert.equal(server.calls.length, 0)
+  assert.match(setup.t.$control.get().ownerError, /Couldn't list the gateways/)
+})
+
+test('R1-05: a tool call from another gateway with the same bot name does not wake the pane', async () => {
+  const server = fakeRemoteCua()
+  const { t, registered } = await remoteSetup(server)
+  assert.equal(t.handleToolStart(toolStart('computer_use', { connectionId: 'conn-unrelated' }), 5_000_000), false)
+  assert.equal(registered.length, 0)
+  assert.equal(t.handleToolStart(toolStart('computer_use', { connectionId: 'conn-mini' }), 5_000_000), true)
+})
+
+test('R1-05: the same bot name moving to another gateway hands the old lease back there', async () => {
+  const server = fakeRemoteCua()
+  const { t, context } = await heldByMe(server)
+  context.__host.profileRoutes = () => [{ profile: 'ava', targetProfile: 'ava', connectionId: 'conn-other', mode: 'remote' }]
+  await t.resolveControlOwner()
+  await settle()
+  const release = server.releases()[0]
+  assert.equal(release.connectionId, 'conn-mini', 'released on the gateway it was taken on')
+  assert.equal(t.$control.get().owner.connectionId, 'conn-other')
+  assert.equal(t.controlLocked(), true)
+})
+
+test('R1-06: an embedded viewer page for a bot-driven computer gets no focus and no keys', async () => {
+  const server = fakeRemoteCua()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes: AVA_ROUTE })
+  const ep = setup.t.normalizeEndpoint({ ...setup.ep, mode: 'iframe', iframeUrl: 'http://127.0.0.1:6080/vnc.html' })
+  setup.ctx.storage.set('endpoints', [ep])
+  setup.t.$settings.set({ ...setup.t.$settings.get(), endpoints: [ep] })
+  setup.t.syncControlTarget()
+  await settle()
+  const frame = setup.t.ensureIframeEl()
+  let blurred = 0
+  frame.blur = () => {
+    blurred += 1
+  }
+  setup.context.document.activeElement = frame
+  setup.t.$ui.set({ ...setup.t.$ui.get(), expanded: true })
+  setup.t.syncSurfacePointer()
+  assert.equal(frame.inert, true)
+  assert.equal(frame.getAttribute('inert'), '')
+  assert.equal(frame.getAttribute('tabindex'), '-1')
+  assert.equal(frame.style.pointerEvents, 'none')
+  assert.ok(blurred >= 1, 'focus inside the page is taken back')
+  const view = setup.t.controlView(setup.t.$control.get(), setup.t.control.viewerId)
+  assert.equal(view.canTakeOver, false)
+  await setup.t.takeOver()
+  assert.equal(server.takes().length, 0)
+})
+
+test('R1-06: a probe that falls back to an embedded page is fenced too', async () => {
+  const server = fakeRemoteCua()
+  const setup = await remoteSetup(server)
+  // The live engine endpoint switched to iframe (probe fallback) while settings still say websocket.
+  setup.t.engine.endpoint = setup.t.normalizeEndpoint({ ...setup.ep, mode: 'iframe', iframeUrl: 'http://127.0.0.1:6080/vnc.html' })
+  setup.t.syncControlTarget()
+  const frame = setup.t.ensureIframeEl()
+  setup.t.syncSurfacePointer()
+  assert.equal(frame.inert, true)
+  assert.equal(setup.t.controlView(setup.t.$control.get(), setup.t.control.viewerId).canTakeOver, false)
+})
+
+test('R1-06: an ordinary (not bot-driven) embedded page keeps its input', () => {
+  const setup = boundSetup({ remoteCua: false })
+  const frame = setup.t.ensureIframeEl()
+  setup.t.$ui.set({ ...setup.t.$ui.get(), expanded: true })
+  setup.t.syncSurfacePointer()
+  assert.notEqual(frame.inert, true)
+  assert.equal(frame.style.pointerEvents, 'auto')
 })
