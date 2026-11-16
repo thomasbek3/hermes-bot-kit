@@ -28,8 +28,11 @@ Lease file: `<profile home>/remote-cua/lease.json`, written atomically (tmp + re
 ```
 
 No file = `{"holder": "agent", "viewer": null, "since": 0, "epoch": 0}`. `epoch` goes up by one on every
-change. `viewer` is any id the pane picks (1-128 of `A-Z a-z 0-9 . _ : -`), stable for one pane
-instance and kept across reloads so it can hand back what it took.
+change. `viewer` is any id the pane picks (1-128 of `A-Z a-z 0-9 . _ : -`). The pane mints a **new**
+viewer id on every load (ids are never kept across reloads), and after a `take` or `release` that
+timed out it switches to another fresh id. So a late `release` that still names the old id gets
+409 `not_holder` and cannot revoke a newer grant. A human lease left from before a reload is cleared
+with **Hand back (force)** (`release` with `"force": true`).
 
 ## Endpoints
 
@@ -65,7 +68,8 @@ when you took over has its result discarded.
 | 400 | `{"ok": false, "error": "bad_viewer", …}` (no viewer and no `"force": true`) |
 
 `{"force": true}` (viewer optional) clears a lease whatever viewer holds it: the pane's **Hand back
-(force)** after a reload.
+(force)** after a reload, since the reloaded pane has a new viewer id and its plain `release` would get
+`not_holder`.
 
 ### `GET /api/plugins/remote-cua/status[?fresh=1]`
 
