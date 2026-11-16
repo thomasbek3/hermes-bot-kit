@@ -54,6 +54,14 @@ function PreviewLink({ href, children }: { href: string; children?: any }) {
 /** Like the real renderer's `a` component element: the raw href as a prop
  *  (a `decorateText` hook sees it, safe or not). */
 function link(key: number, href: string, label: any) {
+  // Streamdown's sanitizer (rehype-harden) runs before any component or the
+  // decorate hook: a link that is not http(s), mailto, tel or relative draws
+  // as "<label> [blocked]" with no href at all.
+  const raw = href.trim()
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(raw)?.[1]?.toLowerCase()
+  if (scheme && !['http', 'https', 'mailto', 'tel'].includes(scheme)) {
+    return React.createElement('span', { key, title: 'Blocked URL', className: 'text-gray-500' }, label, ' [blocked]')
+  }
   return React.createElement(PreviewLink, { key, href }, label)
 }
 function inline(text: string): any[] {

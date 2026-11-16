@@ -110,11 +110,22 @@ test('Slack: the app link only with a known team id; otherwise the https permali
   assert.deepEqual(slackOpenTarget(SLACK, { teamId: 'T0EXAMPLE1' }), { kind: 'web', url: SLACK }, 'an opener without app schemes')
   assert.deepEqual(slackOpenTarget(SLACK, { teamId: 'T0EXAMPLE1', appScheme: true }), {
     kind: 'app',
-    url: 'slack://channel?team=T0EXAMPLE1&id=C0123ABCD&message=1762560000.123456'
+    url: 'slack://channel?team=T0EXAMPLE1&id=C0123ABCD&message=1762560000.123456',
+    fallback: SLACK
   })
   assert.deepEqual(slackOpenTarget(SLACK, { teamId: 'bogus', appScheme: true }), { kind: 'web', url: SLACK }, 'a malformed team id is ignored')
-  assert.deepEqual(slackOpenTarget('slack://channel?team=T0EXAMPLE1&id=C0123ABCD'), { kind: 'web', url: 'https://app.slack.com/client/T0EXAMPLE1/C0123ABCD' })
-  assert.deepEqual(slackOpenTarget('slack://open?team=T0EXAMPLE1'), { kind: 'web', url: 'https://app.slack.com/client/T0EXAMPLE1' })
+  // A slack:// link is tried as itself (the exact message), then the channel page.
+  assert.deepEqual(slackOpenTarget('slack://channel?team=T0EXAMPLE1&id=C0123ABCD&message=1762560000.123456'), {
+    kind: 'app',
+    url: 'slack://channel?team=T0EXAMPLE1&id=C0123ABCD&message=1762560000.123456',
+    fallback: 'https://app.slack.com/client/T0EXAMPLE1/C0123ABCD'
+  })
+  assert.deepEqual(slackOpenTarget('slack://channel?team=T0EXAMPLE1&id=C0123ABCD&message=bad'), {
+    kind: 'app',
+    url: 'slack://channel?team=T0EXAMPLE1&id=C0123ABCD',
+    fallback: 'https://app.slack.com/client/T0EXAMPLE1/C0123ABCD'
+  }, 'a malformed message ts is dropped')
+  assert.deepEqual(slackOpenTarget('slack://open?team=T0EXAMPLE1'), { kind: 'app', url: 'slack://open?team=T0EXAMPLE1', fallback: 'https://app.slack.com/client/T0EXAMPLE1' })
   assert.equal(slackOpenTarget('slack://channel?id=C0123ABCD'), null, 'no team: not opened')
   assert.equal(slackOpenTarget('slack://file?team=T0EXAMPLE1&id=F1'), null)
   assert.equal(sourceOpenUrl(SLACK_REPLY), SLACK_REPLY, 'a thread reply opens its own permalink')

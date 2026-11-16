@@ -8,7 +8,9 @@
   recognised by exact host or subdomain (lookalikes such as `slack.com.evil.io` are not); any other public
   site gets a neutral globe, never a fetched favicon. A bare URL gets a short label ("Slack message", "Gmail",
   "GitHub PR #12"). A click opens it through the plugin SDK's `openExternal`; a Slack permalink opens on
-  slack.com, which hands off to the Slack app at that message (no team id is ever guessed). Unsafe links,
+  slack.com, which hands off to the Slack app at that message (no team id is ever guessed). A `slack://channel?team=…&id=…&message=…`
+  app link is carried past the renderer's link sanitizer and tried as itself first (the exact message);
+  when the host refuses app schemes, as Hermes does today, it opens that channel on app.slack.com. Unsafe links,
   `mailto:`, private hosts and code stay as before. Logos are Simple Icons (CC0, bundled); dark marks such as
   GitHub and X switch to the light text colour in dark mode. A bare URL still typing waits until it ends, so
   its chip never changes mid-stream. The agent-cards skill gains "Link your sources": end a line about a

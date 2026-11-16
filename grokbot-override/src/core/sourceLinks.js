@@ -113,62 +113,140 @@ export function parseSlackPermalink(value) {
   }
 }
 
-/** What a click on a Slack link opens.
+const TEAM_ID = /^T[A-Z0-9]{4,}$/
+const CHANNEL_ID = /^[CDG][A-Z0-9]{4,}$/
+const MESSAGE_TS = /^\d{10}\.\d{6}$/
+
+/** What a click on a Slack link opens: `{ kind, url, fallback? }`.
  *
  *  Slack's documented desktop deep link to a message is
- *  `slack://channel?team=<team id>&id=<channel id>&message=<ts>` — it needs the
- *  workspace's team id, which a permalink does not carry. We never guess one:
- *  without `teamId` (and an opener that admits the `slack:` scheme) the https
- *  permalink is opened, and slack.com hands it to the desktop app at that
- *  message. Hermes's open bridge admits http(s)/mailto only, so the screen
- *  always takes the https route today; the app branch is here for an opener
- *  that can launch app schemes.
+ *  `slack://channel?team=<team id>&id=<channel id>&message=<ts>`. It needs the
+ *  workspace's team id, which an https permalink does not carry, and we never
+ *  guess one: an https permalink opens as itself, and slack.com hands it to
+ *  the desktop app at that message. (With a known `teamId` and an opener that
+ *  admits app schemes, the deep link is built; nothing passes one today.)
  *
- *  A `slack://channel?team=T&id=C` / `slack://open?team=T` link becomes the
- *  equivalent https `app.slack.com/client/…` page (which hands off the same
- *  way); any other `slack://` link is not opened. */
+ *  A `slack://channel?team=T&id=C[&message=ts]` / `slack://open?team=T` link
+ *  is tried as itself first (the exact message, when the host opener admits
+ *  the scheme). Hermes's opener admits http(s)/mailto only and refuses it, so
+ *  the `fallback` opens: `app.slack.com/client/T/C`, which hands off to the
+ *  app at the CHANNEL. No documented https URL addresses a message from a team
+ *  id, channel id and ts alone (an https permalink needs the workspace's own
+ *  domain), so the fallback cannot keep the message. Any other `slack://`
+ *  link is not opened. */
 export function slackOpenTarget(value, { teamId = '', appScheme = false } = {}) {
   const url = value instanceof URL ? value : parseSourceUrl(value)
   if (!url) return null
   if (url.protocol === 'slack:') {
     const team = url.searchParams.get('team') || ''
     const id = url.searchParams.get('id') || ''
-    if (!/^T[A-Z0-9]{4,}$/.test(team)) return null
+    const message = url.searchParams.get('message') || ''
+    if (!TEAM_ID.test(team)) return null
     const kind = url.hostname || url.pathname.replace(/^\/+/, '')
-    if (kind === 'channel' && /^[CDG][A-Z0-9]{4,}$/.test(id)) return { kind: 'web', url: `https://app.slack.com/client/${team}/${id}` }
-    if (kind === 'open') return { kind: 'web', url: `https://app.slack.com/client/${team}` }
+    if (kind === 'channel' && CHANNEL_ID.test(id)) {
+      const params = new URLSearchParams({ team, id })
+      if (MESSAGE_TS.test(message)) params.set('message', message)
+      return { kind: 'app', url: `slack://channel?${params}`, fallback: `https://app.slack.com/client/${team}/${id}` }
+    }
+    if (kind === 'open') return { kind: 'app', url: `slack://open?${new URLSearchParams({ team })}`, fallback: `https://app.slack.com/client/${team}` }
     return null
   }
   const permalink = parseSlackPermalink(url)
-  if (permalink && appScheme && /^T[A-Z0-9]{4,}$/.test(String(teamId))) {
+  if (permalink && appScheme && TEAM_ID.test(String(teamId))) {
     const params = new URLSearchParams({ team: teamId, id: permalink.channel, message: permalink.ts })
-    return { kind: 'app', url: `slack://channel?${params}` }
+    return { kind: 'app', url: `slack://channel?${params}`, fallback: url.href }
   }
   return { kind: 'web', url: url.href }
+}
+
+/** The renderer's sanitizer drops every link that is not http(s), mailto or
+ *  tel before the decorate hook sees it (`slack://…` draws as "[blocked]").
+ *  So a valid Slack app link is carried through it as an https stand-in: the
+ *  channel page with the canonical deep link in its fragment. sourceLinkFor
+ *  turns the stand-in back into the app link; an older shell without the
+ *  hook just shows a link to the channel page. */
+const SLACK_APP_MARK = 'gbo-slack-app='
+
+/** Inline-code spans in a markdown block: [start, end) ranges. A run of n
+ *  backticks opens a span that the next run of exactly n closes, within the
+ *  paragraph; an unmatched run is literal text. */
+export function inlineCodeRanges(text) {
+  const ranges = []
+  const source = String(text ?? '')
+  const run = /`+/g
+  let match
+  while ((match = run.exec(source))) {
+    const len = match[0].length
+    const from = match.index + len
+    const paragraphEnd = source.indexOf('\n\n', from)
+    const limit = paragraphEnd < 0 ? source.length : paragraphEnd
+    const close = new RegExp(String.raw`(?<!\`)\`{${len}}(?!\`)`, 'g')
+    close.lastIndex = from
+    const end = close.exec(source)
+    if (end && end.index < limit) {
+      ranges.push([match.index, end.index + len])
+      run.lastIndex = end.index + len
+    }
+  }
+  return ranges
+}
+
+/** `[label](slack://…)` → `[label](https://app.slack.com/client/…#gbo-slack-app=…)`
+ *  for valid Slack app links outside inline code; everything else as is. */
+export function protectSlackAppLinks(text) {
+  const source = String(text ?? '')
+  if (!source.includes('](slack:')) return source
+  const code = inlineCodeRanges(source)
+  return source.replace(/\]\((slack:[^)\s]+)\)/gi, (whole, href, at) => {
+    if (code.some(([a, b]) => at >= a && at < b)) return whole
+    const target = slackOpenTarget(href)
+    if (!target?.fallback) return whole
+    return `](${target.fallback}#${SLACK_APP_MARK}${encodeURIComponent(target.url)})`
+  })
+}
+
+/** The Slack app link a stand-in carries, or null. */
+function slackAppFromStandIn(url) {
+  if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'app.slack.com') return null
+  if (!url.hash.startsWith(`#${SLACK_APP_MARK}`)) return null
+  let decoded = ''
+  try {
+    decoded = decodeURIComponent(url.hash.slice(SLACK_APP_MARK.length + 1))
+  } catch {
+    return null
+  }
+  return /^slack:/i.test(decoded) ? decoded : null
 }
 
 // ---- safety, opening, labels ----
 
 /** A link this screen draws as a source chip and opens on a click, or null
  *  (the renderer's own element stays). Only https/http to a public host with
- *  no credentials, or a `slack://` link that maps to a Slack page. Never
+ *  no credentials, or a valid Slack app link (or its stand-in). Never
  *  `javascript:`, `data:`, `file:` or any other scheme; `mailto:`/`tel:` are
- *  left to the renderer unchanged. */
+ *  left to the renderer unchanged. `opens` is what a click tries, in order. */
 export function sourceLinkFor(href) {
   const url = parseSourceUrl(href)
   if (!url) return null
-  if (url.protocol === 'slack:') {
-    const target = slackOpenTarget(url)
-    return target ? { service: SERVICE_BY_ID.get('slack'), href: url.href, openUrl: target.url } : null
+  const app = url.protocol === 'slack:' ? url.href : slackAppFromStandIn(url)
+  if (app) {
+    const target = slackOpenTarget(app)
+    if (!target?.fallback) return null
+    return { service: SERVICE_BY_ID.get('slack'), href: target.url, opens: [target.url, target.fallback], openUrl: target.url }
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
   if (url.username || url.password || isPrivateHost(url.hostname)) return null
   const service = serviceFor(url) || WEB_SERVICE
   const openUrl = service.id === 'slack' ? slackOpenTarget(url)?.url || url.href : url.href
-  return { service, href: url.href, openUrl }
+  return { service, href: url.href, opens: [openUrl], openUrl }
 }
 
-/** The URL a click opens for `href`, or null when it must not open. */
+/** What a click on `href` tries to open, in order ([] when it must not open). */
+export function sourceOpenUrls(href) {
+  return sourceLinkFor(href)?.opens ?? []
+}
+
+/** The first URL a click opens for `href`, or null when it must not open. */
 export function sourceOpenUrl(href) {
   return sourceLinkFor(href)?.openUrl ?? null
 }

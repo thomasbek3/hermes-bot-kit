@@ -14,22 +14,25 @@ import { app } from './app'
 import { BRAND_MARKS } from './brandMarks'
 import { openExternalLink } from './slackActions'
 
-/** Open a source link outside the app: the plugin SDK's `ctx.os.openExternal`
- *  when the host gives one, else the desktop bridge / window.open. */
-export function openSource(url: string) {
+/** Open a source link outside the app. `urls` are tried in order through the
+ *  plugin SDK's `ctx.os.openExternal` (it answers false when the host refuses,
+ *  e.g. an app scheme such as `slack://`); when none is taken, the first web
+ *  URL goes to the desktop bridge / window.open. Callers pass only targets
+ *  from core/sourceLinks.js (validated). */
+export async function openSource(urls: string | string[]) {
+  const list = (Array.isArray(urls) ? urls : [urls]).filter(Boolean)
   const open = app.ctx?.os?.openExternal
   if (typeof open === 'function') {
-    try {
-      void Promise.resolve(open.call(app.ctx.os, url)).then(
-        (ok: unknown) => (ok === false ? openExternalLink(url) : undefined),
-        () => openExternalLink(url)
-      )
-      return
-    } catch {
-      /* fall through */
+    for (const url of list) {
+      try {
+        if ((await open.call(app.ctx.os, url)) !== false) return
+      } catch {
+        /* the next one */
+      }
     }
   }
-  openExternalLink(url)
+  const web = list.find(url => /^https?:\/\//i.test(url))
+  if (web) openExternalLink(web)
 }
 
 function GlobeMark() {
@@ -82,13 +85,13 @@ export function SourceLink({ href, children }: { href: string; children?: React.
       onClick={event => {
         event.preventDefault()
         event.stopPropagation()
-        openSource(link.openUrl)
+        void openSource(link.opens)
       }}
       onAuxClick={event => {
         if (event.button !== 1) return
         event.preventDefault()
         event.stopPropagation()
-        openSource(link.openUrl)
+        void openSource(link.opens)
       }}
     >
       <SourceIcon id={link.service.id} />

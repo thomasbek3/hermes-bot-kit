@@ -54531,9 +54531,6 @@ function SheetGrid({ data }) {
   ] });
 }
 
-// src/ui/SourceLink.tsx
-import * as React11 from "react";
-
 // src/core/sourceLinks.js
 var SOURCE_SERVICES = Object.freeze([
   { id: "slack", name: "Slack", domains: ["slack.com"] },
@@ -54620,37 +54617,90 @@ function parseSlackPermalink(value) {
     threadTs: thread && /^\d{10}\.\d{6}$/.test(thread) ? thread : null
   };
 }
+var TEAM_ID = /^T[A-Z0-9]{4,}$/;
+var CHANNEL_ID = /^[CDG][A-Z0-9]{4,}$/;
+var MESSAGE_TS = /^\d{10}\.\d{6}$/;
 function slackOpenTarget(value, { teamId = "", appScheme = false } = {}) {
   const url = value instanceof URL ? value : parseSourceUrl(value);
   if (!url) return null;
   if (url.protocol === "slack:") {
     const team = url.searchParams.get("team") || "";
     const id = url.searchParams.get("id") || "";
-    if (!/^T[A-Z0-9]{4,}$/.test(team)) return null;
+    const message = url.searchParams.get("message") || "";
+    if (!TEAM_ID.test(team)) return null;
     const kind = url.hostname || url.pathname.replace(/^\/+/, "");
-    if (kind === "channel" && /^[CDG][A-Z0-9]{4,}$/.test(id)) return { kind: "web", url: `https://app.slack.com/client/${team}/${id}` };
-    if (kind === "open") return { kind: "web", url: `https://app.slack.com/client/${team}` };
+    if (kind === "channel" && CHANNEL_ID.test(id)) {
+      const params = new URLSearchParams({ team, id });
+      if (MESSAGE_TS.test(message)) params.set("message", message);
+      return { kind: "app", url: `slack://channel?${params}`, fallback: `https://app.slack.com/client/${team}/${id}` };
+    }
+    if (kind === "open") return { kind: "app", url: `slack://open?${new URLSearchParams({ team })}`, fallback: `https://app.slack.com/client/${team}` };
     return null;
   }
   const permalink = parseSlackPermalink(url);
-  if (permalink && appScheme && /^T[A-Z0-9]{4,}$/.test(String(teamId))) {
+  if (permalink && appScheme && TEAM_ID.test(String(teamId))) {
     const params = new URLSearchParams({ team: teamId, id: permalink.channel, message: permalink.ts });
-    return { kind: "app", url: `slack://channel?${params}` };
+    return { kind: "app", url: `slack://channel?${params}`, fallback: url.href };
   }
   return { kind: "web", url: url.href };
+}
+var SLACK_APP_MARK = "gbo-slack-app=";
+function inlineCodeRanges(text3) {
+  const ranges = [];
+  const source = String(text3 ?? "");
+  const run = /`+/g;
+  let match;
+  while (match = run.exec(source)) {
+    const len = match[0].length;
+    const from = match.index + len;
+    const paragraphEnd = source.indexOf("\n\n", from);
+    const limit = paragraphEnd < 0 ? source.length : paragraphEnd;
+    const close = new RegExp(String.raw`(?<!\`)\`{${len}}(?!\`)`, "g");
+    close.lastIndex = from;
+    const end = close.exec(source);
+    if (end && end.index < limit) {
+      ranges.push([match.index, end.index + len]);
+      run.lastIndex = end.index + len;
+    }
+  }
+  return ranges;
+}
+function protectSlackAppLinks(text3) {
+  const source = String(text3 ?? "");
+  if (!source.includes("](slack:")) return source;
+  const code = inlineCodeRanges(source);
+  return source.replace(/\]\((slack:[^)\s]+)\)/gi, (whole, href, at) => {
+    if (code.some(([a2, b2]) => at >= a2 && at < b2)) return whole;
+    const target = slackOpenTarget(href);
+    if (!target?.fallback) return whole;
+    return `](${target.fallback}#${SLACK_APP_MARK}${encodeURIComponent(target.url)})`;
+  });
+}
+function slackAppFromStandIn(url) {
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "app.slack.com") return null;
+  if (!url.hash.startsWith(`#${SLACK_APP_MARK}`)) return null;
+  let decoded = "";
+  try {
+    decoded = decodeURIComponent(url.hash.slice(SLACK_APP_MARK.length + 1));
+  } catch {
+    return null;
+  }
+  return /^slack:/i.test(decoded) ? decoded : null;
 }
 function sourceLinkFor(href) {
   const url = parseSourceUrl(href);
   if (!url) return null;
-  if (url.protocol === "slack:") {
-    const target = slackOpenTarget(url);
-    return target ? { service: SERVICE_BY_ID.get("slack"), href: url.href, openUrl: target.url } : null;
+  const app2 = url.protocol === "slack:" ? url.href : slackAppFromStandIn(url);
+  if (app2) {
+    const target = slackOpenTarget(app2);
+    if (!target?.fallback) return null;
+    return { service: SERVICE_BY_ID.get("slack"), href: target.url, opens: [target.url, target.fallback], openUrl: target.url };
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
   if (url.username || url.password || isPrivateHost(url.hostname)) return null;
   const service = serviceFor(url) || WEB_SERVICE;
   const openUrl = service.id === "slack" ? slackOpenTarget(url)?.url || url.href : url.href;
-  return { service, href: url.href, openUrl };
+  return { service, href: url.href, opens: [openUrl], openUrl };
 }
 var clip2 = (text3, max) => text3.length <= max ? text3 : `${text3.slice(0, max - 1)}…`;
 function bareLinkLabel(href) {
@@ -54716,6 +54766,9 @@ function needsLightOnDark(hex) {
   const bg = luminance("2a2a2a");
   return (luminance(hex) + 0.05) / (bg + 0.05) < 3;
 }
+
+// src/ui/SourceLink.tsx
+import * as React11 from "react";
 
 // src/ui/brandMarks.ts
 var BRAND_MARKS = {
@@ -55402,19 +55455,19 @@ function enableSlackProvisioning(bot) {
 
 // src/ui/SourceLink.tsx
 import { jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
-function openSource(url) {
+async function openSource(urls) {
+  const list = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
   const open = app.ctx?.os?.openExternal;
   if (typeof open === "function") {
-    try {
-      void Promise.resolve(open.call(app.ctx.os, url)).then(
-        (ok) => ok === false ? openExternalLink(url) : void 0,
-        () => openExternalLink(url)
-      );
-      return;
-    } catch {
+    for (const url of list) {
+      try {
+        if (await open.call(app.ctx.os, url) !== false) return;
+      } catch {
+      }
     }
   }
-  openExternalLink(url);
+  const web = list.find((url) => /^https?:\/\//i.test(url));
+  if (web) openExternalLink(web);
 }
 function GlobeMark() {
   return /* @__PURE__ */ jsxs12("svg", { viewBox: "0 0 24 24", width: "14", height: "14", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", focusable: "false", children: [
@@ -55447,13 +55500,13 @@ function SourceLink({ href, children }) {
       onClick: (event) => {
         event.preventDefault();
         event.stopPropagation();
-        openSource(link.openUrl);
+        void openSource(link.opens);
       },
       onAuxClick: (event) => {
         if (event.button !== 1) return;
         event.preventDefault();
         event.stopPropagation();
-        openSource(link.openUrl);
+        void openSource(link.opens);
       },
       children: [
         /* @__PURE__ */ jsx13(SourceIcon, { id: link.service.id }),
@@ -55654,7 +55707,7 @@ function BotText({ bot, text: text3 }) {
   const parts = React12.useMemo(() => clean ? splitFences(clean) : [], [clean]);
   return /* @__PURE__ */ jsxs13(Fragment8, { children: [
     parts.map(
-      (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx14(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx14(Markdown, { text: part.text, decorateText: decorateSourceLinks }, index)
+      (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx14(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx14(Markdown, { text: protectSlackAppLinks(part.text), decorateText: decorateSourceLinks }, index)
     ),
     /* @__PURE__ */ jsx14(MediaStrip, { bot, media })
   ] });
