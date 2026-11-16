@@ -103,6 +103,13 @@ go back to the override's tab or roster.
   still streaming shows a quiet placeholder line. Some endings are ambiguous until the next character (a line
   with a `|` that may become a table, a final `!`, a final literal `*`), so they appear with the next chunk or
   when the reply completes (PARITY C7, known limits).
+- The composer keeps **what you typed per bot**: switch to another bot and back and the draft is still there
+  (text only, for this app session; a send clears it). A message Hermes refuses comes back into that bot's
+  composer, below anything you typed since.
+- While Hermes is in the background, the open chat sends a **native notification** when a reply finishes, an
+  approval is waiting or the bot needs your input (never for a silent reply, and the text is a generic line,
+  never the reply or a secret prompt). Clicking it opens that bot. Hermes's *Plugin notifications* setting
+  turns them off.
 - Bot Chats opened here are **desktop sessions** (as in stock Desktop), so the bot knows markdown, files and
   cards render. A chat whose session started before you installed or updated the override keeps its old mode
   until that session restarts.
@@ -110,7 +117,9 @@ go back to the override's tab or roster.
   scheduled job for this bot**, **open this bot's computer**.
 - **Grokbot Override: self-check (read-only)**: reads the roster, one bot's Bot Chat registry and history
   tail, and its cron list, then writes counts (never message text) to the plugin's data folder as
-  `self-check.json`.
+  `self-check.json`. Its `contract` block probes every private Hermes detail the override relies on
+  (`src/core/contract.js`); if a required one disappears after a Hermes update, the override shows one quiet
+  notice per app session, and any window-chrome rule whose anchor is gone is simply not applied.
 
 A bot that has never been opened has no Bot Chat yet. Clicking it creates one exactly as Bot Mode does
 (registry first, adopt the existing chat on a conflict, so the two can never make two); a chat tab that

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { createChatController, submitDelivery } from '../src/core/session.js'
-import { draftOwnerKey, restoreAfterFailure } from '../src/core/drafts.js'
+import { draftOwnerKey, isRecoverableRefusal } from '../src/core/drafts.js'
 import { createBotRequester } from '../src/core/routing.js'
 import { BOT, flush, gateway } from './harness.mjs'
 
@@ -102,8 +102,7 @@ test('r3 #1 a 4090 SESSION_OWNER_UNCONFIRMED is "delivery unknown": no composer 
   await chat.open()
   const result = await chat.sendDraft('queued maybe')
   assert.equal(result.delivery, 'unknown')
-  const owner = draftOwnerKey(BOT)
-  assert.equal(restoreAfterFailure({ result, sentOwner: owner, currentOwner: owner, currentText: '', currentFiles: [] }), false, 'never put back in the composer')
+  assert.equal(isRecoverableRefusal(result), false, 'never put back in the composer')
   const retried = await chat.retry(result.clientId)
   assert.equal(retried.ok, false)
   assert.equal(count(gw, 'prompt.submit'), 2, 'the id-carrying attempt (refused by contract) and one identityless send')
@@ -240,11 +239,11 @@ function stagingGateway({ refuse }) {
   return gw
 }
 
-/** The composer's own path: restore when restoreAfterFailure says so, then
- *  hand the bubble back to the controller (Chat.tsx onRestored). */
+/** The composer's own path for a refused send in an empty composer: the
+ *  draft (text and files) comes back when isRecoverableRefusal says so, then
+ *  the bubble is handed back to the controller (Chat.tsx onRestored). */
 function composerRestore(chat, result) {
-  const owner = draftOwnerKey(BOT)
-  const restore = restoreAfterFailure({ result, sentOwner: owner, currentOwner: owner, currentText: '', currentFiles: [] })
+  const restore = isRecoverableRefusal(result)
   if (restore) chat.dropFailed(result.clientId)
   return restore
 }

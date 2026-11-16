@@ -70,3 +70,14 @@ export function readPluginStorage<T>(pluginId: string, key: string, fallback: T)
     return fallback
   }
 }
+
+/** The desktop bridge (`window.hermesDesktop`): a PRIVATE Hermes door with no
+ *  SDK equivalent, listed with its probe in core/contract.js. Null outside
+ *  the desktop app. */
+export function desktopBridge(): any {
+  try {
+    return (globalThis as any).window?.hermesDesktop ?? null
+  } catch {
+    return null
+  }
+}

@@ -43176,10 +43176,16 @@ async function readDraftFiles(list, { owner, isCurrent, read, maxBytes = MAX_ATT
   }
   return { files, notes, stale: false };
 }
-function restoreAfterFailure({ result, sentOwner, currentOwner, currentText, currentFiles }) {
-  if (!result || result.ok || result.delivery !== "not-sent") return false;
-  if (!sentOwner || sentOwner !== currentOwner) return false;
-  return !String(currentText || "").trim() && !(Array.isArray(currentFiles) && currentFiles.length);
+function isRecoverableRefusal(result) {
+  return Boolean(result && !result.ok && result.delivery === "not-sent");
+}
+function appendDraft(current, text3) {
+  const add2 = typeof text3 === "string" ? text3 : "";
+  const cur = typeof current === "string" ? current : "";
+  if (!add2.trim()) return cur;
+  return cur.trim() ? `${cur.replace(/\s+$/, "")}
+
+${add2}` : add2;
 }
 function failureNote(result, restored) {
   if (!result || result.ok) return "";
@@ -43189,6 +43195,63 @@ function failureNote(result, restored) {
   }
   return "Delivery unknown: it may already have reached the bot, so it will not be sent again from here. Check the chat, or open it in Hermes Bot Mode.";
 }
+var DRAFT_OWNERS_MAX = 20;
+function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
+  const map = /* @__PURE__ */ new Map();
+  const notes = /* @__PURE__ */ new Map();
+  const listeners = /* @__PURE__ */ new Map();
+  const api = {
+    get(owner) {
+      return owner && map.get(owner) || "";
+    },
+    set(owner, text3) {
+      if (!owner) return;
+      const value = typeof text3 === "string" ? text3 : "";
+      map.delete(owner);
+      if (!value.trim()) return;
+      map.set(owner, value);
+      while (map.size > maxOwners) map.delete(map.keys().next().value);
+    },
+    clear(owner) {
+      map.delete(owner);
+      notes.delete(owner);
+    },
+    size: () => map.size,
+    recover(owner, text3, note = "") {
+      if (!owner) return;
+      api.set(owner, appendDraft(api.get(owner), text3));
+      const live = listeners.get(owner);
+      if (live && live.size) {
+        for (const fn of [...live]) {
+          try {
+            fn(typeof text3 === "string" ? text3 : "", note);
+          } catch {
+          }
+        }
+      } else if (note) notes.set(owner, note);
+    },
+    /** The note of a recovery that happened while no composer of `owner`
+     *  was on screen; consumed. */
+    takeNote(owner) {
+      const note = notes.get(owner) || "";
+      notes.delete(owner);
+      return note;
+    },
+    /** A live composer of `owner`: `fn(text, note)` on each recovery. */
+    subscribe(owner, fn) {
+      if (!owner || typeof fn !== "function") return () => void 0;
+      let set = listeners.get(owner);
+      if (!set) listeners.set(owner, set = /* @__PURE__ */ new Set());
+      set.add(fn);
+      return () => {
+        set.delete(fn);
+        if (!set.size && listeners.get(owner) === set) listeners.delete(owner);
+      };
+    }
+  };
+  return api;
+}
+var draftTexts = createDraftTexts();
 
 // src/core/delivery.js
 function newSubmissionId() {
@@ -45755,37 +45818,45 @@ function hideStockCss(attrs = TAB_ATTRS) {
   return attrs.map((attr) => `[${attr}="${STOCK_PANE_ID}"]{display:none!important}`).join("\n");
 }
 var TOP_HEADER = "[data-tree-group][data-window-top] > [data-panel-header]";
-function hideTopStripCss() {
+var LEFT_CLUSTER = '[data-titlebar-cluster="left"]';
+var RIGHT_CLUSTER = '[data-titlebar-cluster="right"]';
+var ROSTER_ZONE = "[data-tree-group]:has([data-gbo-root].gbo-roster)";
+var SEAM = ":is(div:has(> [data-sash-overlap]):has([data-gbo-root])) > [data-sash-overlap].cursor-col-resize > span:first-child";
+var CHROME_ANCHORS = Object.freeze({
+  topHeader: TOP_HEADER,
+  titlebarCluster: "[data-titlebar-cluster]",
+  statusbar: 'footer[data-slot="statusbar"]',
+  rosterZone: "[data-tree-group]",
+  seam: "[data-sash-overlap]"
+});
+var always = () => true;
+function hideTopStripCss(has = always) {
+  if (!has(CHROME_ANCHORS.topHeader)) return "";
   return [
     `${TOP_HEADER} [data-zone-tabstrip],${TOP_HEADER} [data-panel-page-header]{display:none!important}`,
     `${TOP_HEADER}{height:var(--titlebar-height,34px)!important;background:transparent!important;-webkit-app-region:drag}`,
     `${TOP_HEADER} > [data-window-drag-handle]{flex:1 1 auto!important;width:auto!important}`
   ].join("\n");
 }
-var LEFT_CLUSTER = '[data-titlebar-cluster="left"]';
-var RIGHT_CLUSTER = '[data-titlebar-cluster="right"]';
-var ROSTER_ZONE = "[data-tree-group]:has([data-gbo-root].gbo-roster)";
-var SEAM = ":is(div:has(> [data-sash-overlap]):has([data-gbo-root])) > [data-sash-overlap].cursor-col-resize > span:first-child";
-function hideWindowChromeCss() {
+function hideWindowChromeCss(has = always) {
   return [
     // Titlebar icons: the left cluster beside the traffic lights (sidebar
     // toggle), the fixed right cluster and the pane-tools cluster Hermes
     // renders just before it. Nothing clickable stays in the top band but the
     // override's own buttons.
-    `${LEFT_CLUSTER},${RIGHT_CLUSTER},div:has(+ ${RIGHT_CLUSTER}):not([data-titlebar-cluster]){visibility:hidden!important;pointer-events:none!important}`,
+    has(CHROME_ANCHORS.titlebarCluster) ? `${LEFT_CLUSTER},${RIGHT_CLUSTER},div:has(+ ${RIGHT_CLUSTER}):not([data-titlebar-cluster]){visibility:hidden!important;pointer-events:none!important}` : "",
     // The bottom status bar.
-    `footer[data-slot="statusbar"]{display:none!important}`,
+    has(CHROME_ANCHORS.statusbar) ? `footer[data-slot="statusbar"]{display:none!important}` : "",
     // Native scrollbars in the roster's sidebar zone (the override draws its
     // own overlay thumb on hover).
-    `${ROSTER_ZONE} *{scrollbar-width:none!important}`,
+    has(CHROME_ANCHORS.rosterZone) ? `${ROSTER_ZONE} *{scrollbar-width:none!important}` : "",
     // The sidebar | workspace seam: one solid hairline.
-    `${SEAM}{opacity:1!important;background:#e4e4e4!important}`,
-    `.dark ${SEAM}{background:#222!important}`
-  ].join("\n");
+    has(CHROME_ANCHORS.seam) ? `${SEAM}{opacity:1!important;background:#e4e4e4!important}` : "",
+    has(CHROME_ANCHORS.seam) ? `.dark ${SEAM}{background:#222!important}` : ""
+  ].filter(Boolean).join("\n");
 }
-function overrideChromeCss() {
-  return `${hideTopStripCss()}
-${hideWindowChromeCss()}`;
+function overrideChromeCss(has = always) {
+  return [hideTopStripCss(has), hideWindowChromeCss(has)].filter(Boolean).join("\n");
 }
 function createStockController({ document: document2, host: host3, now = () => Date.now() }) {
   let on = false;
@@ -45815,9 +45886,17 @@ function createStockController({ document: document2, host: host3, now = () => D
     } catch {
     }
   };
+  const has = (anchor) => {
+    if (typeof document2?.querySelector !== "function") return true;
+    try {
+      return Boolean(document2.querySelector(anchor));
+    } catch {
+      return false;
+    }
+  };
   const writeStyle = (css, strip) => {
     writeStyleAt(HIDE_STYLE_ID, css);
-    if (strip) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss());
+    if (strip) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss(has));
     else removeStyleAt(HIDE_STRIP_STYLE_ID);
   };
   const removeStyle2 = () => {
@@ -46532,6 +46611,13 @@ function readPluginStorage(pluginId, key, fallback) {
     return JSON.parse(raw);
   } catch {
     return fallback;
+  }
+}
+function desktopBridge() {
+  try {
+    return globalThis.window?.hermesDesktop ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -47645,6 +47731,144 @@ function newBotChat(host3, bot, ownerKey) {
   return true;
 }
 
+// src/core/nativeNotify.js
+var INPUT_BODY = {
+  clarify: "Has a question for you.",
+  connection: "Needs a connection approved."
+};
+var INPUT_DEFAULT = "Needs your input.";
+var BODIES = Object.freeze({ done: "Replied.", approval: "Needs your approval.", input: INPUT_DEFAULT });
+var SEEN_CAP = 500;
+function createSeen() {
+  return { ids: /* @__PURE__ */ new Set(), base: /* @__PURE__ */ new Map(), recent: /* @__PURE__ */ new Map() };
+}
+var CROSS_SLOT_MS = 15e3;
+function remember(seen, id) {
+  if (seen.ids.has(id)) return false;
+  seen.ids.add(id);
+  if (seen.ids.size > SEEN_CAP) seen.ids.delete(seen.ids.values().next().value);
+  return true;
+}
+var chatOf = (state) => state && state.chat && typeof state.chat === "object" ? state.chat : null;
+var itemsOf = (state) => Array.isArray(chatOf(state)?.items) ? chatOf(state).items : [];
+function chatIdentity(state, keyOf2 = (bot) => String(bot?.name || "")) {
+  if (!state?.bot) return "";
+  return `${keyOf2(state.bot)}\0${String(state.runtimeId || "")}`;
+}
+function finishedReply(items) {
+  let lastUser = -1;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (items[i]?.kind === "user") {
+      lastUser = i;
+      break;
+    }
+  }
+  const turn = items.slice(lastUser + 1);
+  if (turn.some((item) => item?.kind === "error" || item?.kind === "turn-error" || item?.failedTurn)) return null;
+  for (let i = turn.length - 1; i >= 0; i -= 1) {
+    const item = turn[i];
+    if (item?.kind !== "assistant") continue;
+    if (item.streaming) return null;
+    const text3 = String(item.text || "").trim();
+    if (!text3 || isSilenceReply(text3)) return null;
+    return item;
+  }
+  return null;
+}
+var isLiveId = (id) => String(id || "").startsWith("live:");
+function sameReply(base4, reply) {
+  if (!base4 || !reply) return false;
+  const id = String(reply.id || "");
+  if (base4.id === id) return true;
+  return isLiveId(base4.id) && !isLiveId(id) && base4.text === String(reply.text || "").trim();
+}
+function turnReply(items, startIds) {
+  const turn = items.filter((item) => !startIds.has(String(item?.id || "")));
+  if (turn.some((item) => item?.kind === "error" || item?.kind === "turn-error" || item?.failedTurn)) return null;
+  for (let i = turn.length - 1; i >= 0; i -= 1) {
+    const item = turn[i];
+    if (item?.kind !== "assistant") continue;
+    if (item.streaming) return null;
+    const text3 = String(item.text || "").trim();
+    if (!text3 || isSilenceReply(text3)) return null;
+    return item;
+  }
+  return null;
+}
+var pendingApprovals = (items) => items.filter((item) => item?.kind === "approval" && item.status === "pending");
+function inputKey(waiting) {
+  if (!waiting || typeof waiting !== "object") return "";
+  return `input:${String(waiting.kind || "")}:${String(waiting.id || waiting.opId || "")}`;
+}
+function markSeen(state, seen) {
+  const items = itemsOf(state);
+  for (const item of pendingApprovals(items)) remember(seen, `approval:${item.id}`);
+  const reply = finishedReply(items);
+  if (reply) remember(seen, `done:${reply.id}`);
+  const key = inputKey(chatOf(state)?.waiting);
+  if (key) remember(seen, key);
+}
+function nativeNotifications(prev, next, { focused, seen, name = "", keyOf: keyOf2, slot = "main", now = Date.now() } = {}) {
+  if (!seen || !next?.bot || !chatOf(next)) return [];
+  const same = prev && chatIdentity(prev, keyOf2) === chatIdentity(next, keyOf2);
+  if (!same) {
+    markSeen(next, seen);
+    return [];
+  }
+  const title = String(name || next.bot?.name || "Bot").trim() || "Bot";
+  const out = [];
+  const items = itemsOf(next);
+  const identity = chatIdentity(next, keyOf2);
+  const baseKey = `${slot}\0${identity}`;
+  if (!chatOf(prev)?.busy && chatOf(next).busy) {
+    const before = finishedReply(itemsOf(prev));
+    seen.base.set(baseKey, {
+      id: before ? String(before.id || "") : "",
+      text: before ? String(before.text || "").trim() : "",
+      startIds: new Set(itemsOf(prev).map((item) => String(item?.id || "")))
+    });
+    if (seen.base.size > 50) seen.base.delete(seen.base.keys().next().value);
+  }
+  if (focused) {
+    if (chatOf(prev)?.busy && !chatOf(next).busy) {
+      const base4 = seen.base.get(baseKey);
+      seen.base.delete(baseKey);
+      const reply = base4 ? turnReply(items, base4.startIds) : finishedReply(items);
+      if (reply) remember(seen, `done:${reply.id}`);
+    }
+    markSeen(next, seen);
+    return [];
+  }
+  if (chatOf(prev)?.busy && !chatOf(next).busy) {
+    const base4 = seen.base.get(baseKey);
+    seen.base.delete(baseKey);
+    const reply = base4 ? turnReply(items, base4.startIds) : finishedReply(items);
+    const fresh = reply && !sameReply(base4?.id ? base4 : null, reply);
+    if (fresh && remember(seen, `done:${reply.id}`)) {
+      const sameKey = `${identity}\0${String(reply.text || "").trim()}`;
+      const last = seen.recent.get(sameKey);
+      if (!(last && last.slot !== slot && now - last.at < CROSS_SLOT_MS)) {
+        out.push({ id: `done:${reply.id}`, kind: "done", title, body: BODIES.done });
+        seen.recent.delete(sameKey);
+        seen.recent.set(sameKey, { slot, at: now });
+        if (seen.recent.size > 50) seen.recent.delete(seen.recent.keys().next().value);
+      }
+    } else if (reply) remember(seen, `done:${reply.id}`);
+  }
+  let approvals = 0;
+  for (const item of pendingApprovals(items)) {
+    const id = `approval:${item.id}`;
+    if (remember(seen, id) && approvals === 0) {
+      approvals += 1;
+      out.push({ id, kind: "approval", title, body: BODIES.approval });
+    }
+  }
+  const waiting = chatOf(next).waiting;
+  const key = inputKey(waiting);
+  if (key && remember(seen, key)) out.push({ id: key, kind: "input", title, body: INPUT_BODY[waiting.kind] || INPUT_DEFAULT });
+  return out;
+}
+
 // src/core/usage.js
 function compactNumber(n) {
   const v = Number(n) || 0;
@@ -48369,7 +48593,59 @@ async function readUsage(bot, runtimeId, key) {
     if (cur.key === key && cur.runtimeId === runtimeId) roster2.usage.set({ ...cur, error: String(error?.message || error) });
   }
 }
+var notifySeen = createSeen();
+var notifyPrev = /* @__PURE__ */ new Map();
+var slotWatchers = /* @__PURE__ */ new Map();
+function windowFocused() {
+  try {
+    if (typeof document === "undefined") return true;
+    if (document.hidden) return false;
+    return typeof document.hasFocus === "function" ? document.hasFocus() : true;
+  } catch {
+    return true;
+  }
+}
+function sendNativeNotifications(slotId, state, extra) {
+  const prev = notifyPrev.get(slotId) ?? null;
+  notifyPrev.set(slotId, state);
+  const os = app.ctx?.os;
+  if (typeof os?.notify !== "function") return;
+  const bot = state?.bot;
+  let list = [];
+  try {
+    const name = bot ? displayName(bot, metaFor(bot)) : "";
+    list = nativeNotifications(prev, state, { focused: windowFocused(), seen: notifySeen, name, keyOf: rowKey, slot: slotId });
+  } catch {
+    return;
+  }
+  for (const n of list) {
+    try {
+      os.notify({
+        title: n.title,
+        body: n.body,
+        onActivate: () => {
+          try {
+            if (extra) host2?.revealPane?.(`plugin-workspace:${slotId}`);
+            else {
+              selectBot(bot);
+              backToOverride();
+            }
+          } catch {
+          }
+        }
+      });
+    } catch {
+    }
+  }
+}
+function trackChatSlot(slot) {
+  const id = String(slot?.id || "");
+  if (!id || !slot?.extra || slotWatchers.has(id) || typeof slot?.chat?.subscribe !== "function") return;
+  sendNativeNotifications(id, slot.chat.get(), true);
+  slotWatchers.set(id, slot.chat.subscribe(() => sendNativeNotifications(id, slot.chat.get(), true)));
+}
 function onChatState(state) {
+  sendNativeNotifications("main", state, false);
   const key = state?.bot ? rowKey(state.bot) : "";
   const runtimeId = String(state?.runtimeId || "");
   const cur = roster2.usage.get();
@@ -48422,6 +48698,9 @@ function stopRosterParity() {
   offEvents = null;
   offChat?.();
   offChat = null;
+  notifyPrev.clear();
+  for (const off of slotWatchers.values()) off();
+  slotWatchers.clear();
   usageRuntime = "";
   roster2.dialog.set(null);
 }
@@ -50926,7 +51205,7 @@ var SEED_MAX = 8;
 var chatSeeds = /* @__PURE__ */ new Map();
 var cronSeeds = /* @__PURE__ */ new Map();
 var screenSeeds = /* @__PURE__ */ new Map();
-function remember(map, key, value) {
+function remember2(map, key, value) {
   if (!key) return;
   map.delete(key);
   map.set(key, value);
@@ -50934,7 +51213,7 @@ function remember(map, key, value) {
 }
 function rememberChat(key, chat) {
   const seed = seedFromState(chat?.get?.());
-  if (seed) remember(chatSeeds, key, seed);
+  if (seed) remember2(chatSeeds, key, seed);
 }
 function seedFor(bot, key) {
   const seed = chatSeeds.get(key);
@@ -51057,7 +51336,7 @@ async function loadCron(bot) {
     if (!current()) return;
     if (res?.error) throw new Error(res.error);
     const jobs = sortJobs(res?.jobs);
-    remember(cronSeeds, key, jobs);
+    remember2(cronSeeds, key, jobs);
     app.cron.set((s) => ({ ...s, loading: false, jobs }));
   } catch (error) {
     if (current()) app.cron.set((s) => ({ ...s, loading: false, error: String(error?.message || error) }));
@@ -51090,7 +51369,7 @@ async function loadScreen(bot) {
   if (app.screen.get().key !== key) app.screen.set({ key, status: screenSeeds.get(key) ?? null });
   try {
     const status = await requestForBot(bot, "display.status", { profile: String(bot.name) });
-    if (status && !status.error) remember(screenSeeds, key, status);
+    if (status && !status.error) remember2(screenSeeds, key, status);
     if (app.screen.get().key === key) app.screen.set({ key, status });
   } catch {
     if (app.screen.get().key === key) app.screen.set({ key, status: { error: true } });
@@ -53701,7 +53980,7 @@ function Composer({
   answering = false,
   onAnswer
 }) {
-  const [text3, setText] = React5.useState("");
+  const [text3, setText] = React5.useState(() => draftTexts.get(draftOwnerKey(bot)));
   const [files, setFiles] = React5.useState([]);
   const [note, setNote] = React5.useState("");
   const [options, setOptions] = React5.useState([]);
@@ -53716,6 +53995,13 @@ function Composer({
   textRef.current = text3;
   const filesRef = React5.useRef(files);
   filesRef.current = files;
+  const mountedRef = React5.useRef(true);
+  React5.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const reads = React5.useRef(/* @__PURE__ */ new Set());
   const completionSeq = React5.useRef(0);
   const completeRef = React5.useRef(onCompleteSlash);
@@ -53725,12 +54011,22 @@ function Composer({
     reads.current.clear();
   };
   React5.useEffect(() => {
-    setText("");
+    setText(draftTexts.get(owner));
     setFiles([]);
-    setNote("");
     setOptions([]);
-    return abortReads;
+    setNote(draftTexts.takeNote(owner));
+    const off = draftTexts.subscribe(owner, (value, message) => {
+      setText((current) => appendDraft(current, value));
+      if (message) setNote(message);
+    });
+    return () => {
+      off();
+      abortReads();
+    };
   }, [owner]);
+  React5.useEffect(() => {
+    draftTexts.set(ownerRef.current, text3);
+  }, [text3]);
   React5.useEffect(() => {
     if (!draftRef) return void 0;
     draftRef.current = (value, forOwner) => {
@@ -53833,12 +54129,8 @@ ${value}`);
       setNote("");
       setOptions([]);
       const result2 = await onAnswer(sending);
-      if (ownerRef.current !== sentOwner) return;
-      if (!result2?.ok) {
-        if (!textRef.current.trim()) setText(sending);
-        setNote(`Your answer was not sent${result2?.error ? `: ${result2.error}` : ""}.`);
-      }
-      inputRef.current?.focus();
+      if (!result2?.ok) draftTexts.recover(sentOwner, sending, `Your answer was not sent${result2?.error ? `: ${result2.error}` : ""}.`);
+      if (mountedRef.current && ownerRef.current === sentOwner) inputRef.current?.focus();
       return;
     }
     const attachments = files.filter((file) => file.owner === ownerRef.current);
@@ -53848,17 +54140,17 @@ ${value}`);
     setNote("");
     setOptions([]);
     const result = await onSend(sending, attachments, apiText ? { apiText } : void 0);
-    if (ownerRef.current !== sentOwner) return;
-    if (!result.ok) {
-      const restore = restoreAfterFailure({ result, sentOwner, currentOwner: ownerRef.current, currentText: textRef.current, currentFiles: filesRef.current });
-      if (restore) {
-        setText(sending);
-        setFiles(attachments);
-        if (result.clientId) onRestored?.(result.clientId);
-      }
-      setNote(failureNote(result, restore));
+    const here = mountedRef.current && ownerRef.current === sentOwner;
+    if (isRecoverableRefusal(result)) {
+      const filesBack = here && attachments.length > 0 && !filesRef.current.length;
+      if (filesBack) setFiles(attachments);
+      const reattach = attachments.length > 0 && !filesBack;
+      draftTexts.recover(sentOwner, sending, `${failureNote(result, true)}${reattach ? " Attach the files again." : ""}`);
+      if (result.clientId) onRestored?.(result.clientId);
+    } else if (!result.ok && here) {
+      setNote(failureNote(result, false));
     }
-    inputRef.current?.focus();
+    if (here) inputRef.current?.focus();
   };
   const addFiles = async (list) => {
     const picked = Array.from(list || []);
@@ -61158,6 +61450,144 @@ function RosterPane() {
   ] });
 }
 
+// src/core/contract.js
+var BOT_MODE_STORAGE_KEYS = Object.freeze({
+  botMeta: "hermes.plugin.hermes-bots.bot-meta-v2",
+  activityToasts: "hermes.plugin.hermes-bots.activity-toasts",
+  groupChats: "hermes.plugin.hermes-bots.group-chats"
+});
+var CONTRACT_EVENTS = Object.freeze([
+  "message.start",
+  "message.delta",
+  "message.interim",
+  "message.complete",
+  "reasoning.delta",
+  "thinking.delta",
+  "reasoning.available",
+  "error",
+  "approval.request",
+  "approval.settled",
+  "approval.cancelled",
+  "clarify.request",
+  "clarify.settled",
+  "request.cancel",
+  "connection.request",
+  "connection.update",
+  "tool.generating",
+  "tool.start",
+  "tool.complete",
+  "status.update",
+  "message.reaction",
+  "session.usage",
+  "session.info",
+  "session.reclaimed",
+  "session.replay_gap",
+  "gateway.ready",
+  "display.lease",
+  "display.status",
+  "display.install.log",
+  "display.install.done"
+]);
+var CONTRACT_EVENT_PREFIXES = Object.freeze(["room.", "group"]);
+var selector = (id, sel, used, required) => ({ id, kind: "selector", target: sel, used, required });
+var CONTRACT = Object.freeze([
+  // DOM anchors (stock.js hides; app.ts finds the stock session tiles).
+  selector("dom.tree-tab", `[${TAB_ATTRS[0]}]`, "stock.js: hide the stock Bots tab; app.ts: stock session tiles and whether a hidden computer-viewer pane exists (T3)", true),
+  selector("dom.narrow-overlay-tab", `[${TAB_ATTRS[1]}]`, "stock.js: hide the stock Bots tab on the narrow overlay (only in narrow windows)", false),
+  selector("dom.stock-bots-tab", `[${TAB_ATTRS[0]}="${STOCK_PANE_ID}"]`, "stock.js: the tab that is hidden (Bot Mode registered)", false),
+  selector("dom.top-header", CHROME_ANCHORS.topHeader, "stock.js: top tab strips hidden, header band kept as drag region", true),
+  selector("dom.zone-tabstrip", "[data-zone-tabstrip]", "stock.js: top tab strip rule", false),
+  selector("dom.panel-page-header", "[data-panel-page-header]", "stock.js: top page header hidden with the strip (only on some panes)", false),
+  selector("dom.tab-vertical", "[data-vertical]", "stock.js: a vertical (rail) stock tab is not the shown one (only with a rail)", false),
+  selector("dom.tab-active", "[data-active]", "stock.js / app.ts: which stock tab is active", false),
+  selector("dom.window-drag-handle", "[data-window-drag-handle]", "stock.js: drag handle widened", false),
+  selector("dom.titlebar-cluster", CHROME_ANCHORS.titlebarCluster, "stock.js: titlebar icon clusters made invisible and click-through", true),
+  selector("dom.statusbar", CHROME_ANCHORS.statusbar, "stock.js: status bar hidden (absent when the user turned it off)", false),
+  selector("dom.tree-group", CHROME_ANCHORS.rosterZone, "stock.js: native scrollbars hidden in the roster zone", true),
+  selector("dom.sash-overlap", CHROME_ANCHORS.seam, "stock.js: the sidebar | workspace seam (absent while the sidebar is closed)", false),
+  selector("css.aui-md", ".aui-md", "styles-adapt.ts: Hermes markdown inside bubbles (only once a chat is on screen)", false),
+  // Bot Mode's data.
+  { id: "query.bot-mode-roster", kind: "query", target: JSON.stringify(STOCK_ROSTER_KEY), used: "app.ts/roster.js: read Bot Mode's roster cache (falls back to host.agents + profiles.list)", required: false },
+  { id: "storage.bot-meta", kind: "storage", target: BOT_MODE_STORAGE_KEYS.botMeta, used: "app.ts readSideData: Bot Mode's local bot meta (read directly with localStorage.getItem on every roster tick, re-parsed only when the text changes, T2)", required: false },
+  { id: "storage.activity-toasts", kind: "storage", target: BOT_MODE_STORAGE_KEYS.activityToasts, used: "app.ts: Bot Mode's activity-toast setting", required: false },
+  { id: "storage.group-chats", kind: "storage", target: BOT_MODE_STORAGE_KEYS.groupChats, used: "rosterActions.ts: Bot Mode's group chats", required: false },
+  // The desktop bridge.
+  { id: "bridge.api", kind: "bridge", target: "api", used: "app.ts/rosterActions.ts/cronOps.js: core REST (history paging, media and workspace reads, transcription, cron)", required: true },
+  { id: "bridge.readFileDataUrl", kind: "bridge", target: "readFileDataUrl", used: "app.ts: local media reads (falls back to api)", required: false },
+  { id: "bridge.getMachineProfile", kind: "bridge", target: "getMachineProfile", used: "app.ts: the user's name for the roster", required: false },
+  { id: "bridge.requestMicrophoneAccess", kind: "bridge", target: "requestMicrophoneAccess", used: "Voice.tsx: the microphone prompt", required: false },
+  // Gateway events.
+  ...CONTRACT_EVENTS.map((name) => ({ id: `event.${name}`, kind: "event", target: name, used: "session.js / reducer.js / rosterActions.ts / Screen.tsx event tap", required: false })),
+  ...CONTRACT_EVENT_PREFIXES.map((prefix) => ({ id: `event.${prefix}*`, kind: "event-prefix", target: prefix, used: "rooms.js: group chat re-read", required: false }))
+]);
+function createEventLog(names = CONTRACT_EVENTS, prefixes = CONTRACT_EVENT_PREFIXES) {
+  const wanted = new Set(names);
+  const counts = /* @__PURE__ */ new Map();
+  const prefixCounts = /* @__PURE__ */ new Map();
+  return {
+    note(type) {
+      const name = String(type || "");
+      if (wanted.has(name)) counts.set(name, (counts.get(name) || 0) + 1);
+      for (const prefix of prefixes) if (name.startsWith(prefix)) prefixCounts.set(prefix, (prefixCounts.get(prefix) || 0) + 1);
+    },
+    count: (name) => counts.get(name) || 0,
+    prefixCount: (prefix) => prefixCounts.get(prefix) || 0
+  };
+}
+function probeEntry(entry, env) {
+  try {
+    switch (entry.kind) {
+      case "selector": {
+        const doc = env.document;
+        if (!doc || typeof doc.querySelector !== "function") return "unprobed";
+        return doc.querySelector(entry.target) ? "ok" : null;
+      }
+      case "query": {
+        const client = env.queryClient;
+        const cache = client?.getQueryCache?.();
+        if (!cache || typeof cache.findAll !== "function") return null;
+        const hits = cache.findAll({ queryKey: JSON.parse(entry.target) });
+        return Array.isArray(hits) && hits.length ? "ok" : null;
+      }
+      case "storage": {
+        const store = env.localStorage;
+        if (!store || typeof store.getItem !== "function") return "unprobed";
+        return store.getItem(entry.target) !== null ? "ok" : null;
+      }
+      case "bridge":
+        return typeof env.bridge?.[entry.target] === "function" ? "ok" : null;
+      case "event":
+        return env.events ? env.events.count(entry.target) > 0 ? "seen" : "unseen" : "unprobed";
+      case "event-prefix":
+        return env.events?.prefixCount ? env.events.prefixCount(entry.target) > 0 ? "seen" : "unseen" : "unprobed";
+      default:
+        return "unprobed";
+    }
+  } catch {
+    return null;
+  }
+}
+function probeContract(env = {}, contract = CONTRACT) {
+  const entries = contract.map((entry) => {
+    const found = probeEntry(entry, env);
+    const status = found ?? (entry.required ? "missing" : "absent");
+    return { id: entry.id, kind: entry.kind, target: entry.target, required: entry.required, status };
+  });
+  const missing = entries.filter((e2) => e2.status === "missing").map((e2) => e2.id);
+  const counts = {};
+  for (const e2 of entries) counts[e2.status] = (counts[e2.status] || 0) + 1;
+  return { ok: missing.length === 0, missing, counts, entries };
+}
+function contractNotice(result) {
+  if (!result || result.ok || !result.missing?.length) return null;
+  const list = result.missing.slice(0, 3).join(", ") + (result.missing.length > 3 ? "…" : "");
+  return {
+    kind: "info",
+    title: "Grokbot Override: Hermes changed",
+    message: `Some Hermes internals the override relies on were not found (${list}). It keeps working where it can; run "Grokbot Override: self-check" for details.`
+  };
+}
+
 // src/ui/UsageMeter.tsx
 import { jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 function Bar({ percent }) {
@@ -61244,6 +61674,84 @@ function unwireParity() {
 
 // src/index.tsx
 import { jsx as jsx31 } from "react/jsx-runtime";
+var contractEvents = createEventLog();
+var NOTICE_FLAG = "__grokbotOverrideContractNoticed";
+var CONTRACT_PROBE_MS = 8e3;
+function runContractProbe() {
+  return probeContract({
+    document: typeof document === "undefined" ? null : document,
+    queryClient: queryClient2(),
+    localStorage: (() => {
+      try {
+        return globalThis.localStorage ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+    bridge: desktopBridge(),
+    events: contractEvents
+  });
+}
+function contractStartupCheck() {
+  try {
+    if (!app.enabled.get() || typeof document === "undefined" || !document.querySelector("[data-gbo-root]")) return false;
+    const notice = contractNotice(runContractProbe());
+    const w = globalThis.window ?? globalThis;
+    if (notice && !w[NOTICE_FLAG]) {
+      w[NOTICE_FLAG] = true;
+      host2?.notify?.(notice);
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
+var CONTRACT_PROBE_TRIES = 5;
+function createContractSchedule(ctx) {
+  let done = false;
+  let tries = 0;
+  let cancel = null;
+  const arm = () => {
+    if (done || cancel || typeof ctx?.setTimeout !== "function") return;
+    const handle = ctx.setTimeout(() => {
+      cancel = null;
+      if (contractStartupCheck()) {
+        done = true;
+        return;
+      }
+      tries += 1;
+      if (tries < CONTRACT_PROBE_TRIES && app.enabled.get()) arm();
+    }, CONTRACT_PROBE_MS);
+    cancel = typeof handle === "function" ? handle : () => void 0;
+  };
+  arm();
+  const off = app.enabled.subscribe(() => {
+    if (!app.enabled.get() || done) return;
+    tries = 0;
+    arm();
+  });
+  return () => {
+    off();
+    cancel?.();
+    cancel = null;
+    done = true;
+  };
+}
+function withContractReport(ctx) {
+  const files = ctx?.files;
+  if (!files || typeof files.writeText !== "function") return ctx;
+  const wrapped = Object.create(files);
+  wrapped.writeText = (scope, name, text3, ...rest) => {
+    if (scope === "data" && name === "self-check.json") {
+      try {
+        text3 = JSON.stringify({ ...JSON.parse(text3), contract: runContractProbe() }, null, 2);
+      } catch {
+      }
+    }
+    return files.writeText(scope, name, text3, ...rest);
+  };
+  return { ...ctx, files: wrapped };
+}
 var index_default = {
   id: PLUGIN_ID,
   name: "Grokbot Override",
@@ -61253,7 +61761,10 @@ var index_default = {
     setRenderers({
       roster: () => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "roster", children: /* @__PURE__ */ jsx31(RosterPane, {}) }),
       workspace: () => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx31(ChatWorkspace, {}) }),
-      tab: (slot) => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx31(ChatWorkspace, { slot }) }),
+      tab: (slot) => {
+        trackChatSlot(slot);
+        return /* @__PURE__ */ jsx31(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx31(ChatWorkspace, { slot }) });
+      },
       room: (slot) => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "room", children: /* @__PURE__ */ jsx31(RoomWorkspace, { slot }) })
     });
     ctx.registerMany([
@@ -61362,11 +61873,15 @@ var index_default = {
     ]);
     if (typeof ctx?.__gboSmoke === "function") ctx.__gboSmoke({ app, roster2, openDialog, selectBot, openBotScreen, screenStore, setEnabled, primeModelOptions, createBot, createBotChat });
     const unwire = wireParity();
-    start(ctx);
+    const offContractEvents = typeof ctx?.onEvent === "function" ? ctx.onEvent("*", (event) => contractEvents.note(event?.type)) : null;
+    start(withContractReport(ctx));
+    const stopContractSchedule = createContractSchedule(ctx);
     if (PROBE) ctx.setTimeout(() => void selfCheck({ notify: false }), 6e3);
     ctx.onDispose(() => {
       stop();
       unwire();
+      if (typeof offContractEvents === "function") offContractEvents();
+      stopContractSchedule();
     });
   }
 };

@@ -18,7 +18,7 @@
 
 import * as React from 'react'
 
-import { draftOwnerKey, failureNote, readDraftFiles, restoreAfterFailure } from '../core/drafts.js'
+import { appendDraft, draftOwnerKey, draftTexts, failureNote, isRecoverableRefusal, readDraftFiles } from '../core/drafts.js'
 import { mentionCompletions, mentionedBots, mentionNote } from '../core/mentions.js'
 import { displayName } from '../core/roster.js'
 import { metaFor, openInBotMode, stockHandoffProblem } from './app'
@@ -169,7 +169,8 @@ export function Composer({
   answering?: boolean
   onAnswer?: (text: string) => Promise<{ ok: boolean; error?: string }>
 }) {
-  const [text, setText] = React.useState('')
+  // T8: the typed text is kept per bot across switches (core/drafts.js).
+  const [text, setText] = React.useState(() => draftTexts.get(draftOwnerKey(bot)))
   const [files, setFiles] = React.useState<DraftAttachment[]>([])
   const [note, setNote] = React.useState('')
   const [options, setOptions] = React.useState<Completion[]>([])
@@ -185,6 +186,14 @@ export function Composer({
   textRef.current = text
   const filesRef = React.useRef(files)
   filesRef.current = files
+  // False once this composer unmounts (a bot switch remounts it by key).
+  const mountedRef = React.useRef(true)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const reads = React.useRef(new Set<AbortController>())
   const completionSeq = React.useRef(0)
   const completeRef = React.useRef(onCompleteSlash)
@@ -196,12 +205,27 @@ export function Composer({
   }
 
   React.useEffect(() => {
-    setText('')
+    setText(draftTexts.get(owner))
     setFiles([])
-    setNote('')
     setOptions([])
-    return abortReads
+    // A recovery that landed while this bot's composer was not on screen
+    // left its note behind; the text is already in the draft.
+    setNote(draftTexts.takeNote(owner))
+    // Recoveries while this composer is on screen: appended to what it shows.
+    const off = draftTexts.subscribe(owner, (value: string, message: string) => {
+      setText(current => appendDraft(current, value))
+      if (message) setNote(message)
+    })
+    return () => {
+      off()
+      abortReads()
+    }
   }, [owner])
+
+  // Remember what is typed for this bot; an empty composer (a send) clears it.
+  React.useEffect(() => {
+    draftTexts.set(ownerRef.current, text)
+  }, [text])
 
   React.useEffect(() => {
     if (!draftRef) return undefined
@@ -317,12 +341,9 @@ export function Composer({
       setNote('')
       setOptions([])
       const result = await onAnswer(sending)
-      if (ownerRef.current !== sentOwner) return
-      if (!result?.ok) {
-        if (!textRef.current.trim()) setText(sending)
-        setNote(`Your answer was not sent${result?.error ? `: ${result.error}` : ''}.`)
-      }
-      inputRef.current?.focus()
+      // Not taken: back into this bot's draft (whichever composer shows it).
+      if (!result?.ok) draftTexts.recover(sentOwner, sending, `Your answer was not sent${result?.error ? `: ${result.error}` : ''}.`)
+      if (mountedRef.current && ownerRef.current === sentOwner) inputRef.current?.focus()
       return
     }
     const attachments = files.filter(file => file.owner === ownerRef.current)
@@ -332,19 +353,24 @@ export function Composer({
     setNote('')
     setOptions([])
     const result = await onSend(sending, attachments, apiText ? { apiText } : undefined)
-    if (ownerRef.current !== sentOwner) return
-    if (!result.ok) {
-      const restore = restoreAfterFailure({ result, sentOwner, currentOwner: ownerRef.current, currentText: textRef.current, currentFiles: filesRef.current })
-      if (restore) {
-        // Hermes refused it before admitting anything: the whole draft comes
-        // back, files included (their staging receipts move with them).
-        setText(sending)
-        setFiles(attachments)
-        if (result.clientId) onRestored?.(result.clientId)
-      }
-      setNote(failureNote(result, restore))
+    const here = mountedRef.current && ownerRef.current === sentOwner
+    if (isRecoverableRefusal(result)) {
+      // Hermes took nothing. One rule (core/drafts.js recover): the text goes
+      // back into this bot's draft, appended, never replacing anything; the
+      // failed bubble is dropped, so the composer is the one way to resend.
+      // Files come back only into this same composer when it holds none (the
+      // draft store keeps text only); otherwise the note asks to attach them
+      // again.
+      const filesBack = here && attachments.length > 0 && !filesRef.current.length
+      if (filesBack) setFiles(attachments)
+      const reattach = attachments.length > 0 && !filesBack
+      draftTexts.recover(sentOwner, sending, `${failureNote(result, true)}${reattach ? ' Attach the files again.' : ''}`)
+      if (result.clientId) onRestored?.(result.clientId)
+    } else if (!result.ok && here) {
+      // Delivery unknown: never re-armed (it may have reached the bot).
+      setNote(failureNote(result, false))
     }
-    inputRef.current?.focus()
+    if (here) inputRef.current?.focus()
   }
 
   const addFiles = async (list: FileList | null) => {

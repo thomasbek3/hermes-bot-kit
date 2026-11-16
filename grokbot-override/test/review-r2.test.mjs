@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 import { createChatController } from '../src/core/session.js'
-import { draftOwnerKey, restoreAfterFailure } from '../src/core/drafts.js'
+import { appendDraft, createDraftTexts, draftOwnerKey, isRecoverableRefusal } from '../src/core/drafts.js'
 import { drawerKeyDown, trapFocus } from '../src/core/focus.js'
 import { handoffBlocked, placeDraft } from '../src/core/handoff.js'
 import { retainBotRoute } from '../src/core/routing.js'
@@ -442,14 +442,20 @@ test('#7 a lost submit acknowledgement is "delivery unknown" and is checked agai
   }
 })
 
-test('#7 a failed send is restored to the composer only when nothing newer was typed', () => {
-  const failed = { ok: false, delivery: 'not-sent' }
-  const owner = 'bot:a'
-  assert.equal(restoreAfterFailure({ result: failed, sentOwner: owner, currentOwner: owner, currentText: '', currentFiles: [] }), true)
-  assert.equal(restoreAfterFailure({ result: failed, sentOwner: owner, currentOwner: owner, currentText: 'newer', currentFiles: [] }), false)
-  assert.equal(restoreAfterFailure({ result: failed, sentOwner: owner, currentOwner: owner, currentText: '', currentFiles: [{}] }), false)
-  assert.equal(restoreAfterFailure({ result: failed, sentOwner: owner, currentOwner: 'bot:b', currentText: '', currentFiles: [] }), false)
-  assert.equal(restoreAfterFailure({ result: { ok: false, delivery: 'unknown' }, sentOwner: owner, currentOwner: owner, currentText: '', currentFiles: [] }), false, 'maybe delivered: never re-armed')
+test('#7 a refused send comes back to the composer without ever replacing newer text (T8 recover rule)', () => {
+  // Only a definite refusal comes back; an unknown delivery may have reached the bot.
+  assert.equal(isRecoverableRefusal({ ok: false, delivery: 'not-sent' }), true)
+  assert.equal(isRecoverableRefusal({ ok: false, delivery: 'unknown' }), false, 'maybe delivered: never re-armed')
+  assert.equal(isRecoverableRefusal({ ok: true }), false)
+  // Newer text stays; the refused text goes below it.
+  assert.equal(appendDraft('', 'refused'), 'refused')
+  assert.equal(appendDraft('newer  \n', 'refused'), 'newer\n\nrefused')
+  assert.equal(appendDraft('newer', '  '), 'newer')
+  const d = createDraftTexts()
+  d.set('bot:a', 'newer')
+  d.recover('bot:a', 'refused', 'Not sent')
+  assert.equal(d.get('bot:a'), 'newer\n\nrefused')
+  assert.equal(d.takeNote('bot:a'), 'Not sent')
 })
 
 // ── #8 drawer focus ────────────────────────────────────────────────────────

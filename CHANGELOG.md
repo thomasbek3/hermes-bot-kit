@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **grokbot-override: one guarded contract for private Hermes internals (T10, 2026-11-15)**: every private
+  dependency (window-chrome DOM anchors, Bot Mode's roster cache key and localStorage keys, the
+  `window.hermesDesktop` bridge calls, the gateway event names) is listed in `src/core/contract.js` with a
+  read-only probe. Each window-chrome rule is now written only while its anchor is in the DOM, so a Hermes
+  update that renames one drops that rule instead of hiding the wrong thing. The self-check report gains a
+  `contract` block, and a missing required entry shows one quiet notice per app session. No behaviour change
+  while everything is present.
+- **grokbot-override: the composer keeps a draft per bot (T8, 2026-11-15)**: switching bots used to clear what
+  you had typed. The composer now keeps the typed text per bot and puts it back when you return, as Hermes's
+  own composer does per session. Text only (never attachments), in memory for this app session, up to 20 bots,
+  kept whole however long; a send clears it. Text Hermes did not take (a refused send, a failed free-text
+  answer) always comes back to that bot's composer, below anything newer, even after switching bots; files
+  come back only into the same composer, otherwise a note asks to attach them again.
+- **grokbot-override: native notifications from override chats (T7, 2026-11-15)**: Hermes only fires its OS
+  notifications for sessions its own message stream owns, so a reply or an approval in an override chat made
+  none while Hermes was in the background. The open chat now sends them through the plugin door
+  `ctx.os.notify`: reply finished, approval waiting, input needed (clarify, sudo, secret, vault, connection).
+  Only while the Hermes window is not focused, once per reply / card / prompt, never for a silent reply or a
+  failed turn, and with generic bodies only. Clicking one opens that bot. Needs a live check.
 - **grokbot-override: switching back to a bot shows its chat at once (T9, 2026-11-15)**: every bot switch went
   through the centred "Opening …'s chat" card and then popped in the transcript, and the profile panel blanked its
   jobs and computer status. The last eight bots' transcripts, scheduled jobs and screen status are now kept in

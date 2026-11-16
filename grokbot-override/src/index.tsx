@@ -8,12 +8,107 @@ import { ChatWorkspace } from './ui/Chat'
 import { primeModelOptions } from './ui/ProfileConfig'
 import { RosterPane } from './ui/Roster'
 import { RoomWorkspace } from './ui/Rooms'
-import { createBot } from './ui/rosterActions'
+import { createBot, trackChatSlot } from './ui/rosterActions'
 import { openDialog, roster2 } from './ui/rosterStores'
 import { openBotScreen, screenStore } from './ui/Screen'
-import { PALETTE_AREA, sdk } from './ui/sdk'
+import { contractNotice, createEventLog, probeContract } from './core/contract.js'
+import { desktopBridge, host, PALETTE_AREA, queryClient, sdk } from './ui/sdk'
 import { UsageStatusChip } from './ui/UsageMeter'
 import { createBotChat, wireParity } from './ui/wiring'
+
+// T10: the private-internals contract (core/contract.js). Event names seen
+// this app session, the probe, and the one quiet notice per app session.
+const contractEvents = createEventLog()
+const NOTICE_FLAG = '__grokbotOverrideContractNoticed'
+const CONTRACT_PROBE_MS = 8_000
+
+function runContractProbe() {
+  return probeContract({
+    document: typeof document === 'undefined' ? null : document,
+    queryClient: queryClient(),
+    localStorage: (() => {
+      try {
+        return globalThis.localStorage ?? null
+      } catch {
+        return null
+      }
+    })(),
+    bridge: desktopBridge(),
+    events: contractEvents
+  })
+}
+
+/** Once the override is on screen: probe, and if a required entry is gone,
+ *  one quiet notice per app session (survives a plugin reload). Returns
+ *  false while the override is off or not mounted yet (nothing probed). */
+function contractStartupCheck(): boolean {
+  try {
+    if (!app.enabled.get() || typeof document === 'undefined' || !document.querySelector('[data-gbo-root]')) return false
+    const notice = contractNotice(runContractProbe())
+    const w = (globalThis as any).window ?? globalThis
+    if (notice && !w[NOTICE_FLAG]) {
+      w[NOTICE_FLAG] = true
+      host?.notify?.(notice)
+    }
+    return true
+  } catch {
+    return true
+  }
+}
+
+/** The startup probe's schedule (review C-R1-04): 8 s after load, retried a
+ *  few times while the override is not on screen yet, and armed again each
+ *  time the override is switched on, until one probe has run. */
+const CONTRACT_PROBE_TRIES = 5
+function createContractSchedule(ctx: any) {
+  let done = false
+  let tries = 0
+  let cancel: null | (() => void) = null
+  const arm = () => {
+    if (done || cancel || typeof ctx?.setTimeout !== 'function') return
+    const handle = ctx.setTimeout(() => {
+      cancel = null
+      if (contractStartupCheck()) {
+        done = true
+        return
+      }
+      tries += 1
+      if (tries < CONTRACT_PROBE_TRIES && app.enabled.get()) arm()
+    }, CONTRACT_PROBE_MS)
+    cancel = typeof handle === 'function' ? handle : () => undefined
+  }
+  arm()
+  const off = app.enabled.subscribe(() => {
+    if (!app.enabled.get() || done) return
+    tries = 0
+    arm()
+  })
+  return () => {
+    off()
+    cancel?.()
+    cancel = null
+    done = true
+  }
+}
+
+/** The self-check report (app.ts selfCheck writes it through ctx.files) gets
+ *  the contract block: the files door is wrapped, nothing else changes. */
+function withContractReport(ctx: any) {
+  const files = ctx?.files
+  if (!files || typeof files.writeText !== 'function') return ctx
+  const wrapped = Object.create(files)
+  wrapped.writeText = (scope: string, name: string, text: string, ...rest: any[]) => {
+    if (scope === 'data' && name === 'self-check.json') {
+      try {
+        text = JSON.stringify({ ...JSON.parse(text), contract: runContractProbe() }, null, 2)
+      } catch {
+        /* keep the report as it was */
+      }
+    }
+    return files.writeText(scope, name, text, ...rest)
+  }
+  return { ...ctx, files: wrapped }
+}
 
 export default {
   id: PLUGIN_ID,
@@ -36,11 +131,15 @@ export default {
           <ChatWorkspace />
         </OverrideBoundary>
       ),
-      tab: slot => (
-        <OverrideBoundary area="chat">
-          <ChatWorkspace slot={slot} />
-        </OverrideBoundary>
-      ),
+      tab: slot => {
+        // T7 / review C-R2-02: a side tab's chat notifies too (idempotent).
+        trackChatSlot(slot)
+        return (
+          <OverrideBoundary area="chat">
+            <ChatWorkspace slot={slot} />
+          </OverrideBoundary>
+        )
+      },
       room: slot => (
         <OverrideBoundary area="room">
           <RoomWorkspace slot={slot} />
@@ -164,11 +263,15 @@ export default {
     // Roster-side surfaces call into the chat side (R13 kickoff, R12 new tab,
     // New group chat, room failures on the badge): src/ui/wiring.ts.
     const unwire = wireParity()
-    start(ctx)
+    const offContractEvents = typeof ctx?.onEvent === 'function' ? ctx.onEvent('*', (event: any) => contractEvents.note(event?.type)) : null
+    start(withContractReport(ctx))
+    const stopContractSchedule = createContractSchedule(ctx)
     if (PROBE) ctx.setTimeout(() => void selfCheck({ notify: false }), 6_000)
     ctx.onDispose(() => {
       stop()
       unwire()
+      if (typeof offContractEvents === 'function') offContractEvents()
+      stopContractSchedule()
     })
   }
 }

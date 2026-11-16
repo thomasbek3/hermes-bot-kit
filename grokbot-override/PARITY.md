@@ -134,12 +134,13 @@ pane's unread tracker pauses while the override is on screen; the override runs 
 | C22 | Edit / regenerate / rewind a message (`confirm_truncate`) | app `use-prompt-actions/rewind.ts`, `slash-session-commands.ts` | Implemented | On a stored message: **Edit** (inline) submits the new text and **Regenerate** resends the user turn a reply answered, each as a truncating `prompt.submit` with stock's consent params by durable row id (`confirm_truncate`, `truncate_before_row_id`, `confirm_deep_truncate` when later turns are archived, `confirm_empty_truncate` when nothing stays; `rewind.ts:174-199`, `methods_prompt.py:507-532`); cutting older turns asks first. A legacy rewrite's new survivor ids are requested (`rebind_survivor_row_ids`, every loaded durable id) and applied to the chat items and loaded rows (`survivor_row_id_map`, or the older positional `survivor_user_row_ids`; stock `rewind.ts` `rebindSurvivorRowIds`), so a reaction or a second edit during the new reply addresses the live row. **Rewind to here** on a canonical gateway is `session.rewind {target_message_id: <the selected row>}` (the host's `session.mutate rewind`, retained for an exact retry when its reply is lost); on a legacy gateway that does not serve it (structured -32601 only; a handler error or unknown code, whatever its text, is "not confirmed" and never followed by the legacy undo, review v2-r3 H2), the gateway's own `/undo N` through `slash.exec`. The message goes back into the composer only after a confirmed rewind, below any draft already there, and only in the composer of the bot it was rewound in; a refused or unanswered rewind prefills nothing and re-reads the transcript. All go through the C6 delivery rules (submission id, never twice); a refused rewrite re-reads the stored rows so nothing looks lost. Not while a turn runs. Tests: `test/parity-c22-c23.test.mjs`, `test/review-v2-r1.test.mjs`, `test/review-v2-r1-rewind.test.mjs` (loader). Fakes only: no live canonical or legacy owner has been exercised. |
 | C23 | Reactions (`message.react`) | app `store/reactions.ts`, `message.reaction` event | Implemented | The six Tapback reactions on any message; one per author, the same emoji again retracts; optimistic, then the gateway's list wins, a failure rolls back (`toggleMessageReaction`). `message.react {session_id, row_id \| newest_role, emoji, author:'user'}`; a live message without a row id names `newest_role` and learns its id. Stored reactions come from the row's `display_metadata`; the agent's live `message.reaction` paints at once. Tests: `test/parity-c22-c23.test.mjs`. |
 | C24 | Copy a message | app | Implemented | |
-| C25 | Context / cost meter | statusbar (`use-statusbar-items.tsx`, `lib/statusbar.tsx`) | Implemented | A status-bar chip (right side, where stock's meter is) for the open Bot Chat: `session.usage` (read) when the chat attaches and after each reply, merged with the `session.usage` / `session.info` / `message.complete` usage of that runtime only. Shows used / max context with a bar, and cost when the backend reports it. The profile panel shows the bot's configured model instead (one row that opens the model picker). Stock's meter follows the focused core session, which the override chat is not. |
+| C25 | Context / cost meter | statusbar (`use-statusbar-items.tsx`, `lib/statusbar.tsx`) | Implemented (hidden on purpose) | Owner decision 2026-11-15: the meter stays hidden while the override is on. The chip lives only in Hermes's status bar, which the override's chrome style hides, so it shows only during a peek; it is not repeated in the profile panel. A status-bar chip (right side, where stock's meter is) for the open Bot Chat: `session.usage` (read) when the chat attaches and after each reply, merged with the `session.usage` / `session.info` / `message.complete` usage of that runtime only. Shows used / max context with a bar, and cost when the backend reports it. The profile panel shows the bot's configured model instead (one row that opens the model picker). Stock's meter follows the focused core session, which the override chat is not. |
 | C26 | Two Bot Chats side by side (Open in new tab) | `openRosterBot({intent:'tab'})` | Implemented | **Open another chat beside this one** (chat header; exported as `openBotInNewTab(bot)` for the roster menu) opens another override chat tab docked right of the main one (`host.openWorkspace`, `dock: {pane: 'plugin-workspace:grokbot-override', pos: 'right'}`), with its own chat controller (own route lease, listener, refresh), so two Bot Chats run at once; the main tab can switch bots while the side tab keeps its own. The same bot in two tabs is the same stored chat. Closing a tab retires its chat like the main tab (a running turn finishes first, bounded); turning the override off closes them. The side tab is the chat only; its profile button fronts the main tab's panel for that bot. Test: `test/loader-tabs.test.mjs`. |
 | C27 | Background refresh while the chat is open (another surface, cron delivery) | `refreshOpenBotChat` | Implemented | Live events while attached, plus a read-only history refresh every 15 s while idle. The refresh merges the newest page into the loaded rows by row id: earlier pages stay, an unsent bubble and a waiting approval card stay where they were (see C5 for the one reset case). A stored row that replaces a live reply or a sent bubble keeps that bubble's React identity (`renderKey`, `src/core/history.js` `carryKeys`: a sent bubble goes to the exact row that confirmed it, a live reply to an assistant row of that same turn, otherwise no key; the durable id is the stored row's), so the finished reply, its group, its cards and images are not remounted when the refresh lands (`test/tighter-t4-keys.test.mjs`). A message the user just sent stays on screen from **Send** until a read shows its stored row (matched by role, text and order, each row claiming one bubble), across chat creation, a runtime swap, re-attach and every refresh, poll or reconcile; the stored row then takes its place, never a second copy (`test/vanishing-first-message.test.mjs`). While a turn runs, a watchdog asks `session.active_list` (a read) after 10 s without events, backing off to 60 s (60 s while the window is hidden), and a turn the gateway reports idle is settled from the stored transcript; a failed check counts as unknown, never as finished. A `prompt.submit` receipt cannot undo a completion that arrived before it. A runtime found gone settles the turn and re-attaches (C18); nothing is re-sent. The idle refresh also resolves a **Delivery unknown** send whose row has appeared (C6). Bounded polling, not an exact recovery time; tested against a fake gateway only. |
 | C28 | Attachments: images (`image.attach_bytes`), files and PDFs (`file.attach` → `ref_text`) | app `use-prompt-actions`, `group-turns.ts` | Implemented | A staging-only gateway (`gateway/session_images.py`, `path` + `mime`) gets the images in `prompt.submit`'s `attachments: [{path, mime}]`, as stock does; a legacy gateway keeps them on the runtime until the next submit. After a definite refusal (C6) the text and attachments go back into the composer if nothing newer was typed there, keeping their staging receipts (no double staging); otherwise the bubble offers **Retry** with the original payload. A refusal that says Hermes removed the staged images (4090 `SESSION_OWNER_BUSY`) stages them again. An image removed from a restored draft is detached (`image.detach`) at once and before the next send; if that detach fails the send is **Not sent**. Closing the chat detaches leftovers (best effort). An uncertain send with attachments is retried under its submission id with the byte-identical params (C6). Files picked for one bot never reach another. A slash command cannot carry attachments (as in the Hermes composer). |
 | C29 | Voice input | app `use-mic-recorder.ts`, `api/system.ts` `transcribeAudio` | Implemented | Recorded in this window (`requestMicrophoneAccess`, `getUserMedia`, `MediaRecorder`), transcribed with `POST /api/audio/transcribe {data_url, mime_type}` pinned to the **bot's** connection and profile with stock's timeout rule (not `voice.record`, which captures on the gateway's machine); the words go into the draft, never sent by themselves. Microphone errors use stock's copy. The mic records only while its Stop button is on screen: one acquisition per click (a pending one shows "Starting the microphone…"), and leaving the chat, unmounting or switching bots during the permission prompt, `getUserMedia` or transcription stops every track of a late stream at once and drops a late transcript (review v2-r1 #1). `src/core/voice.js`, `src/ui/Voice.tsx`; tests `test/loader-composer.test.mjs`, `test/review-v2-r1-voice.test.mjs` (loader, fake media; no microphone hardware). Stock first tries a client-direct STT provider and relays otherwise; the override always uses the relay, the same backend endpoint stock falls back to. |
 | C30 | Empty-chat greeting (`chat.empty`) | `chat-empty.tsx` | Implemented | Minimal: avatar + name. |
+| C31 | Native OS notifications (turn done, approval, input needed) | `store/native-notifications.ts`, fired from `use-message-stream` / `server-requests.ts` | Implemented | T7: stock fires these only for sessions its own message stream owns, which the override's chat never is. The override sends them for every open override chat (the main tab and each side tab; a reply shown in two tabs notifies once) through the public plugin door `ctx.os.notify` (`src/core/nativeNotify.js`): only while the Hermes window is not focused, once per reply / approval card / prompt, never for a silent reply or a failed turn, and with generic bodies only ("Replied.", "Needs your approval.", "Has a question for you.", "Needs your input."), never the reply, the command, the question or any secret prompt. Clicking it opens that bot (a side tab's notification brings that tab forward). Hermes's "Plugin notifications" setting and its per-plugin throttle apply. Not yet checked live. |
 
 Beyond stock (Grok Bot, not in Hermes Bot Mode, so not a parity row): **email draft cards** for the kit's
 `email-drafts` agent plugin. A bot's `email_draft_create` tool result becomes a card in the chat (shown with
@@ -163,13 +164,13 @@ the plugin's `/email-drafts` command through `slash.exec`), sent once on **Send*
 
 | Status | Count |
 |---|---|
-| Implemented | 50 |
+| Implemented | 51 |
 | Partial | 5 |
 | Fallback | 0 |
 | Later | 0 |
 | Blocked | 0 |
 
-(R1-R18, C1-C30, P1-P7 = 55 rows, each counted once by its status, after merging the chat-side parity
+(R1-R18, C1-C31, P1-P7 = 56 rows, each counted once by its status, after merging the chat-side parity
 (`feature/override-parity-chat`: C3, C6, C7, C11, C13, C15, C19, C20, C22, C23, C26, C28, C29, R14, R16, R17)
 and the roster-side parity (`feature/override-parity-roster`: R6, R9, R11, R12, R13, R15, P3, P4, P6, C21,
 C25) into `feature/grokbot-override-v2` and wiring them together. The five **Partial** rows (R11, R12, R13,
@@ -195,6 +196,26 @@ Nothing hands off to stock Bot Mode in normal use; none of the rows is live-qual
   first time still shows the generic placeholder until it decodes, a remote image loads only on **Load**, and the
   video placeholder assumes 16:9. So first-load and non-16:9 media can still change height once.
 
+## Known limits (notifications, drafts, contract)
+
+- **Native notifications (C31), one reply in two tabs.** Each side tab's chat runs its own controller, so the same
+  reply has a different live id in each tab. To notify once, a reply with the same bot, runtime and text seen by
+  another tab within 15 s counts as the same reply. A genuinely new reply with the same text that only one tab
+  still shows (for example after the main tab switched to another bot) inside that window is therefore not
+  notified. Exact correlation needs a shared gateway turn or message id, which the event stream does not give
+  every frame. Tracked; not fixed.
+- **Native notifications, closed side tabs.** A side tab is registered with the notifier when it first renders.
+  Nothing tells the plugin when that tab closes without changing `app.ts`, so its subscription and last chat
+  state stay until the override is switched off (one entry per side tab opened in the app session). A closed tab
+  receives no events, so it never notifies. Tracked; not fixed.
+- **Native notifications are not live-checked yet.** Delivery, Hermes's *Plugin notifications* setting and
+  throttling, and click-to-open are covered by unit and loader tests with a stub OS door only.
+- **Drafts (T8).** Text only, in memory for the app session: a plugin reload or app restart discards them, files
+  are never kept across a switch (a refused send's files come back only into the same composer; otherwise a note
+  asks to attach them again), and only the 20 most recently written bots keep a draft.
+- **Contract probes (T10)** show that a private selector, key or bridge call is still present, not that it still
+  means the same thing after a Hermes update. The sidebar seam colours stay fixed light/dark values.
+
 ## Architecture notes
 
 **Two panes, Bot Mode's own zones.** Bot Mode puts its roster in the sidebar zone (tab **BOTS**) and its
@@ -211,6 +232,24 @@ overlay) and switches a selected stock BOTS tab to the override tab once per sel
 guard the retired `bot-sections` used for SESSIONS). OFF unregisters the panes, removes the style and reveals the
 stock Bots pane: stock is back instantly. Fallback actions set a temporary "peek" that removes the hide
 style until the override tab is shown again.
+
+**Private Hermes internals: one guarded contract (T10).** Everything the override uses that has no SDK door is
+listed, each with a read-only probe, in `src/core/contract.js`: the DOM anchors of the window chrome it hides
+(`[data-tree-tab]`, `[data-narrow-overlay-tab]`, `[data-tree-group][data-window-top] > [data-panel-header]`,
+`[data-zone-tabstrip]`, `[data-panel-page-header]`, `[data-vertical]`, `[data-active]`, `[data-window-drag-handle]`, `[data-titlebar-cluster]`, `footer[data-slot="statusbar"]`,
+`[data-tree-group]`, `[data-sash-overlap]`, `.aui-md`), Bot Mode's roster query key `['hermes-bots','roster']` and
+localStorage keys (`hermes.plugin.hermes-bots.{bot-meta-v2,activity-toasts,group-chats}`), the desktop bridge
+`window.hermesDesktop.{api,readFileDataUrl,getMachineProfile,requestMicrophoneAccess}` (`desktopBridge()` in
+`src/ui/sdk.ts`), and every gateway event name the chat, reconnect and screen code acts on (including
+`gateway.ready`, `session.replay_gap` and the `display.*` events, plus the `room.*` / `group*` families). A test
+scans the source for event names and Hermes DOM attributes, so a new one that is not in the contract fails it. `core/stock.js` writes each chrome rule only
+while its anchor is in the DOM, so a renamed anchor drops its rule instead of hiding the wrong thing. The
+self-check writes the probe results as a `contract` block in `self-check.json`; a required entry that is missing
+(the tab, top header, titlebar cluster and tree-group anchors, `window.hermesDesktop.api`) shows one quiet notice
+per app session, once the override is on screen (probed 8 s after load, retried while it is not mounted yet, and
+armed again when the override is switched on later). Optional entries (a status bar the user turned off, a closed
+sidebar, Bot Mode data not written yet) report `absent`; events report `seen` / `unseen`. Any new private touch
+point must be added to this list.
 
 **Same engine, same chats.** Every RPC goes through a port of Bot Mode's `requestForBot`: a
 source-scoped row uses `host.requestProfile(route, …)` with `profile` rewritten to the route's
