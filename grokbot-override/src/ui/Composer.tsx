@@ -18,7 +18,7 @@
 
 import * as React from 'react'
 
-import { draftOwnerKey, failureNote, readDraftFiles, restoreAfterFailure } from '../core/drafts.js'
+import { draftOwnerKey, draftTexts, failureNote, readDraftFiles, restoreAfterFailure } from '../core/drafts.js'
 import { mentionCompletions, mentionedBots, mentionNote } from '../core/mentions.js'
 import { displayName } from '../core/roster.js'
 import { metaFor, openInBotMode, stockHandoffProblem } from './app'
@@ -169,7 +169,8 @@ export function Composer({
   answering?: boolean
   onAnswer?: (text: string) => Promise<{ ok: boolean; error?: string }>
 }) {
-  const [text, setText] = React.useState('')
+  // T8: the typed text is kept per bot across switches (core/drafts.js).
+  const [text, setText] = React.useState(() => draftTexts.get(draftOwnerKey(bot)))
   const [files, setFiles] = React.useState<DraftAttachment[]>([])
   const [note, setNote] = React.useState('')
   const [options, setOptions] = React.useState<Completion[]>([])
@@ -196,12 +197,17 @@ export function Composer({
   }
 
   React.useEffect(() => {
-    setText('')
+    setText(draftTexts.get(owner))
     setFiles([])
     setNote('')
     setOptions([])
     return abortReads
   }, [owner])
+
+  // Remember what is typed for this bot; an empty composer (a send) clears it.
+  React.useEffect(() => {
+    draftTexts.set(ownerRef.current, text)
+  }, [text])
 
   React.useEffect(() => {
     if (!draftRef) return undefined

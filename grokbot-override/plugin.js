@@ -43061,6 +43061,29 @@ function failureNote(result, restored) {
   }
   return "Delivery unknown: it may already have reached the bot, so it will not be sent again from here. Check the chat, or open it in Hermes Bot Mode.";
 }
+var DRAFT_TEXT_MAX = 4096;
+var DRAFT_OWNERS_MAX = 20;
+function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX, maxChars = DRAFT_TEXT_MAX } = {}) {
+  const map = /* @__PURE__ */ new Map();
+  return {
+    get(owner) {
+      return owner && map.get(owner) || "";
+    },
+    set(owner, text3) {
+      if (!owner) return;
+      const value = typeof text3 === "string" ? text3 : "";
+      map.delete(owner);
+      if (!value.trim() || value.length > maxChars) return;
+      map.set(owner, value);
+      while (map.size > maxOwners) map.delete(map.keys().next().value);
+    },
+    clear(owner) {
+      map.delete(owner);
+    },
+    size: () => map.size
+  };
+}
+var draftTexts = createDraftTexts();
 
 // src/core/delivery.js
 function newSubmissionId() {
@@ -52973,7 +52996,7 @@ function Composer({
   answering = false,
   onAnswer
 }) {
-  const [text3, setText] = React5.useState("");
+  const [text3, setText] = React5.useState(() => draftTexts.get(draftOwnerKey(bot)));
   const [files, setFiles] = React5.useState([]);
   const [note, setNote] = React5.useState("");
   const [options, setOptions] = React5.useState([]);
@@ -52997,12 +53020,15 @@ function Composer({
     reads.current.clear();
   };
   React5.useEffect(() => {
-    setText("");
+    setText(draftTexts.get(owner));
     setFiles([]);
     setNote("");
     setOptions([]);
     return abortReads;
   }, [owner]);
+  React5.useEffect(() => {
+    draftTexts.set(ownerRef.current, text3);
+  }, [text3]);
   React5.useEffect(() => {
     if (!draftRef) return void 0;
     draftRef.current = (value, forOwner) => {

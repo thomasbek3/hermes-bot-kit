@@ -72,3 +72,39 @@ export function failureNote(result, restored) {
   }
   return 'Delivery unknown: it may already have reached the bot, so it will not be sent again from here. Check the chat, or open it in Hermes Bot Mode.'
 }
+
+// ── typed text kept per bot (T8) ─────────────────────────────────────────
+//
+// Switching bots used to clear the composer. Hermes's own composer keeps a
+// draft per session; the override keeps the typed TEXT per bot (draft owner
+// key), in memory for this app session only: never files, never written to
+// disk, capped at 20 bots and 4 KB each (the oldest bot's entry goes first;
+// a longer draft is kept whole in the composer but not remembered past 4 KB).
+// A successful send empties the composer, which clears the entry.
+
+export const DRAFT_TEXT_MAX = 4096
+export const DRAFT_OWNERS_MAX = 20
+
+export function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX, maxChars = DRAFT_TEXT_MAX } = {}) {
+  const map = new Map()
+  return {
+    get(owner) {
+      return (owner && map.get(owner)) || ''
+    },
+    set(owner, text) {
+      if (!owner) return
+      const value = typeof text === 'string' ? text : ''
+      map.delete(owner)
+      if (!value.trim() || value.length > maxChars) return
+      map.set(owner, value)
+      while (map.size > maxOwners) map.delete(map.keys().next().value)
+    },
+    clear(owner) {
+      map.delete(owner)
+    },
+    size: () => map.size
+  }
+}
+
+/** The composer's shared draft texts (one per app session). */
+export const draftTexts = createDraftTexts()
