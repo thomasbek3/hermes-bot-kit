@@ -24,12 +24,21 @@ type Props = Omit<React.HTMLAttributes<HTMLElement>, 'ref'> & {
   wrapClassName?: string
   /** Receives the scroller element (the Transcript's stick-to-bottom ref). */
   scrollRef?: React.MutableRefObject<any>
+  /** Called when the scroller or its content changes size after it rendered
+   *  (an image decodes, a card grows): the transcript stays pinned to its
+   *  bottom through it (stickToBottom.ts). Runs before paint. */
+  onContentResize?: () => void
+  /** Drawn over the scroll area, outside the scroller (the jump-to-latest
+   *  button): it stays put while the content scrolls. */
+  overlay?: React.ReactNode
 }
 
-export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className, onScroll, children, ...rest }: Props) {
+export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, children, ...rest }: Props) {
   const scroller = React.useRef<HTMLElement | null>(null)
   const thumb = React.useRef<HTMLDivElement | null>(null)
   const [dragging, setDragging] = React.useState(false)
+  const resized = React.useRef(onContentResize)
+  resized.current = onContentResize
 
   const update = React.useCallback(() => {
     const el = scroller.current
@@ -50,14 +59,32 @@ export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className,
     const el = scroller.current
     const RO = (globalThis as any).ResizeObserver
     if (!el || typeof RO !== 'function') return undefined
-    const observer = new RO(update)
+    // One observer for both jobs: the thumb, and the owner's resize hook
+    // (the transcript's stick-to-bottom) before the frame paints.
+    const observer = new RO(() => {
+      resized.current?.()
+      update()
+    })
     observer.observe(el)
     for (const child of Array.from(el.children)) observer.observe(child)
-    const mo = typeof MutationObserver === 'function' ? new MutationObserver(update) : null
+    // DOM changes only move the thumb: once per frame, however many land.
+    const raf = (globalThis as any).requestAnimationFrame
+    const caf = (globalThis as any).cancelAnimationFrame
+    let frame: any = null
+    const queue = () => {
+      if (frame !== null) return
+      if (typeof raf !== 'function') return update()
+      frame = raf(() => {
+        frame = null
+        update()
+      })
+    }
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver(queue) : null
     mo?.observe(el, { childList: true, subtree: true })
     return () => {
       observer.disconnect()
       mo?.disconnect()
+      if (frame !== null && typeof caf === 'function') caf(frame)
     }
   }, [update])
 
@@ -113,6 +140,7 @@ export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className,
         children
       )}
       <div className="gbo-oscroll-thumb" ref={thumb} data-scrollable="false" aria-hidden="true" onPointerDown={startDrag} />
+      {overlay}
     </div>
   )
 }

@@ -48602,7 +48602,7 @@ a { color: inherit; }
 
 /* ---------- transcript ---------- */
 .transcript-wrap { position: relative; flex: 1 1 0; min-height: 0; }
-.transcript { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 60px 16px 16px; overflow-anchor: none; }
+.transcript { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 60px 16px 16px; overflow-anchor: auto; }
 .transcript__col { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: 960px; margin: 0 auto; min-height: 100%; justify-content: flex-end; }
 .transcript__col > * { max-width: 100%; }
 
@@ -48724,6 +48724,7 @@ a { color: inherit; }
   animation: rise 160ms var(--ease-out);
 }
 .jump-btn:hover { background: var(--color-bg-elevated-hover); }
+.jump-btn svg { width: 16px; height: 16px; color: var(--color-text-secondary); }
 
 /* ---------- empty chat ---------- */
 .empty-chat { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: auto; padding: 40px 24px; text-align: center; align-self: center; }
@@ -51667,7 +51668,7 @@ var OverrideBoundary = class extends React3.Component {
 };
 
 // src/ui/Chat.tsx
-import * as React24 from "react";
+import * as React25 from "react";
 
 // src/core/colors.js
 function expandHex(hex) {
@@ -54921,14 +54922,97 @@ function EmailDraftCard({ item, bot, controller: controller2 }) {
   ] });
 }
 
+// src/ui/stickToBottom.ts
+import * as React13 from "react";
+var STICK_PX = 16;
+var fromBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight;
+function useStickToBottom(dep, mine, latest = "") {
+  const ref = React13.useRef(null);
+  const stick = React13.useRef(true);
+  const lastMine = React13.useRef(mine);
+  const lastLatest = React13.useRef(latest);
+  const keep = React13.useRef(null);
+  const [unseen, setUnseen] = React13.useState(false);
+  React13.useLayoutEffect(() => {
+    const el = ref.current;
+    if (mine !== lastMine.current) {
+      lastMine.current = mine;
+      if (mine) stick.current = true;
+    }
+    const newer = latest !== lastLatest.current;
+    lastLatest.current = latest;
+    if (!el) return;
+    if (keep.current !== null) {
+      el.scrollTop = el.scrollHeight - keep.current;
+      return;
+    }
+    if (stick.current) el.scrollTop = el.scrollHeight;
+    else if (newer && latest) setUnseen(true);
+  }, [dep, mine, latest]);
+  React13.useLayoutEffect(() => {
+    if (stick.current && unseen) setUnseen(false);
+  });
+  const onScroll = () => {
+    const el = ref.current;
+    if (!el) return;
+    stick.current = fromBottom(el) < STICK_PX;
+    if (stick.current) setUnseen(false);
+  };
+  const onContentResize = React13.useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (keep.current !== null) el.scrollTop = el.scrollHeight - keep.current;
+    else if (stick.current) el.scrollTop = el.scrollHeight;
+  }, []);
+  const pin = () => {
+    stick.current = true;
+  };
+  const keepPlace = async (load) => {
+    const el = ref.current;
+    if (el) keep.current = el.scrollHeight - el.scrollTop;
+    try {
+      await load();
+    } finally {
+      const restore = () => {
+        const target = ref.current;
+        if (target && keep.current !== null) target.scrollTop = target.scrollHeight - keep.current;
+      };
+      restore();
+      const done = () => {
+        restore();
+        keep.current = null;
+        const target = ref.current;
+        if (target) stick.current = fromBottom(target) < STICK_PX;
+      };
+      const raf2 = globalThis.requestAnimationFrame;
+      if (typeof raf2 === "function") raf2(() => done());
+      else setTimeout(done, 16);
+    }
+  };
+  const jump = () => {
+    const el = ref.current;
+    stick.current = true;
+    setUnseen(false);
+    if (!el) return;
+    const top = el.scrollHeight;
+    try {
+      if (typeof el.scrollTo === "function") el.scrollTo({ top, behavior: "smooth" });
+      else el.scrollTop = top;
+    } catch {
+      el.scrollTop = top;
+    }
+  };
+  return { ref, onScroll, onContentResize, pin, stick, keepPlace, jump, unseen };
+}
+
 // src/ui/Profile.tsx
-import * as React21 from "react";
+import * as React22 from "react";
 
 // src/ui/BotDialogs.tsx
-import * as React17 from "react";
+import * as React18 from "react";
 
 // src/ui/CronDialogs.tsx
-import * as React13 from "react";
+import * as React14 from "react";
 import { Fragment as Fragment9, jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
 var digits = (v, n) => v.replace(/[^0-9]/g, "").slice(0, n);
 function timeLabel(id) {
@@ -54974,18 +55058,18 @@ function SchedulePicker({ state, setState }) {
 }
 function JobDialog({ bot, job, onClose }) {
   const editing = Boolean(job);
-  const [title, setTitle] = React13.useState(() => job ? routineTitle(job) : "");
-  const [stored, setStored] = React13.useState(() => ({ status: editing ? "loading" : "ready" }));
-  const [instruction, setInstruction] = React13.useState("");
-  const [sched, setSched] = React13.useState(() => job ? { ...scheduleStateFrom(job.schedule), repeatN: void 0 } : defaultScheduleState());
-  const [initialSchedule] = React13.useState(() => job ? composeSchedule({ ...scheduleStateFrom(job.schedule), repeatN: void 0 }).trim() : void 0);
-  const [continuity, setContinuity] = React13.useState(false);
-  const [target, setTarget] = React13.useState(() => job?.deliver === "bot-chat" ? "bot-chat" : "history");
-  const [busy, setBusy] = React13.useState(false);
-  const [error, setError] = React13.useState(null);
+  const [title, setTitle] = React14.useState(() => job ? routineTitle(job) : "");
+  const [stored, setStored] = React14.useState(() => ({ status: editing ? "loading" : "ready" }));
+  const [instruction, setInstruction] = React14.useState("");
+  const [sched, setSched] = React14.useState(() => job ? { ...scheduleStateFrom(job.schedule), repeatN: void 0 } : defaultScheduleState());
+  const [initialSchedule] = React14.useState(() => job ? composeSchedule({ ...scheduleStateFrom(job.schedule), repeatN: void 0 }).trim() : void 0);
+  const [continuity, setContinuity] = React14.useState(false);
+  const [target, setTarget] = React14.useState(() => job?.deliver === "bot-chat" ? "bot-chat" : "history");
+  const [busy, setBusy] = React14.useState(false);
+  const [error, setError] = React14.useState(null);
   const who = displayName(bot, metaFor(bot));
   const schedule = composeSchedule(sched).trim();
-  React13.useEffect(() => {
+  React14.useEffect(() => {
     if (!editing) return;
     let live = true;
     loadJob(bot, job).then(
@@ -55126,7 +55210,7 @@ function JobRemoveDialog({ bot, job, onClose }) {
 }
 
 // src/ui/ProfileConfig.tsx
-import * as React14 from "react";
+import * as React15 from "react";
 import { Fragment as Fragment10, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
 var modelCatalogue = createCatalogue();
 function modelKey(bot) {
@@ -55147,8 +55231,8 @@ function useModelOptions(bot, { foreground = false } = {}) {
     const data = modelCatalogue.peek(key);
     return data ? { loading: false, error: null, data } : null;
   };
-  const [state, setState] = React14.useState(() => read() || { loading: true, error: null, data: null });
-  React14.useEffect(() => {
+  const [state, setState] = React15.useState(() => read() || { loading: true, error: null, data: null });
+  React15.useEffect(() => {
     let live = true;
     const now = read();
     if (now) setState(now);
@@ -55174,7 +55258,7 @@ function ModelPicker({
   children
 }) {
   const { loading, error, data } = useModelOptions(bot, { foreground });
-  const [manual, setManual] = React14.useState(null);
+  const [manual, setManual] = React15.useState(null);
   const providers = usableProviders(data);
   const known = !value.provider || providers.some((p) => providerMatches(p, value.provider));
   const freeText = loading ? false : manual ?? !known;
@@ -55241,10 +55325,10 @@ function ModelExtraFields({
   ] });
 }
 function SkillsHub({ bot, onInstalled }) {
-  const [query, setQuery] = React14.useState("");
-  const [results, setResults] = React14.useState(null);
-  const [busy, setBusy] = React14.useState(null);
-  const [error, setError] = React14.useState(null);
+  const [query, setQuery] = React15.useState("");
+  const [results, setResults] = React15.useState(null);
+  const [busy, setBusy] = React15.useState(null);
+  const [error, setError] = React15.useState(null);
   return /* @__PURE__ */ jsxs15("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
     /* @__PURE__ */ jsxs15(
       "form",
@@ -55303,11 +55387,11 @@ function backendScope(bot) {
   return route ? { connectionId: route.connectionId, profile: route.targetProfile || route.profile } : bot.name;
 }
 function McpSetup({ bot, entry, onDone }) {
-  const [phase, setPhase] = React14.useState("idle");
-  const [message, setMessage] = React14.useState("");
-  const fields = React14.useRef({});
-  const epoch = React14.useRef(0);
-  const pending = React14.useRef(null);
+  const [phase, setPhase] = React15.useState("idle");
+  const [message, setMessage] = React15.useState("");
+  const fields = React15.useRef({});
+  const epoch = React15.useRef(0);
+  const pending = React15.useRef(null);
   const wipePending = () => {
     const held = pending.current;
     pending.current = null;
@@ -55321,7 +55405,7 @@ function McpSetup({ bot, entry, onDone }) {
   const clearFields = () => {
     for (const input of Object.values(fields.current)) if (input) input.value = "";
   };
-  React14.useEffect(
+  React15.useEffect(
     () => () => {
       epoch.current += 1;
       clearFields();
@@ -55426,12 +55510,12 @@ function McpSetup({ bot, entry, onDone }) {
   ] });
 }
 function AdvancedConfig({ bot, state, setState }) {
-  const [unsupported, setUnsupported] = React14.useState(null);
-  const [filter, setFilter] = React14.useState("");
-  const [toolsetOpen, setToolsetOpen] = React14.useState("");
+  const [unsupported, setUnsupported] = React15.useState(null);
+  const [filter, setFilter] = React15.useState("");
+  const [toolsetOpen, setToolsetOpen] = React15.useState("");
   const ToolsetPanel = sdk.ToolsetConfigPanel;
   const loadKey = `${bot?.connectionId || ""}::${bot?.name}`;
-  React14.useEffect(() => {
+  React15.useEffect(() => {
     if (state.loaded) return;
     let live = true;
     loadProfileConfig(bot).then((next) => live && setState(() => next)).catch((error) => live && setUnsupported(String(error?.message || error)));
@@ -55495,7 +55579,7 @@ function AdvancedConfig({ bot, state, setState }) {
 }
 
 // src/ui/SlackSetup.tsx
-import * as React16 from "react";
+import * as React17 from "react";
 
 // src/core/slack.js
 var SLACK_PLATFORM = "slack";
@@ -56139,29 +56223,29 @@ function enableSlackProvisioning(bot) {
 }
 
 // src/ui/SlackConnect.tsx
-import * as React15 from "react";
+import * as React16 from "react";
 import { Fragment as Fragment11, jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
 function SlackConnect({ bot, name, initial, onClose }) {
-  const [workspaces, setWorkspaces] = React15.useState(initial.workspaces);
-  const [selected, setSelected] = React15.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
-  const [phase, setPhase] = React15.useState(initial.status?.phase || "none");
-  const [teamName, setTeamName] = React15.useState(initial.status?.team_name || "");
-  const [adding, setAdding] = React15.useState(needsWorkspace(initial.workspaces));
-  const [refresh, setRefresh] = React15.useState("");
-  const [authorize, setAuthorize] = React15.useState("");
-  const [busy, setBusy] = React15.useState(false);
-  const [confirm, setConfirm] = React15.useState(false);
-  const [error, setError] = React15.useState("");
-  const [timedOut, setTimedOut] = React15.useState(false);
-  const [testResult, setTestResult] = React15.useState("");
-  const [needsBootstrap, setNeedsBootstrap] = React15.useState(Boolean(initial.bootstrap));
-  const phaseRef = React15.useRef(phase);
-  const alive = React15.useRef(true);
+  const [workspaces, setWorkspaces] = React16.useState(initial.workspaces);
+  const [selected, setSelected] = React16.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
+  const [phase, setPhase] = React16.useState(initial.status?.phase || "none");
+  const [teamName, setTeamName] = React16.useState(initial.status?.team_name || "");
+  const [adding, setAdding] = React16.useState(needsWorkspace(initial.workspaces));
+  const [refresh, setRefresh] = React16.useState("");
+  const [authorize, setAuthorize] = React16.useState("");
+  const [busy, setBusy] = React16.useState(false);
+  const [confirm, setConfirm] = React16.useState(false);
+  const [error, setError] = React16.useState("");
+  const [timedOut, setTimedOut] = React16.useState(false);
+  const [testResult, setTestResult] = React16.useState("");
+  const [needsBootstrap, setNeedsBootstrap] = React16.useState(Boolean(initial.bootstrap));
+  const phaseRef = React16.useRef(phase);
+  const alive = React16.useRef(true);
   phaseRef.current = phase;
-  React15.useEffect(() => () => {
+  React16.useEffect(() => () => {
     alive.current = false;
   }, []);
-  React15.useEffect(() => {
+  React16.useEffect(() => {
     if (phase !== "created" && phase !== "installed") return;
     let stopped = false;
     const started = Date.now();
@@ -56388,10 +56472,10 @@ function SuggestedSlack({ bot }) {
   const state = useStore(slack.state);
   const hidden = useStore(slack.hidden);
   const key = rowKey(bot);
-  React16.useEffect(() => {
+  React17.useEffect(() => {
     loadSlackHidden();
   }, []);
-  React16.useEffect(() => {
+  React17.useEffect(() => {
     void loadSlackState(bot);
   }, [key]);
   if (state.key === key && ["created", "installed", "connected", "denied", "error"].includes(state.connectStatus?.phase)) return null;
@@ -56431,10 +56515,10 @@ function LegacySlackStatusDialog({ bot, onClose }) {
   const entry = state.key === key ? state.platform : null;
   const served = state.key === key && Boolean(state.served);
   const name = displayName(bot, metaFor(bot));
-  const [testing, setTesting] = React16.useState(false);
-  const [result, setResult] = React16.useState(null);
-  const alive = React16.useRef(true);
-  React16.useEffect(() => {
+  const [testing, setTesting] = React17.useState(false);
+  const [result, setResult] = React17.useState(null);
+  const alive = React17.useRef(true);
+  React17.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
@@ -56505,18 +56589,18 @@ function sleep(ms, cancelled) {
 var STEP_NAMES = ["Create the Slack app", "Paste two tokens", "Connect", "Approve your first DM"];
 function LegacySlackDialog({ bot, initial, onClose }) {
   const name = displayName(bot, metaFor(bot));
-  const [stage, setStage] = React16.useState(initial?.stage || "create");
-  const [appToken, setAppToken] = React16.useState("");
-  const [botToken, setBotToken] = React16.useState("");
-  const [busy, setBusy] = React16.useState(false);
-  const [error, setError] = React16.useState(initial?.error ?? null);
-  const [note, setNote] = React16.useState(initial?.note ?? null);
-  const [pending, setPending] = React16.useState(initial?.pending || []);
-  const [approving, setApproving] = React16.useState("");
-  const [approved, setApproved] = React16.useState([]);
-  const [polling, setPolling] = React16.useState(false);
-  const alive = React16.useRef(true);
-  React16.useEffect(() => {
+  const [stage, setStage] = React17.useState(initial?.stage || "create");
+  const [appToken, setAppToken] = React17.useState("");
+  const [botToken, setBotToken] = React17.useState("");
+  const [busy, setBusy] = React17.useState(false);
+  const [error, setError] = React17.useState(initial?.error ?? null);
+  const [note, setNote] = React17.useState(initial?.note ?? null);
+  const [pending, setPending] = React17.useState(initial?.pending || []);
+  const [approving, setApproving] = React17.useState("");
+  const [approved, setApproved] = React17.useState([]);
+  const [polling, setPolling] = React17.useState(false);
+  const alive = React17.useRef(true);
+  React17.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
@@ -56528,7 +56612,7 @@ function LegacySlackDialog({ bot, initial, onClose }) {
     setBotToken("");
     onClose();
   };
-  React16.useEffect(() => {
+  React17.useEffect(() => {
     if (stage !== "connected" || initial?.pending) return;
     let stopped = false;
     const done = () => stopped || gone();
@@ -56759,8 +56843,8 @@ function LegacySlackDialog({ bot, initial, onClose }) {
   ] });
 }
 function SlackConnectRouter({ bot, initial, onClose, status }) {
-  const [result, setResult] = React16.useState(initial ? { kind: "missing" } : null);
-  React16.useEffect(() => {
+  const [result, setResult] = React17.useState(initial ? { kind: "missing" } : null);
+  React17.useEffect(() => {
     if (initial) return;
     let cancelled = false;
     setResult(null);
@@ -56793,9 +56877,9 @@ var hostSeq = 0;
 var hosts = [];
 var hostChange = /* @__PURE__ */ new Set();
 function useIsDialogHost() {
-  const [id] = React17.useState(() => ++hostSeq);
-  const [, force] = React17.useReducer((n) => n + 1, 0);
-  React17.useEffect(() => {
+  const [id] = React18.useState(() => ++hostSeq);
+  const [, force] = React18.useReducer((n) => n + 1, 0);
+  React18.useEffect(() => {
     hosts.push(id);
     hostChange.forEach((fn) => fn());
     hostChange.add(force);
@@ -56811,14 +56895,14 @@ function useIsDialogHost() {
 function RosterDialogs() {
   const isHost = useIsDialogHost();
   const dialog = useStore(roster2.dialog);
-  const [confirm, setConfirm] = React17.useState(null);
-  React17.useEffect(() => {
+  const [confirm, setConfirm] = React18.useState(null);
+  React18.useEffect(() => {
     if (!isHost) return;
     setConfirm(null);
     setConfirmAsker((message) => new Promise((resolve) => setConfirm({ message, resolve })));
     return () => setConfirmAsker(null);
   }, [isHost]);
-  const close = React17.useCallback(() => closeDialogIf(dialog), [dialog]);
+  const close = React18.useCallback(() => closeDialogIf(dialog), [dialog]);
   if (!isHost) return null;
   return /* @__PURE__ */ jsxs18(OverrideBoundary, { area: "dialog", onReset: close, children: [
     dialog?.kind === "edit" ? /* @__PURE__ */ jsx19(EditProfileDialog, { bot: dialog.bot, onClose: close }) : null,
@@ -56902,11 +56986,11 @@ function normalizeImage(dataUrl, edge = 256) {
   });
 }
 function AvatarPicker({ name, title, description, look, setLook }) {
-  const [tab, setTab] = React17.useState("face");
-  const [gen, setGen] = React17.useState({ available: null, busy: false, error: null });
+  const [tab, setTab] = React18.useState("face");
+  const [gen, setGen] = React18.useState({ available: null, busy: false, error: null });
   const seedName = name || "agent";
   const { seedPart, kind } = parseBlob(look.shape);
-  React17.useEffect(() => {
+  React18.useEffect(() => {
     if (tab === "generate" && gen.available !== true) void probeImageGeneration().then((available) => setGen((g) => ({ ...g, available })));
   }, [tab]);
   return /* @__PURE__ */ jsxs18("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [
@@ -56996,21 +57080,21 @@ function lookOf(bot, meta) {
   return { shape: meta?.shape || "blobatar", color: meta?.color ?? null, image: meta?.image ?? null, title: meta?.title || bot?.title || "" };
 }
 function EditProfileDialog({ bot: row, onClose }) {
-  const [bot, setBot] = React17.useState(row);
+  const [bot, setBot] = React18.useState(row);
   const meta = metaFor(row);
-  const [opened] = React17.useState(() => lookOf(row, meta));
-  const [look, setLook] = React17.useState(() => lookOf(row, meta));
-  const [description, setDescriptionState] = React17.useState(String(row.description || ""));
-  const descriptionTouched = React17.useRef(false);
+  const [opened] = React18.useState(() => lookOf(row, meta));
+  const [look, setLook] = React18.useState(() => lookOf(row, meta));
+  const [description, setDescriptionState] = React18.useState(String(row.description || ""));
+  const descriptionTouched = React18.useRef(false);
   const setDescription = (value) => {
     descriptionTouched.current = true;
     setDescriptionState(value);
   };
-  const [advancedOpen, setAdvancedOpen] = React17.useState(false);
-  const [adv, setAdv] = React17.useState(emptyAdvancedState());
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(null);
-  React17.useEffect(() => {
+  const [advancedOpen, setAdvancedOpen] = React18.useState(false);
+  const [adv, setAdv] = React18.useState(emptyAdvancedState());
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(null);
+  React18.useEffect(() => {
     let live = true;
     void ensureBotProfile(row).then((next) => {
       if (!live) return;
@@ -57063,9 +57147,9 @@ function EditProfileDialog({ bot: row, onClose }) {
   );
 }
 function ConfigDialog({ bot, initial, onClose }) {
-  const [adv, setAdv] = React17.useState(() => initial?.loaded ? initial : emptyAdvancedState());
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(null);
+  const [adv, setAdv] = React18.useState(() => initial?.loaded ? initial : emptyAdvancedState());
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(null);
   const dirty = adv.dirtyModel || adv.dirtySoul || adv.dirtySkills || adv.dirtyToolsets || adv.dirtyMcp;
   return /* @__PURE__ */ jsxs18(
     Dialog,
@@ -57113,10 +57197,10 @@ function ModelDialog({ bot, onClose }) {
   const key = rowKey(bot);
   const current = useStore(roster2.models)[key];
   const settings = useStore(roster2.modelSettings)[key];
-  const [edits, setEdits] = React17.useState({});
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(null);
-  React17.useEffect(() => {
+  const [edits, setEdits] = React18.useState({});
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(null);
+  React18.useEffect(() => {
     void loadBotModel(bot, { foreground: true });
     void loadBotModelSettings(bot, { foreground: true });
   }, [key]);
@@ -57199,9 +57283,9 @@ function ModelDialog({ bot, onClose }) {
 function GroupsDialog({ bot, onClose }) {
   useStore(roster2.metaWrites);
   useStore(app.roster);
-  const [name, setName] = React17.useState("");
-  const [error, setError] = React17.useState(null);
-  const [busy, setBusy] = React17.useState(false);
+  const [name, setName] = React18.useState("");
+  const [error, setError] = React18.useState(null);
+  const [busy, setBusy] = React18.useState(false);
   const meta = metaFor(bot);
   const current = botGroups(meta);
   const groups = knownGroups(app.roster.get().rows.map((r) => metaFor(r)));
@@ -57286,24 +57370,24 @@ function GroupsDialog({ bot, onClose }) {
 }
 function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }) {
   useStore(app.roster);
-  const [name, setName] = React17.useState("");
-  const [title, setTitle] = React17.useState("");
-  const [description, setDescription] = React17.useState("");
-  const [look, setLook] = React17.useState({ shape: blobatarMarkup("x", 8) !== null ? "blobatar" : "circle", color: null, image: null });
-  const [tab, setTab] = React17.useState(initialTab);
-  const [target, setTarget] = React17.useState("");
-  const [connections, setConnections] = React17.useState([]);
-  const [cloneFrom, setCloneFrom] = React17.useState("default");
-  const [model, setModel] = React17.useState({ provider: "", model: "" });
-  const [soul, setSoul] = React17.useState("");
-  const [noSkills, setNoSkills] = React17.useState(false);
-  const [shareAuth, setShareAuth] = React17.useState(true);
-  const [caps, setCaps] = React17.useState(initialCaps ? { target: "", ...initialCaps } : null);
-  const [capsError, setCapsError] = React17.useState(null);
-  const [dirtyCaps, setDirtyCaps] = React17.useState({ skills: false, toolsets: false, mcp: false });
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(null);
-  React17.useEffect(() => {
+  const [name, setName] = React18.useState("");
+  const [title, setTitle] = React18.useState("");
+  const [description, setDescription] = React18.useState("");
+  const [look, setLook] = React18.useState({ shape: blobatarMarkup("x", 8) !== null ? "blobatar" : "circle", color: null, image: null });
+  const [tab, setTab] = React18.useState(initialTab);
+  const [target, setTarget] = React18.useState("");
+  const [connections, setConnections] = React18.useState([]);
+  const [cloneFrom, setCloneFrom] = React18.useState("default");
+  const [model, setModel] = React18.useState({ provider: "", model: "" });
+  const [soul, setSoul] = React18.useState("");
+  const [noSkills, setNoSkills] = React18.useState(false);
+  const [shareAuth, setShareAuth] = React18.useState(true);
+  const [caps, setCaps] = React18.useState(initialCaps ? { target: "", ...initialCaps } : null);
+  const [capsError, setCapsError] = React18.useState(null);
+  const [dirtyCaps, setDirtyCaps] = React18.useState({ skills: false, toolsets: false, mcp: false });
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(null);
+  React18.useEffect(() => {
     void listConnections().then(setConnections);
   }, []);
   const active = String(activeConnection() || "");
@@ -57313,7 +57397,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
   const remote = Boolean(target);
   const taken = slugTaken(rows, slug, target);
   const capSource = cloneFrom === "__none__" || remote ? "default" : cloneFrom;
-  React17.useEffect(() => {
+  React18.useEffect(() => {
     if (tab !== "capabilities" || caps && caps.source === capSource && caps.target === target) return;
     let live = true;
     setCapsError(null);
@@ -57419,7 +57503,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
 }
 
 // src/ui/Rooms.tsx
-import * as React18 from "react";
+import * as React19 from "react";
 import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
 function botFor(profile, route) {
   return app.roster.get().rows.find(
@@ -57432,10 +57516,10 @@ function Face({ profile, route, size = 28, working = false }) {
 }
 function NewGroup({ route, onDone }) {
   const roster = useStore(app.roster);
-  const [name, setName] = React18.useState("");
-  const [picked, setPicked] = React18.useState([]);
-  const [error, setError] = React18.useState("");
-  const [busy, setBusy] = React18.useState(false);
+  const [name, setName] = React19.useState("");
+  const [picked, setPicked] = React19.useState([]);
+  const [error, setError] = React19.useState("");
+  const [busy, setBusy] = React19.useState(false);
   const eligible = roster.rows.filter((bot) => String(bot?.route?.connectionId || bot?.connectionId || "local") === String(route?.connectionId || "local") && !metaFor(bot)?.hidden);
   return /* @__PURE__ */ jsxs19(
     "form",
@@ -57510,7 +57594,7 @@ function RoomsSection({ query = "" }) {
   ] });
 }
 function PendingAction({ action, controller: controller2, members, route, acting }) {
-  const [error, setError] = React18.useState("");
+  const [error, setError] = React19.useState("");
   const member = members.find((m) => m.member_id === action.member_id);
   const who = member?.display_name || member?.handle || action.member_id;
   const run = (choice) => controller2.act(action, choice).catch((err2) => setError(String(err2?.message || err2)));
@@ -57582,18 +57666,18 @@ function RoomWorkspace({ slot }) {
   const state = useStore(slot.chat);
   const controller2 = slot.controller();
   const route = slot.route;
-  const [draft, setDraft] = React18.useState("");
-  const [note, setNote] = React18.useState("");
-  const [renaming, setRenaming] = React18.useState(false);
-  const [newName, setNewName] = React18.useState("");
-  const [confirmDisband, setConfirmDisband] = React18.useState(false);
-  const scroller = React18.useRef(null);
+  const [draft, setDraft] = React19.useState("");
+  const [note, setNote] = React19.useState("");
+  const [renaming, setRenaming] = React19.useState(false);
+  const [newName, setNewName] = React19.useState("");
+  const [confirmDisband, setConfirmDisband] = React19.useState(false);
+  const scroller = React19.useRef(null);
   const room = state.room || slot.room;
   const members = room?.members || [];
   const driver = state.driver;
   const working = new Set((driver?.member_activity || []).filter((a2) => a2.status === "working" || a2.status === "running").map((a2) => a2.member_id));
-  const items = React18.useMemo(() => withDividers(state.items || []), [state.items]);
-  React18.useLayoutEffect(() => {
+  const items = React19.useMemo(() => withDividers(state.items || []), [state.items]);
+  React19.useLayoutEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length, state.posts?.length]);
@@ -57721,7 +57805,7 @@ function RoomWorkspace({ slot }) {
 }
 
 // src/ui/Screen.tsx
-import * as React19 from "react";
+import * as React20 from "react";
 
 // src/core/screen.js
 var CLOSE_CONTROL_TAKEN = 4e3;
@@ -57961,7 +58045,7 @@ function screenStore(bot) {
   return store;
 }
 function useScreenState(store) {
-  return React19.useSyncExternalStore(store.subscribe, store.get, store.get);
+  return React20.useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 async function loadRfb() {
   const mod = await init_novnc_rfb().then(() => novnc_rfb_exports);
@@ -57981,26 +58065,26 @@ function BotScreen({ bot }) {
   const lease = state.lease ?? status?.lease ?? null;
   const viewer = state.viewer;
   const iHold = leaseHeldBy(lease, viewer);
-  const canvasHost = React19.useRef(null);
-  const rfb = React19.useRef(null);
-  const socket = React19.useRef(null);
-  const retention = React19.useRef(null);
-  const installRetention = React19.useRef(null);
-  const unmounted = React19.useRef(false);
-  const releaseInstall = React19.useCallback(() => {
+  const canvasHost = React20.useRef(null);
+  const rfb = React20.useRef(null);
+  const socket = React20.useRef(null);
+  const retention = React20.useRef(null);
+  const installRetention = React20.useRef(null);
+  const unmounted = React20.useRef(false);
+  const releaseInstall = React20.useCallback(() => {
     installRetention.current?.();
     installRetention.current = null;
   }, []);
-  const pasteCleanup = React19.useRef(null);
-  const generation2 = React19.useRef(0);
-  const dialedAt = React19.useRef(0);
-  const evictions = React19.useRef(0);
-  const [conn, setConn] = React19.useState("idle");
-  const [error, setError] = React19.useState(null);
-  const [busy, setBusy] = React19.useState(false);
-  const [evicted, setEvicted] = React19.useState(false);
-  const [installLog, setInstallLog] = React19.useState([]);
-  const refresh = React19.useCallback(async () => {
+  const pasteCleanup = React20.useRef(null);
+  const generation2 = React20.useRef(0);
+  const dialedAt = React20.useRef(0);
+  const evictions = React20.useRef(0);
+  const [conn, setConn] = React20.useState("idle");
+  const [error, setError] = React20.useState(null);
+  const [busy, setBusy] = React20.useState(false);
+  const [evicted, setEvicted] = React20.useState(false);
+  const [installLog, setInstallLog] = React20.useState([]);
+  const refresh = React20.useCallback(async () => {
     const request2 = store.beginRequest();
     try {
       store.setStatus(await displayRequest(host2, bot, "display.status"), request2);
@@ -58010,7 +58094,7 @@ function BotScreen({ bot }) {
       setError(errText(err2));
     }
   }, [rowKey(bot)]);
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     void refresh();
     const key = () => store.get().status?.profile_key;
     const offLease = onDisplayEvent("display.lease", (event) => {
@@ -58035,7 +58119,7 @@ function BotScreen({ bot }) {
       offDone?.();
     };
   }, [refresh, releaseInstall]);
-  const detach = React19.useCallback((handBack2 = false) => {
+  const detach = React20.useCallback((handBack2 = false) => {
     generation2.current += 1;
     if (handBack2) socket.current?.close(1e3);
     try {
@@ -58050,7 +58134,7 @@ function BotScreen({ bot }) {
     pasteCleanup.current?.();
     pasteCleanup.current = null;
   }, []);
-  const attach = React19.useCallback(
+  const attach = React20.useCallback(
     async (auto = false) => {
       if (!canvasHost.current) return;
       if (!auto) evictions.current = 0;
@@ -58139,7 +58223,7 @@ function BotScreen({ bot }) {
     },
     [rowKey(bot), detach, refresh]
   );
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     unmounted.current = false;
     return () => {
       unmounted.current = true;
@@ -58147,10 +58231,10 @@ function BotScreen({ bot }) {
       detach(true);
     };
   }, [detach, releaseInstall]);
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     if (status?.running && conn === "idle") void attach(true);
   }, [status?.running, conn, attach]);
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     if (rfb.current) {
       rfb.current.viewOnly = !iHold;
       if (iHold) rfb.current.focus?.();
@@ -58313,7 +58397,7 @@ setScreenOpener(openBotScreen);
 onRosterParityStop(closeAllScreens);
 
 // src/ui/OverlayScroll.tsx
-import * as React20 from "react";
+import * as React21 from "react";
 import { jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
 var MIN_THUMB_PX = 28;
 function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
@@ -58324,11 +58408,13 @@ function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
   const offset = range > 0 ? Math.round(Math.min(Math.max(scrollTop, 0), range) / range * travel) : 0;
   return { size, offset, travel, range };
 }
-function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, children, ...rest }) {
-  const scroller = React20.useRef(null);
-  const thumb = React20.useRef(null);
-  const [dragging, setDragging] = React20.useState(false);
-  const update = React20.useCallback(() => {
+function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, children, ...rest }) {
+  const scroller = React21.useRef(null);
+  const thumb = React21.useRef(null);
+  const [dragging, setDragging] = React21.useState(false);
+  const resized = React21.useRef(onContentResize);
+  resized.current = onContentResize;
+  const update = React21.useCallback(() => {
     const el = scroller.current;
     const bar = thumb.current;
     if (!el || !bar) return;
@@ -58341,19 +58427,34 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     bar.style.height = `${geo.size}px`;
     bar.style.transform = `translateY(${el.offsetTop + geo.offset}px)`;
   }, []);
-  React20.useLayoutEffect(() => {
+  React21.useLayoutEffect(() => {
     update();
     const el = scroller.current;
     const RO = globalThis.ResizeObserver;
     if (!el || typeof RO !== "function") return void 0;
-    const observer2 = new RO(update);
+    const observer2 = new RO(() => {
+      resized.current?.();
+      update();
+    });
     observer2.observe(el);
     for (const child of Array.from(el.children)) observer2.observe(child);
-    const mo = typeof MutationObserver === "function" ? new MutationObserver(update) : null;
+    const raf2 = globalThis.requestAnimationFrame;
+    const caf = globalThis.cancelAnimationFrame;
+    let frame = null;
+    const queue = () => {
+      if (frame !== null) return;
+      if (typeof raf2 !== "function") return update();
+      frame = raf2(() => {
+        frame = null;
+        update();
+      });
+    };
+    const mo = typeof MutationObserver === "function" ? new MutationObserver(queue) : null;
     mo?.observe(el, { childList: true, subtree: true });
     return () => {
       observer2.disconnect();
       mo?.disconnect();
+      if (frame !== null && typeof caf === "function") caf(frame);
     };
   }, [update]);
   const setScroller = (el) => {
@@ -58390,7 +58491,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     target.addEventListener("pointercancel", end);
   };
   return /* @__PURE__ */ jsxs21("div", { className: `gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ""}${dragging ? " is-dragging" : ""}`, children: [
-    React20.createElement(
+    React21.createElement(
       as,
       {
         ...rest,
@@ -58403,7 +58504,8 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
       },
       children
     ),
-    /* @__PURE__ */ jsx23("div", { className: "gbo-oscroll-thumb", ref: thumb, "data-scrollable": "false", "aria-hidden": "true", onPointerDown: startDrag })
+    /* @__PURE__ */ jsx23("div", { className: "gbo-oscroll-thumb", ref: thumb, "data-scrollable": "false", "aria-hidden": "true", onPointerDown: startDrag }),
+    overlay
   ] });
 }
 
@@ -58425,7 +58527,7 @@ function jobWhen(job) {
 function ModelCard({ bot }) {
   const key = rowKey(bot);
   const current = useStore(roster2.models)[key];
-  React21.useEffect(() => {
+  React22.useEffect(() => {
     void loadBotModel(bot);
     void loadBotModelSettings(bot);
   }, [key]);
@@ -58586,7 +58688,7 @@ function ProfilePanel({ bot, onClose }) {
 }
 
 // src/ui/Prompts.tsx
-import * as React22 from "react";
+import * as React23 from "react";
 import { Fragment as Fragment15, jsx as jsx25, jsxs as jsxs23 } from "react/jsx-runtime";
 var TITLES = {
   sudo: "needs your administrator password",
@@ -58636,7 +58738,7 @@ function ChoiceCard({
     if (qid && qid in overrides) return onPick?.(qid, overrides[qid], nextPage);
     onPage?.(nextPage);
   };
-  const baseId = React22.useId();
+  const baseId = React23.useId();
   const shown = paged ? [current, ...questions.map((_, i) => i).filter((i) => i !== current)] : questions.map((_, i) => i);
   const block = (qi) => {
     const q = questions[qi];
@@ -58758,8 +58860,8 @@ function SettledChoiceCard({ item }) {
   return /* @__PURE__ */ jsx25(ChoiceCard, { questions: item.questions || [], picks: item.answers || {}, settled: { status: item.status } });
 }
 function ValueCard({ waiting, onAnswer }) {
-  const first = React22.useRef(null);
-  const second = React22.useRef(null);
+  const first = React23.useRef(null);
+  const second = React23.useRef(null);
   const busy = Boolean(waiting.answering);
   const login = waiting.kind === "vault-login";
   const secret = waiting.kind !== "vault-code";
@@ -58826,7 +58928,7 @@ function openExternal(url) {
 }
 function ConnectionCard({ waiting, onRespond }) {
   const busy = Boolean(waiting.answering);
-  const forms = React22.useRef({});
+  const forms = React23.useRef({});
   const targets = waiting.targets || [];
   return /* @__PURE__ */ jsxs23(Fragment15, { children: [
     targets.length === 0 ? /* @__PURE__ */ jsx25("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
@@ -58924,11 +59026,11 @@ function WaitingCard({ waiting, bot, name, controller: controller2 }) {
 }
 
 // src/ui/Tools.tsx
-import * as React23 from "react";
+import * as React24 from "react";
 import { jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
 var PREVIEW_CHARS = 4e3;
 function LongText({ text: text3, label }) {
-  const [all, setAll] = React23.useState(false);
+  const [all, setAll] = React24.useState(false);
   const long = text3.length > PREVIEW_CHARS;
   return /* @__PURE__ */ jsxs24("div", { className: "gbo-tool-block", children: [
     /* @__PURE__ */ jsx26("div", { className: "gbo-tool-block-label", children: label }),
@@ -59075,18 +59177,18 @@ function UserMeta({
 }
 var STREAM_RENDER_MS = 60;
 function useStreamText(text3, streaming) {
-  const [shown, setShown] = React24.useState(text3);
-  const latest = React24.useRef(text3);
-  const timer = React24.useRef(null);
+  const [shown, setShown] = React25.useState(text3);
+  const latest = React25.useRef(text3);
+  const timer = React25.useRef(null);
   latest.current = text3;
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     if (!streaming || timer.current) return;
     timer.current = setTimeout(() => {
       timer.current = null;
       setShown(latest.current);
     }, STREAM_RENDER_MS);
   }, [text3, streaming]);
-  React24.useEffect(() => () => clearTimeout(timer.current), []);
+  React25.useEffect(() => () => clearTimeout(timer.current), []);
   return streaming ? shown : text3;
 }
 function DirectivePlaceholder() {
@@ -59095,7 +59197,7 @@ function DirectivePlaceholder() {
 function AssistantBody({ item, bot, pos }) {
   const streaming = Boolean(item.streaming);
   const shown = useStreamText(item.text, streaming);
-  const safe = React24.useMemo(() => streaming ? streamSafeParts(shown) : null, [streaming, shown]);
+  const safe = React25.useMemo(() => streaming ? streamSafeParts(shown) : null, [streaming, shown]);
   const { segments, scope } = useDirectiveSegments(safe ? safe.text : item.text);
   const time = item.at ? /* @__PURE__ */ jsx27("span", { className: "bubble__time", children: clock(item.at) }) : null;
   const pending = safe?.directive && scope ? /* @__PURE__ */ jsx27(DirectivePlaceholder, {}) : null;
@@ -59124,10 +59226,10 @@ function AssistantBody({ item, bot, pos }) {
   ] });
 }
 function TurnErrorCard({ item, bot, controller: controller2 }) {
-  const [open, setOpen] = React24.useState(false);
-  const [starting, setStarting] = React24.useState(false);
-  const pressed = React24.useRef(false);
-  React24.useEffect(() => {
+  const [open, setOpen] = React25.useState(false);
+  const [starting, setStarting] = React25.useState(false);
+  const pressed = React25.useRef(false);
+  React25.useEffect(() => {
     if (!item.retrying) pressed.current = false;
   }, [item.retrying, item.id]);
   const retry = () => {
@@ -59207,28 +59309,6 @@ function Item({
       return null;
   }
 }
-var STICK_PX = 16;
-function useStickToBottom(dep, mine) {
-  const ref = React24.useRef(null);
-  const stick = React24.useRef(true);
-  const lastMine = React24.useRef(mine);
-  React24.useLayoutEffect(() => {
-    const el = ref.current;
-    if (mine !== lastMine.current) {
-      lastMine.current = mine;
-      if (mine) stick.current = true;
-    }
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [dep, mine]);
-  const onScroll = () => {
-    const el = ref.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
-  };
-  const pin = () => {
-    stick.current = true;
-  };
-  return { ref, onScroll, pin, stick };
-}
 function lookingAt(el) {
   const doc = el?.ownerDocument;
   if (!el || !doc || !el.isConnected) return false;
@@ -59239,16 +59319,16 @@ function lookingAt(el) {
 }
 function useNewLine(key, items, ready, ref) {
   const line = useStore(roster2.newLine);
-  const latest = React24.useRef({ key, items, ready });
+  const latest = React25.useRef({ key, items, ready });
   latest.current = { key, items, ready };
-  const note = React24.useCallback(() => {
+  const note = React25.useCallback(() => {
     const { key: k, items: list, ready: ok } = latest.current;
     noteTranscript(k, list, ok, lookingAt(ref.current));
   }, [ref]);
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     note();
   }, [key, items, ready, note]);
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     const win = globalThis.window;
     const doc = globalThis.document;
     win?.addEventListener?.("focus", note);
@@ -59263,22 +59343,29 @@ function useNewLine(key, items, ready, ref) {
 function NewLine() {
   return /* @__PURE__ */ jsx27("div", { className: "gbo-new-line", role: "separator", "aria-label": "New messages", children: /* @__PURE__ */ jsx27("span", { children: "NEW" }) });
 }
-var SlotContext = React24.createContext(mainSlot);
-var useController = () => React24.useContext(SlotContext).controller();
+var SlotContext = React25.createContext(mainSlot);
+var useController = () => React25.useContext(SlotContext).controller();
 function Transcript({ state, bot, meta, onPrefill }) {
   const items = state.chat.items;
   const showWork = useStore(app.showWork);
-  const mine = React24.useMemo(() => {
+  const mine = React25.useMemo(() => {
     for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === "user") return String(items[i].id);
     return "";
   }, [items]);
-  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items, mine);
+  const latest = React25.useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const kind = items[i]?.kind;
+      if (kind === "user" || kind === "assistant") return String(items[i].id);
+    }
+    return "";
+  }, [items]);
+  const { ref, onScroll: onStickScroll, onContentResize, pin, keepPlace, jump, unseen } = useStickToBottom(items, mine, latest);
   const newLine = useNewLine(rowKey(bot), items, state.phase === "ready", ref);
   const onScroll = () => {
     onStickScroll();
     newLine.note();
   };
-  const decorated = React24.useMemo(
+  const decorated = React25.useMemo(
     () => groupMessages(
       withNewMarker(withDividers(withTurnCards(visibleItems(withEmailDrafts(items), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
     ),
@@ -59291,8 +59378,8 @@ function Transcript({ state, bot, meta, onPrefill }) {
   const openStock = () => void openInBotMode(bot, "Check whether your message arrived before sending anything again.");
   const activity2 = state.chat.busy ? activityLabel(state.chat, showWork) : "";
   const recentKey = items.slice(-8).map((item) => item.id).join("|");
-  const outer = React24.useContext(DirectiveContext);
-  const directives = React24.useMemo(
+  const outer = React25.useContext(DirectiveContext);
+  const directives = React25.useMemo(
     () => !controller2 ? outer : state.storedId ? {
       bot,
       sessionId: String(state.storedId),
@@ -59301,36 +59388,47 @@ function Transcript({ state, bot, meta, onPrefill }) {
     } : null,
     [bot, state.storedId, controller2, recentKey, outer]
   );
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     pin();
   }, [state.storedId]);
-  return /* @__PURE__ */ jsx27(DirectiveContext.Provider, { value: directives, children: /* @__PURE__ */ jsx27(OverlayScroll, { wrapClassName: "transcript-wrap gbo-transcript-scroll", className: "transcript gbo-transcript", scrollRef: ref, onScroll, children: /* @__PURE__ */ jsxs25("div", { className: "transcript__col gbo-column", children: [
-    state.hasMore ? /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void controller2?.loadEarlier(), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
-    !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs25("div", { className: "empty-chat", children: [
-      /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
-      /* @__PURE__ */ jsx27("div", { className: "empty-chat__title", children: displayName(bot, meta) }),
-      /* @__PURE__ */ jsx27("div", { className: "empty-chat__sub", children: "Send a message to start the conversation" })
-    ] }) : null,
-    decorated.map((entry) => {
-      const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
-      if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.id);
-      const bubbles = entry.items.filter((item) => item.text);
-      return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.id)) }, entry.id);
-    }),
-    state.chat.waiting ? /* @__PURE__ */ jsx27(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
-    activity2 ? /* @__PURE__ */ jsxs25("div", { className: "activity-line gbo-activity", role: "status", children: [
-      /* @__PURE__ */ jsx27("span", { className: "activity-line__mark", children: /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 22 }) }),
-      /* @__PURE__ */ jsxs25("span", { className: "activity-line__text shimmer", children: [
-        activity2,
-        "…"
+  return /* @__PURE__ */ jsx27(DirectiveContext.Provider, { value: directives, children: /* @__PURE__ */ jsx27(
+    OverlayScroll,
+    {
+      wrapClassName: "transcript-wrap gbo-transcript-scroll",
+      className: "transcript gbo-transcript",
+      scrollRef: ref,
+      onScroll,
+      onContentResize,
+      overlay: unseen ? /* @__PURE__ */ jsx27("button", { type: "button", className: "jump-btn gbo-jump", "aria-label": "Jump to latest", title: "Jump to latest", onClick: jump, children: /* @__PURE__ */ jsx27(IconChevronDown, {}) }) : null,
+      children: /* @__PURE__ */ jsxs25("div", { className: "transcript__col gbo-column", children: [
+        state.hasMore ? /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void keepPlace(() => controller2?.loadEarlier()), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
+        !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs25("div", { className: "empty-chat", children: [
+          /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
+          /* @__PURE__ */ jsx27("div", { className: "empty-chat__title", children: displayName(bot, meta) }),
+          /* @__PURE__ */ jsx27("div", { className: "empty-chat__sub", children: "Send a message to start the conversation" })
+        ] }) : null,
+        decorated.map((entry) => {
+          const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
+          if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.id);
+          const bubbles = entry.items.filter((item) => item.text);
+          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.id)) }, entry.id);
+        }),
+        state.chat.waiting ? /* @__PURE__ */ jsx27(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
+        activity2 ? /* @__PURE__ */ jsxs25("div", { className: "activity-line gbo-activity", role: "status", children: [
+          /* @__PURE__ */ jsx27("span", { className: "activity-line__mark", children: /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 22 }) }),
+          /* @__PURE__ */ jsxs25("span", { className: "activity-line__text shimmer", children: [
+            activity2,
+            "…"
+          ] })
+        ] }) : null,
+        state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx27("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
       ] })
-    ] }) : null,
-    state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx27("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
-  ] }) }) });
+    }
+  ) });
 }
 function Center({ state, bot }) {
   const controller2 = useController();
-  const slot = React24.useContext(SlotContext);
+  const slot = React25.useContext(SlotContext);
   const name = displayName(bot, metaFor(bot));
   if (state.phase === "no-chat") {
     return /* @__PURE__ */ jsxs25("div", { className: "gbo-center", children: [
@@ -59384,7 +59482,7 @@ function Center({ state, bot }) {
 }
 var NARROW_PANE_PX = 900;
 function usePaneWidth(ref, enabled = true) {
-  React24.useEffect(() => {
+  React25.useLayoutEffect(() => {
     const el = ref.current;
     if (!enabled) return void 0;
     const RO = globalThis.ResizeObserver;
@@ -59438,8 +59536,8 @@ function PanelSash({ rootRef }) {
   );
 }
 function ProfileDrawer({ bot, onClose, backgroundRef }) {
-  const ref = React24.useRef(null);
-  React24.useEffect(() => {
+  const ref = React25.useRef(null);
+  React25.useEffect(() => {
     if (!ref.current) return;
     return trapFocus(ref.current, { background: backgroundRef.current });
   }, [backgroundRef]);
@@ -59472,14 +59570,14 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const panelWidth = useStore(app.panelWidth);
   const roster = useStore(app.roster);
   const rosterShown = useStore(app.rosterShown);
-  const rootRef = React24.useRef(null);
-  const draftRef = React24.useRef(null);
-  const chatRef = React24.useRef(null);
+  const rootRef = React25.useRef(null);
+  const draftRef = React25.useRef(null);
+  const chatRef = React25.useRef(null);
   usePaneWidth(rootRef, !slot.extra);
-  const closeDrawer = React24.useCallback(() => app.drawerOpen.set(false), []);
+  const closeDrawer = React25.useCallback(() => app.drawerOpen.set(false), []);
   const bot = state?.bot ? findBot(rowKey(state.bot)) || state.bot : findBot(selectedKey);
   const pending = !state && bot && !slot.extra ? rowKey(bot) : "";
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     if (!pending || app.chat.get()) return;
     const target = findBot(pending);
     if (target) selectBot(target, { openWorkspace: false });
@@ -59554,7 +59652,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
 }
 
 // src/ui/Roster.tsx
-import * as React26 from "react";
+import * as React27 from "react";
 
 // src/core/person.js
 function initialsOf(name) {
@@ -59571,20 +59669,20 @@ function footerPerson(name) {
 }
 
 // src/ui/Unread.tsx
-import * as React25 from "react";
+import * as React26 from "react";
 import { jsx as jsx28 } from "react/jsx-runtime";
 function UnreadDot({ bot }) {
   const Dot = sdk.SessionStatusDot;
   const id = botCanonicalSessionId(bot);
   if (!id || !(typeof Dot === "function" || Dot && typeof Dot === "object")) return null;
-  return /* @__PURE__ */ jsx28("span", { className: "gbo-row-dot", children: React25.createElement(Dot, { storedSessionId: id }) });
+  return /* @__PURE__ */ jsx28("span", { className: "gbo-row-dot", children: React26.createElement(Dot, { storedSessionId: id }) });
 }
 
 // src/ui/Roster.tsx
 import { Fragment as Fragment18, jsx as jsx29, jsxs as jsxs26 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
-  const [now, setNow] = React26.useState(() => Date.now());
-  React26.useEffect(() => {
+  const [now, setNow] = React27.useState(() => Date.now());
+  React27.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(id);
   }, [ms]);
@@ -59630,11 +59728,11 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
   ] });
 }
 function SectionNameField({ initial = "", label, onCommit, onCancel }) {
-  const [value, setValue] = React26.useState(initial);
-  const ref = React26.useRef(null);
-  const done = React26.useRef(false);
-  const mountedAt = React26.useRef(Date.now());
-  React26.useEffect(() => {
+  const [value, setValue] = React27.useState(initial);
+  const ref = React27.useRef(null);
+  const done = React27.useRef(false);
+  const mountedAt = React27.useRef(Date.now());
+  React27.useEffect(() => {
     const focus = () => {
       if (done.current) return;
       ref.current?.focus();
@@ -59705,7 +59803,7 @@ function PinnedBot({ bot, size, selected, working }) {
   ) }) });
 }
 function useRosterShown(ref) {
-  React26.useEffect(() => {
+  React27.useEffect(() => {
     app.rosterShown.set(true);
     const el = ref.current;
     const RO = globalThis.ResizeObserver;
@@ -59722,7 +59820,7 @@ function useRosterShown(ref) {
 }
 var NAV_KEYS = /* @__PURE__ */ new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
 function usePointerMode(ref) {
-  React26.useEffect(() => {
+  React27.useEffect(() => {
     const el = ref.current;
     const doc = el?.ownerDocument;
     if (!el || !doc) return;
@@ -59754,10 +59852,10 @@ function RosterPane() {
   const sectionEdit = useStore(roster2.sectionEdit);
   const sectionDelete = useStore(roster2.sectionDelete);
   const person = footerPerson(useStore(app.userName));
-  React26.useEffect(() => loadUserName(), []);
-  const [searching, setSearching] = React26.useState(false);
+  React27.useEffect(() => loadUserName(), []);
+  const [searching, setSearching] = React27.useState(false);
   const now = useNow();
-  const rootRef = React26.useRef(null);
+  const rootRef = React27.useRef(null);
   useRosterShown(rootRef);
   usePointerMode(rootRef);
   const roster = app.roster.get();
@@ -59916,7 +60014,7 @@ function RosterPane() {
               ]
             }
           ) }) : null;
-          return /* @__PURE__ */ jsxs26(React26.Fragment, { children: [
+          return /* @__PURE__ */ jsxs26(React27.Fragment, { children: [
             /* @__PURE__ */ jsxs26("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
               head,
               isCollapsed ? null : section.bots.map((bot) => row(bot))

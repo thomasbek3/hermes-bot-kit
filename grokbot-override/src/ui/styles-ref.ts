@@ -378,7 +378,7 @@ a { color: inherit; }
 
 /* ---------- transcript ---------- */
 .transcript-wrap { position: relative; flex: 1 1 0; min-height: 0; }
-.transcript { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 60px 16px 16px; overflow-anchor: none; }
+.transcript { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 60px 16px 16px; overflow-anchor: auto; }
 .transcript__col { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: 960px; margin: 0 auto; min-height: 100%; justify-content: flex-end; }
 .transcript__col > * { max-width: 100%; }
 
@@ -500,6 +500,7 @@ a { color: inherit; }
   animation: rise 160ms var(--ease-out);
 }
 .jump-btn:hover { background: var(--color-bg-elevated-hover); }
+.jump-btn svg { width: 16px; height: 16px; color: var(--color-text-secondary); }
 
 /* ---------- empty chat ---------- */
 .empty-chat { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: auto; padding: 40px 24px; text-align: center; align-self: center; }

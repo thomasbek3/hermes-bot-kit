@@ -23,11 +23,12 @@ import { roster2 } from './rosterStores'
 import { newChatWith } from './rosterActions'
 import { BotAvatar, botColor } from './Avatar'
 import { Composer } from './Composer'
-import { IconChevron, IconOpen, IconPanel, IconSidebar, IconX } from './icons'
+import { IconChevron, IconChevronDown, IconOpen, IconPanel, IconSidebar, IconX } from './icons'
 import { MenuButton } from './kit'
 import { DirectiveBlock, DirectiveContext, type DirectiveScope, useDirectiveSegments } from './Directives'
 import { EmailDraftCard } from './EmailDraft'
 import { BotProse } from './Media'
+import { STICK_PX, useStickToBottom } from './stickToBottom'
 import { AssistantActions, Reactions, UserActions } from './MessageActions'
 import { ProfilePanel } from './Profile'
 import { OverlayScroll } from './OverlayScroll'
@@ -402,36 +403,9 @@ function Item({
   }
 }
 
-/** How close to the bottom still counts as "at the bottom" (CSS px). Small on
- *  purpose: a reader a few lines up is reading, and a transcript update must
- *  not pull them down (it was 80px, three lines). */
-export const STICK_PX = 16
-
-/** Follow new messages while the transcript is at its bottom. Once the user
- *  scrolls up, nothing moves their position until they come back to the
- *  bottom themselves or send a message (`mine`: the id of their newest
- *  message; a new one pins). */
-function useStickToBottom(dep: unknown, mine: string) {
-  const ref = React.useRef<HTMLDivElement | null>(null)
-  const stick = React.useRef(true)
-  const lastMine = React.useRef(mine)
-  React.useLayoutEffect(() => {
-    const el = ref.current
-    if (mine !== lastMine.current) {
-      lastMine.current = mine
-      if (mine) stick.current = true
-    }
-    if (el && stick.current) el.scrollTop = el.scrollHeight
-  }, [dep, mine])
-  const onScroll = () => {
-    const el = ref.current
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
-  }
-  const pin = () => {
-    stick.current = true
-  }
-  return { ref, onScroll, pin, stick }
-}
+/** How close to the bottom still counts as "at the bottom" (stickToBottom.ts;
+ *  re-exported, test/look9-card-scroll.test.mjs reads it here). */
+export { STICK_PX }
 
 /** Whether the user is looking at this transcript's newest messages: the
  *  window focused and visible, the transcript on screen, scrolled to its
@@ -495,7 +469,14 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
     for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === 'user') return String(items[i].id)
     return ''
   }, [items])
-  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items, mine)
+  const latest = React.useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const kind = items[i]?.kind
+      if (kind === 'user' || kind === 'assistant') return String(items[i].id)
+    }
+    return ''
+  }, [items])
+  const { ref, onScroll: onStickScroll, onContentResize, pin, keepPlace, jump, unseen } = useStickToBottom(items, mine, latest)
   const newLine = useNewLine(rowKey(bot), items, state.phase === 'ready', ref)
   const onScroll = () => {
     onStickScroll()
@@ -543,10 +524,23 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
 
   return (
     <DirectiveContext.Provider value={directives}>
-    <OverlayScroll wrapClassName="transcript-wrap gbo-transcript-scroll" className="transcript gbo-transcript" scrollRef={ref} onScroll={onScroll}>
+    <OverlayScroll
+      wrapClassName="transcript-wrap gbo-transcript-scroll"
+      className="transcript gbo-transcript"
+      scrollRef={ref}
+      onScroll={onScroll}
+      onContentResize={onContentResize}
+      overlay={
+        unseen ? (
+          <button type="button" className="jump-btn gbo-jump" aria-label="Jump to latest" title="Jump to latest" onClick={jump}>
+            <IconChevronDown />
+          </button>
+        ) : null
+      }
+    >
       <div className="transcript__col gbo-column">
         {state.hasMore ? (
-          <button type="button" className="btn btn--sm btn--secondary gbo-more" disabled={state.loadingMore} onClick={() => void controller?.loadEarlier()}>
+          <button type="button" className="btn btn--sm btn--secondary gbo-more" disabled={state.loadingMore} onClick={() => void keepPlace(() => controller?.loadEarlier())}>
             {state.loadingMore ? 'Loading…' : 'Show earlier messages'}
           </button>
         ) : null}
@@ -658,7 +652,9 @@ const NARROW_PANE_PX = 900
  *  wide window), so the profile panel turns into a drawer when it would not
  *  fit beside the chat (review r1 #9). */
 function usePaneWidth(ref: React.RefObject<HTMLDivElement | null>, enabled = true) {
-  React.useEffect(() => {
+  // A layout effect: the narrow-drawer decision lands before the first
+  // paint, so a docked panel never shows for one frame and then flips.
+  React.useLayoutEffect(() => {
     const el = ref.current
     if (!enabled) return undefined
     const RO = (globalThis as any).ResizeObserver

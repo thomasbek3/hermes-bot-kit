@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **grokbot-override: the transcript stays pinned through late growth (2026-11-15)**: the chat used to follow the
+  bottom only when its message list changed, so an image, card, preview or code block that finished sizing afterwards
+  left you short of the latest message. A pinned view now follows every content resize before paint
+  (`src/ui/stickToBottom.ts`, fed by OverlayScroll's existing ResizeObserver; its DOM-mutation thumb update is now
+  once per frame). A reader who scrolled up is never moved; a newer message then shows a round jump-to-latest button
+  that scrolls down smoothly and pins again. **Show earlier messages** keeps your place instead of jumping. The
+  transcript uses the browser's scroll anchoring, so content changing above you no longer shifts what you read. The
+  narrow-pane drawer decision is measured before the first paint, so a docked panel no longer flips after one frame.
 - **grokbot-override: replies are formatted live while they stream (2026-11-15)**: a bot reply no longer
   types as plain text and then snaps into formatting when it finishes. It renders through the same markdown
   path as a finished reply from the first token: bold, lists, headings, links, inline code and code blocks
