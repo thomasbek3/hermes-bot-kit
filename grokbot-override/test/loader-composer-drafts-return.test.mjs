@@ -61,8 +61,8 @@ test('composer: A → B → A, then a refusal: the text comes back into the live
   await waitFor(() => chatEl.querySelector('textarea')?.value === 'preserve this refused draft, edited', 'the edited draft survives')
   assert.equal(calls.filter(c => c.method === 'prompt.submit').length, 1, 'never resent by itself')
 
-  // A newer draft typed before the refusal is never overwritten; the failed
-  // bubble then stays as the recovery route.
+  // A newer draft typed before the refusal is never overwritten: the refused
+  // text goes below it (T8 recover rule, review C-R3-01).
   type(await box(), 'second refused send')
   await waitFor(() => chatEl.querySelector('textarea').value === 'second refused send', 'typed the second')
   ;(await box()).dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
@@ -76,6 +76,6 @@ test('composer: A → B → A, then a refusal: the text comes back into the live
   await waitFor(() => chatEl.querySelector('textarea').value === 'newer text', 'typed newer text')
   pending[1].reject(rpcError(4009, 'session busy'))
   await tick(150)
-  assert.equal(chatEl.querySelector('textarea').value, 'newer text', 'the newer draft is kept')
-  assert.ok(chatEl.textContent.includes('second refused send'), 'the failed bubble stays as the way to retry it')
+  assert.equal(chatEl.querySelector('textarea').value, 'newer text\n\nsecond refused send', 'the newer draft is kept, the refused text below it')
+  assert.equal([...chatEl.querySelectorAll('.bubble')].filter(b => b.textContent.includes('second refused send')).length, 0, 'one way to resend it: the composer')
 })

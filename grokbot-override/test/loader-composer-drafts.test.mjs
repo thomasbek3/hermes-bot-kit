@@ -39,35 +39,32 @@ test('draft texts: per owner, empty clears, capped at 20 owners, any length kept
   assert.equal(d.get(''), '')
 })
 
-test('draft texts: a refused send goes to a live empty composer, else to the store for the next one, never over a newer draft', () => {
+test('draft texts: recover only appends, to the store and to every live composer, and keeps the note for the next mount', () => {
   const d = createDraftTexts()
-  // No composer on screen: stored, with a pending record for the next mount.
-  assert.equal(d.restore('a', 'refused', { clientId: 'local:1', note: 'Not sent' }), true)
+  // No composer on screen: into the store, the note kept for the next mount.
+  d.recover('a', 'refused', 'Not sent')
   assert.equal(d.get('a'), 'refused')
-  assert.equal(d.take('a', 'something else'), null, 'only when the composer shows that text')
-  d.restore('a', 'x')
-  assert.equal(d.get('a'), 'refused', 'never over a newer draft')
-  d.set('a', '')
-  assert.equal(d.restore('a', 'again', { clientId: 'local:2', note: 'n' }), true)
-  assert.deepEqual(d.take('a', 'again'), { text: 'again', clientId: 'local:2', note: 'n' })
-  assert.equal(d.take('a', 'again'), null, 'consumed')
-  // A live composer that is empty takes it; the store is left to its own write.
-  d.set('b', '')
+  assert.equal(d.takeNote('a'), 'Not sent')
+  assert.equal(d.takeNote('a'), '', 'consumed')
+  // Two recoveries in a row and a newer draft: nothing is replaced.
+  d.recover('a', 'second', '')
+  assert.equal(d.get('a'), 'refused\n\nsecond')
+  d.set('b', 'newer')
+  d.recover('b', 'refused')
+  assert.equal(d.get('b'), 'newer\n\nrefused')
+  // Live composers each get the text (they append to their own state); the note is theirs.
   const got = []
-  const off = d.subscribe('b', (text, info) => (got.push([text, info.clientId]), true))
-  assert.equal(d.restore('b', 'live one', { clientId: 'local:3' }), true)
-  assert.deepEqual(got, [['live one', 'local:3']])
-  assert.equal(d.take('b', 'live one'), null, 'no pending record when a live composer took it')
-  off()
-  // A live composer that refuses (it holds files) leaves nothing behind.
-  const off2 = d.subscribe('c', () => false)
-  assert.equal(d.restore('c', 'refused', {}), false)
-  assert.equal(d.get('c'), '')
+  const off1 = d.subscribe('c', (text, note) => got.push(['one', text, note]))
+  const off2 = d.subscribe('c', (text, note) => got.push(['two', text, note]))
+  d.recover('c', 'x', 'n')
+  assert.deepEqual(got, [['one', 'x', 'n'], ['two', 'x', 'n']])
+  assert.equal(d.takeNote('c'), '', 'a live composer showed the note')
+  off1()
   off2()
-  // Typing something else drops the pending record.
-  d.restore('e', 'pending text', { clientId: 'local:4' })
-  d.set('e', 'typed over')
-  assert.equal(d.take('e', 'pending text'), null)
+  // A note with no text (a files-only send) still reaches the next mount.
+  d.recover('e', '', 'Attach the files again.')
+  assert.equal(d.get('e'), '')
+  assert.equal(d.takeNote('e'), 'Attach the files again.')
 })
 
 test('composer: a draft survives switching bots and coming back; a send clears it', { skip: !READY && 'dev dependencies not installed' }, async t => {

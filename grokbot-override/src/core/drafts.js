@@ -51,15 +51,21 @@ export async function readDraftFiles(list, { owner, isCurrent, read, maxBytes = 
   return { files, notes, stale: false }
 }
 
-/** After a send failed: put the draft back in the composer? Only when Hermes
- *  definitely refused it (`not-sent`, see core/delivery.js), the composer
- *  still belongs to the same bot, and nothing newer was typed or attached
- *  since (review r2 #7). An `unknown` delivery is never re-armed: it may have
- *  reached the bot (review r3 #1). */
-export function restoreAfterFailure({ result, sentOwner, currentOwner, currentText, currentFiles }) {
-  if (!result || result.ok || result.delivery !== 'not-sent') return false
-  if (!sentOwner || sentOwner !== currentOwner) return false
-  return !String(currentText || '').trim() && !(Array.isArray(currentFiles) && currentFiles.length)
+/** A failed send whose text goes back to the composer: only a definite
+ *  refusal (`not-sent`, see core/delivery.js: nothing was admitted). An
+ *  `unknown` delivery is never re-armed: it may have reached the bot (review
+ *  r3 #1). Where it goes and how is `draftTexts.recover` (below). */
+export function isRecoverableRefusal(result) {
+  return Boolean(result && !result.ok && result.delivery === 'not-sent')
+}
+
+/** `text` added to a draft without ever replacing it: below what is there,
+ *  separated by a blank line (the rewind rule, review override-v2-r1 #3). */
+export function appendDraft(current, text) {
+  const add = typeof text === 'string' ? text : ''
+  const cur = typeof current === 'string' ? current : ''
+  if (!add.trim()) return cur
+  return cur.trim() ? `${cur.replace(/\s+$/, '')}\n\n${add}` : add
 }
 
 /** The composer's note after a failed send (`restored`: the draft came back).
@@ -78,20 +84,25 @@ export function failureNote(result, restored) {
 // Switching bots used to clear the composer. Hermes's own composer keeps a
 // draft per session; the override keeps the typed TEXT per bot (draft owner
 // key), in memory for this app session only: never files, never written to
-// disk, up to 20 bots (the oldest bot's entry goes first). A draft is kept
-// whole, however long: nothing is persisted, so there is no size cap, and an
-// accepted draft is never dropped (review C-R1-01). A successful send empties
-// the composer, which clears the entry.
+// disk, any length, up to 20 bots (the oldest bot's entry goes first).
+//
+// Two operations, nothing else:
+//  - the composer writes its text on every change (`set`) and reads it on
+//    mount (`get`); an empty composer (a send) clears the entry;
+//  - `recover(owner, text, note)` gives back text that Hermes did NOT take (a
+//    definitely refused send, a failed free-text answer). It is synchronous
+//    and only ever APPENDS: the store gets the text below whatever it holds,
+//    and every live composer of that bot appends it to its own text with a
+//    functional update, so two recoveries before a render, a newer draft, or
+//    a composer that is not on screen can never lose either text (reviews
+//    C-R1-02, C-R2-01, C-R3-01..03). The note is shown by the live composer,
+//    or by the next one to mount.
 
 export const DRAFT_OWNERS_MAX = 20
 
 export function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
   const map = new Map()
-  // A refused send restored while no composer of that bot was on screen:
-  // owner → { text, clientId, note }, consumed by the next composer that
-  // mounts with exactly that text (review C-R2-01).
-  const pending = new Map()
-  // Live composers per owner: (text, info) → true when it took the text.
+  const notes = new Map()
   const listeners = new Map()
   const api = {
     get(owner) {
@@ -100,51 +111,38 @@ export function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
     set(owner, text) {
       if (!owner) return
       const value = typeof text === 'string' ? text : ''
-      if (pending.has(owner) && pending.get(owner).text !== value) pending.delete(owner)
       map.delete(owner)
       if (!value.trim()) return
       map.set(owner, value)
-      while (map.size > maxOwners) {
-        const oldest = map.keys().next().value
-        map.delete(oldest)
-        pending.delete(oldest)
-      }
+      while (map.size > maxOwners) map.delete(map.keys().next().value)
     },
     clear(owner) {
       map.delete(owner)
-      pending.delete(owner)
+      notes.delete(owner)
     },
     size: () => map.size,
-    /** Give a definitely refused send's text back to `owner`'s draft: to a
-     *  live composer of that bot if one takes it (an empty one), else into the
-     *  store with a pending record for the next composer that mounts. Never
-     *  over a newer draft. Returns true when the text found a home. */
-    restore(owner, text, info = {}) {
-      const value = typeof text === 'string' ? text : ''
-      if (!owner || !value.trim() || api.get(owner).trim()) return false
+    recover(owner, text, note = '') {
+      if (!owner) return
+      api.set(owner, appendDraft(api.get(owner), text))
       const live = listeners.get(owner)
       if (live && live.size) {
         for (const fn of [...live]) {
           try {
-            if (fn(value, info)) return true
+            fn(typeof text === 'string' ? text : '', note)
           } catch {
-            /* next */
+            /* the store already holds it */
           }
         }
-        return false
-      }
-      api.set(owner, value)
-      pending.set(owner, { text: value, ...info })
-      return true
+      } else if (note) notes.set(owner, note)
     },
-    /** The pending restore for `owner` if the composer now shows `text`;
-     *  consumed either way. */
-    take(owner, text) {
-      const record = pending.get(owner)
-      pending.delete(owner)
-      return record && record.text === text ? record : null
+    /** The note of a recovery that happened while no composer of `owner`
+     *  was on screen; consumed. */
+    takeNote(owner) {
+      const note = notes.get(owner) || ''
+      notes.delete(owner)
+      return note
     },
-    /** A live composer for `owner`; returns the unsubscribe. */
+    /** A live composer of `owner`: `fn(text, note)` on each recovery. */
     subscribe(owner, fn) {
       if (!owner || typeof fn !== 'function') return () => undefined
       let set = listeners.get(owner)

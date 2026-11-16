@@ -94,7 +94,8 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
   completes. A half-typed `**`, link, table row, `MEDIA:` line or list marker waits a moment until it is
   complete; an open code block shows and grows; a card still streaming shows a quiet placeholder line.
 - The composer keeps **what you typed per bot**: switch to another bot and back and the draft is still there
-  (text only, for this app session; a send clears it).
+  (text only, for this app session; a send clears it). A message Hermes refuses comes back into that bot's
+  composer, below anything you typed since.
 - While Hermes is in the background, the open chat sends a **native notification** when a reply finishes, an
   approval is waiting or the bot needs your input (never for a silent reply, and the text is a generic line,
   never the reply or a secret prompt). Clicking it opens that bot. Hermes's *Plugin notifications* setting

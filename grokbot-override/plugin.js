@@ -43048,10 +43048,16 @@ async function readDraftFiles(list, { owner, isCurrent, read, maxBytes = MAX_ATT
   }
   return { files, notes, stale: false };
 }
-function restoreAfterFailure({ result, sentOwner, currentOwner, currentText, currentFiles }) {
-  if (!result || result.ok || result.delivery !== "not-sent") return false;
-  if (!sentOwner || sentOwner !== currentOwner) return false;
-  return !String(currentText || "").trim() && !(Array.isArray(currentFiles) && currentFiles.length);
+function isRecoverableRefusal(result) {
+  return Boolean(result && !result.ok && result.delivery === "not-sent");
+}
+function appendDraft(current, text3) {
+  const add2 = typeof text3 === "string" ? text3 : "";
+  const cur = typeof current === "string" ? current : "";
+  if (!add2.trim()) return cur;
+  return cur.trim() ? `${cur.replace(/\s+$/, "")}
+
+${add2}` : add2;
 }
 function failureNote(result, restored) {
   if (!result || result.ok) return "";
@@ -43064,7 +43070,7 @@ function failureNote(result, restored) {
 var DRAFT_OWNERS_MAX = 20;
 function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
   const map = /* @__PURE__ */ new Map();
-  const pending = /* @__PURE__ */ new Map();
+  const notes = /* @__PURE__ */ new Map();
   const listeners = /* @__PURE__ */ new Map();
   const api = {
     get(owner) {
@@ -43073,50 +43079,37 @@ function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
     set(owner, text3) {
       if (!owner) return;
       const value = typeof text3 === "string" ? text3 : "";
-      if (pending.has(owner) && pending.get(owner).text !== value) pending.delete(owner);
       map.delete(owner);
       if (!value.trim()) return;
       map.set(owner, value);
-      while (map.size > maxOwners) {
-        const oldest = map.keys().next().value;
-        map.delete(oldest);
-        pending.delete(oldest);
-      }
+      while (map.size > maxOwners) map.delete(map.keys().next().value);
     },
     clear(owner) {
       map.delete(owner);
-      pending.delete(owner);
+      notes.delete(owner);
     },
     size: () => map.size,
-    /** Give a definitely refused send's text back to `owner`'s draft: to a
-     *  live composer of that bot if one takes it (an empty one), else into the
-     *  store with a pending record for the next composer that mounts. Never
-     *  over a newer draft. Returns true when the text found a home. */
-    restore(owner, text3, info = {}) {
-      const value = typeof text3 === "string" ? text3 : "";
-      if (!owner || !value.trim() || api.get(owner).trim()) return false;
+    recover(owner, text3, note = "") {
+      if (!owner) return;
+      api.set(owner, appendDraft(api.get(owner), text3));
       const live = listeners.get(owner);
       if (live && live.size) {
         for (const fn of [...live]) {
           try {
-            if (fn(value, info)) return true;
+            fn(typeof text3 === "string" ? text3 : "", note);
           } catch {
           }
         }
-        return false;
-      }
-      api.set(owner, value);
-      pending.set(owner, { text: value, ...info });
-      return true;
+      } else if (note) notes.set(owner, note);
     },
-    /** The pending restore for `owner` if the composer now shows `text`;
-     *  consumed either way. */
-    take(owner, text3) {
-      const record = pending.get(owner);
-      pending.delete(owner);
-      return record && record.text === text3 ? record : null;
+    /** The note of a recovery that happened while no composer of `owner`
+     *  was on screen; consumed. */
+    takeNote(owner) {
+      const note = notes.get(owner) || "";
+      notes.delete(owner);
+      return note;
     },
-    /** A live composer for `owner`; returns the unsubscribe. */
+    /** A live composer of `owner`: `fn(text, note)` on each recovery. */
     subscribe(owner, fn) {
       if (!owner || typeof fn !== "function") return () => void 0;
       let set = listeners.get(owner);
@@ -53142,22 +53135,14 @@ function Composer({
     for (const controller2 of reads.current) controller2.abort();
     reads.current.clear();
   };
-  const onRestoredRef = React5.useRef(onRestored);
-  onRestoredRef.current = onRestored;
   React5.useEffect(() => {
-    const draft = draftTexts.get(owner);
-    setText(draft);
+    setText(draftTexts.get(owner));
     setFiles([]);
     setOptions([]);
-    const restored = draftTexts.take(owner, draft);
-    setNote(restored?.note || "");
-    if (restored?.clientId) onRestoredRef.current?.(restored.clientId);
-    const off = draftTexts.subscribe(owner, (value, info) => {
-      if (textRef.current.trim() || filesRef.current.length) return false;
-      setText(value);
-      setNote(info?.note || "");
-      if (info?.clientId) onRestoredRef.current?.(info.clientId);
-      return true;
+    setNote(draftTexts.takeNote(owner));
+    const off = draftTexts.subscribe(owner, (value, message) => {
+      setText((current) => appendDraft(current, value));
+      if (message) setNote(message);
     });
     return () => {
       off();
@@ -53269,12 +53254,8 @@ ${value}`);
       setNote("");
       setOptions([]);
       const result2 = await onAnswer(sending);
-      if (ownerRef.current !== sentOwner) return;
-      if (!result2?.ok) {
-        if (!textRef.current.trim()) setText(sending);
-        setNote(`Your answer was not sent${result2?.error ? `: ${result2.error}` : ""}.`);
-      }
-      inputRef.current?.focus();
+      if (!result2?.ok) draftTexts.recover(sentOwner, sending, `Your answer was not sent${result2?.error ? `: ${result2.error}` : ""}.`);
+      if (mountedRef.current && ownerRef.current === sentOwner) inputRef.current?.focus();
       return;
     }
     const attachments = files.filter((file) => file.owner === ownerRef.current);
@@ -53284,22 +53265,17 @@ ${value}`);
     setNote("");
     setOptions([]);
     const result = await onSend(sending, attachments, apiText ? { apiText } : void 0);
-    if (!mountedRef.current || ownerRef.current !== sentOwner) {
-      if (!result.ok && result.delivery === "not-sent" && !attachments.length) {
-        draftTexts.restore(sentOwner, sending, { clientId: result.clientId || "", note: failureNote(result, true) });
-      }
-      return;
+    const here = mountedRef.current && ownerRef.current === sentOwner;
+    if (isRecoverableRefusal(result)) {
+      const filesBack = here && attachments.length > 0 && !filesRef.current.length;
+      if (filesBack) setFiles(attachments);
+      const reattach = attachments.length > 0 && !filesBack;
+      draftTexts.recover(sentOwner, sending, `${failureNote(result, true)}${reattach ? " Attach the files again." : ""}`);
+      if (result.clientId) onRestored?.(result.clientId);
+    } else if (!result.ok && here) {
+      setNote(failureNote(result, false));
     }
-    if (!result.ok) {
-      const restore = restoreAfterFailure({ result, sentOwner, currentOwner: ownerRef.current, currentText: textRef.current, currentFiles: filesRef.current });
-      if (restore) {
-        setText(sending);
-        setFiles(attachments);
-        if (result.clientId) onRestored?.(result.clientId);
-      }
-      setNote(failureNote(result, restore));
-    }
-    inputRef.current?.focus();
+    if (here) inputRef.current?.focus();
   };
   const addFiles = async (list) => {
     const picked = Array.from(list || []);
