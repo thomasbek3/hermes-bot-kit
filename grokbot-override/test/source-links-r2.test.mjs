@@ -68,6 +68,67 @@ async function mountProse(t, text, { defer = false } = {}) {
   return { container, draw }
 }
 
+// ---- SL24-06: the Slack rewrite never touches code or escaped text ----
+
+const SLACK_LINK = `[Her message](${SLACK_APP})`
+
+test('SL24-06: escaped backticks, indented code and escaped brackets stay exactly as written', () => {
+  for (const text of [
+    `Escaped \\\` and code \`${SLACK_LINK}\``,
+    `Example:\n\n    ${SLACK_LINK}\n`,
+    `\\${SLACK_LINK}`,
+    `\`\`a ${SLACK_LINK} b\`\``
+  ]) {
+    assert.equal(protectSlackAppLinks(text), text, JSON.stringify(text))
+  }
+  // A real link next to escaped text and code is still carried.
+  const mixed = `\\\` then ${SLACK_LINK}`
+  assert.notEqual(protectSlackAppLinks(mixed), mixed)
+  // An indented line inside a list is a list continuation, not code.
+  assert.notEqual(protectSlackAppLinks(`- item\n\n    ${SLACK_LINK}`), `- item\n\n    ${SLACK_LINK}`)
+})
+
+test('SL24-06: in the host pipeline the displayed code text is the original', { skip: skipHost }, async t => {
+  const { m } = await setup(t)
+  const text = `Escaped \\\` and code \`${SLACK_LINK}\``
+  const html = host.render(protectSlackAppLinks(text), m.sourceLinkUi.decorateSourceLinks)
+  const code = /<code[^>]*>([\s\S]*?)<\/code>/.exec(html)?.[1]
+  assert.equal(code, SLACK_LINK.replace(/&/g, '&amp;'), html)
+  assert.doesNotMatch(html, /gbo-slack-app/)
+  const indented = host.render(protectSlackAppLinks(`Example:\n\n    ${SLACK_LINK}\n`), m.sourceLinkUi.decorateSourceLinks)
+  assert.match(indented, /<pre/, 'an indented code block')
+  assert.doesNotMatch(indented, /gbo-slack-app/)
+})
+
+// ---- SL24-07: every valid Markdown link form with a Slack app destination ----
+
+const FORMS = {
+  title: `[Her message](${SLACK_APP} "Message title")`,
+  angle: `[Her message](<${SLACK_APP}>)`,
+  upper: `[Her message](${SLACK_APP.replace('slack:', 'SLACK:')})`,
+  reference: `[Her message][msg]\n\n[msg]: ${SLACK_APP}`
+}
+
+test('SL24-07: titled, angle, upper-case and reference Slack links are carried; titles kept', () => {
+  for (const [name, text] of Object.entries(FORMS)) {
+    const out = protectSlackAppLinks(text)
+    assert.notEqual(out, text, name)
+    assert.match(out, /https:\/\/app\.slack\.com\/client\/T0EXAMPLE1\/C0123ABCD#gbo-slack-app=/, name)
+  }
+  assert.match(protectSlackAppLinks(FORMS.title), /"Message title"\)$/)
+  assert.match(protectSlackAppLinks(FORMS.angle), /^\[Her message\]\(<https:[^>]+>\)$/)
+})
+
+test('SL24-07: in the host pipeline every form draws a Slack chip, never [blocked]', { skip: skipHost }, async t => {
+  const { m } = await setup(t)
+  for (const [name, text] of Object.entries(FORMS)) {
+    const html = host.render(protectSlackAppLinks(text), m.sourceLinkUi.decorateSourceLinks)
+    assert.doesNotMatch(html, /\[blocked\]/, name)
+    assert.match(html, /<a class="gbo-src"[^>]*data-service="slack"/, name)
+    assert.match(html, /<span class="gbo-src-text">Her message<\/span>/, name)
+  }
+})
+
 // ---- SL24-02 (accepted platform limit): documented, and bots told to use https permalinks ----
 
 test('SL24-02: the slack:// limit is documented and the skill asks for https permalinks', async () => {

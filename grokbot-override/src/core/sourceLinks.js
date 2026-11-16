@@ -167,42 +167,157 @@ export function slackOpenTarget(value, { teamId = '', appScheme = false } = {}) 
  *  hook just shows a link to the channel page. */
 const SLACK_APP_MARK = 'gbo-slack-app='
 
-/** Inline-code spans in a markdown block: [start, end) ranges. A run of n
- *  backticks opens a span that the next run of exactly n closes, within the
- *  paragraph; an unmatched run is literal text. */
-export function inlineCodeRanges(text) {
-  const ranges = []
+/** Code in a markdown text (fenced blocks are already split out by
+ *  core/fences.js): a per-character mask, true inside an indented code block
+ *  or an inline code span. Follows CommonMark closely enough for the rewrite
+ *  below never to touch code:
+ *  - indented code: a line indented 4+ spaces (or a tab) that follows a blank
+ *    line or another code line, outside a list (list continuations are
+ *    indented too);
+ *  - inline code: a run of n backticks opens a span that the next run of
+ *    exactly n closes within the paragraph; a backslash-escaped backtick is
+ *    literal and shortens the run; inside a span backslashes are literal; an
+ *    unmatched run is literal text. */
+export function markdownCodeMask(text) {
   const source = String(text ?? '')
-  const run = /`+/g
-  let match
-  while ((match = run.exec(source))) {
-    const len = match[0].length
-    const from = match.index + len
-    const paragraphEnd = source.indexOf('\n\n', from)
-    const limit = paragraphEnd < 0 ? source.length : paragraphEnd
-    const close = new RegExp(String.raw`(?<!\`)\`{${len}}(?!\`)`, 'g')
-    close.lastIndex = from
-    const end = close.exec(source)
-    if (end && end.index < limit) {
-      ranges.push([match.index, end.index + len])
-      run.lastIndex = end.index + len
+  const mask = new Uint8Array(source.length)
+  // Indented code blocks.
+  let offset = 0
+  let prevBlank = true
+  let prevCode = false
+  let inList = false
+  for (const line of source.split('\n')) {
+    const blank = !line.trim()
+    const indented = /^(?: {4}|\t| {0,3}\t)/.test(line)
+    let code = false
+    if (!blank) {
+      if (indented && !inList && (prevBlank || prevCode)) code = true
+      else if (/^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)/.test(line)) inList = true
+      else if (!indented && prevBlank) inList = false
     }
+    if (code) mask.fill(1, offset, offset + line.length)
+    if (!blank) prevCode = code
+    prevBlank = blank
+    offset += line.length + 1
   }
-  return ranges
+  // Inline code spans.
+  let i = 0
+  while (i < source.length) {
+    if (mask[i]) {
+      i += 1
+      continue
+    }
+    const ch = source[i]
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (ch !== '`') {
+      i += 1
+      continue
+    }
+    let j = i
+    while (source[j] === '`') j += 1
+    const len = j - i
+    const paragraphEnd = source.indexOf('\n\n', j)
+    const limit = paragraphEnd < 0 ? source.length : paragraphEnd
+    let k = j
+    let close = -1
+    while (k < limit) {
+      if (source[k] !== '`') {
+        k += 1
+        continue
+      }
+      let e = k
+      while (source[e] === '`') e += 1
+      if (e - k === len) {
+        close = k
+        break
+      }
+      k = e
+    }
+    if (close < 0) {
+      i = j
+      continue
+    }
+    mask.fill(1, i, close + len)
+    i = close + len
+  }
+  return mask
 }
 
-/** `[label](slack://…)` → `[label](https://app.slack.com/client/…#gbo-slack-app=…)`
- *  for valid Slack app links outside inline code; everything else as is. */
+const isEscaped = (source, at) => {
+  let n = 0
+  for (let k = at - 1; k >= 0 && source[k] === '\\'; k -= 1) n += 1
+  return n % 2 === 1
+}
+
+/** The unescaped `[` that opens the label closed by the `]` at `close`, or -1. */
+function labelOpen(source, close, mask) {
+  let depth = 0
+  for (let k = close - 1; k >= 0 && close - k <= 1000; k -= 1) {
+    if (source[k] === '\n' && source[k - 1] === '\n') return -1
+    if (mask[k] || isEscaped(source, k)) continue
+    if (source[k] === ']') depth += 1
+    else if (source[k] === '[') {
+      if (depth === 0) return k
+      depth -= 1
+    }
+  }
+  return -1
+}
+
+/** The https stand-in for a valid Slack app link, or null. */
+function standIn(href) {
+  const target = slackOpenTarget(href)
+  return target?.fallback ? `${target.fallback}#${SLACK_APP_MARK}${encodeURIComponent(target.url)}` : null
+}
+
+// `](` dest [title] `)`: dest bare or <angle>, any case of the scheme.
+const INLINE_DEST = /\]\([ \t]*(?:<(slack:[^<>\s]*)>|(slack:[^\s()<>]+))((?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*\))/gi
+// `[ref]: dest [title]` on its own line.
+const REF_DEF = /^( {0,3}\[(?:[^\]\\\n]|\\.)+\]:[ \t]*)(?:<(slack:[^<>\s]*)>|(slack:\S+))(?=[ \t]|$)/gim
+
+/** Valid Slack app link destinations → https stand-ins, in inline links
+ *  (`[label](slack://…)`, with a title or an `<angle>` destination, any case)
+ *  and reference definitions (`[ref]: slack://…`). Code, escaped brackets and
+ *  invalid or unsupported Slack links are left exactly as written. */
 export function protectSlackAppLinks(text) {
   const source = String(text ?? '')
-  if (!source.includes('](slack:')) return source
-  const code = inlineCodeRanges(source)
-  return source.replace(/\]\((slack:[^)\s]+)\)/gi, (whole, href, at) => {
-    if (code.some(([a, b]) => at >= a && at < b)) return whole
-    const target = slackOpenTarget(href)
-    if (!target?.fallback) return whole
-    return `](${target.fallback}#${SLACK_APP_MARK}${encodeURIComponent(target.url)})`
-  })
+  if (!/slack:/i.test(source)) return source
+  const mask = markdownCodeMask(source)
+  const edits = []
+  for (const m of source.matchAll(INLINE_DEST)) {
+    const at = m.index
+    if (mask[at] || isEscaped(source, at)) continue
+    if (labelOpen(source, at, mask) < 0) continue
+    const href = m[1] ?? m[2]
+    const replacement = standIn(href)
+    if (!replacement) continue
+    const destStart = at + m[0].indexOf(m[1] !== undefined ? `<${href}>` : href)
+    const destEnd = destStart + (m[1] !== undefined ? href.length + 2 : href.length)
+    edits.push([destStart, destEnd, m[1] !== undefined ? `<${replacement}>` : replacement])
+  }
+  for (const m of source.matchAll(REF_DEF)) {
+    const at = m.index
+    if (mask[at + m[1].length - 1] || mask[at]) continue
+    const href = m[2] ?? m[3]
+    const replacement = standIn(href)
+    if (!replacement) continue
+    const destStart = at + m[1].length
+    const destEnd = destStart + (m[2] !== undefined ? href.length + 2 : href.length)
+    edits.push([destStart, destEnd, m[2] !== undefined ? `<${replacement}>` : replacement])
+  }
+  if (!edits.length) return source
+  edits.sort((a, b) => a[0] - b[0])
+  let out = ''
+  let last = 0
+  for (const [from, to, value] of edits) {
+    if (from < last) continue
+    out += source.slice(last, from) + value
+    last = to
+  }
+  return out + source.slice(last)
 }
 
 /** The Slack app link a stand-in carries, or null. */
