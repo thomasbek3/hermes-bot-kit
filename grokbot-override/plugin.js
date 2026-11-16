@@ -43200,6 +43200,35 @@ function failureNote(result, restored) {
   }
   return UNCONFIRMED_DELIVERY_NOTE;
 }
+var sendSeqs = /* @__PURE__ */ new Map();
+var sendSubs = /* @__PURE__ */ new Map();
+var composerSends = {
+  /** A new send attempt for `owner`: its number; every subscriber hears it. */
+  begin(owner) {
+    const seq = (sendSeqs.get(owner) || 0) + 1;
+    sendSeqs.set(owner, seq);
+    for (const fn of [...sendSubs.get(owner) || []]) {
+      try {
+        fn(seq);
+      } catch {
+      }
+    }
+    return seq;
+  },
+  /** Whether `seq` is still the newest attempt for `owner`. */
+  isCurrent(owner, seq) {
+    return sendSeqs.get(owner) === seq;
+  },
+  subscribe(owner, fn) {
+    let set = sendSubs.get(owner);
+    if (!set) sendSubs.set(owner, set = /* @__PURE__ */ new Set());
+    set.add(fn);
+    return () => {
+      set.delete(fn);
+      if (!set.size && sendSubs.get(owner) === set) sendSubs.delete(owner);
+    };
+  }
+};
 function unknownSendId(result) {
   return result && !result.ok && result.delivery === "unknown" && result.clientId ? String(result.clientId) : "";
 }
@@ -54455,12 +54484,14 @@ function Composer({
     setOptions([]);
     setNote(draftTexts.takeNote(owner));
     setUnknownId("");
+    const offSends = composerSends.subscribe(owner, () => setUnknownId(""));
     const off = draftTexts.subscribe(owner, (value, message) => {
       setText((current) => appendDraft(current, value));
       if (message) setNote(message);
     });
     return () => {
       off();
+      offSends();
       abortReads();
     };
   }, [owner]);
@@ -54549,7 +54580,7 @@ ${value}`);
     if (slash && !files.length) {
       setText("");
       setNote("");
-      setUnknownId("");
+      composerSends.begin(sentOwner);
       setOptions([]);
       const result2 = await onSlash?.(sending);
       if (ownerRef.current !== sentOwner) return;
@@ -54568,7 +54599,7 @@ ${value}`);
       }
       setText("");
       setNote("");
-      setUnknownId("");
+      composerSends.begin(sentOwner);
       setOptions([]);
       const result2 = await onAnswer(sending);
       if (!result2?.ok) draftTexts.recover(sentOwner, sending, `Your answer was not sent${result2?.error ? `: ${result2.error}` : ""}.`);
@@ -54580,7 +54611,7 @@ ${value}`);
     setText("");
     setFiles([]);
     setNote("");
-    setUnknownId("");
+    const attempt = composerSends.begin(sentOwner);
     setOptions([]);
     const result = await onSend(sending, attachments, apiText ? { apiText } : void 0);
     const here = mountedRef.current && ownerRef.current === sentOwner;
@@ -54591,9 +54622,11 @@ ${value}`);
       draftTexts.recover(sentOwner, sending, `${failureNote(result, true)}${reattach ? " Attach the files again." : ""}`);
       if (result.clientId) onRestored?.(result.clientId);
     } else if (!result.ok && here) {
-      const followed = unknownSendId(result);
-      if (followed) setUnknownId(followed);
-      else setNote(failureNote(result, false));
+      if (composerSends.isCurrent(sentOwner, attempt)) {
+        const followed = unknownSendId(result);
+        if (followed) setUnknownId(followed);
+        else setNote(failureNote(result, false));
+      }
     }
     if (here) inputRef.current?.focus();
   };

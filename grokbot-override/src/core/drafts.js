@@ -87,6 +87,42 @@ export function failureNote(result, restored) {
   return UNCONFIRMED_DELIVERY_NOTE
 }
 
+// Composer send attempts, numbered per bot (its immutable route identity),
+// shared by every composer showing that bot (side-by-side tabs of the same
+// chat). Starting a send dismisses the "delivery unknown" note in all of
+// them, and only the newest attempt may set one: an older send that settles
+// later never brings a note back over a newer message.
+const sendSeqs = new Map()
+const sendSubs = new Map()
+export const composerSends = {
+  /** A new send attempt for `owner`: its number; every subscriber hears it. */
+  begin(owner) {
+    const seq = (sendSeqs.get(owner) || 0) + 1
+    sendSeqs.set(owner, seq)
+    for (const fn of [...(sendSubs.get(owner) || [])]) {
+      try {
+        fn(seq)
+      } catch {
+        /* one composer never breaks another */
+      }
+    }
+    return seq
+  },
+  /** Whether `seq` is still the newest attempt for `owner`. */
+  isCurrent(owner, seq) {
+    return sendSeqs.get(owner) === seq
+  },
+  subscribe(owner, fn) {
+    let set = sendSubs.get(owner)
+    if (!set) sendSubs.set(owner, (set = new Set()))
+    set.add(fn)
+    return () => {
+      set.delete(fn)
+      if (!set.size && sendSubs.get(owner) === set) sendSubs.delete(owner)
+    }
+  }
+}
+
 /** The bubble a "delivery unknown" send left behind, for the composer to
  *  follow ('' when there is none to follow). */
 export function unknownSendId(result) {

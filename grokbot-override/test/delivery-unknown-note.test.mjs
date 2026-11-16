@@ -249,3 +249,82 @@ test('mounted: a definite refusal (not-sent) keeps its recovery: the draft and n
   assert.equal(c.container.querySelector('textarea').value, 'refused message')
   assert.equal(c.note(), 'Not sent: session busy. Your message is back in the composer.')
 })
+
+// ── review round 1 (DU-R1-01, DU-R1-02) ──────────────────────────────────
+
+function deferred() {
+  let resolve
+  const promise = new Promise(res => (resolve = res))
+  return { promise, resolve }
+}
+const UNKNOWN_A = { ok: false, delivery: 'unknown', error: 'connection closed', clientId: 'local:A' }
+const itemA = patch => unknownItem({ id: 'local:A', text: 'message A', ...patch })
+const itemB = patch => unknownItem({ id: 'local:B', text: 'message B', ...patch })
+
+test('DU-R1-01: A pending, B sent, then A comes back unknown: no note returns for the older send', { skip }, async t => {
+  const c = await mountComposer(t)
+  const a = deferred()
+  c.sends.next.push(a.promise, { ok: true, delivery: 'sent', clientId: 'local:B' })
+  await c.send('message A')
+  await c.send('message B')
+  assert.equal(c.note(), '')
+  a.resolve(UNKNOWN_A)
+  await settle()
+  c.render({ items: [itemA()] })
+  assert.equal(c.note(), '', 'B dismissed the note; A settling later does not bring it back')
+})
+
+test('DU-R1-01: A pending, B unknown and unconfirmed, then A unknown: the note stays on B', { skip }, async t => {
+  const c = await mountComposer(t)
+  const a = deferred()
+  c.sends.next.push(a.promise, { ok: false, delivery: 'unknown', error: 'connection closed', clientId: 'local:B' })
+  await c.send('message A')
+  await c.send('message B')
+  c.render({ items: [itemB({ checked: true })] })
+  assert.equal(c.note(), UNCONFIRMED_DELIVERY_NOTE)
+  a.resolve(UNKNOWN_A)
+  await settle()
+  c.render({ items: [itemA(), itemB({ checked: true })] })
+  assert.equal(c.note(), UNCONFIRMED_DELIVERY_NOTE, 'follows the newest send (B), not the one that settled last')
+})
+
+test('DU-R1-01: A pending, B refused (draft back), then A unknown: the refusal note and draft stay', { skip }, async t => {
+  const c = await mountComposer(t)
+  const a = deferred()
+  c.sends.next.push(a.promise, { ok: false, delivery: 'not-sent', error: 'session busy', clientId: 'local:B' })
+  await c.send('message A')
+  await c.send('message B')
+  const refused = 'Not sent: session busy. Your message is back in the composer.'
+  assert.equal(c.note(), refused)
+  assert.equal(c.container.querySelector('textarea').value, 'message B')
+  a.resolve(UNKNOWN_A)
+  await settle()
+  c.render({ items: [itemA()] })
+  assert.equal(c.note(), refused)
+  assert.equal(c.container.querySelector('textarea').value, 'message B')
+})
+
+test('DU-R1-02: the same bot side by side: a send in the second tab dismisses the first tab’s note', { skip }, async t => {
+  const first = await mountComposer(t)
+  const second = await mountComposer(t)
+  first.sends.next.push(UNKNOWN_A)
+  await first.send('message A')
+  first.render({ items: [itemA()] })
+  second.render({ items: [itemA()] })
+  assert.equal(first.note(), CHECKING_DELIVERY_NOTE)
+  await second.send('message B')
+  assert.equal(first.note(), '', 'the user sent another message to this chat')
+  assert.equal(second.note(), '')
+})
+
+test('DU-R1-02 control: a send to a different bot leaves this bot’s note alone', { skip }, async t => {
+  const first = await mountComposer(t)
+  const other = await mountComposer(t)
+  other.render({ bot: bot('security'), name: 'Security' })
+  first.sends.next.push(UNKNOWN_A)
+  await first.send('message A')
+  first.render({ items: [itemA()] })
+  assert.equal(first.note(), CHECKING_DELIVERY_NOTE)
+  await other.send('to security')
+  assert.equal(first.note(), CHECKING_DELIVERY_NOTE)
+})

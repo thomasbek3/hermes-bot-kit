@@ -18,7 +18,7 @@
 
 import * as React from 'react'
 
-import { appendDraft, deliveryNote, draftOwnerKey, draftTexts, failureNote, isRecoverableRefusal, readDraftFiles, unknownSendId } from '../core/drafts.js'
+import { appendDraft, composerSends, deliveryNote, draftOwnerKey, draftTexts, failureNote, isRecoverableRefusal, readDraftFiles, unknownSendId } from '../core/drafts.js'
 import { mentionCompletions, mentionedBots, mentionNote } from '../core/mentions.js'
 import { displayName } from '../core/roster.js'
 import { metaFor, openInBotMode, stockHandoffProblem } from './app'
@@ -219,6 +219,8 @@ export function Composer({
     // left its note behind; the text is already in the draft.
     setNote(draftTexts.takeNote(owner))
     setUnknownId('')
+    // A send to this bot from any of its composers dismisses the note here.
+    const offSends = composerSends.subscribe(owner, () => setUnknownId(''))
     // Recoveries while this composer is on screen: appended to what it shows.
     const off = draftTexts.subscribe(owner, (value: string, message: string) => {
       setText(current => appendDraft(current, value))
@@ -226,6 +228,7 @@ export function Composer({
     })
     return () => {
       off()
+      offSends()
       abortReads()
     }
   }, [owner])
@@ -327,7 +330,7 @@ export function Composer({
     if (slash && !files.length) {
       setText('')
       setNote('')
-      setUnknownId('')
+      composerSends.begin(sentOwner)
       setOptions([])
       const result = await onSlash?.(sending)
       if (ownerRef.current !== sentOwner) return
@@ -348,7 +351,7 @@ export function Composer({
       }
       setText('')
       setNote('')
-      setUnknownId('')
+      composerSends.begin(sentOwner)
       setOptions([])
       const result = await onAnswer(sending)
       // Not taken: back into this bot's draft (whichever composer shows it).
@@ -361,7 +364,9 @@ export function Composer({
     setText('')
     setFiles([])
     setNote('')
-    setUnknownId('')
+    // Numbered before the await: only this attempt, if still the newest
+    // for this bot, may set the "delivery unknown" note (DU-R1-01).
+    const attempt = composerSends.begin(sentOwner)
     setOptions([])
     const result = await onSend(sending, attachments, apiText ? { apiText } : undefined)
     const here = mountedRef.current && ownerRef.current === sentOwner
@@ -380,9 +385,11 @@ export function Composer({
     } else if (!result.ok && here) {
       // Delivery unknown: never re-armed (it may have reached the bot). The
       // note follows the bubble's history check (deliveryNote).
-      const followed = unknownSendId(result)
-      if (followed) setUnknownId(followed)
-      else setNote(failureNote(result, false))
+      if (composerSends.isCurrent(sentOwner, attempt)) {
+        const followed = unknownSendId(result)
+        if (followed) setUnknownId(followed)
+        else setNote(failureNote(result, false))
+      }
     }
     if (here) inputRef.current?.focus()
   }
