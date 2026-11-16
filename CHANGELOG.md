@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **grokbot-override: images and recordings keep their size, and streaming no longer re-renders old messages
+  (2026-11-15)**: an image from the bot's machine is decoded before it shows and drawn with its width and height
+  (clamped to 360 px wide), instead of a fixed 160×110 box that then jumped to the image's size; the size and the
+  decoded image are remembered per bot and path, so switching bots and coming back draws it at once in its final
+  box. Audio and video load in a player-sized box instead of a file card that turned into a player. A bot's
+  finished messages are memoized (`BotProse`, `BotText`, the Markdown renderer), so each streamed delta re-renders
+  only the reply that is streaming, not every message above it; media effects key on the bot's route, not the
+  roster's row object.
 - **grokbot-override: a finished reply no longer flashes when its stored copy arrives (2026-11-15)**: a streamed
   reply (`live:…`) and a sent bubble (`local:…`) were replaced by their stored rows on the next history read, which
   gave them new React keys: the bubble and its group remounted, Markdown re-parsed, cards showed their loading box

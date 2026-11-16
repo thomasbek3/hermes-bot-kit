@@ -17954,7 +17954,7 @@ var init_xlsx = __esm({
         }
         prep_blob(d2, 0);
         var ft = d2.read_shift(1);
-        var memo = !!(ft & 136);
+        var memo3 = !!(ft & 136);
         var vfp = false, l7 = false;
         switch (ft) {
           case 2:
@@ -17965,12 +17965,12 @@ var init_xlsx = __esm({
           // dBASE III
           case 48:
             vfp = true;
-            memo = true;
+            memo3 = true;
             break;
           // VFP
           case 49:
             vfp = true;
-            memo = true;
+            memo3 = true;
             break;
           // VFP with autoincrement
           // 0x43 dBASE IV SQL table files
@@ -18119,7 +18119,7 @@ var init_xlsx = __esm({
                 }
                 break;
               case "M":
-                if (!memo) throw new Error("DBF Unexpected MEMO for type " + ft.toString(16));
+                if (!memo3) throw new Error("DBF Unexpected MEMO for type " + ft.toString(16));
                 out[R][C] = "##MEMO##" + (l7 ? parseInt(s.trim(), 10) : dd.read_shift(4));
                 break;
               case "N":
@@ -49796,8 +49796,10 @@ var CHAT_CSS = (
 .gbo-media-image { display: block; max-width: min(100%, 360px); border-radius: 12px; overflow: hidden; border: 1px solid var(--gbo-border); }
 .gbo-media-image img { display: block; max-width: 100%; height: auto; }
 .gbo-media-image.is-loading { width: 160px; height: 110px; background: var(--gbo-accent); }
-.gbo-media-audio { width: min(100%, 320px); }
+.gbo-media-audio { display: block; width: min(100%, 320px); height: 40px; }
+.gbo-media-audio.is-loading { border-radius: 999px; background: var(--gbo-accent); }
 .gbo-media-video { max-width: min(100%, 420px); border-radius: 12px; }
+.gbo-media-video.is-loading { display: block; width: min(100%, 320px); aspect-ratio: 16 / 9; background: var(--gbo-accent); }
 .gbo-media-file {
   display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px;
   border: 1px solid var(--gbo-border); background: var(--gbo-bg); font: var(--gbo-text-body-sm); cursor: pointer;
@@ -54562,28 +54564,79 @@ function saveDataUrl(dataUrl, name) {
   } catch {
   }
 }
+var MEDIA_IMAGE_MAX_PX = 360;
+var READY_MAX = 60;
+var readyMedia = /* @__PURE__ */ new Map();
+function rememberMedia(key, value) {
+  readyMedia.delete(key);
+  readyMedia.set(key, value);
+  while (readyMedia.size > READY_MAX) readyMedia.delete(readyMedia.keys().next().value);
+}
+function mediaBox(width, height) {
+  if (!(Number(width) > 0) || !(Number(height) > 0)) return null;
+  const w = Math.min(Number(width), MEDIA_IMAGE_MAX_PX);
+  return { width: Math.round(w), height: Math.round(w * Number(height) / Number(width)) };
+}
+function decodeSize(src) {
+  const Img = globalThis.window?.Image ?? globalThis.Image;
+  if (typeof Img !== "function") return Promise.resolve({});
+  let img;
+  try {
+    img = new Img();
+  } catch {
+    return Promise.resolve({});
+  }
+  if (typeof img.decode !== "function") return Promise.resolve({});
+  img.src = src;
+  const read = () => img.naturalWidth > 0 && img.naturalHeight > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : {};
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({}), 1500);
+    img.decode().then(
+      () => {
+        clearTimeout(timer);
+        resolve(read());
+      },
+      () => {
+        clearTimeout(timer);
+        resolve({});
+      }
+    );
+  });
+}
 function OwnerMedia({ bot, item }) {
-  const [src, setSrc] = React11.useState("");
+  const route = rowKey(bot);
+  const cacheKey = `${route}|${item.path}`;
+  const cached2 = !item.remote ? readyMedia.get(cacheKey) : void 0;
+  const [ready, setReady] = React11.useState(cached2 || null);
   const [error, setError] = React11.useState("");
+  const botRef = React11.useRef(bot);
+  botRef.current = bot;
   const wantsRead = !item.remote && item.kind !== "file";
   React11.useEffect(() => {
     if (!wantsRead) return void 0;
+    const hit = readyMedia.get(cacheKey);
+    if (hit) {
+      setReady((current) => current?.src === hit.src ? current : hit);
+      return void 0;
+    }
     let live = true;
-    readBotMedia(bot, item.path).then(
-      (url) => {
-        if (live) setSrc(url);
-      },
-      (err2) => {
-        if (live) setError(String(err2?.message || err2));
-      }
-    );
+    readBotMedia(botRef.current, item.path).then(async (url) => {
+      const size = item.kind === "image" && url ? await decodeSize(url) : {};
+      if (!live) return;
+      const value = { src: url, ...size };
+      if (url) rememberMedia(cacheKey, value);
+      setReady(value);
+    }).catch((err2) => {
+      if (live) setError(String(err2?.message || err2));
+    });
     return () => {
       live = false;
     };
-  }, [bot, item.path, wantsRead]);
+  }, [cacheKey, item.path, item.kind, wantsRead]);
+  const src = ready?.src || "";
   if (item.kind === "image" && item.remote && !src) {
     const host3 = remoteImageHost(item.path);
-    return /* @__PURE__ */ jsxs12("button", { type: "button", className: "gbo-media-remote", title: item.path, onClick: () => setSrc(item.path), children: [
+    return /* @__PURE__ */ jsxs12("button", { type: "button", className: "gbo-media-remote", title: item.path, onClick: () => setReady({ src: item.path }), children: [
       /* @__PURE__ */ jsxs12("span", { className: "gbo-media-remote-host", children: [
         "Image from ",
         host3
@@ -54597,10 +54650,22 @@ function OwnerMedia({ bot, item }) {
       item.name,
       ": not available"
     ] });
-    return src ? /* @__PURE__ */ jsx13("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx13("img", { alt: item.name, src, loading: "lazy" }) }) : /* @__PURE__ */ jsx13("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
+    const box = mediaBox(ready?.width, ready?.height);
+    return src ? /* @__PURE__ */ jsx13("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx13(
+      "img",
+      {
+        alt: item.name,
+        src,
+        loading: "lazy",
+        ...box ? { width: box.width, height: box.height, style: { aspectRatio: `${box.width} / ${box.height}` } } : {}
+      }
+    ) }) : /* @__PURE__ */ jsx13("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
   }
-  if ((item.kind === "audio" || item.kind === "video") && src) {
-    return item.kind === "audio" ? /* @__PURE__ */ jsx13("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx13("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
+  if (item.kind === "audio" || item.kind === "video") {
+    if (src) {
+      return item.kind === "audio" ? /* @__PURE__ */ jsx13("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx13("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
+    }
+    if (!error) return /* @__PURE__ */ jsx13("span", { className: `gbo-media-${item.kind} is-loading`, role: "img", "aria-label": `Loading ${item.name}` });
   }
   return /* @__PURE__ */ jsx13(FileCard, { bot, item });
 }
@@ -54706,23 +54771,39 @@ function MediaStrip({ bot, media }) {
   if (!shown.length) return null;
   return /* @__PURE__ */ jsx13("div", { className: "gbo-media", children: shown.map((item) => /* @__PURE__ */ jsx13(OwnerMedia, { bot, item }, item.path)) });
 }
-function BotText({ bot, text: text3 }) {
-  const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
-  const parts = React11.useMemo(() => clean ? splitFences(clean) : [], [clean]);
-  return /* @__PURE__ */ jsxs12(Fragment8, { children: [
-    parts.map(
-      (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx13(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx13(Markdown, { text: part.text }, index)
-    ),
-    /* @__PURE__ */ jsx13(MediaStrip, { bot, media })
-  ] });
+function memo2(component, equal) {
+  return typeof React11.memo === "function" ? React11.memo(component, equal) : component;
 }
-function BotProse({
-  bot,
-  text: text3,
-  pos,
-  time,
-  streaming = false
-}) {
+var MemoMarkdown = memo2(Markdown);
+var sameBot = (a2, b2) => a2 === b2 || rowKey(a2) === rowKey(b2);
+var BotText = memo2(
+  function BotText2({ bot, text: text3 }) {
+    const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
+    const parts = React11.useMemo(() => clean ? splitFences(clean) : [], [clean]);
+    return /* @__PURE__ */ jsxs12(Fragment8, { children: [
+      parts.map(
+        (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx13(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx13(MemoMarkdown, { text: part.text }, index)
+      ),
+      /* @__PURE__ */ jsx13(MediaStrip, { bot, media })
+    ] });
+  },
+  (a2, b2) => a2.text === b2.text && sameBot(a2.bot, b2.bot)
+);
+function sameNode(a2, b2) {
+  if (a2 === b2) return true;
+  if (!React11.isValidElement(a2) || !React11.isValidElement(b2)) return false;
+  if (a2.type !== b2.type || a2.key !== b2.key) return false;
+  const pa = a2.props || {};
+  const pb = b2.props || {};
+  const keys2 = Object.keys(pa);
+  if (keys2.length !== Object.keys(pb).length) return false;
+  return keys2.every((key) => {
+    const x = pa[key];
+    const y = pb[key];
+    return x === y || (typeof x !== "object" || x === null) && (typeof y !== "object" || y === null) && Object.is(x, y) || key === "children" && sameNode(x, y);
+  });
+}
+function BotProseView({ bot, text: text3, pos, time, streaming = false }) {
   const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
   const files = media.filter((item) => item.kind === "file");
   const bubble = Boolean(clean) || media.length > files.length;
@@ -54734,6 +54815,10 @@ function BotProse({
     /* @__PURE__ */ jsx13(FileCards, { bot, files })
   ] });
 }
+var BotProse = memo2(
+  BotProseView,
+  (a2, b2) => a2.text === b2.text && a2.pos === b2.pos && Boolean(a2.streaming) === Boolean(b2.streaming) && sameBot(a2.bot, b2.bot) && sameNode(a2.time, b2.time)
+);
 
 // src/ui/EmailDraft.tsx
 import { jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
