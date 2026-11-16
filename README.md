@@ -50,7 +50,7 @@ Desktop plugins plus an optional agent plugin, one install:
 One command, the desktop plugins (idempotent, no sudo, agents can run it unattended):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16/install.sh | bash
 ```
 
 Then in Hermes Desktop: **⌘K → Reload plugins** (or restart the app).
@@ -82,7 +82,7 @@ left their folders in `desktop-plugins/`, the installer says so; run it with
 profile), so it has its own one-liner:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.10.4/texting-style/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16/texting-style/install.sh | bash
 ```
 
 **remote-cua** is an *agent* plugin too (per bot profile, on the gateway host):
