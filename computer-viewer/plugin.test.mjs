@@ -1173,6 +1173,10 @@ function fakeRemoteCua({ lease = AGENT_LEASE, status = STATUS_READY, configured 
         if (!force && server.lease.viewer !== viewer) {
           return reply(409, { ok: false, error: 'not_holder', message: 'This viewer does not hold control; use force to hand back anyway', lease: server.lease })
         }
+        // remote-cua lease.release(expect_epoch=…): a forced release clears only the lease it saw.
+        if (force && Number.isInteger(body.epoch) && body.epoch !== server.lease.epoch) {
+          return reply(409, { ok: false, error: 'stale_force', message: 'Control changed since this hand back was sent; nothing was released', lease: server.lease })
+        }
         bump({ holder: 'agent', viewer: null })
       }
       return reply(200, { ok: true, lease: server.lease })
@@ -1304,7 +1308,7 @@ test('after a reload the old lease shows "Hand back (force)", which clears it', 
   await t.handBack(false)
   assert.equal(server.releases().length, 0, 'a plain hand back from a non-holder sends nothing')
   await t.handBack(true)
-  assert.deepEqual(plain(server.releases()[0].body), { viewer: t.control.viewerId, force: true })
+  assert.deepEqual(plain(server.releases()[0].body), { viewer: t.control.viewerId, force: true, epoch: 3 })
   assert.equal(server.lease.holder, 'agent')
 })
 
@@ -2060,4 +2064,54 @@ test('R3-02: a stale release landing AFTER the new grant is refused by the serve
   await t.refreshLease()
   assertInputMatchesServer(t, server, instances, 'after the stale release')
   assert.equal(lastRfb(instances).viewOnly, false)
+})
+
+// ---------------------------------------------------------------------------
+// Integration gate (INT-01): a forced hand back names the lease it saw.
+// ---------------------------------------------------------------------------
+
+test('INT-01: a timed-out forced hand back that commits after a new Take over cannot revoke it', async () => {
+  const server = fakeRemoteCua({ lease: { holder: 'human', viewer: 'cv-from-before-reload', since: 1763251100, epoch: 10 } })
+  const setup = await remoteSetup(server)
+  const { t, context, instances } = setup
+  lastRfb(instances).listeners.get('connect')({})
+  t.showPane()
+  assert.equal(t.controlView(t.$control.get(), t.control.viewerId).canForce, true, 'precondition: a lease left by another viewer')
+  const late = timeoutThenLateCommit(context, server)
+  await t.handBack(true)
+  await settle()
+  assert.equal(server.lease.viewer, 'cv-from-before-reload', 'the forced release has not committed')
+  // The previous viewer hands back on its own.
+  server.api.answer({ method: 'POST', path: '/api/plugins/remote-cua/release', body: { viewer: 'cv-from-before-reload', force: false } })
+  assert.equal(server.lease.holder, 'agent')
+  await t.refreshLease()
+  assert.equal(t.controlView(t.$control.get(), t.control.viewerId).chip, 'Bot is in control')
+  // This window takes over (a new id: the forced request's outcome is unknown).
+  await t.takeOver()
+  await settle()
+  const grant = { ...server.lease }
+  assert.equal(grant.holder, 'human')
+  assert.equal(grant.viewer, t.control.viewerId)
+  assert.equal(lastRfb(instances).viewOnly, false, 'this window drives the machine')
+  // Now the old forced release reaches the server: it named epoch 10, the
+  // lease is at a later epoch, so the server refuses it and the grant stands.
+  const result = late[0]()
+  assert.match(String(result && result.message), /^409: .*stale_force/)
+  assert.deepEqual(plain(server.lease), plain(grant))
+  assertInputMatchesServer(t, server, instances, 'after the late forced release')
+  await t.refreshLease()
+  assertInputMatchesServer(t, server, instances, 'after the next poll')
+  assert.equal(lastRfb(instances).viewOnly, false)
+})
+
+test('INT-01: a forced hand back sends the epoch it saw; the current lease is cleared, a later one is not', async () => {
+  const server = fakeRemoteCua({ lease: { holder: 'human', viewer: 'cv-from-before-reload', since: 1763251100, epoch: 7 } })
+  const { t } = await remoteSetup(server)
+  await t.handBack(true)
+  assert.deepEqual(plain(server.releases()[0].body), { viewer: t.control.viewerId, force: true, epoch: 7 })
+  assert.equal(server.lease.holder, 'agent')
+  // A forced release naming an older epoch is refused with the current lease.
+  server.lease = { holder: 'human', viewer: 'cv-other', since: 1763251300, epoch: 9 }
+  assert.throws(() => server.api.answer({ method: 'POST', path: '/api/plugins/remote-cua/release', body: { viewer: 'x', force: true, epoch: 8 } }), /409: .*stale_force/)
+  assert.equal(server.lease.viewer, 'cv-other')
 })

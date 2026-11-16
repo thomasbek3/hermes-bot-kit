@@ -46,6 +46,23 @@ def test_force_release_clears_a_stuck_lease(home):
     assert lease.release(None, home, force=True).holder == lease.AGENT
 
 
+def test_forced_release_names_the_epoch_it_saw(home):
+    """INT-01: old viewer takes, a forced release is sent for that lease and stalls, the old viewer hands
+    back, a new viewer takes; the forced release then commits and must not clear the new grant."""
+    seen = lease.take("pane-old", home)
+    lease.release("pane-old", home)  # an ordinary hand back
+    grant = lease.take("pane-new", home)
+    with pytest.raises(lease.LeaseConflict) as exc:
+        lease.release("pane-force", home, force=True, expect_epoch=seen.epoch)
+    assert exc.value.code == "stale_force" and exc.value.lease == grant
+    assert lease.read(home) == grant
+    # Naming the current epoch clears it; against an agent lease it is the usual no-op.
+    assert lease.release("pane-force", home, force=True, expect_epoch=grant.epoch).holder == lease.AGENT
+    assert lease.release(None, home, force=True, expect_epoch=0).holder == lease.AGENT
+    with pytest.raises(ValueError):
+        lease.release(None, home, force=True, expect_epoch="3")
+
+
 def test_corrupt_file_reads_as_agent(home):
     (home / "remote-cua").mkdir()
     (home / "remote-cua" / "lease.json").write_text("{nope")

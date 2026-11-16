@@ -32,7 +32,9 @@ change. `viewer` is any id the pane picks (1-128 of `A-Z a-z 0-9 . _ : -`). The 
 viewer id on every load (ids are never kept across reloads), and after a `take` or `release` that
 timed out it switches to another fresh id. So a late `release` that still names the old id gets
 409 `not_holder` and cannot revoke a newer grant. A human lease left from before a reload is cleared
-with **Hand back (force)** (`release` with `"force": true`).
+with **Hand back (force)** (`release` with `"force": true` and the `"epoch"` of the lease the pane saw),
+which clears only that lease: a forced release that commits late gets 409 `stale_force` once the lease
+has moved on, so it cannot revoke a newer grant either.
 
 ## Endpoints
 
@@ -59,17 +61,21 @@ Unconfigured profile: `"configured": false, "machine": null, "error": "this prof
 From 200 on, the bot's `computer_use` is refused with `human_has_control`, and a call already running
 when you took over has its result discarded.
 
-### `POST /api/plugins/remote-cua/release` `{"viewer": "pane-7f3a", "force": false}`
+### `POST /api/plugins/remote-cua/release` `{"viewer": "pane-7f3a", "force": false}` or `{"viewer": "pane-7f3a", "force": true, "epoch": 5}`
 
 | Status | Body |
 |---|---|
 | 200 | `{"ok": true, "lease": {"holder": "agent", "viewer": null, "since": …, "epoch": 6}}` (already agent: unchanged, 200) |
 | 409 | `{"ok": false, "error": "not_holder", "message": "This viewer does not hold control; use force to hand back anyway", "lease": {…}}` |
+| 409 | `{"ok": false, "error": "stale_force", "message": "Control changed since this hand back was sent; nothing was released", "lease": {…}}` (forced, and `epoch` is not the current human lease's) |
 | 400 | `{"ok": false, "error": "bad_viewer", …}` (no viewer and no `"force": true`) |
+| 400 | `{"ok": false, "error": "bad_epoch", …}` (`epoch` present but not an integer) |
 
 `{"force": true}` (viewer optional) clears a lease whatever viewer holds it: the pane's **Hand back
 (force)** after a reload, since the reloaded pane has a new viewer id and its plain `release` would get
-`not_holder`.
+`not_holder`. With `"epoch": n` (the pane always sends it) it clears only the human lease at epoch `n`;
+a lease that has since changed hands is left alone (`stale_force`). Without `epoch` (scripts, older
+panes) it clears whatever holds the lease.
 
 ### `GET /api/plugins/remote-cua/status[?fresh=1]`
 

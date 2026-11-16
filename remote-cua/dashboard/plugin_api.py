@@ -2,7 +2,7 @@
 
     GET  /lease                      who holds this profile's remote machine
     POST /take     {"viewer": id}    the human at ``viewer`` takes over
-    POST /release  {"viewer": id, "force": false}   hand back to the bot
+    POST /release  {"viewer": id, "force": false[, "epoch": n]}   hand back to the bot
     GET  /status[?fresh=1]           reachable, driver, permissions, screen awake
 
 Profile scope: ``?profile=<name>`` (Hermes binds that profile's home before the handler runs), else
@@ -101,12 +101,17 @@ def release(payload: Any = Body(default=None)) -> JSONResponse:
         return _answer(400, ok=False, error="bad_viewer", message="viewer must be 1-128 letters, digits, . _ : -")
     if viewer is None and not force:
         return _answer(400, ok=False, error="bad_viewer", message="send the viewer that took control, or force: true")
+    # A forced release names the epoch of the lease it saw: it clears only that lease (stale_force once it
+    # has moved on), so a late commit can never revoke a later grant.
+    epoch = payload.get("epoch") if isinstance(payload, dict) else None
+    if epoch is not None and (isinstance(epoch, bool) or not isinstance(epoch, int)):
+        return _answer(400, ok=False, error="bad_epoch", message="epoch must be an integer")
     try:
-        current = lease.release(viewer, force=force)
+        current = lease.release(viewer, force=force, expect_epoch=epoch if force else None)
     except lease.LeaseConflict as exc:
-        return _answer(409, ok=False, error=exc.code,
-                       message="This viewer does not hold control; use force to hand back anyway",
-                       lease=exc.lease.to_dict())
+        message = ("Control changed since this hand back was sent; nothing was released"
+                   if exc.code == "stale_force" else "This viewer does not hold control; use force to hand back anyway")
+        return _answer(409, ok=False, error=exc.code, message=message, lease=exc.lease.to_dict())
     return _answer(200, ok=True, lease=current.to_dict())
 
 

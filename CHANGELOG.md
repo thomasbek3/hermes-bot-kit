@@ -30,6 +30,13 @@
   whose answer was lost, is handed back (with retries) whenever the pane stops controlling that machine, including
   removing the binding; the gateway is picked by the focused chat's `focusedSessionOwner`, never the active socket,
   and fails closed when unprovable.
+- **computer-viewer + remote-cua: a forced hand back clears only the lease it saw (2026-11-16)**: **Hand back
+  (force)** now sends the epoch of the human lease the pane saw, and remote-cua's `release` clears only that
+  lease (409 `stale_force` once it has changed hands; `lease.release(expect_epoch=…)`). Before, a forced
+  release that timed out but committed later (after the old viewer handed back and this pane took over under
+  a new id) revoked the new grant while the pane's input stayed on. A forced release without `epoch` keeps
+  the old meaning for scripts. Round 3's "a late release can never revoke a later grant" now holds for
+  forced releases too.
 - **computer-viewer: control fixes from review round 3 (2026-11-16)**: a lease change with no answer retires its
   viewer id, so a release that commits late can never revoke a later grant (Package P's release only clears the
   viewer it names), and Take over re-reads the lease and waits while an old id of this window holds it; a focus

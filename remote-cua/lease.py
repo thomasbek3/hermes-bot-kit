@@ -38,7 +38,8 @@ DISCARDED = (f"{REASON}: A human took over this computer while the action ran; i
 
 
 class LeaseConflict(Exception):
-    """Another viewer holds the lease (take), or the caller does not hold it (release without force)."""
+    """Another viewer holds the lease (take), the caller does not hold it (release without force), or a
+    forced release names an epoch the lease has moved past (``stale_force``)."""
 
     def __init__(self, code: str, lease: "Lease"):
         super().__init__(code)
@@ -157,11 +158,17 @@ def take(viewer: str, home: Optional[Path] = None, *, now: Optional[float] = Non
 
 
 def release(viewer: Optional[str], home: Optional[Path] = None, *, force: bool = False,
-            now: Optional[float] = None) -> Lease:
+            expect_epoch: Optional[int] = None, now: Optional[float] = None) -> Lease:
     """Hand control back to the bot. Idempotent when the agent already holds it. Without ``force`` only the
-    holding viewer may release (LeaseConflict ``not_holder``); ``force`` clears a stuck lease."""
+    holding viewer may release (LeaseConflict ``not_holder``); ``force`` clears a stuck lease.
+
+    ``expect_epoch`` (with ``force``): the epoch of the human lease the caller saw. The forced release
+    clears only that lease; once the lease has moved on (a hand back, a new take), it is refused with
+    LeaseConflict ``stale_force``, so a forced request that commits late can never revoke a later grant."""
     if viewer is not None and not valid_viewer(viewer):
         raise ValueError("viewer must be 1-128 letters, digits, . _ : -")
+    if expect_epoch is not None and (isinstance(expect_epoch, bool) or not isinstance(expect_epoch, int)):
+        raise ValueError("expect_epoch must be an integer")
     path = lease_path(home)
     with _locked(path):
         current = read(home)
@@ -169,6 +176,8 @@ def release(viewer: Optional[str], home: Optional[Path] = None, *, force: bool =
             return current
         if not force and current.viewer != viewer:
             raise LeaseConflict("not_holder", current)
+        if force and expect_epoch is not None and current.epoch != expect_epoch:
+            raise LeaseConflict("stale_force", current)
         lease = Lease(holder=AGENT, viewer=None, since=time.time() if now is None else now, epoch=current.epoch + 1)
         _write(path, lease)
         return lease

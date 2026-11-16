@@ -2546,7 +2546,11 @@ function createRemoteCuaClient(request) {
   return {
     lease: owner => request(owner, 'lease'),
     take: (owner, viewer) => request(owner, 'take', { viewer }),
-    release: (owner, viewer, force) => request(owner, 'release', { viewer, force: Boolean(force) }),
+    // A forced release names the epoch of the lease it saw: remote-cua clears
+    // only that lease (409 stale_force once it has moved on), so a forced
+    // request that commits late can never revoke a later grant (INT-01).
+    release: (owner, viewer, force, epoch) =>
+      request(owner, 'release', force && Number.isInteger(epoch) ? { viewer, force: true, epoch } : { viewer, force: Boolean(force) }),
     status: (owner, fresh) => request(owner, 'status', undefined, fresh ? 'fresh=1' : '')
   }
 }
@@ -2927,6 +2931,8 @@ async function handBack(force = false) {
   const { key, owner } = state
   // Hand back the id the lease names: ours now, or one this window retired.
   const viewer = !force && state.lease && isOwnOldViewer(state.lease.viewer) ? state.lease.viewer : control.viewerId
+  // Force clears only the lease this window saw (its epoch), never a later one.
+  const seenEpoch = state.lease && Number.isInteger(state.lease.epoch) ? state.lease.epoch : null
   const gen = ++control.gen
   patchControl({
     pending: force ? 'force' : 'release',
@@ -2937,7 +2943,7 @@ async function handBack(force = false) {
   refreshInputGate()
   let raw
   try {
-    raw = await queued(owner, () => control.client.release(owner, viewer, force))
+    raw = await queued(owner, () => control.client.release(owner, viewer, force, seenEpoch))
   } catch (error) {
     const sure = definitive(error)
     if (sure) noteHold(owner, error.body, viewer)

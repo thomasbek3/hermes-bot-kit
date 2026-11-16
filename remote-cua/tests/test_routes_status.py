@@ -69,6 +69,20 @@ def test_bad_viewer(client, home, body):
     assert c.post("/api/plugins/remote-cua/take", json=body).status_code == 400
 
 
+def test_forced_release_with_a_stale_epoch_is_refused(client, home):
+    write_config(home, MAC_CONFIG)
+    c, _ = client
+    seen = c.post("/api/plugins/remote-cua/take", json={"viewer": "pane-old"}).json()["lease"]
+    c.post("/api/plugins/remote-cua/release", json={"viewer": "pane-old"})
+    grant = c.post("/api/plugins/remote-cua/take", json={"viewer": "pane-new"}).json()["lease"]
+    r = c.post("/api/plugins/remote-cua/release", json={"viewer": "pane-x", "force": True, "epoch": seen["epoch"]})
+    assert r.status_code == 409 and r.json()["error"] == "stale_force" and r.json()["lease"] == grant
+    assert c.post("/api/plugins/remote-cua/release", json={"force": True, "epoch": "1"}).status_code == 400
+    assert c.post("/api/plugins/remote-cua/release", json={"force": True, "epoch": True}).status_code == 400
+    r = c.post("/api/plugins/remote-cua/release", json={"viewer": "pane-x", "force": True, "epoch": grant["epoch"]})
+    assert r.status_code == 200 and r.json()["lease"]["holder"] == "agent"
+
+
 def test_release_without_viewer_needs_force(client, home):
     write_config(home, MAC_CONFIG)
     c, _ = client
