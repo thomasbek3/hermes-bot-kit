@@ -463,7 +463,9 @@ function PreviewDirective({ attrs, source, scope }: { attrs: Record<string, stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, rel, html, known])
   const name = rel ? rel.split('/').pop() || rel : 'Preview'
-  if (rel && html && state === null) return <div className="gbo-preview is-loading" aria-label={`Loading ${name}`} />
+  // The loading shell is as tall as the frame will start (and as the
+  // streaming placeholder before it, Chat.tsx), so nothing jumps.
+  if (rel && html && state === null) return <div className="gbo-preview is-loading" aria-label={`Loading ${name}`} style={{ height: previewStartHeight(attrs.height) }} />
   if (!rel || !html || state?.error) {
     return (
       <div className="gbo-preview-row" title={source}>

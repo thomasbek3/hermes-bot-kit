@@ -373,9 +373,9 @@ function boxTsv(rows, box) {
   const lines = [];
   for (let r = box.top; r <= box.bottom; r += 1) {
     const row = rows[r] || [];
-    const cells = [];
-    for (let c2 = box.left; c2 <= box.right; c2 += 1) cells.push(tsvField(row[c2]));
-    lines.push(cells.join("	"));
+    const cells2 = [];
+    for (let c2 = box.left; c2 <= box.right; c2 += 1) cells2.push(tsvField(row[c2]));
+    lines.push(cells2.join("	"));
   }
   return lines.join("\n");
 }
@@ -11512,9 +11512,9 @@ function html_to_sheet(str3, _opts) {
       continue;
     }
     if (hd != "<td" && hd != "<th") continue;
-    var cells = row.split(/<\/t[dh]>/i);
-    for (j = 0; j < cells.length; ++j) {
-      var cell = cells[j].trim();
+    var cells2 = row.split(/<\/t[dh]>/i);
+    for (j = 0; j < cells2.length; ++j) {
+      var cell = cells2[j].trim();
       if (!cell.match(/<t[dh]/i)) continue;
       var m = cell, cc = 0;
       while (m.charAt(0) == "<" && (cc = m.indexOf(">")) > -1) m = m.slice(cc + 1);
@@ -13562,12 +13562,12 @@ function parse_TST_TileRowInfo(u8, type) {
   }
   if (offsets.length != cnt)
     throw "Expected ".concat(cnt, " cells, found ").concat(offsets.length);
-  var cells = [];
+  var cells2 = [];
   for (C = 0; C < offsets.length - 1; ++C)
-    cells[offsets[C][0]] = used_storage[subarray](offsets[C][1] * width, offsets[C + 1][1] * width);
+    cells2[offsets[C][0]] = used_storage[subarray](offsets[C][1] * width, offsets[C + 1][1] * width);
   if (offsets.length >= 1)
-    cells[offsets[offsets.length - 1][0]] = used_storage[subarray](offsets[offsets.length - 1][1] * width);
-  return { R, cells };
+    cells2[offsets[offsets.length - 1][0]] = used_storage[subarray](offsets[offsets.length - 1][1] * width);
+  return { R, cells: cells2 };
 }
 function parse_TST_Tile(M2, root) {
   var _a;
@@ -22195,7 +22195,7 @@ var init_xlsx = __esm({
       var rregex = /r=["']([^"']*)["']/;
       var refregex = /ref=["']([^"']*)["']/;
       return function parse_ws_xml_data2(sdata, s, opts, guess, themes, styles, wb) {
-        var ri = 0, x = "", cells = [], cref = [], idx = 0, i = 0, cc = 0, d2 = "", p;
+        var ri = 0, x = "", cells2 = [], cref = [], idx = 0, i = 0, cc = 0, d2 = "", p;
         var tag, tagr = 0, tagc = 0;
         var sstr, ftag;
         var fmtid = 0, fillid = 0;
@@ -22277,11 +22277,11 @@ var init_xlsx = __esm({
             }
             if (rowrite) rows[tagr - 1] = rowobj;
           }
-          cells = x.slice(ri).split(cellregex);
-          for (var rslice = 0; rslice != cells.length; ++rslice) if (cells[rslice].trim().charAt(0) != "<") break;
-          cells = cells.slice(rslice);
-          for (ri = 0; ri != cells.length; ++ri) {
-            x = cells[ri].trim();
+          cells2 = x.slice(ri).split(cellregex);
+          for (var rslice = 0; rslice != cells2.length; ++rslice) if (cells2[rslice].trim().charAt(0) != "<") break;
+          cells2 = cells2.slice(rslice);
+          for (ri = 0; ri != cells2.length; ++ri) {
+            x = cells2[ri].trim();
             if (x.length === 0) continue;
             cref = x.match(rregex);
             idx = ri;
@@ -49163,7 +49163,14 @@ var ADAPT_SRC = (
 .bubble.is-user { color: var(--gbo-tint-fg, #FFFFFF); }
 .bubble.is-user a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .bubble.is-user code { background: #FFFFFF2E; border-radius: 4px; padding: 1px 4px; font-family: var(--font-mono-stack); font-size: 13px; }
-.bubble.is-streaming > .bubble__plain::after {
+/* The live caret of a streaming reply (it renders formatted as it types,
+   core/streamSafe.js): after the last line of text, inline, so it never adds
+   a line and finishing the reply moves nothing. Not on the reference's
+   ".md > :last-child" box, which would sit on a line of its own. */
+.bubble.is-streaming .md > :last-child::after { content: none; }
+.bubble.is-streaming .md > :last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.bubble.is-streaming .md > :last-child > :is(ul, ol):last-child > li:last-child::after,
+.bubble.is-streaming .md > .gbo-plain:last-child::after {
   content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%;
   background: currentColor; opacity: 0.4; vertical-align: middle; animation: breathe 1s ease-in-out infinite;
 }
@@ -49522,6 +49529,11 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
   background: var(--color-bubble-agent-flat); color: var(--color-text-primary);
 }
 .gbo-dcard.is-loading { width: 300px; min-height: 84px; opacity: 0.6; }
+/* A directive still streaming: the loading card's shell with one quiet
+   skeleton line, never the raw "::card{…" text. */
+.gbo-dcard.is-pending { justify-content: center; padding: 14px 16px; }
+.gbo-dcard-skeleton { display: block; width: 60%; height: 10px; border-radius: 999px; background: var(--color-text-tertiary); opacity: 0.35; animation: breathe 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .gbo-dcard-skeleton { animation: none; } }
 .gbo-dcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 0 8px; }
 .gbo-dcard-title { font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0.15px; overflow-wrap: anywhere; text-transform: none; }
 .gbo-dcard.is-unavailable .gbo-dcard-title { padding: 0 8px; text-transform: capitalize; }
@@ -51895,6 +51907,677 @@ function withDividers(items, nowMs = Date.now(), locale) {
   return out;
 }
 
+// src/core/streamSafe.js
+var HOLD_MAX = 500;
+var DIRECTIVE_BODY_MAX = 2048;
+var RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+var LIST_RE = /^( {0,3})([-*+]|\d{1,9}[.)])( +|$)/;
+var FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+var ATX = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+var DEF = /^ {0,3}\[((?:[^\]\\\n]|\\.){1,999})\]:/;
+var MEDIA_WHOLE = /^[\t ]*[`"']?(?:M|ME|MED|MEDI|MEDIA|MEDIA:.*)$/;
+var MEDIA_TOKEN = /^[`"']?MEDIA:\s*(?:`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|[^\s`"]+)[`"']?/;
+var DIRECTIVE_TOKEN = /^::(?:card|preview)\{[^{}\n]*\}/;
+var AUTOLINK = /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>]+)(>?)/;
+var isWord = (ch) => ch !== void 0 && /[\p{L}\p{N}]/u.test(ch);
+var oddBackticks = (s) => (s.match(/`/g) || []).length % 2 === 1;
+var spaces = (s) => /^ */.exec(s)[0].length;
+var normLabel = (s) => s.trim().replace(/\s+/g, " ").toLowerCase();
+var hasPipe = (line) => /(^|[^\\])\|/.test(line);
+function cells(line) {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+  return s.split(/(?<!\\)\|/);
+}
+var separatorish = (line) => /^[ \t]*[|:\- \t]+$/.test(line) && /[|-]/.test(line);
+function isSeparator(line, cols) {
+  if (!separatorish(line) || !line.includes("|") && cols > 1) return false;
+  const parts = cells(line);
+  return parts.length === cols && parts.every((cell) => /^\s*:?-+:?\s*$/.test(cell));
+}
+var interrupts = (rest) => /^ {0,3}(?:>|`{3}|~{3}|#{1,6}(?:[ \t]|$)|[-*+][ \t]+\S|1[.)][ \t]+\S)/.test(rest) || RULE.test(rest);
+function closesFence(rest, fence) {
+  const m = /^ {0,3}(`+|~+)[ \t]*$/.exec(rest);
+  return Boolean(m && m[1][0] === fence.char && m[1].length >= fence.len);
+}
+function cloneState(st) {
+  return {
+    source: st.source,
+    defs: st.defs,
+    containers: [...st.containers],
+    leaf: st.leaf && st.leaf.ranges ? { ...st.leaf, ranges: [...st.leaf.ranges] } : st.leaf
+  };
+}
+function expandTabs(line) {
+  if (!line.includes("	")) return { text: line, at: (pos) => pos };
+  let text3 = "";
+  const map = [];
+  for (let k = 0; k < line.length; k += 1) {
+    if (line[k] === "	") {
+      const width = 4 - text3.length % 4;
+      for (let x = 0; x < width; x += 1) map.push(k);
+      text3 += " ".repeat(width);
+    } else {
+      map.push(k);
+      text3 += line[k];
+    }
+  }
+  map.push(line.length);
+  return { text: text3, at: (pos) => map[Math.min(pos, map.length - 1)] };
+}
+function scanLine(st, raw, offset) {
+  const plain = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+  const { text: line, at } = expandTabs(plain);
+  const span = (pos2) => [offset + at(pos2), offset + plain.length, offset];
+  const { containers } = st;
+  let leaf = st.leaf;
+  if (leaf && (leaf.type === "heading" || leaf.type === "def")) st.leaf = leaf = null;
+  let pos = 0;
+  let matched = 0;
+  for (const c2 of containers) {
+    const rest2 = line.slice(pos);
+    if (c2.type === "quote") {
+      const m = /^ {0,3}>/.exec(rest2);
+      if (!m) break;
+      pos += m[0].length;
+      if (line[pos] === " ") pos += 1;
+    } else if (rest2.trim()) {
+      if (spaces(rest2) < c2.indent) break;
+      pos += c2.indent;
+    }
+    matched += 1;
+  }
+  const info = { pos, matched, opened: 0, rest: line.slice(pos), leaf: null, lineStart: offset };
+  if (leaf && leaf.type === "fence") {
+    if (matched === containers.length) {
+      if (closesFence(info.rest, leaf)) {
+        st.leaf = null;
+        info.closedFence = true;
+      } else info.inFence = leaf;
+      return info;
+    }
+    st.leaf = leaf = null;
+  }
+  let rest = line.slice(pos);
+  if (!rest.trim()) {
+    containers.length = matched;
+    st.leaf = null;
+    info.blank = true;
+    return info;
+  }
+  if (matched < containers.length && leaf && leaf.type === "para" && !interrupts(rest)) {
+    leaf.ranges.push(span(pos));
+    info.leaf = leaf;
+    return info;
+  }
+  if (matched < containers.length) {
+    containers.length = matched;
+    st.leaf = leaf = null;
+  }
+  for (; ; ) {
+    if (spaces(rest) >= 4) break;
+    const q = /^ {0,3}> ?/.exec(rest);
+    if (q) {
+      containers.push({ type: "quote" });
+      pos += q[0].length;
+      rest = line.slice(pos);
+      info.opened += 1;
+      st.leaf = leaf = null;
+      continue;
+    }
+    if (RULE.test(rest)) break;
+    const l = LIST_RE.exec(rest);
+    if (l) {
+      const after = rest.slice(l[0].length);
+      const blankItem = !after.trim();
+      if (leaf && leaf.type === "para" && (blankItem || /\d/.test(l[2][0]) && !/^1[.)]$/.test(l[2]))) break;
+      let n = l[3].length;
+      if (blankItem || n >= 5) n = 1;
+      containers.push({ type: "list", indent: l[1].length + l[2].length + n });
+      pos += Math.min(l[0].length, l[1].length + l[2].length + n);
+      rest = line.slice(pos);
+      info.opened += 1;
+      st.leaf = leaf = null;
+      if (blankItem) break;
+      continue;
+    }
+    break;
+  }
+  info.pos = pos;
+  info.rest = rest;
+  if (!rest.trim()) {
+    st.leaf = null;
+    info.blank = true;
+    return info;
+  }
+  const range = span(pos);
+  if (spaces(rest) >= 4) {
+    if (leaf && leaf.type === "para") {
+      leaf.ranges.push(range);
+      info.leaf = leaf;
+    } else info.leaf = st.leaf = { type: "indented" };
+    return info;
+  }
+  const f2 = FENCE_OPEN.exec(rest);
+  if (f2 && !(f2[2][0] === "`" && f2[3].includes("`"))) {
+    const prefix = containers.map((c2) => c2.type === "quote" ? "> " : " ".repeat(c2.indent)).join("") + f2[1];
+    info.leaf = st.leaf = { type: "fence", char: f2[2][0], len: f2[2].length, prefix };
+    info.openedFence = true;
+    return info;
+  }
+  if (ATX.test(rest)) {
+    info.leaf = st.leaf = { type: "heading", ranges: [range] };
+    return info;
+  }
+  if (leaf && leaf.type === "table") {
+    leaf.ranges = [range];
+    info.leaf = leaf;
+    return info;
+  }
+  if (leaf && leaf.type === "para") {
+    const head = leaf.ranges[leaf.ranges.length - 1];
+    const header = st.source.slice(head[0], head[1]).replace(/\r$/, "");
+    if (hasPipe(header) && isSeparator(rest, cells(header).length)) {
+      info.leaf = st.leaf = { type: "table", cols: cells(header).length, ranges: [] };
+      info.separator = true;
+      return info;
+    }
+  }
+  if (RULE.test(rest) || leaf && leaf.type === "para" && /^ {0,3}(?:=+|-+)[ \t]*$/.test(rest)) {
+    st.leaf = null;
+    info.rule = true;
+    return info;
+  }
+  const def = DEF.exec(rest);
+  if (def && !(leaf && leaf.type === "para")) {
+    const label = normLabel(def[1]);
+    const hasDest = /^\s*\S/.test(rest.slice(def[0].length));
+    if (label.startsWith("^")) {
+      st.defs.add(label);
+      info.leaf = st.leaf = { type: "para", ranges: [range] };
+      return info;
+    }
+    if (hasDest) st.defs.add(label);
+    info.leaf = st.leaf = { type: "def" };
+    info.defComplete = hasDest;
+    return info;
+  }
+  if (leaf && leaf.type === "para") leaf.ranges.push(range);
+  else st.leaf = { type: "para", ranges: [range] };
+  info.leaf = st.leaf;
+  return info;
+}
+function openMediaTag(line) {
+  for (const match of line.matchAll(/[`"']?MEDIA:/g)) {
+    const rest = line.slice(match.index + match[0].length).replace(/^\s*/, "");
+    if (!rest) return match.index;
+    const q = rest[0];
+    if (q === "`" || q === '"' || q === "'") {
+      if (rest.indexOf(q, 1) < 0) return match.index;
+      continue;
+    }
+    const path = /^[^\s`"]+/.exec(rest);
+    if (!path || path[0].length === rest.length) return match.index;
+  }
+  return -1;
+}
+function openMediaTagIn(text3) {
+  const at = text3.lastIndexOf("MEDIA:");
+  if (at < 0) return -1;
+  const start2 = at > 0 && "`\"'".includes(text3[at - 1]) ? at - 1 : at;
+  const rest = text3.slice(at + 6).replace(/^\s*/, "");
+  if (!rest) return start2;
+  const q = rest[0];
+  if (q === "`" || q === '"' || q === "'") {
+    const close = rest.indexOf(q, 1);
+    const nl = rest.indexOf("\n");
+    return close < 0 && nl < 0 ? start2 : -1;
+  }
+  const path = /^[^\s`"]+/.exec(rest);
+  return path && path[0].length === rest.length ? start2 : -1;
+}
+function typedAttrs(body) {
+  let text3 = body;
+  if ((text3.match(/"/g) || []).length % 2) text3 += '"';
+  else if ((text3.match(/'/g) || []).length % 2) text3 += "'";
+  const attrs = {};
+  for (const pair of text3.matchAll(/([a-z][\w-]{0,63})=(?:"([^"]*)"|'([^']*)'|([^\s"'{}]+))/gi)) {
+    attrs[pair[1].toLowerCase()] = pair[2] ?? pair[3] ?? pair[4] ?? "";
+  }
+  return attrs;
+}
+function holdTokens(line) {
+  const dir = new RegExp(String.raw`(^|\s)::(card|preview)\{([^{}\n]{0,${DIRECTIVE_BODY_MAX}})$`).exec(line);
+  if (dir) {
+    const at2 = dir.index + dir[1].length;
+    if (!oddBackticks(line.slice(0, at2))) return { at: at2, pending: { name: dir[2], attrs: typedAttrs(dir[3]) } };
+  }
+  const head = /(^|\s)(::?[a-z]{0,7})$/.exec(line);
+  if (head) {
+    const word = head[2].replace(/^::?/, "");
+    const at2 = head.index + head[1].length;
+    if ((head[2] === ":" || "card".startsWith(word) || "preview".startsWith(word)) && !oddBackticks(line.slice(0, at2))) {
+      return { at: at2, pending: null };
+    }
+  }
+  let at = openMediaTag(line);
+  const tagHead = /(^|\W)[`"']?(?:M|ME|MED|MEDI|MEDIA)$/.exec(line);
+  if (tagHead) {
+    const start2 = tagHead.index + tagHead[1].length;
+    if (at < 0 || start2 < at) at = start2;
+  }
+  return { at, pending: null };
+}
+function linkTail(t, k) {
+  const n = t.length;
+  while (k < n && (t[k] === " " || t[k] === "	" || t[k] === "\n")) k += 1;
+  if (k >= n) return "open";
+  if (t[k] === "<") {
+    k += 1;
+    while (k < n && t[k] !== ">" && t[k] !== "\n" && t[k] !== "<") k += t[k] === "\\" ? 2 : 1;
+    if (k >= n) return "open";
+    if (t[k] !== ">") return -1;
+    k += 1;
+  } else {
+    let depth = 0;
+    while (k < n) {
+      const c2 = t[k];
+      if (c2 === "\\") {
+        k += 2;
+        continue;
+      }
+      if (c2 === "(") depth += 1;
+      else if (c2 === ")") {
+        if (depth === 0) break;
+        depth -= 1;
+      } else if (/\s/.test(c2)) break;
+      k += 1;
+    }
+    if (k >= n) return "open";
+  }
+  while (k < n && /\s/.test(t[k])) k += 1;
+  if (k >= n) return "open";
+  if (t[k] === '"' || t[k] === "'" || t[k] === "(") {
+    const close = t[k] === "(" ? ")" : t[k];
+    k += 1;
+    while (k < n && t[k] !== close) k += t[k] === "\\" ? 2 : 1;
+    if (k >= n) return "open";
+    k += 1;
+    while (k < n && /\s/.test(t[k])) k += 1;
+    if (k >= n) return "open";
+  }
+  return t[k] === ")" ? k + 1 : -1;
+}
+var isWS = (ch) => ch === void 0 || /\s/u.test(ch);
+var isPunct = (ch) => ch !== void 0 && /[\p{P}\p{S}]/u.test(ch);
+function delimiterRun(t, i, j) {
+  const ch = t[i];
+  const prev = t[i - 1];
+  const next = t[j];
+  const left = !isWS(next) && (!isPunct(next) || isWS(prev) || isPunct(prev));
+  const right = !isWS(prev) && (!isPunct(prev) || isWS(next) || isPunct(next));
+  const canOpen = ch === "_" ? left && (!right || isPunct(prev)) : left;
+  const canClose = ch === "_" ? right && (!left || isPunct(next)) : right;
+  return { ch, start: i, end: j, count: j - i, rem: j - i, canOpen, canClose, removed: false };
+}
+function processEmphasis(list) {
+  for (let ci = 0; ci < list.length; ci += 1) {
+    const c2 = list[ci];
+    while (!c2.removed && c2.canClose && c2.rem > 0) {
+      let oi = ci - 1;
+      for (; oi >= 0; oi -= 1) {
+        const d2 = list[oi];
+        if (d2.removed || d2.rem === 0 || d2.ch !== c2.ch || !d2.canOpen) continue;
+        if (c2.ch === "~") {
+          if (d2.count !== c2.count) continue;
+        } else if ((d2.canClose || c2.canOpen) && (d2.count + c2.count) % 3 === 0 && !(d2.count % 3 === 0 && c2.count % 3 === 0)) continue;
+        break;
+      }
+      if (oi < 0) break;
+      const o = list[oi];
+      if (c2.firstOpener === void 0) c2.firstOpener = oi;
+      const use = c2.ch === "~" ? Math.min(o.rem, c2.rem) : o.rem >= 2 && c2.rem >= 2 ? 2 : 1;
+      o.rem -= use;
+      c2.rem -= use;
+      for (let k = oi + 1; k < ci; k += 1) list[k].removed = true;
+    }
+  }
+}
+function inlineScan(t, defs) {
+  const delims = [];
+  const brackets = [];
+  let code = null;
+  let cut2 = -1;
+  let i = 0;
+  const n = t.length;
+  const hold = (at) => {
+    if (n - at <= HOLD_MAX) cut2 = at;
+    return n - at <= HOLD_MAX;
+  };
+  scan: while (i < n) {
+    const ch = t[i];
+    if (code) {
+      if (ch !== "`") {
+        i += 1;
+        continue;
+      }
+    } else {
+      if (ch === "\\") {
+        if (i + 1 >= n) {
+          cut2 = i;
+          break;
+        }
+        i += 2;
+        continue;
+      }
+      if (ch === "!" && i + 1 >= n) {
+        cut2 = i;
+        break;
+      }
+      const tail = t.slice(i, i + 4096);
+      if (ch === "<" && /^<\/?[A-Za-z0-9+.@-]*$/.test(tail) && n - i <= 40) {
+        cut2 = i;
+        break;
+      }
+      if (ch === "&" && /^&#?[A-Za-z0-9]{0,32}$/.test(tail)) {
+        cut2 = i;
+        break;
+      }
+      if (ch === "M" || (ch === "`" || ch === '"' || ch === "'") && t.startsWith("MEDIA:", i + 1)) {
+        const m = MEDIA_TOKEN.exec(tail);
+        if (m && (ch !== "M" || i === 0 || !isWord(t[i - 1]))) {
+          i += m[0].length;
+          continue;
+        }
+      }
+      if (ch === ":" && t[i + 1] === ":") {
+        const m = DIRECTIVE_TOKEN.exec(tail);
+        if (m) {
+          i += m[0].length;
+          continue;
+        }
+      }
+      if (ch === "<") {
+        const m = AUTOLINK.exec(tail);
+        if (m) {
+          if (m[1]) {
+            i += m[0].length;
+            continue;
+          }
+          if (i + m[0].length >= n && hold(i)) break;
+        }
+      }
+      if ((ch === "h" || ch === "w") && (i === 0 || /[\s*_~(]/.test(t[i - 1])) && /^(?:https?:\/\/|www\.)/.test(tail)) {
+        let j = i;
+        while (j < n && !/[\s<]/.test(t[j])) j += 1;
+        if (j >= n) {
+          let k = j;
+          while (k > i && "?!.,:*_~".includes(t[k - 1])) k -= 1;
+          if (k < j) {
+            cut2 = k;
+            break;
+          }
+        }
+        i = j;
+        continue;
+      }
+    }
+    if (ch === "`") {
+      let j = i;
+      while (t[j] === "`") j += 1;
+      const len = j - i;
+      if (!code) {
+        if (j >= n) {
+          cut2 = i;
+          break;
+        }
+        code = { len, at: i, content: j };
+      } else if (len === code.len) code = null;
+      else if (j >= n) {
+        cut2 = i;
+        break;
+      }
+      i = j;
+      continue;
+    }
+    if (ch === "[" || ch === "!" && t[i + 1] === "[") {
+      brackets.push({ at: i, depth: delims.length });
+      i += ch === "!" ? 2 : 1;
+      continue;
+    }
+    if (ch === "]" && brackets.length) {
+      const b2 = brackets.pop();
+      const label = t.slice(t[b2.at] === "!" ? b2.at + 2 : b2.at + 1, i);
+      const next = t[i + 1];
+      const confine = () => {
+        const inner = delims.slice(b2.depth);
+        processEmphasis(inner);
+        for (const d2 of inner) d2.removed = true;
+      };
+      if (next === "(") {
+        const end = linkTail(t, i + 2);
+        if (end === "open") {
+          if (hold(b2.at)) break scan;
+          i += 1;
+          continue;
+        }
+        if (end > 0) {
+          confine();
+          i = end;
+          continue;
+        }
+        i += 1;
+        continue;
+      }
+      if (next === "[") {
+        let j = i + 2;
+        while (j < n && t[j] !== "]" && t[j] !== "[") j += t[j] === "\\" ? 2 : 1;
+        if (j >= n) {
+          if (hold(b2.at)) break scan;
+          i += 1;
+          continue;
+        }
+        if (t[j] === "]") {
+          const ref = t.slice(i + 2, j);
+          if (defs.has(normLabel(ref || label))) {
+            confine();
+            i = j + 1;
+            continue;
+          }
+        }
+        i += 1;
+        continue;
+      }
+      if (next === void 0 && !defs.has(normLabel(label))) {
+        if (hold(b2.at)) break;
+      }
+      if (defs.has(normLabel(label))) confine();
+      i += 1;
+      continue;
+    }
+    if (ch === "*" || ch === "_" || ch === "~") {
+      let j = i;
+      while (t[j] === ch) j += 1;
+      if (!(ch === "~" && j - i > 2)) delims.push(delimiterRun(t, i, j));
+      i = j;
+      continue;
+    }
+    i += 1;
+  }
+  for (const b2 of brackets) {
+    if (n - b2.at <= HOLD_MAX) {
+      if (cut2 < 0 || b2.at < cut2) cut2 = b2.at;
+      break;
+    }
+  }
+  if (cut2 < 0 && code && !t.slice(code.content).trim()) cut2 = code.at;
+  let open = delims.filter((d2) => !d2.removed && d2.end <= (cut2 < 0 ? n : cut2));
+  let paired = false;
+  const last = open[open.length - 1];
+  if (cut2 < 0 && !code && last && last.end === n) {
+    const now = open.map((d2) => ({ ...d2 }));
+    processEmphasis(now);
+    const grown = open.map((d2) => ({ ...d2 }));
+    const tip = grown[grown.length - 1];
+    tip.count += 1;
+    tip.rem += 1;
+    processEmphasis(grown);
+    const settled = now[now.length - 1].firstOpener === tip.firstOpener;
+    if (!settled) cut2 = last.start;
+    else if (now[now.length - 1].rem > 0) cut2 = n - now[now.length - 1].rem;
+    else {
+      open = now;
+      paired = true;
+    }
+  }
+  if (cut2 >= 0) return { cut: cut2, closers: "", code: false };
+  if (!paired) processEmphasis(open);
+  let closers = "";
+  if (code) closers += "`".repeat(code.len);
+  for (let k = open.length - 1; k >= 0; k -= 1) {
+    const d2 = open[k];
+    if (!d2.removed && d2.rem > 0 && d2.canOpen && !d2.canClose) closers += d2.ch.repeat(d2.ch === "~" ? d2.rem : Math.min(d2.rem, 3));
+  }
+  return { cut: -1, closers, code: Boolean(code) };
+}
+function leafText(source, ranges, limit) {
+  const parts = [];
+  let text3 = "";
+  for (const [s, e0] of ranges) {
+    if (s >= limit) break;
+    const e2 = Math.min(e0, limit);
+    if (parts.length) text3 += "\n";
+    parts.push({ s, e: e2, v: text3.length });
+    text3 += source.slice(s, e2);
+  }
+  const toSource = (v) => {
+    for (let k = parts.length - 1; k >= 0; k -= 1) {
+      if (v >= parts[k].v) return Math.min(parts[k].s + (v - parts[k].v), parts[k].e);
+    }
+    return parts.length ? parts[0].s : limit;
+  };
+  return { text: text3, toSource };
+}
+function streamSafeParts(input) {
+  const raw = String(input ?? "");
+  const lead = /^\s*/.exec(raw)[0];
+  if (!lead) return safeParts(raw);
+  const parts = safeParts(raw.slice(lead.length));
+  return { ...parts, text: parts.text ? lead + parts.text : "", held: parts.text ? parts.held : raw };
+}
+function safeParts(input) {
+  const source = input;
+  const none = { text: "", held: source, directive: false, pending: null };
+  if (!source) return { ...none, held: "" };
+  const lastStart = source.lastIndexOf("\n") + 1;
+  const st = { source, defs: /* @__PURE__ */ new Set(), containers: [], leaf: null };
+  let offset = 0;
+  while (offset < lastStart) {
+    const end = source.indexOf("\n", offset);
+    scanLine(st, source.slice(offset, end), offset);
+    offset = end + 1;
+  }
+  const lastRaw = source.slice(lastStart);
+  const before = st.leaf;
+  let cut2 = source.length;
+  let closeFence = null;
+  let region = null;
+  let pending = null;
+  if (!lastRaw.trim()) {
+    cut2 = lastStart;
+    if (before && before.type === "fence") closeFence = before;
+    else if (before && before.ranges) region = before;
+    if (before && before.type === "para" && !lastRaw) {
+      const head = before.ranges[before.ranges.length - 1];
+      if (hasPipe(source.slice(head[0], head[1]))) cut2 = head[2];
+    }
+  } else {
+    const after = cloneState(st);
+    const info = scanLine(after, lastRaw, lastStart);
+    const rest = info.rest.replace(/\r$/, "");
+    if (info.inFence) {
+      closeFence = info.inFence;
+      const partial = new RegExp(`^ {0,3}\\${info.inFence.char}+[ \\t]*$`);
+      if (!rest.trim() || partial.test(rest) || MEDIA_WHOLE.test(rest)) cut2 = lastStart;
+      else {
+        const tag = openMediaTag(lastRaw);
+        if (tag >= 0) cut2 = lastStart + tag;
+      }
+    } else if (info.closedFence) {
+    } else if (info.leaf && info.leaf.type === "indented") {
+      const tokens = holdTokens(lastRaw);
+      if (tokens.at >= 0) {
+        cut2 = lastStart + tokens.at;
+        pending = tokens.pending;
+      }
+    } else if (info.openedFence || info.blank || /^ {0,3}#{1,6}[ \t]*$/.test(rest) || /^\d{1,9}[.)]?$/.test(rest.trim()) || /^ {0,3}(?:`{1,2}|~{1,2})$/.test(rest) || info.rule || // A reference definition is invisible once it has a destination
+    // (it only resolves links); before that it would show as text.
+    info.leaf && info.leaf.type === "def" && !info.defComplete || MEDIA_WHOLE.test(rest) || MEDIA_WHOLE.test(lastRaw)) {
+      cut2 = lastStart;
+      if (before && before.ranges) region = before;
+    } else if (!info.separator && before && before.type === "para" && info.leaf && info.leaf.type === "para" && separatorish(rest) && hasPipe(source.slice(before.ranges[before.ranges.length - 1][0], before.ranges[before.ranges.length - 1][1]))) {
+      cut2 = before.ranges[before.ranges.length - 1][2];
+      region = before;
+    } else if (info.leaf && info.leaf.type === "para" && hasPipe(rest)) {
+      cut2 = lastStart;
+      region = before && before.type === "para" ? before : null;
+    } else {
+      if (info.leaf && info.leaf.ranges) region = info.leaf;
+      const tokens = holdTokens(lastRaw);
+      if (tokens.at >= 0) {
+        cut2 = lastStart + tokens.at;
+        pending = tokens.pending;
+      }
+    }
+  }
+  const media = openMediaTagIn(source);
+  if (media >= 0 && media < cut2) {
+    cut2 = media;
+    pending = null;
+  }
+  if (cut2 === lastStart && before && before.type === "para") {
+    const head = before.ranges[before.ranges.length - 1];
+    if (hasPipe(source.slice(head[0], head[1]))) cut2 = head[2];
+  }
+  let safe = source.slice(0, cut2);
+  if (closeFence) {
+    const text3 = `${safe}${safe.endsWith("\n") ? "" : "\n"}${closeFence.prefix}${closeFence.char.repeat(closeFence.len)}`;
+    return { text: text3, held: source.slice(cut2), directive: false, pending: null };
+  }
+  let closers = "";
+  if (region && region.type !== "indented" && region.ranges.length) {
+    for (let pass = 0; pass < 8; pass += 1) {
+      const { text: text3, toSource } = leafText(source, region.ranges, safe.length);
+      if (!text3) break;
+      if (/^\[[ xX]?\]?[ \t]*$/.test(text3) && region.ranges[0][0] > region.ranges[0][2]) {
+        safe = safe.slice(0, region.ranges[0][2]);
+        pending = null;
+        break;
+      }
+      let from = 0;
+      if (region.type === "table") {
+        const pipe = /(?:^|[^\\])\|(?!.*(?:^|[^\\])\|)/.exec(text3);
+        if (pipe) from = pipe.index + pipe[0].length;
+      }
+      const inline = inlineScan(text3.slice(from), st.defs);
+      if (inline.cut >= 0) inline.cut += from;
+      if (inline.cut < 0) {
+        closers = inline.closers;
+        if (closers && !inline.code) safe = safe.replace(/\s+$/, "");
+        break;
+      }
+      let at = toSource(inline.cut);
+      if (at >= safe.length) break;
+      const line = region.ranges.find((r) => at >= r[2] && at <= r[0]);
+      if (line) at = line[2];
+      safe = safe.slice(0, at);
+      pending = null;
+    }
+  }
+  return { text: safe + closers, held: source.slice(safe.length), directive: Boolean(pending), pending };
+}
+
 // src/core/emailDrafts.js
 var DRAFT_PLUGIN = "email-drafts";
 var DRAFT_RPC = `plugin.${DRAFT_PLUGIN}.api`;
@@ -53617,7 +54300,7 @@ function PreviewDirective({ attrs, source, scope }) {
     };
   }, [key, rel, html, known]);
   const name = rel ? rel.split("/").pop() || rel : "Preview";
-  if (rel && html && state === null) return /* @__PURE__ */ jsx8("div", { className: "gbo-preview is-loading", "aria-label": `Loading ${name}` });
+  if (rel && html && state === null) return /* @__PURE__ */ jsx8("div", { className: "gbo-preview is-loading", "aria-label": `Loading ${name}`, style: { height: previewStartHeight(attrs.height) } });
   if (!rel || !html || state?.error) {
     return /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-row", title: source, children: [
       /* @__PURE__ */ jsx8("span", { className: "gbo-preview-name", children: name }),
@@ -54486,13 +55169,19 @@ function BotText({ bot, text: text3 }) {
     /* @__PURE__ */ jsx13(MediaStrip, { bot, media })
   ] });
 }
-function BotProse({ bot, text: text3, pos, time }) {
+function BotProse({
+  bot,
+  text: text3,
+  pos,
+  time,
+  streaming = false
+}) {
   const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
   const files = media.filter((item) => item.kind === "file");
   const bubble = Boolean(clean) || media.length > files.length;
   return /* @__PURE__ */ jsxs12(Fragment8, { children: [
     bubble ? /* @__PURE__ */ jsxs12("div", { className: "bubble-wrap is-left", children: [
-      /* @__PURE__ */ jsx13("div", { className: `bubble is-agent${pos}`, children: /* @__PURE__ */ jsx13("div", { className: "md", children: /* @__PURE__ */ jsx13(BotText, { bot, text: text3 }) }) }),
+      /* @__PURE__ */ jsx13("div", { className: `bubble is-agent${pos}${streaming ? " is-streaming" : ""}`, children: /* @__PURE__ */ jsx13("div", { className: "md", children: /* @__PURE__ */ jsx13(BotText, { bot, text: text3 }) }) }),
       time
     ] }) : null,
     /* @__PURE__ */ jsx13(FileCards, { bot, files })
@@ -58878,20 +59567,54 @@ function UserMeta({
   }
   return null;
 }
+var STREAM_RENDER_MS = 60;
+function useStreamText(text3, streaming) {
+  const [shown, setShown] = React24.useState(text3);
+  const latest = React24.useRef(text3);
+  latest.current = text3;
+  React24.useEffect(() => {
+    if (!streaming) return void 0;
+    setShown(latest.current);
+    const id = setInterval(() => setShown((current) => current === latest.current ? current : latest.current), STREAM_RENDER_MS);
+    return () => clearInterval(id);
+  }, [streaming]);
+  return streaming ? shown : text3;
+}
+function DirectivePlaceholder({ pending }) {
+  return /* @__PURE__ */ jsx27("div", { className: "gbo-directive is-pending", "aria-hidden": "true", children: pending.name === "preview" ? /* @__PURE__ */ jsx27("div", { className: "gbo-preview is-loading is-pending", style: { height: previewStartHeight(pending.attrs?.height) } }) : /* @__PURE__ */ jsx27("div", { className: "gbo-dcard is-loading is-pending", children: /* @__PURE__ */ jsx27("span", { className: "gbo-dcard-skeleton" }) }) });
+}
 function AssistantBody({ item, bot, pos }) {
-  const { segments, scope } = useDirectiveSegments(item.streaming ? "" : item.text);
-  const time = item.at ? /* @__PURE__ */ jsx27("span", { className: "bubble__time", children: clock(item.at) }) : null;
-  if (item.streaming) {
-    return /* @__PURE__ */ jsxs25("div", { className: "bubble-wrap is-left", children: [
-      /* @__PURE__ */ jsx27("div", { className: `bubble is-agent${pos} is-streaming`, children: /* @__PURE__ */ jsx27("div", { className: "bubble__plain", children: item.text }) }),
-      time
-    ] });
-  }
-  if (!segments || !scope) return /* @__PURE__ */ jsx27(BotProse, { bot, text: item.text, pos, time });
-  const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
-  return /* @__PURE__ */ jsx27(Fragment16, { children: segments.map(
-    (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx27(BotProse, { bot, text: segment.text, pos, time: index === lastProse ? time : null }, index) : /* @__PURE__ */ jsx27(DirectiveBlock, { segment, poll: scope.recent.has(item.id), scope }, index)
-  ) });
+  const streaming = Boolean(item.streaming);
+  const shown = useStreamText(item.text, streaming);
+  const safe = React24.useMemo(() => streaming ? streamSafeParts(shown) : null, [streaming, shown]);
+  const text3 = safe ? safe.text : item.text;
+  const { segments: found, scope } = useDirectiveSegments(text3);
+  const segments = React24.useMemo(() => found && scope ? found : [{ kind: "prose", text: text3 }], [found, scope, text3]);
+  const time = React24.useMemo(() => item.at ? /* @__PURE__ */ jsx27("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
+  const poll = Boolean(scope?.recent.has(item.id));
+  const body = React24.useMemo(() => {
+    const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
+    let prose = 0;
+    let directives = 0;
+    return segments.map(
+      (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx27(
+        BotProse,
+        {
+          bot,
+          text: segment.text,
+          pos,
+          time: index === lastProse ? time : null,
+          streaming: streaming && index === lastProse
+        },
+        `p${prose++}`
+      ) : /* @__PURE__ */ jsx27(DirectiveBlock, { segment, poll, scope }, `d${directives++}`)
+    );
+  }, [segments, bot, pos, time, streaming, poll, scope]);
+  const placeholder = React24.useMemo(() => safe?.pending && scope ? /* @__PURE__ */ jsx27(DirectivePlaceholder, { pending: safe.pending }) : null, [safe, scope]);
+  return /* @__PURE__ */ jsxs25(Fragment16, { children: [
+    body,
+    placeholder
+  ] });
 }
 function TurnErrorCard({ item, bot, controller: controller2 }) {
   const [open, setOpen] = React24.useState(false);

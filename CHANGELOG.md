@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **grokbot-override: replies are formatted live while they stream (2026-11-15)**: a bot reply no longer
+  types as plain text and then snaps into formatting when it finishes. It renders through the same markdown
+  path as a finished reply from the first token: bold, lists, headings, links, inline code and code blocks
+  (with Copy) appear as it types, and the bubble's markup is the same while streaming and when done, so
+  settled formatting does not change at completion (ambiguous endings appear with the next chunk or at
+  completion; PARITY C7 known limits). A new pure `streamSafe` step keeps each
+  tick render-stable: an open code fence is closed temporarily (the block grows), a trailing unmatched
+  `**`/`*`/`_`/backtick is closed or held, and a half link, table row, list or heading marker, `MEDIA:` line
+  or `::card{…}` directive waits until it is complete (a card still streaming shows a quiet skeleton line,
+  never raw directive text). Re-renders are throttled to one per 60 ms; the finished reply uses its full text
+  untouched. Silence markers still never show.
+  Review round 1 hardening: an inline `MEDIA:` tag (spaced, quoted or Unicode path) is held until its path is
+  terminated, so no partial path is drawn or read; a combined closer (`**a *b***`) closes every run; fences in
+  blockquotes and list items close with their container prefix and code is never repaired; a temporary
+  inline-code closer never merges with a literal backtick; a table ending in a complete row or separator shows
+  whole; a card completing never remounts the prose before it; markdown re-renders only on throttled ticks; a
+  streaming preview reserves its own height; StrictMode effect replay no longer freezes the stream.
+  Review round 2: the streaming text is now read as CommonMark blocks (quote and list-item containers at any
+  nesting, fenced and indented code, tables, reference definitions, lazy continuation), so a fence closes only
+  under its own containers and code is never changed; an inline tokenizer skips link destinations, autolinks,
+  bare URLs, MEDIA tags and directives, waits for unfinished links (nested parentheses, titles) and shows
+  defined reference links at once; GFM short table rows show while streaming; a bare `height=360` sizes the
+  preview placeholder. A local, out-of-repo check compared every prefix of 790 documents with a CommonMark/GFM parser.
+  Review round 3: a `MEDIA:` tag whose path starts on the next line (LF or CRLF, as `extractMedia` accepts) is
+  held from its start, so no marker shows and no truncated path is read; tabs count as CommonMark indentation
+  (tab stops of 4) for containers, fences and indented code, so tab-indented code is shown exactly; emphasis
+  pairs by CommonMark's delimiter rules (flanking, `_` rules, the multiple-of-3 rule, delimiters between a pair
+  removed), so a complete span such as `**2*3**` is unchanged while streaming. The test fixture email now uses
+  a reserved example domain (the root privacy guard passes).
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did
