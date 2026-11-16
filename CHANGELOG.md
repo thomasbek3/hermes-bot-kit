@@ -13,7 +13,8 @@
   when the host refuses app schemes, as Hermes does today, it opens that channel on app.slack.com. This is a
   known limit (PARITY.md): Hermes's opener admits only http/https/mailto, so bots are told to use https
   permalinks, which open the exact message. Titled, `<angle>`, upper-case and reference-style Slack links are
-  carried too; code, indented code and escaped text are never rewritten. Unsafe links,
+  carried too; code, indented code and escaped text are never rewritten. Heading and table-header links get the
+  same logo, title and short bare-URL label, kept up to date as the reply streams. Unsafe links,
   `mailto:`, private hosts and code stay as before. Logos are Simple Icons (CC0, bundled); dark marks such as
   GitHub and X switch to the light text colour in dark mode. A bare URL still typing waits until it ends, so
   its chip never changes mid-stream. The agent-cards skill gains "Link your sources": end a line about a

@@ -139,15 +139,22 @@ function decorate(children: React.ReactNode): React.ReactNode {
 /** Stable identity: the renderer memoises its components on it. */
 export const decorateSourceLinks = (children: React.ReactNode) => decorate(children)
 
-// ---- headings and table headers (review SL24-05) ----
+// ---- headings and table headers (review SL24-05, SL24-08) ----
 //
 // The host renderer calls `decorateText` for p / li / td only; links in
-// h1-h6 and th are its own anchors. Those are enhanced in place after each
-// render: the same logo (a node prepended inside the anchor, aria-hidden),
-// the full URL as the title, and a click routed through openSource by a
+// h1-h6 and th are its own anchors. Those are enhanced in place: the same
+// logo (a node prepended inside the anchor, aria-hidden), the full URL as the
+// title, a bare URL's short label, and a click routed through openSource by a
 // capture handler on the plugin's own prose element (so the host anchor's
 // own click never runs). Same validation as the chips; never inside code.
-// The anchor's text is React's and stays as the host drew it.
+//
+// The host commits its text deferred (after this component's commit, without
+// re-rendering it), so a MutationObserver on the prose element re-runs the
+// pass on every descendant change; the pass is idempotent, so its own
+// mutations settle at once. React's own child nodes are never moved or
+// edited: the injected nodes are extra children, and a bare URL's text stays
+// where React put it, hidden by CSS (`is-bare`: font-size 0 on the anchor,
+// the injected label at the measured size), with the label as aria-label.
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const HOST_LINKS = ':is(h1, h2, h3, h4, h5, h6, th) a[href]'
@@ -190,8 +197,28 @@ function iconNode(doc: Document, id: string): HTMLElement {
   return span
 }
 
-/** Give heading and table-header links inside `root` the source-link look
- *  and title. Idempotent; returns how many it enhanced. */
+const PART = '[data-gbo-src-part]'
+
+/** The anchor's own text (React's), without the injected parts. */
+function ownText(anchor: Element): string {
+  let text = ''
+  anchor.childNodes.forEach(node => {
+    if (node.nodeType === 1 && (node as Element).matches(PART)) return
+    text += node.textContent || ''
+  })
+  return text
+}
+
+function strip(anchor: HTMLElement) {
+  anchor.querySelectorAll(`:scope > ${PART}`).forEach(node => node.remove())
+  for (const name of ['data-gbo-src-host', 'data-service', 'aria-label', 'title']) anchor.removeAttribute(name)
+  anchor.classList.remove('gbo-src-host', 'is-bare')
+  anchor.style.removeProperty('--gbo-src-label-size')
+}
+
+/** Give heading and table-header links inside `root` the source-link look,
+ *  title and (bare URLs) short label; undo it on a link that is no longer a
+ *  source. Idempotent; returns how many anchors it changed. */
 export function enhanceSourceLinks(root: Element | null): number {
   if (!root?.querySelectorAll) return 0
   let count = 0
@@ -199,16 +226,46 @@ export function enhanceSourceLinks(root: Element | null): number {
     if (anchor.classList.contains('gbo-src') || anchor.closest('code, pre, .gbo-code')) continue
     const href = anchor.getAttribute('href') || ''
     const link = sourceLinkFor(href)
-    if (!link) continue
-    // React may have reset the anchor's text (textContent), taking the logo
-    // with it: enhanced means the same href AND the logo still there.
-    if (anchor.getAttribute('data-gbo-src-host') === href && anchor.querySelector(':scope > [data-gbo-src-icon]')) continue
-    anchor.querySelectorAll(':scope > [data-gbo-src-icon]').forEach(node => node.remove())
+    if (!link) {
+      if (anchor.hasAttribute('data-gbo-src-host')) {
+        strip(anchor)
+        count += 1
+      }
+      continue
+    }
+    const text = ownText(anchor)
+    const label = isBareLink(text, href) ? bareLinkLabel(href) : ''
+    const icon = anchor.firstElementChild
+    const labelNode = anchor.querySelector(':scope > .gbo-src-label')
+    const current =
+      anchor.getAttribute('data-gbo-src-host') === href &&
+      anchor.firstChild === icon &&
+      icon?.hasAttribute('data-gbo-src-icon') &&
+      (icon.getAttribute('data-service') || 'web') === (BRAND_MARKS[link.service.id] ? link.service.id : 'web') &&
+      (label ? labelNode?.textContent === label : !labelNode)
+    if (current) continue
+    strip(anchor)
+    const doc = anchor.ownerDocument
     anchor.setAttribute('data-gbo-src-host', href)
     anchor.setAttribute('data-service', link.service.id)
     anchor.classList.add('gbo-src-host')
     anchor.title = link.href
-    anchor.insertBefore(iconNode(anchor.ownerDocument, link.service.id), anchor.firstChild)
+    const iconEl = iconNode(doc, link.service.id)
+    iconEl.setAttribute('data-gbo-src-part', '')
+    if (label) {
+      // Measure before hiding React's text (font-size 0 on the anchor).
+      const size = doc.defaultView?.getComputedStyle?.(anchor).fontSize || ''
+      if (size && size !== '0px') anchor.style.setProperty('--gbo-src-label-size', size)
+      const labelEl = doc.createElement('span')
+      labelEl.className = 'gbo-src-label'
+      labelEl.setAttribute('data-gbo-src-part', '')
+      labelEl.setAttribute('aria-hidden', 'true')
+      labelEl.textContent = label
+      anchor.appendChild(labelEl)
+      anchor.setAttribute('aria-label', label)
+      anchor.classList.add('is-bare')
+    }
+    anchor.insertBefore(iconEl, anchor.firstChild)
     count += 1
   }
   return count
@@ -227,9 +284,23 @@ export function onSourceClickCapture(event: React.MouseEvent) {
   void openSource(link.opens)
 }
 
-/** Enhance heading / header links after every render of `ref`'s element. */
+/** Enhance heading / header links in `ref`'s element after every render of
+ *  it AND after every deferred descendant commit (a MutationObserver: the
+ *  host's text commits without re-rendering this component). Disconnected on
+ *  unmount. */
 export function useHostSourceLinks(ref: React.RefObject<HTMLElement | null>) {
   React.useLayoutEffect(() => {
     enhanceSourceLinks(ref.current)
   })
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    const Observer = (globalThis as any).MutationObserver
+    if (!el || typeof Observer !== 'function') return undefined
+    const observer = new Observer(() => {
+      enhanceSourceLinks(el)
+      observer.takeRecords() // this pass's own changes
+    })
+    observer.observe(el, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['href'] })
+    return () => observer.disconnect()
+  }, [ref])
 }

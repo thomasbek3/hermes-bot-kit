@@ -68,6 +68,50 @@ async function mountProse(t, text, { defer = false } = {}) {
   return { container, draw }
 }
 
+// ---- SL24-05: enhancement follows the host's deferred commits ----
+
+test('SL24-05: a heading link that first appears in a deferred final commit is enhanced', { skip }, async t => {
+  const { container, draw } = await mountProse(t, '## Read ', { defer: true })
+  draw('## Read [The PR](https://github.com/example/repo/pull/12)')
+  await settle()
+  const a = container.querySelector('h2 a[href]')
+  assert.ok(a, 'the link drew')
+  assert.equal(a.getAttribute('data-service'), 'github')
+  assert.equal(a.querySelectorAll('[data-gbo-src-icon]').length, 1)
+  assert.equal(a.title, 'https://github.com/example/repo/pull/12')
+})
+
+test('SL24-05: a reused heading anchor that changes destination, then label, is re-decorated', { skip }, async t => {
+  const { container, draw } = await mountProse(t, '## Read [The PR](https://github.com/example/repo/pull/12)', { defer: true })
+  draw('## Read [The PR](https://docs.google.com/document/d/abc/edit)')
+  await settle()
+  let a = container.querySelector('h2 a[href]')
+  assert.equal(a.getAttribute('data-service'), 'googledocs')
+  assert.equal(a.title, 'https://docs.google.com/document/d/abc/edit')
+  assert.deepEqual([...a.querySelectorAll('[data-gbo-src-icon]')].map(n => n.getAttribute('data-service')), ['googledocs'])
+  draw('## Read [The doc](https://docs.google.com/document/d/abc/edit)')
+  await settle()
+  a = container.querySelector('h2 a[href]')
+  assert.equal(a.textContent, 'The doc')
+  assert.equal(a.querySelectorAll('[data-gbo-src-icon]').length, 1, 'the logo comes back after the text changes')
+  // A destination that is no longer a source link (an intranet host the
+  // renderer still draws as a link) loses the decoration.
+  draw('## Read [The doc](https://wiki.corp/page)')
+  await settle()
+  a = container.querySelector('h2 a[href]')
+  assert.equal(a.querySelectorAll('[data-gbo-src-icon]').length, 0)
+  assert.equal(a.getAttribute('data-service'), null)
+})
+
+test('SL24-05: a table-header link added in a deferred commit is enhanced', { skip }, async t => {
+  const { container, draw } = await mountProse(t, 'Table:', { defer: true })
+  draw('Table:\n\n| [The doc](https://docs.google.com/document/d/abc/edit) | b |\n|---|---|\n| c | d |')
+  await settle()
+  const th = container.querySelector('th a[href]')
+  assert.equal(th.getAttribute('data-service'), 'googledocs')
+  assert.equal(th.querySelectorAll('[data-gbo-src-icon]').length, 1)
+})
+
 // ---- SL24-06: the Slack rewrite never touches code or escaped text ----
 
 const SLACK_LINK = `[Her message](${SLACK_APP})`
@@ -127,6 +171,42 @@ test('SL24-07: in the host pipeline every form draws a Slack chip, never [blocke
     assert.match(html, /<a class="gbo-src"[^>]*data-service="slack"/, name)
     assert.match(html, /<span class="gbo-src-text">Her message<\/span>/, name)
   }
+})
+
+// ---- SL24-08: bare URLs in headings and table headers get the short label ----
+
+test('SL24-08: a long bare URL in a heading shows the short label, the full URL only as the title', { skip }, async t => {
+  const { container } = await mountProse(t, `## See ${LONG_BARE}`)
+  const a = container.querySelector('h2 a[href]')
+  assert.ok(LONG_BARE.length > 200)
+  assert.equal(a.querySelector('.gbo-src-label').textContent, 'GitHub example/repo')
+  assert.equal(a.getAttribute('aria-label'), 'GitHub example/repo')
+  assert.equal(a.title, LONG_BARE)
+  // React's URL text stays where React put it (never moved), hidden by CSS.
+  assert.ok(a.classList.contains('is-bare'))
+  assert.ok([...a.childNodes].some(n => n.nodeType === 3 && n.textContent === LONG_BARE), 'the host text node is untouched')
+  assert.equal(a.querySelector('.gbo-src-label').getAttribute('aria-hidden'), 'true')
+  const { m } = await setup(t)
+  assert.match(m.CSS, /a\.gbo-src-host\.is-bare[^{]*\{ font-size: 0; \}/, 'the URL text is not shown')
+  assert.match(m.CSS, /a\.gbo-src-host\.is-bare[^{]*\.gbo-src-label[^{]*\{ font-size: var\(--gbo-src-label-size/)
+})
+
+test('SL24-08: a bare URL in a table header gets the short label; an explicit label is kept', { skip }, async t => {
+  const { container } = await mountProse(t, `| ${LONG_BARE} | [The PR](https://github.com/example/repo/pull/12) |\n|---|---|\n| a | b |`)
+  const [bare, named] = container.querySelectorAll('th a[href]')
+  assert.equal(bare.querySelector('.gbo-src-label').textContent, 'GitHub example/repo')
+  assert.equal(named.querySelector('.gbo-src-label'), null)
+  assert.equal(named.textContent, 'The PR')
+})
+
+test('SL24-08: the short label survives a deferred update of the same bare heading URL', { skip }, async t => {
+  const { container, draw } = await mountProse(t, `## See ${LONG_BARE}`, { defer: true })
+  draw(`## See ${LONG_BARE.replace('file.md', 'other.md')}`)
+  await settle()
+  const a = container.querySelector('h2 a[href]')
+  assert.equal(a.querySelector('.gbo-src-label').textContent, 'GitHub example/repo')
+  assert.equal(a.title, LONG_BARE.replace('file.md', 'other.md'))
+  assert.equal(a.querySelectorAll('.gbo-src-label').length, 1)
 })
 
 // ---- SL24-02 (accepted platform limit): documented, and bots told to use https permalinks ----

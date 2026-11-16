@@ -153,11 +153,13 @@ Outlook/Office 365, Dropbox, Zoho, Stripe, HubSpot, Airtable, Trello, Asana, Cal
 LinkedIn) draws as a bundled logo plus its text; other public hosts get a neutral globe; a bare URL gets a
 short label. It hooks the SDK renderer's `decorateText` prop, so the renderer's own safe-link rules still
 apply (no chip for `javascript:`, `data:`, `mailto:`, private hosts or code). Links in headings and table
-headers (which the host renders without `decorateText`) are enhanced in place after each render with the
-same logo, title and click path. A valid `slack://` app link is carried past the host's sanitizer as an
-https stand-in and tried as the exact deep link first. Clicks go through
-`ctx.os.openExternal`. `src/core/sourceLinks.js`, `src/ui/SourceLink.tsx`, `src/ui/brandMarks.ts`; tests
-`test/source-links-24.test.mjs`.
+headers (which the host renders without `decorateText`) are enhanced in place, after each render and on
+every deferred host commit (a MutationObserver), with the same logo, title, bare-URL short label and click
+path. A valid `slack://` app link (inline, titled, `<angle>`, any case, or a reference definition; never in
+code or escaped text) is carried past the host's sanitizer as an https stand-in and tried as the exact deep
+link first (see Known limits). Clicks go through `ctx.os.openExternal`. `src/core/sourceLinks.js`,
+`src/ui/SourceLink.tsx`, `src/ui/brandMarks.ts`; tests `test/source-links-24.test.mjs`,
+`test/source-links-r1.test.mjs`, `test/source-links-r2.test.mjs`.
 
 ## Right panel (profile)
 

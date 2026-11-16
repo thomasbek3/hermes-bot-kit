@@ -261,6 +261,11 @@ const ADAPT_SRC = /* css */ `
 .gbo-src-text { white-space: normal; text-decoration: underline; text-decoration-color: var(--color-border-primary); text-underline-offset: 2px; }
 .gbo-src:hover .gbo-src-text { text-decoration-color: currentColor; }
 .gbo-src:focus-visible, a.gbo-src-host:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+/* A bare URL in a heading or table header (SourceLink.tsx enhanceSourceLinks):
+   React's URL text stays in the anchor at size 0; the short label shows at
+   the anchor's measured size. */
+a.gbo-src-host.is-bare { font-size: 0; }
+a.gbo-src-host.is-bare .gbo-src-label { font-size: var(--gbo-src-label-size, 15px); }
 .md .aui-md :is(strong, b) { font-weight: 600; color: inherit; }
 .md .aui-md :is(h1, h2, h3, h4, h5, h6) { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: inherit; color: inherit; }
 .md .aui-md h1 { font-size: 17px; line-height: 24px; }

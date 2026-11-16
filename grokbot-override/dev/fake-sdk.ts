@@ -75,9 +75,16 @@ function inline(text: string): any[] {
   })
 }
 
+/** Test switch: model the host's deferred text commits. */
+export const FAKE_RENDER = { defer: false }
+
 export function MessageTextContent({ text, media, previewOnly, decorateText }: { text: string; media?: boolean; previewOnly?: boolean; decorateText?: (children: any) => any }) {
   const deco = (children: any) => (decorateText ? decorateText(children) : children)
-  const blocks = String(text).split(/\n{2,}/)
+  // Hermes's surface defers its text (StreamdownTextPrimitive `defer`): with
+  // FAKE_RENDER.defer on, an update commits here AFTER the parent's commit,
+  // without re-rendering the parent, as in the app.
+  const deferred = React.useDeferredValue(text)
+  const blocks = String(FAKE_RENDER.defer ? deferred : text).split(/\n{2,}/)
   return React.createElement(
     'div',
     { className: MARKDOWN_CLASSES, 'data-media': String(media !== false), 'data-preview-only': String(Boolean(previewOnly)) },

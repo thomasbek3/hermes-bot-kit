@@ -45628,9 +45628,9 @@ function createStockController({ document: document2, host: host3, now = () => D
     } catch {
     }
   };
-  const writeStyle = (css, strip) => {
+  const writeStyle = (css, strip2) => {
     writeStyleAt(HIDE_STYLE_ID, css);
-    if (strip) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss());
+    if (strip2) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss());
     else removeStyleAt(HIDE_STRIP_STYLE_ID);
   };
   const removeStyle2 = () => {
@@ -49250,6 +49250,11 @@ var ADAPT_SRC = (
 .gbo-src-text { white-space: normal; text-decoration: underline; text-decoration-color: var(--color-border-primary); text-underline-offset: 2px; }
 .gbo-src:hover .gbo-src-text { text-decoration-color: currentColor; }
 .gbo-src:focus-visible, a.gbo-src-host:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+/* A bare URL in a heading or table header (SourceLink.tsx enhanceSourceLinks):
+   React's URL text stays in the anchor at size 0; the short label shows at
+   the anchor's measured size. */
+a.gbo-src-host.is-bare { font-size: 0; }
+a.gbo-src-host.is-bare .gbo-src-label { font-size: var(--gbo-src-label-size, 15px); }
 .md .aui-md :is(strong, b) { font-weight: 600; color: inherit; }
 .md .aui-md :is(h1, h2, h3, h4, h5, h6) { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: inherit; color: inherit; }
 .md .aui-md h1 { font-size: 17px; line-height: 24px; }
@@ -54848,8 +54853,8 @@ function bareLinkLabel(href) {
 function isBareLink(text3, href) {
   const label = String(text3 ?? "").trim();
   if (!label) return true;
-  const strip = (value) => String(value || "").trim().replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "").toLowerCase();
-  return strip(label) === strip(href) || /^(?:https?:\/\/|www\.)\S+$/i.test(label);
+  const strip2 = (value) => String(value || "").trim().replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "").toLowerCase();
+  return strip2(label) === strip2(href) || /^(?:https?:\/\/|www\.)\S+$/i.test(label);
 }
 var srgbChannel = (value) => {
   const c2 = value / 255;
@@ -55680,6 +55685,21 @@ function iconNode(doc, id) {
   span.appendChild(svg);
   return span;
 }
+var PART = "[data-gbo-src-part]";
+function ownText(anchor) {
+  let text3 = "";
+  anchor.childNodes.forEach((node) => {
+    if (node.nodeType === 1 && node.matches(PART)) return;
+    text3 += node.textContent || "";
+  });
+  return text3;
+}
+function strip(anchor) {
+  anchor.querySelectorAll(`:scope > ${PART}`).forEach((node) => node.remove());
+  for (const name of ["data-gbo-src-host", "data-service", "aria-label", "title"]) anchor.removeAttribute(name);
+  anchor.classList.remove("gbo-src-host", "is-bare");
+  anchor.style.removeProperty("--gbo-src-label-size");
+}
 function enhanceSourceLinks(root) {
   if (!root?.querySelectorAll) return 0;
   let count = 0;
@@ -55687,14 +55707,40 @@ function enhanceSourceLinks(root) {
     if (anchor.classList.contains("gbo-src") || anchor.closest("code, pre, .gbo-code")) continue;
     const href = anchor.getAttribute("href") || "";
     const link = sourceLinkFor(href);
-    if (!link) continue;
-    if (anchor.getAttribute("data-gbo-src-host") === href && anchor.querySelector(":scope > [data-gbo-src-icon]")) continue;
-    anchor.querySelectorAll(":scope > [data-gbo-src-icon]").forEach((node) => node.remove());
+    if (!link) {
+      if (anchor.hasAttribute("data-gbo-src-host")) {
+        strip(anchor);
+        count += 1;
+      }
+      continue;
+    }
+    const text3 = ownText(anchor);
+    const label = isBareLink(text3, href) ? bareLinkLabel(href) : "";
+    const icon = anchor.firstElementChild;
+    const labelNode = anchor.querySelector(":scope > .gbo-src-label");
+    const current = anchor.getAttribute("data-gbo-src-host") === href && anchor.firstChild === icon && icon?.hasAttribute("data-gbo-src-icon") && (icon.getAttribute("data-service") || "web") === (BRAND_MARKS[link.service.id] ? link.service.id : "web") && (label ? labelNode?.textContent === label : !labelNode);
+    if (current) continue;
+    strip(anchor);
+    const doc = anchor.ownerDocument;
     anchor.setAttribute("data-gbo-src-host", href);
     anchor.setAttribute("data-service", link.service.id);
     anchor.classList.add("gbo-src-host");
     anchor.title = link.href;
-    anchor.insertBefore(iconNode(anchor.ownerDocument, link.service.id), anchor.firstChild);
+    const iconEl = iconNode(doc, link.service.id);
+    iconEl.setAttribute("data-gbo-src-part", "");
+    if (label) {
+      const size = doc.defaultView?.getComputedStyle?.(anchor).fontSize || "";
+      if (size && size !== "0px") anchor.style.setProperty("--gbo-src-label-size", size);
+      const labelEl = doc.createElement("span");
+      labelEl.className = "gbo-src-label";
+      labelEl.setAttribute("data-gbo-src-part", "");
+      labelEl.setAttribute("aria-hidden", "true");
+      labelEl.textContent = label;
+      anchor.appendChild(labelEl);
+      anchor.setAttribute("aria-label", label);
+      anchor.classList.add("is-bare");
+    }
+    anchor.insertBefore(iconEl, anchor.firstChild);
     count += 1;
   }
   return count;
@@ -55713,6 +55759,17 @@ function useHostSourceLinks(ref) {
   React11.useLayoutEffect(() => {
     enhanceSourceLinks(ref.current);
   });
+  React11.useLayoutEffect(() => {
+    const el = ref.current;
+    const Observer = globalThis.MutationObserver;
+    if (!el || typeof Observer !== "function") return void 0;
+    const observer2 = new Observer(() => {
+      enhanceSourceLinks(el);
+      observer2.takeRecords();
+    });
+    observer2.observe(el, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["href"] });
+    return () => observer2.disconnect();
+  }, [ref]);
 }
 
 // src/ui/Media.tsx
