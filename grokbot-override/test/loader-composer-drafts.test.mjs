@@ -15,7 +15,7 @@ function type(el, value) {
   el.dispatchEvent(new window.Event('input', { bubbles: true }))
 }
 
-test('draft texts: per owner, empty clears, capped at 20 owners and 4 KB', () => {
+test('draft texts: per owner, empty clears, capped at 20 owners, any length kept whole', () => {
   const d = createDraftTexts()
   d.set('a', 'hello')
   d.set('b', 'other')
@@ -24,10 +24,11 @@ test('draft texts: per owner, empty clears, capped at 20 owners and 4 KB', () =>
   assert.equal(d.get('c'), '')
   d.set('a', '   ')
   assert.equal(d.get('a'), '', 'whitespace only is no draft')
-  d.set('a', 'x'.repeat(4097))
-  assert.equal(d.get('a'), '', 'over 4 KB is not remembered')
   d.set('a', 'x'.repeat(4096))
-  assert.equal(d.get('a').length, 4096)
+  d.set('a', 'x'.repeat(4097))
+  assert.equal(d.get('a').length, 4097, 'crossing 4 KB never drops the draft (C-R1-01)')
+  d.set('a', 'y'.repeat(100_000))
+  assert.equal(d.get('a').length, 100_000)
   for (let i = 0; i < 25; i += 1) d.set(`k${i}`, `t${i}`)
   assert.equal(d.size(), 20)
   assert.equal(d.get('k0'), '', 'the oldest owner goes first')
@@ -79,3 +80,4 @@ test('composer: a draft survives switching bots and coming back; a send clears i
   await new Promise(resolve => setTimeout(resolve, 50))
   assert.equal(chatEl.querySelector('textarea').value, '', 'no draft after the send')
 })
+

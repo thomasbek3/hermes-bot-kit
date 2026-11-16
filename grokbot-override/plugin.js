@@ -43061,9 +43061,8 @@ function failureNote(result, restored) {
   }
   return "Delivery unknown: it may already have reached the bot, so it will not be sent again from here. Check the chat, or open it in Hermes Bot Mode.";
 }
-var DRAFT_TEXT_MAX = 4096;
 var DRAFT_OWNERS_MAX = 20;
-function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX, maxChars = DRAFT_TEXT_MAX } = {}) {
+function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX } = {}) {
   const map = /* @__PURE__ */ new Map();
   return {
     get(owner) {
@@ -43073,7 +43072,7 @@ function createDraftTexts({ maxOwners = DRAFT_OWNERS_MAX, maxChars = DRAFT_TEXT_
       if (!owner) return;
       const value = typeof text3 === "string" ? text3 : "";
       map.delete(owner);
-      if (!value.trim() || value.length > maxChars) return;
+      if (!value.trim()) return;
       map.set(owner, value);
       while (map.size > maxOwners) map.delete(map.keys().next().value);
     },

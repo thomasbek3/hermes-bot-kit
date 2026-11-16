@@ -11,8 +11,8 @@
   while everything is present.
 - **grokbot-override: the composer keeps a draft per bot (T8, 2026-11-15)**: switching bots used to clear what
   you had typed. The composer now keeps the typed text per bot and puts it back when you return, as Hermes's
-  own composer does per session. Text only (never attachments), in memory for this app session, up to 20 bots
-  and 4 KB each; a send clears it.
+  own composer does per session. Text only (never attachments), in memory for this app session, up to 20 bots,
+  kept whole however long; a send clears it.
 - **grokbot-override: native notifications from override chats (T7, 2026-11-15)**: Hermes only fires its OS
   notifications for sessions its own message stream owns, so a reply or an approval in an override chat made
   none while Hermes was in the background. The open chat now sends them through the plugin door
