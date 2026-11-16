@@ -6,13 +6,33 @@
 import assert from 'node:assert/strict'
 import { existsSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
-import test from 'node:test'
+import test, { afterEach } from 'node:test'
 import { pathToFileURL } from 'node:url'
 
 import { extractMedia } from '../src/core/media.js'
 import { streamSafe, streamSafeParts } from '../src/core/streamSafe.js'
 
 const ready = existsSync(new URL('../node_modules/esbuild', import.meta.url)) && existsSync(new URL('../node_modules/jsdom', import.meta.url))
+
+// Every mounted root is unmounted after its test, pass or fail: a failed
+// assertion before an explicit unmount must not leave a streaming timer
+// alive (it would keep the test process from exiting, INT-05).
+const mountedRoots = new Set()
+function trackRoot(root, container) {
+  let done = false
+  const unmount = () => {
+    if (done) return
+    done = true
+    mountedRoots.delete(unmount)
+    root.unmount()
+    container.remove()
+  }
+  mountedRoots.add(unmount)
+  return unmount
+}
+afterEach(() => {
+  for (const unmount of [...mountedRoots]) unmount()
+})
 const skip = !ready && 'dev dependencies not installed'
 const prefixes = text => Array.from({ length: text.length + 1 }, (_, i) => text.slice(0, i))
 
@@ -160,13 +180,13 @@ test('LF-R3-001 (mounted): a MEDIA tag split across LF or CRLF starts no read be
       const container = document.createElement('div')
       document.body.appendChild(container)
       const root = createRoot(container)
+      const unmount = trackRoot(root, container)
       const scope = { bot: BOT, sessionId: 's-root', sendIntent: async () => ({ ok: true }), recent: new Set(), preload: {} }
       const item = { kind: 'assistant', id: 'a1', text: prefix, at: 1_762_560_030_000, streaming: true }
       flushSync(() => root.render(React.createElement(m.DirectiveContext.Provider, { value: scope }, React.createElement(m.AssistantBody, { item, bot: BOT, pos: '' }))))
       await new Promise(resolve => setTimeout(resolve, 0))
       assert.ok(!container.textContent.includes('MEDIA'), JSON.stringify(prefix))
-      root.unmount()
-      container.remove()
+      unmount()
     }
     assert.ok(e.reads.every(path => path === '/tmp/review/chart.png.backup'), `reads for ${JSON.stringify(full)}: ${JSON.stringify(e.reads)}`)
   }

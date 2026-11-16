@@ -7,12 +7,32 @@
 import assert from 'node:assert/strict'
 import { existsSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
-import test from 'node:test'
+import test, { afterEach } from 'node:test'
 import { pathToFileURL } from 'node:url'
 
 import { streamSafe, streamSafeParts } from '../src/core/streamSafe.js'
 
 const ready = existsSync(new URL('../node_modules/esbuild', import.meta.url)) && existsSync(new URL('../node_modules/jsdom', import.meta.url))
+
+// Every mounted root is unmounted after its test, pass or fail: a failed
+// assertion before an explicit unmount must not leave a streaming timer
+// alive (it would keep the test process from exiting, INT-05).
+const mountedRoots = new Set()
+function trackRoot(root, container) {
+  let done = false
+  const unmount = () => {
+    if (done) return
+    done = true
+    mountedRoots.delete(unmount)
+    root.unmount()
+    container.remove()
+  }
+  mountedRoots.add(unmount)
+  return unmount
+}
+afterEach(() => {
+  for (const unmount of [...mountedRoots]) unmount()
+})
 const skip = !ready && 'dev dependencies not installed'
 const prefixes = text => Array.from({ length: text.length + 1 }, (_, i) => text.slice(0, i))
 
@@ -184,7 +204,7 @@ function mountBody({ m, React, createRoot, flushSync }, files = {}) {
     const el = React.createElement(m.DirectiveContext.Provider, { value: scope }, React.createElement(m.AssistantBody, { item, bot: BOT, pos: '' }))
     flushSync(() => root.render(el))
   }
-  return { container, draw, unmount: () => (root.unmount(), container.remove()) }
+  return { container, draw, unmount: trackRoot(root, container) }
 }
 
 test('LF-R2-004 (mounted): a table ending in a short row draws the same markup streaming and done', { skip }, async t => {

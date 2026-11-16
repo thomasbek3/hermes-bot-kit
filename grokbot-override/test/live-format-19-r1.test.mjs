@@ -6,13 +6,33 @@
 import assert from 'node:assert/strict'
 import { existsSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
-import test from 'node:test'
+import test, { afterEach } from 'node:test'
 import { pathToFileURL } from 'node:url'
 
 import { extractMedia } from '../src/core/media.js'
 import { streamSafe, streamSafeParts } from '../src/core/streamSafe.js'
 
 const ready = existsSync(new URL('../node_modules/esbuild', import.meta.url)) && existsSync(new URL('../node_modules/jsdom', import.meta.url))
+
+// Every mounted root is unmounted after its test, pass or fail: a failed
+// assertion before an explicit unmount must not leave a streaming timer
+// alive (it would keep the test process from exiting, INT-05).
+const mountedRoots = new Set()
+function trackRoot(root, container) {
+  let done = false
+  const unmount = () => {
+    if (done) return
+    done = true
+    mountedRoots.delete(unmount)
+    root.unmount()
+    container.remove()
+  }
+  mountedRoots.add(unmount)
+  return unmount
+}
+afterEach(() => {
+  for (const unmount of [...mountedRoots]) unmount()
+})
 const skip = !ready && 'dev dependencies not installed'
 
 const prefixes = text => Array.from({ length: text.length + 1 }, (_, i) => text.slice(0, i))
@@ -158,7 +178,7 @@ function mountBody(e, { files = {}, strict = false } = {}) {
     if (strict) el = React.createElement(React.StrictMode, null, el)
     flushSync(() => root.render(el))
   }
-  return { container, draw, unmount: () => (root.unmount(), container.remove()) }
+  return { container, draw, unmount: trackRoot(root, container) }
 }
 
 test('LF-R1-001 (mounted): no media read starts for a partial inline path', { skip }, async t => {
@@ -264,6 +284,7 @@ test('LF-R1-009: under StrictMode the stream keeps updating', { skip }, async t 
   const { React, createRoot, flushSync, m } = e
   const container = document.createElement('div')
   const root = createRoot(container)
+  const unmountProbe = trackRoot(root, container)
   const Probe = ({ text, streaming }) => React.createElement('span', null, m.useStreamText(text, streaming))
   const draw = (text, streaming) => flushSync(() => root.render(React.createElement(React.StrictMode, null, React.createElement(Probe, { text, streaming }))))
   draw('one', true)
@@ -275,7 +296,7 @@ test('LF-R1-009: under StrictMode the stream keeps updating', { skip }, async t 
   assert.equal(container.textContent, 'one two three')
   draw('one two three four', false)
   assert.equal(container.textContent, 'one two three four', 'done: the full text at once')
-  root.unmount()
+  unmountProbe()
   // And the whole AssistantBody under StrictMode.
   const view = mountBody(e, { strict: true })
   view.draw('Hello')
