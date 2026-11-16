@@ -49249,7 +49249,7 @@ var ADAPT_SRC = (
 .gbo-src-icon.is-light-on-dark { color: var(--color-src-dark-ink, var(--gbo-src-color)); }
 .gbo-src-text { white-space: normal; text-decoration: underline; text-decoration-color: var(--color-border-primary); text-underline-offset: 2px; }
 .gbo-src:hover .gbo-src-text { text-decoration-color: currentColor; }
-.gbo-src:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+.gbo-src:focus-visible, a.gbo-src-host:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
 .md .aui-md :is(strong, b) { font-weight: 600; color: inherit; }
 .md .aui-md :is(h1, h2, h3, h4, h5, h6) { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: inherit; color: inherit; }
 .md .aui-md h1 { font-size: 17px; line-height: 24px; }
@@ -55546,6 +55546,79 @@ function decorate(children) {
   return changed ? next : children;
 }
 var decorateSourceLinks = (children) => decorate(children);
+var SVG_NS = "http://www.w3.org/2000/svg";
+var HOST_LINKS = ":is(h1, h2, h3, h4, h5, h6, th) a[href]";
+function iconNode(doc, id) {
+  const span = doc.createElement("span");
+  span.setAttribute("aria-hidden", "true");
+  span.setAttribute("data-gbo-src-icon", "");
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("focusable", "false");
+  const mark = BRAND_MARKS[id];
+  if (!mark) {
+    span.className = "gbo-src-icon is-web";
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.8");
+    svg.setAttribute("stroke-linecap", "round");
+    for (const d2 of ["M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0", "M3 12h18M12 3c2.6 2.7 3.8 5.7 3.8 9s-1.2 6.3-3.8 9M12 3c-2.6 2.7-3.8 5.7-3.8 9s1.2 6.3 3.8 9"]) {
+      const path = doc.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", d2);
+      svg.appendChild(path);
+    }
+  } else {
+    span.className = `gbo-src-icon${mark.path && needsLightOnDark(mark.hex) ? " is-light-on-dark" : ""}`;
+    span.setAttribute("data-service", id);
+    span.style.setProperty("--gbo-src-color", `#${mark.hex}`);
+    if (mark.path) {
+      svg.setAttribute("fill", "currentColor");
+      const path = doc.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", mark.path);
+      svg.appendChild(path);
+    } else {
+      svg.innerHTML = String(mark.inner || "");
+    }
+  }
+  span.appendChild(svg);
+  return span;
+}
+function enhanceSourceLinks(root) {
+  if (!root?.querySelectorAll) return 0;
+  let count = 0;
+  for (const anchor of Array.from(root.querySelectorAll(HOST_LINKS))) {
+    if (anchor.classList.contains("gbo-src") || anchor.closest("code, pre, .gbo-code")) continue;
+    const href = anchor.getAttribute("href") || "";
+    const link = sourceLinkFor(href);
+    if (!link) continue;
+    if (anchor.getAttribute("data-gbo-src-host") === href && anchor.querySelector(":scope > [data-gbo-src-icon]")) continue;
+    anchor.querySelectorAll(":scope > [data-gbo-src-icon]").forEach((node) => node.remove());
+    anchor.setAttribute("data-gbo-src-host", href);
+    anchor.setAttribute("data-service", link.service.id);
+    anchor.classList.add("gbo-src-host");
+    anchor.title = link.href;
+    anchor.insertBefore(iconNode(anchor.ownerDocument, link.service.id), anchor.firstChild);
+    count += 1;
+  }
+  return count;
+}
+function onSourceClickCapture(event) {
+  if (event.type === "auxclick" && event.button !== 1) return;
+  const anchor = event.target?.closest?.("a[data-gbo-src-host]");
+  if (!anchor) return;
+  const link = sourceLinkFor(anchor.getAttribute("href") || "");
+  if (!link) return;
+  event.preventDefault();
+  event.stopPropagation();
+  void openSource(link.opens);
+}
+function useHostSourceLinks(ref) {
+  React11.useLayoutEffect(() => {
+    enhanceSourceLinks(ref.current);
+  });
+}
 
 // src/ui/Media.tsx
 import { Fragment as Fragment8, jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
@@ -55726,9 +55799,11 @@ function BotProse({
   const { text: clean, media } = React12.useMemo(() => extractMedia(text3), [text3]);
   const files = media.filter((item) => item.kind === "file");
   const bubble = Boolean(clean) || media.length > files.length;
+  const prose = React12.useRef(null);
+  useHostSourceLinks(prose);
   return /* @__PURE__ */ jsxs13(Fragment8, { children: [
     bubble ? /* @__PURE__ */ jsxs13("div", { className: "bubble-wrap is-left", children: [
-      /* @__PURE__ */ jsx14("div", { className: `bubble is-agent${pos}${streaming ? " is-streaming" : ""}`, children: /* @__PURE__ */ jsx14("div", { className: "md", children: /* @__PURE__ */ jsx14(BotText, { bot, text: text3 }) }) }),
+      /* @__PURE__ */ jsx14("div", { className: `bubble is-agent${pos}${streaming ? " is-streaming" : ""}`, children: /* @__PURE__ */ jsx14("div", { className: "md", ref: prose, onClickCapture: onSourceClickCapture, onAuxClickCapture: onSourceClickCapture, children: /* @__PURE__ */ jsx14(BotText, { bot, text: text3 }) }) }),
       time
     ] }) : null,
     /* @__PURE__ */ jsx14(FileCards, { bot, files })

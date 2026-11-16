@@ -152,7 +152,10 @@ Beyond stock: **source links**. A link in bot prose (streaming or finished) whos
 Outlook/Office 365, Dropbox, Zoho, Stripe, HubSpot, Airtable, Trello, Asana, Calendly, Loom, YouTube, X,
 LinkedIn) draws as a bundled logo plus its text; other public hosts get a neutral globe; a bare URL gets a
 short label. It hooks the SDK renderer's `decorateText` prop, so the renderer's own safe-link rules still
-apply (no chip for `javascript:`, `data:`, `mailto:`, private hosts or code). Clicks go through
+apply (no chip for `javascript:`, `data:`, `mailto:`, private hosts or code). Links in headings and table
+headers (which the host renders without `decorateText`) are enhanced in place after each render with the
+same logo, title and click path. A valid `slack://` app link is carried past the host's sanitizer as an
+https stand-in and tried as the exact deep link first. Clicks go through
 `ctx.os.openExternal`. `src/core/sourceLinks.js`, `src/ui/SourceLink.tsx`, `src/ui/brandMarks.ts`; tests
 `test/source-links-24.test.mjs`.
 

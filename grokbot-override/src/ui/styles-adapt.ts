@@ -260,7 +260,7 @@ const ADAPT_SRC = /* css */ `
 .gbo-src-icon.is-light-on-dark { color: var(--color-src-dark-ink, var(--gbo-src-color)); }
 .gbo-src-text { white-space: normal; text-decoration: underline; text-decoration-color: var(--color-border-primary); text-underline-offset: 2px; }
 .gbo-src:hover .gbo-src-text { text-decoration-color: currentColor; }
-.gbo-src:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+.gbo-src:focus-visible, a.gbo-src-host:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
 .md .aui-md :is(strong, b) { font-weight: 600; color: inherit; }
 .md .aui-md :is(h1, h2, h3, h4, h5, h6) { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: inherit; color: inherit; }
 .md .aui-md h1 { font-size: 17px; line-height: 24px; }

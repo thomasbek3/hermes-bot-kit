@@ -85,6 +85,13 @@ export function MessageTextContent({ text, media, previewOnly, decorateText }: {
       const lines = block.split('\n')
       const heading = block.match(/^(#{1,4}) (.*)$/)
       if (heading) return React.createElement(`h${heading[1].length}`, { key: i }, inline(heading[2]))
+      if (lines.length >= 2 && lines.every(line => /^\|/.test(line)) && /^\|[\s|:-]+\|?$/.test(lines[1])) {
+        // A table: header cells are not decorated (the host calls decorateText on td only).
+        const cells = (line: string) => line.replace(/^\||\|$/g, '').split('|').map(cell => cell.trim())
+        const head = React.createElement('thead', null, React.createElement('tr', null, cells(lines[0]).map((cell, j) => React.createElement('th', { key: j }, inline(cell)))))
+        const body = React.createElement('tbody', null, lines.slice(2).map((line, r) => React.createElement('tr', { key: r }, cells(line).map((cell, j) => React.createElement('td', { key: j }, deco(inline(cell)))))))
+        return React.createElement('table', { key: i }, head, body)
+      }
       if (lines.every(line => /^[-*] /.test(line))) {
         return React.createElement('ul', { key: i, className: 'my-1 gap-0' }, lines.map((line, j) => React.createElement('li', { key: j, className: 'leading-(--dt-line-height)' }, deco(inline(line.slice(2))))))
       }

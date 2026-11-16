@@ -161,3 +161,73 @@ test('SL24-04: in the host pipeline the last streaming tick of a closed angle au
   assert.equal(host.render(streamSafe(done), m.sourceLinkUi.decorateSourceLinks), finished)
   assert.doesNotMatch(host.render(streamSafe(done.slice(0, -5)), m.sourceLinkUi.decorateSourceLinks), /&lt;/, 'no raw < while it types')
 })
+
+// ---- SL24-05: heading and table-header links get the source-link look and path ----
+
+const HEAD_MD = '## Read [The PR](https://github.com/example/repo/pull/12)\n\n| [The doc](https://docs.google.com/document/d/abc/edit) | b |\n|---|---|\n| [cell](https://github.com/example/repo) | d |'
+
+async function mountProse(t, text) {
+  const { m, React, createRoot } = await setup(t)
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  const draw = value => root.render(React.createElement(m.BotProse, { bot: { name: 'scholar' }, text: value, pos: '' }))
+  draw(text)
+  await flush()
+  t.after(() => {
+    root.unmount()
+    container.remove()
+  })
+  return { container, draw }
+}
+
+test('SL24-05: a heading link and a table-header link get the logo and the full-URL title', { skip }, async t => {
+  const { container } = await mountProse(t, HEAD_MD)
+  const heading = container.querySelector('h2 a[href]')
+  assert.equal(heading.getAttribute('data-service'), 'github')
+  assert.ok(heading.firstElementChild.classList.contains('gbo-src-icon'), 'the logo first')
+  assert.equal(heading.firstElementChild.getAttribute('aria-hidden'), 'true')
+  assert.ok(heading.querySelector('.gbo-src-icon svg path'))
+  assert.equal(heading.title, 'https://github.com/example/repo/pull/12')
+  assert.equal(heading.textContent, 'The PR', 'the logo adds no text')
+  const th = container.querySelector('th a[href]')
+  assert.equal(th.getAttribute('data-service'), 'googledocs')
+  assert.ok(th.querySelector('.gbo-src-icon[data-service="googledocs"]'))
+  assert.ok(container.querySelector('td a.gbo-src[data-service="github"]'), 'body cells stay decorated chips')
+  assert.equal(container.querySelectorAll('[data-gbo-src-icon]').length, 2, 'one logo each, no duplicates')
+})
+
+test('SL24-05: a heading-link click opens through openSource; the host anchor click never runs', { skip }, async t => {
+  const calls = await stubOpener(t)
+  const { container } = await mountProse(t, HEAD_MD)
+  const heading = container.querySelector('h2 a[href]')
+  let hostClick = 0
+  heading.addEventListener('click', () => (hostClick += 1))
+  const event = new window.MouseEvent('click', { bubbles: true, cancelable: true })
+  heading.dispatchEvent(event)
+  await flush()
+  assert.equal(event.defaultPrevented, true)
+  assert.equal(hostClick, 0, 'stopped in the capture phase')
+  assert.deepEqual(calls, ['https://github.com/example/repo/pull/12'])
+})
+
+test('SL24-05: re-render keeps exactly one logo; code and unsafe heading links are left alone', { skip }, async t => {
+  const { container, draw } = await mountProse(t, HEAD_MD)
+  draw(`${HEAD_MD}\n\nMore.`)
+  await flush()
+  assert.equal(container.querySelector('h2 a[href]').querySelectorAll('[data-gbo-src-icon]').length, 1)
+  const other = await mountProse(t, '## Run `https://github.com/x` or [mail](mailto:someone@example.com)')
+  assert.equal(other.container.querySelectorAll('[data-gbo-src-icon]').length, 0)
+})
+
+test('SL24-05: in the host pipeline, a heading and a header link are enhanced the same way', { skip: skipHost }, async t => {
+  const { m } = await setup(t)
+  const html = host.render(HEAD_MD, m.sourceLinkUi.decorateSourceLinks)
+  const box = document.createElement('div')
+  box.innerHTML = html
+  assert.equal(box.querySelector('h2 a[href]').getAttribute('data-service'), null, 'reproduced: the host leaves heading links plain')
+  assert.equal(m.sourceLinkUi.enhanceSourceLinks(box), 2)
+  assert.equal(box.querySelector('h2 a[href]').getAttribute('data-service'), 'github')
+  assert.equal(box.querySelector('th a[href]').getAttribute('data-service'), 'googledocs')
+  assert.equal(m.sourceLinkUi.enhanceSourceLinks(box), 0, 'idempotent')
+})
