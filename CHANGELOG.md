@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **remote-cua: Hermes's own computer_use on a remote Mac (2026-11-15)**: a new per-profile agent plugin,
+  [`remote-cua`](remote-cua/README.md). With `computer_use.backend: remote-cua` and a `remote_cua` block
+  (`host`, `user`, `os`, optional `driver`, `vnc`) the bot's native `computer_use` (schema, approvals,
+  Hermes's cua-driver backend) drives a Mac over SSH: the driver is found on the Mac (config, then the
+  gateway's pinned version under `~/.hermes/tools`, then PATH) and checked (version pin, Hermes's driver
+  contract, CuaDriver.app signature), a private daemon is started through that exact `CuaDriver.app`
+  (`open -n -g -a <path>`, never by name), and Hermes's MCP session runs over one `ssh -T -o BatchMode=yes`
+  connection; the daemon is stopped on session end, at exit, and after a crash on the next start. A
+  take-over lease (`<profile>/remote-cua/lease.json`) refuses `computer_use` with `human_has_control` while a
+  human holds it; the Computer pane changes it through `/api/plugins/remote-cua/` (`lease`, `take`,
+  `release`, `status`, see [computer-viewer/docs/REMOTE-CUA.md](computer-viewer/docs/REMOTE-CUA.md)).
+  `hermes remote-cua check` reports reachability, driver, permissions and screen state. `os: windows` is
+  accepted and refused with "Windows support coming: needs cua Session proxy". Hermes internals it uses are
+  version-gated (`>=0.23.0,<0.24.0`, [CONTRACT.md](remote-cua/CONTRACT.md)). Linux VMs: Hermes's native
+  `terminal.backend: ssh` path, documented in [docs/LINUX-VM.md](docs/LINUX-VM.md).
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

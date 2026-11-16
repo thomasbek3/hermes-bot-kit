@@ -1,0 +1,16 @@
+manifest_version: 2
+api_version: 1
+name: remote-cua
+version: 1.0.0
+# Explicit: the directory is also a computer-use provider (computer_use.backend: remote-cua), which
+# Hermes would otherwise auto-detect as "exclusive" and never load as a plugin, losing the lease hook
+# and the CLI command.
+kind: standalone
+description: Hermes's own computer_use tool on a remote Mac over SSH (cua-driver's private daemon), with a take-over lease for the computer-viewer pane
+requires_hermes: ">=0.23.0,<0.24.0"
+provides_hooks:
+  - pre_tool_call
+author: Thomas Bekkers
+license: MIT
+homepage: https://github.com/thomasbek3/hermes-bot-kit
+tags: [computer-use, cua-driver, macos, ssh, remote, take-over]
