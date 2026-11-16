@@ -2549,8 +2549,12 @@ function createRemoteCuaClient(request) {
     // A forced release names the epoch of the lease it saw: remote-cua clears
     // only that lease (409 stale_force once it has moved on), so a forced
     // request that commits late can never revoke a later grant (INT-01).
-    release: (owner, viewer, force, epoch) =>
-      request(owner, 'release', force && Number.isInteger(epoch) ? { viewer, force: true, epoch } : { viewer, force: Boolean(force) }),
+    // Without an epoch nothing is sent: there is no unconditional force.
+    release: (owner, viewer, force, epoch) => {
+      if (!force) return request(owner, 'release', { viewer, force: false })
+      if (!Number.isInteger(epoch)) return Promise.reject(new Error('Hand back (force) needs a fresh lease read; try again.'))
+      return request(owner, 'release', { viewer, force: true, epoch })
+    },
     status: (owner, fresh) => request(owner, 'status', undefined, fresh ? 'fresh=1' : '')
   }
 }
@@ -2933,6 +2937,12 @@ async function handBack(force = false) {
   const viewer = !force && state.lease && isOwnOldViewer(state.lease.viewer) ? state.lease.viewer : control.viewerId
   // Force clears only the lease this window saw (its epoch), never a later one.
   const seenEpoch = state.lease && Number.isInteger(state.lease.epoch) ? state.lease.epoch : null
+  if (force && seenEpoch === null) {
+    // Fail closed: no lease epoch read yet, so no forced release to send.
+    patchControl({ error: 'Hand back (force) needs a fresh lease read; try again.' })
+    void refreshLease()
+    return
+  }
   const gen = ++control.gen
   patchControl({
     pending: force ? 'force' : 'release',

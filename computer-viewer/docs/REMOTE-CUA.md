@@ -70,12 +70,14 @@ when you took over has its result discarded.
 | 409 | `{"ok": false, "error": "stale_force", "message": "Control changed since this hand back was sent; nothing was released", "lease": {…}}` (forced, and `epoch` is not the current human lease's) |
 | 400 | `{"ok": false, "error": "bad_viewer", …}` (no viewer and no `"force": true`) |
 | 400 | `{"ok": false, "error": "bad_epoch", …}` (`epoch` present but not an integer) |
+| 400 | `{"ok": false, "error": "force_needs_epoch", "message": "force needs the epoch of the lease to clear: GET /lease and send its epoch"}` (`"force": true` with no `epoch`, or `"epoch": null`) |
 
-`{"force": true}` (viewer optional) clears a lease whatever viewer holds it: the pane's **Hand back
-(force)** after a reload, since the reloaded pane has a new viewer id and its plain `release` would get
-`not_holder`. With `"epoch": n` (the pane always sends it) it clears only the human lease at epoch `n`;
-a lease that has since changed hands is left alone (`stale_force`). Without `epoch` (scripts, older
-panes) it clears whatever holds the lease.
+`{"force": true, "epoch": n}` (viewer optional) clears the human lease at epoch `n` whatever viewer
+holds it: the pane's **Hand back (force)** after a reload, since the reloaded pane has a new viewer id and
+its plain `release` would get `not_holder`. A lease that has since changed hands is left alone
+(`stale_force`). `epoch` is **required** with force: there is no unconditional force, because a delayed
+one could revoke a later take-over. Scripts read `GET /lease` first and send its `epoch`; an older pane
+that sends force without one gets `force_needs_epoch` and must be updated.
 
 ### `GET /api/plugins/remote-cua/status[?fresh=1]`
 

@@ -34,9 +34,11 @@
   (force)** now sends the epoch of the human lease the pane saw, and remote-cua's `release` clears only that
   lease (409 `stale_force` once it has changed hands; `lease.release(expect_epoch=…)`). Before, a forced
   release that timed out but committed later (after the old viewer handed back and this pane took over under
-  a new id) revoked the new grant while the pane's input stayed on. A forced release without `epoch` keeps
-  the old meaning for scripts. Round 3's "a late release can never revoke a later grant" now holds for
-  forced releases too.
+  a new id) revoked the new grant while the pane's input stayed on. `epoch` is required with `force`: a
+  forced release without one (an older pane, a script, `"epoch": null`) is refused with 400
+  `force_needs_epoch` (`lease.ForceNeedsEpoch`), since a delayed epoch-free force could still revoke a later
+  take-over; scripts GET the lease first and send its epoch, and the pane never sends a force without one.
+  Round 3's "a late release can never revoke a later grant" now holds for forced releases too.
 - **computer-viewer: control fixes from review round 3 (2026-11-16)**: a lease change with no answer retires its
   viewer id, so a release that commits late can never revoke a later grant (Package P's release only clears the
   viewer it names), and Take over re-reads the lease and waits while an old id of this window holds it; a focus

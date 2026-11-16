@@ -1169,12 +1169,16 @@ function fakeRemoteCua({ lease = AGENT_LEASE, status = STATUS_READY, configured 
     if (method === 'POST' && route === 'release') {
       const viewer = body && body.viewer
       const force = Boolean(body && body.force === true)
+      // remote-cua plugin_api: no epoch, no force (force_needs_epoch).
+      if (force && !Number.isInteger(body.epoch)) {
+        return reply(400, { ok: false, error: 'force_needs_epoch', message: 'force needs the epoch of the lease to clear: GET /lease and send its epoch' })
+      }
       if (server.lease.holder === 'human') {
         if (!force && server.lease.viewer !== viewer) {
           return reply(409, { ok: false, error: 'not_holder', message: 'This viewer does not hold control; use force to hand back anyway', lease: server.lease })
         }
         // remote-cua lease.release(expect_epoch=…): a forced release clears only the lease it saw.
-        if (force && Number.isInteger(body.epoch) && body.epoch !== server.lease.epoch) {
+        if (force && body.epoch !== server.lease.epoch) {
           return reply(409, { ok: false, error: 'stale_force', message: 'Control changed since this hand back was sent; nothing was released', lease: server.lease })
         }
         bump({ holder: 'agent', viewer: null })
@@ -2115,3 +2119,48 @@ test('INT-01: a forced hand back sends the epoch it saw; the current lease is cl
   assert.throws(() => server.api.answer({ method: 'POST', path: '/api/plugins/remote-cua/release', body: { viewer: 'x', force: true, epoch: 8 } }), /409: .*stale_force/)
   assert.equal(server.lease.viewer, 'cv-other')
 })
+
+// Gate round 2 (INT-R2-01): no epoch, no force.
+
+test('INT-R2-01: a delayed epoch-free force (an older pane or a script) cannot revoke a new Take over', async () => {
+  const server = fakeRemoteCua({ lease: { holder: 'human', viewer: 'cv-from-before-reload', since: 1763251100, epoch: 10 } })
+  const { t, instances } = await remoteSetup(server)
+  lastRfb(instances).listeners.get('connect')({})
+  t.showPane()
+  // A legacy force is sent for the old lease now and stalls on its way.
+  const legacy = { method: 'POST', path: '/api/plugins/remote-cua/release', body: { viewer: 'pane-legacy', force: true } }
+  // The old holder hands back; this pane takes over.
+  server.api.answer({ method: 'POST', path: '/api/plugins/remote-cua/release', body: { viewer: 'cv-from-before-reload', force: false } })
+  await t.refreshLease()
+  await t.takeOver()
+  await settle()
+  const grant = { ...server.lease }
+  assert.equal(grant.viewer, t.control.viewerId)
+  assert.equal(lastRfb(instances).viewOnly, false, 'this window drives the machine')
+  // The legacy force arrives (with no epoch, and with epoch: null).
+  for (const body of [legacy.body, { ...legacy.body, epoch: null }]) {
+    assert.throws(() => server.api.answer({ ...legacy, body }), /400: .*force_needs_epoch/)
+  }
+  assert.deepEqual(plain(server.lease), plain(grant))
+  assertInputMatchesServer(t, server, instances, 'after the epoch-free force')
+  assert.equal(lastRfb(instances).viewOnly, false)
+})
+
+test('INT-R2-01: the pane never sends a force without an epoch (fails closed)', async () => {
+  const sent = []
+  const client = createClientFor(sent)
+  await assert.rejects(() => client.release({ connectionId: 'conn-mini', profile: 'ava' }, 'cv-x', true, undefined))
+  await assert.rejects(() => client.release({ connectionId: 'conn-mini', profile: 'ava' }, 'cv-x', true, null))
+  assert.deepEqual(sent, [], 'nothing reached the server')
+  await client.release({ connectionId: 'conn-mini', profile: 'ava' }, 'cv-x', true, 4)
+  await client.release({ connectionId: 'conn-mini', profile: 'ava' }, 'cv-x', false)
+  assert.deepEqual(plain(sent), [{ viewer: 'cv-x', force: true, epoch: 4 }, { viewer: 'cv-x', force: false }])
+})
+
+function createClientFor(sent) {
+  const { t } = boundSetup({ remoteCua: true, api: fakeRemoteCua().api, routes: AVA_ROUTE })
+  return t.createRemoteCuaClient(async (owner, op, body) => {
+    sent.push(body)
+    return { ok: true, lease: AGENT_LEASE }
+  })
+}

@@ -51,7 +51,8 @@ def test_lease_take_release_cycle(client, home):
     assert r.status_code == 409 and r.json()["error"] == "held_by_other_viewer"
     r = c.post("/api/plugins/remote-cua/release", json={"viewer": "pane-2"})
     assert r.status_code == 409 and r.json()["error"] == "not_holder"
-    r = c.post("/api/plugins/remote-cua/release", json={"viewer": "pane-2", "force": True})
+    held = c.get("/api/plugins/remote-cua/lease").json()["lease"]
+    r = c.post("/api/plugins/remote-cua/release", json={"viewer": "pane-2", "force": True, "epoch": held["epoch"]})
     assert r.status_code == 200 and r.json()["lease"]["holder"] == "agent"
 
 
@@ -87,7 +88,28 @@ def test_release_without_viewer_needs_force(client, home):
     write_config(home, MAC_CONFIG)
     c, _ = client
     assert c.post("/api/plugins/remote-cua/release", json={}).status_code == 400
-    assert c.post("/api/plugins/remote-cua/release", json={"force": True}).status_code == 200
+    assert c.post("/api/plugins/remote-cua/release", json={"force": True, "epoch": 0}).status_code == 200
+
+
+@pytest.mark.parametrize("body", [{"viewer": "pane-legacy", "force": True},
+                                  {"viewer": "pane-legacy", "force": True, "epoch": None},
+                                  {"force": True}])
+def test_delayed_force_without_an_epoch_cannot_revoke_a_new_grant(client, home, monkeypatch, body):
+    """INT-R2-01 through the real route: an epoch-free force (older pane or script) delayed past an
+    ordinary hand back and a new take is refused with 400 force_needs_epoch; the grant and the bot's
+    refusal stand. On 1c496af it returned 200 and admitted the bot."""
+    write_config(home, MAC_CONFIG)
+    c, api = client
+    c.post("/api/plugins/remote-cua/take", json={"viewer": "pane-old"})
+    c.post("/api/plugins/remote-cua/release", json={"viewer": "pane-old"})
+    grant = c.post("/api/plugins/remote-cua/take", json={"viewer": "pane-new"}).json()["lease"]
+    api_lease = api._mod("lease")
+    monkeypatch.setattr(api_lease, "_remote_cua_selected", lambda: True)
+    assert api_lease.pre_tool_call("computer_use") is not None, "precondition: the bot is refused"
+    r = c.post("/api/plugins/remote-cua/release", json=body)
+    assert r.status_code == 400 and r.json()["error"] == "force_needs_epoch"
+    assert c.get("/api/plugins/remote-cua/lease").json()["lease"] == grant
+    assert api_lease.pre_tool_call("computer_use") is not None, "the bot is still refused"
 
 
 def test_status_route(client, home, monkeypatch):

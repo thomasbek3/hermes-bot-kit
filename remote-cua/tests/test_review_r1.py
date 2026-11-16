@@ -59,7 +59,7 @@ def test_r1_001_refetch_after_takeover_is_refused(home, tmp_path, monkeypatch):
             b.list_windows()
         assert daemon_.cli_calls == []
     finally:
-        lease.release(None, home, force=True)
+        lease.release(None, home, force=True, expect_epoch=lease.read(home).epoch)
         b.stop()
 
 

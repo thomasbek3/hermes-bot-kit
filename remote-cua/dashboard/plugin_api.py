@@ -2,7 +2,7 @@
 
     GET  /lease                      who holds this profile's remote machine
     POST /take     {"viewer": id}    the human at ``viewer`` takes over
-    POST /release  {"viewer": id, "force": false[, "epoch": n]}   hand back to the bot
+    POST /release  {"viewer": id, "force": false} | {"viewer": id, "force": true, "epoch": n}   hand back
     GET  /status[?fresh=1]           reachable, driver, permissions, screen awake
 
 Profile scope: ``?profile=<name>`` (Hermes binds that profile's home before the handler runs), else
@@ -101,11 +101,14 @@ def release(payload: Any = Body(default=None)) -> JSONResponse:
         return _answer(400, ok=False, error="bad_viewer", message="viewer must be 1-128 letters, digits, . _ : -")
     if viewer is None and not force:
         return _answer(400, ok=False, error="bad_viewer", message="send the viewer that took control, or force: true")
-    # A forced release names the epoch of the lease it saw: it clears only that lease (stale_force once it
-    # has moved on), so a late commit can never revoke a later grant.
+    # A forced release must name the epoch of the lease it saw: it clears only that lease (stale_force once
+    # it has moved on), so a late commit can never revoke a later grant. No epoch, no force.
     epoch = payload.get("epoch") if isinstance(payload, dict) else None
     if epoch is not None and (isinstance(epoch, bool) or not isinstance(epoch, int)):
         return _answer(400, ok=False, error="bad_epoch", message="epoch must be an integer")
+    if force and epoch is None:
+        return _answer(400, ok=False, error="force_needs_epoch",
+                       message="force needs the epoch of the lease to clear: GET /lease and send its epoch")
     try:
         current = lease.release(viewer, force=force, expect_epoch=epoch if force else None)
     except lease.LeaseConflict as exc:

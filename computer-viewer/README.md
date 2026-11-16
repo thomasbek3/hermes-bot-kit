@@ -230,7 +230,9 @@ input):
   plugin only lets a release clear the viewer it names, so a late release of
   the old id cannot take control away from the new one. **Hand back
   (force)** names the epoch of the lease it saw, and the plugin clears only
-  that lease, so a forced hand back that lands late cannot either. While an old id of
+  that lease, so a forced hand back that lands late cannot either. The plugin
+  refuses any force without an epoch (`force_needs_epoch`), and the pane never
+  sends one: without a lease read it asks you to try again. While an old id of
   this window still holds the lease, the chip says "Handing back…" and Take
   over waits; Take over also re-reads the lease first.
 - The pane remembers every lease it *may* hold (a take was sent and no answer
@@ -263,7 +265,7 @@ Take over needs the computer bound to the bot (**Endpoint for <bot>**): the
 control lease belongs to that bot's profile. The pane calls the plugin's
 dashboard routes on that bot's own connection and profile —
 `GET /api/plugins/remote-cua/lease`, `POST …/take {viewer}`,
-`POST …/release {viewer, force[, epoch]}`, `GET …/status[?fresh=1]` (shapes in
+`POST …/release {viewer, force, epoch}` (epoch required with force), `GET …/status[?fresh=1]` (shapes in
 [docs/REMOTE-CUA.md](docs/REMOTE-CUA.md)) — authenticated by Hermes like
 every other `/api/` call; it never writes the lease itself. The plugin must be
 enabled in that bot's profile, or the pane says so.

@@ -78,7 +78,7 @@ def test_r2_001_ended_session_replay_never_dispatches_to_the_human(home, tmp_pat
         if take_on == "session_revive":
             assert ("start_session", lease.AGENT) in log  # Hermes did revive and attempt the replay
     finally:
-        lease.release(None, home, force=True)
+        lease.release(None, home, force=True, expect_epoch=lease.read(home).epoch)
         b.stop()
 
 
@@ -96,7 +96,7 @@ def test_r2_001_closed_session_retry_never_dispatches_to_the_human(home, tmp_pat
         assert out["isError"] is True and out["structuredContent"]["code"] == "human_has_control"
         assert log == [("get_window_state", lease.AGENT)]
     finally:
-        lease.release(None, home, force=True)
+        lease.release(None, home, force=True, expect_epoch=lease.read(home).epoch)
         b.stop()
 
 
@@ -120,7 +120,7 @@ def test_r2_001_operation_result_is_fenced_when_it_returns(home, tmp_path, monke
             b.list_windows()
         assert b._active_pid is None and b._active_window_id is None  # disarmed
     finally:
-        lease.release(None, home, force=True)
+        lease.release(None, home, force=True, expect_epoch=lease.read(home).epoch)
         b.stop()
 
 
@@ -149,7 +149,7 @@ def test_r2_001_capture_after_takeover_returns_no_frame(home, tmp_path, monkeypa
         with pytest.raises(_human_has_control()):
             b.capture(mode="vision", pid=9, window_id=7)
     finally:
-        lease.release(None, home, force=True)
+        lease.release(None, home, force=True, expect_epoch=lease.read(home).epoch)
         b.stop()
 
 
@@ -166,7 +166,7 @@ def test_r2_001_operation_refused_up_front_while_human_holds(home, tmp_path, mon
             b.click(x=1, y=1)
         assert log == []
     finally:
-        lease.release(None, home, force=True)
+        lease.release(None, home, force=True, expect_epoch=lease.read(home).epoch)
         b.stop()
 
 
@@ -313,5 +313,5 @@ def test_r3_001_entry_refusal_disarms_the_previous_target(home, tmp_path, monkey
         assert out.ok is False  # Hermes's own "capture first" refusal
         assert [n for n, _ in log if n == "click"] == []
     finally:
-        lease.release(None, home, force=True)
+        lease.release(None, home, force=True, expect_epoch=lease.read(home).epoch)
         b.stop()

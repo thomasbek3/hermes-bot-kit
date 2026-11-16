@@ -42,8 +42,22 @@ def test_release_rules(home):
 
 
 def test_force_release_clears_a_stuck_lease(home):
-    lease.take("pane-1", home)
-    assert lease.release(None, home, force=True).holder == lease.AGENT
+    stuck = lease.take("pane-1", home)
+    assert lease.release(None, home, force=True, expect_epoch=stuck.epoch).holder == lease.AGENT
+
+
+def test_force_without_an_epoch_is_refused_even_when_it_arrives_late(home):
+    """INT-R2-01: an older pane or script sends force with no epoch; it stalls; the old holder hands back
+    and a new viewer takes; the delayed force then runs. It must not clear the new grant (on 1c496af an
+    epoch-free force still cleared whatever held the lease)."""
+    lease.take("pane-old", home)
+    lease.release("pane-old", home)
+    grant = lease.take("pane-new", home)
+    for missing in ({}, {"expect_epoch": None}):
+        with pytest.raises(ValueError) as exc:
+            lease.release("pane-legacy", home, force=True, **missing)
+        assert getattr(exc.value, "code", None) == "force_needs_epoch"
+        assert lease.read(home) == grant, "the new grant stands"
 
 
 def test_forced_release_names_the_epoch_it_saw(home):
