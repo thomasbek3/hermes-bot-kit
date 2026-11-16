@@ -9,6 +9,10 @@
 //                                                  open (routing.js retainBotRoute);
 //                                                  rejects when it cannot be held
 //   setTimer(fn, ms) -> cancel, now(), isVisible() optional
+//   backgroundPoll(type, bot, baseMs, fn, { force }) optional: the idle refresh
+//                                                  runs through it (one background
+//                                                  poll per connection at a time,
+//                                                  backoff; core/backgroundPolls.js)
 //
 // Route lifetime: a bot on a secondary (pooled) connection is reached through
 // host.requestProfile, and each call is its own lease. At zero leases the
@@ -1032,26 +1036,79 @@ export function createChatController(bot, deps, options = {}) {
    *  "Show earlier messages" stays exact, and an unsent bubble or a waiting
    *  approval card stays where it was (review r1 #5). */
   async function refresh() {
-    if (!state.storedId || state.chat.busy || state.phase !== 'ready' || state.loadingMore) return
+    await refreshTail()
+  }
+
+  /** refresh(), reporting a failed read (false) to the idle poll's backoff. */
+  async function refreshTail() {
+    if (!state.storedId || state.chat.busy || state.phase !== 'ready' || state.loadingMore) return true
     try {
       const tail = await readPage(0)
-      if (disposed || state.chat.busy || state.loadingMore) return
+      if (disposed || state.chat.busy || state.loadingMore) return true
       mergeTail(tail, keepLocal)
       resolveUnknownFrom(tail)
+      return true
     } catch {
       /* the next tick retries */
+      return false
     }
   }
 
-  function scheduleIdleRefresh() {
+  // The idle refresh is a BACKGROUND poll: it stops while the window is
+  // hidden (wake() resumes it with one refresh), and with deps.backgroundPoll
+  // it never runs beside another background poll on the bot's connection and
+  // backs off while that connection is slow or failing.
+  const idleBaseMs = () => options.idleRefreshMs ?? IDLE_REFRESH_MS
+  let idlePaused = false
+
+  async function idleTick(force = false) {
+    const gate = deps.backgroundPoll
+    if (typeof gate !== 'function') {
+      await refreshTail()
+      return { nextMs: idleBaseMs() }
+    }
+    try {
+      return (await gate('idle', state.bot, idleBaseMs(), refreshTail, { force })) || { nextMs: idleBaseMs() }
+    } catch {
+      return { nextMs: idleBaseMs() }
+    }
+  }
+
+  function scheduleIdleRefresh(delayMs) {
     if (disposed || retiring) return
     idleCancel?.()
+    idlePaused = false
     idleCancel = setTimer(async () => {
       idleCancel = null
       if (disposed || retiring) return
-      await refresh()
-      scheduleIdleRefresh()
-    }, options.idleRefreshMs ?? IDLE_REFRESH_MS)
+      if (!visible()) {
+        idlePaused = true
+        return
+      }
+      const result = await idleTick()
+      if (idleCancel || disposed || retiring) return
+      if (result?.hidden) {
+        idlePaused = true
+        return
+      }
+      scheduleIdleRefresh(Math.max(1, Number(result?.nextMs) || idleBaseMs()))
+    }, delayMs ?? idleBaseMs())
+  }
+
+  /** The window is visible again: an idle refresh that stopped while it was
+   *  hidden runs once now and the idle timer resumes. */
+  function wake() {
+    if (!idlePaused || disposed || retiring || state.phase !== 'ready' || !visible()) return
+    idlePaused = false
+    void (async () => {
+      const result = await idleTick(true)
+      if (idleCancel || disposed || retiring) return
+      if (result?.hidden) {
+        idlePaused = true
+        return
+      }
+      scheduleIdleRefresh(Math.max(1, Number(result?.nextMs) || idleBaseMs()))
+    })()
   }
 
   function onTurnSettled() {
@@ -2366,6 +2423,7 @@ export function createChatController(bot, deps, options = {}) {
     attach: guard(attach, rejected),
     loadEarlier: guard(loadEarlier, nothing),
     refresh: guard(refresh, nothing),
+    wake,
     reconcile: guard(reconcile, nothing),
     send: guard(send, () => Promise.resolve(false)),
     sendDraft: guard(sendDraft, notSent),

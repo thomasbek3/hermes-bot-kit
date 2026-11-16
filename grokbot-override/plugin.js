@@ -441,7 +441,7 @@ var init_sheetGrid = __esm({
   }
 });
 
-// node_modules/xlsx/xlsx.mjs
+// ../../kit-ov-integrate/grokbot-override/node_modules/xlsx/xlsx.mjs
 function reset_ansi() {
   set_ansi(1252);
 }
@@ -14776,7 +14776,7 @@ function sheet_set_array_formula(ws, range, formula, dynamic) {
 }
 var XLSX, current_codepage, current_ansi, $cptable, VALID_ANSI, CS2CP, set_ansi, set_cp, debom, _getchar, _getansi, DENSE, DIF_XL, Base64_map, has_buf, Buffer_from, buf_utf16le, s2a, bconcat, chr0, chr1, p2_32, days, months, table_fmt, SSF_default_map, SSF_default_str, pct1, frac1, dec1, closeparen, phone, SSF_abstime, cfregex2, SSFImplicit, dateNFregex, bad_formats, CRC32, CFB, _fs, dnthresh, dnthresh1, dnthresh2, pdre1, pdre2, pdre3, FDRE1, FDRE2, FDISO, utc_append_works, lower_months, split_regex, xml_boundary, str_match_xml_ns, str_match_xml_ns_g, str_remove_xml_ns_g, str_match_xml_ig, XML_HEADER, attregexg, tagregex1, tagregex2, tagregex, nsregex, nsregex2, encodings, rencoding, unescapexml, decregex, htmlcharegex, xlml_fixstr, utf8corpus, utf8read, utf8write, htmldecode, vtvregex, vtmregex, wtregex, xlmlregex, XMLNS, XMLNS_main, ___toBuffer, __toBuffer, ___utf16le, __utf16le, ___hexlify, __hexlify, ___utf8, __utf8, ___lpstr, __lpstr, ___cpstr, __cpstr, ___lpwstr, __lpwstr, ___lpp4, __lpp4, ___8lpp4, __8lpp4, ___double, __double, is_buf, __readUInt8, __readUInt16LE, __readInt16LE, __readUInt32LE, __readInt32LE, __readInt32BE, __writeUInt32LE, __writeInt32LE, __writeUInt16LE, parse_BrtCommentText, parse_XLSBCodeName, parse_XLNameWideString, parse_RelID, parse_UncheckedRfX, VT_I2, VT_I4, VT_BOOL, VT_VARIANT, VT_UI4, VT_FILETIME, VT_BLOB, VT_CF, VT_VECTOR_VARIANT, VT_VECTOR_LPSTR, VT_STRING, VT_USTR, VT_CUSTOM, DocSummaryPIDDSI, SummaryPIDSI, CountryEnum, XLSFillPattern, _XLSIcv, XLSIcv, BErr, RBErr, XLSLblBuiltIn, ct2type, RELS, CT_ODS, CORE_PROPS, EXT_PROPS, custregex, XLMLDocPropsMap, evert_XLMLDPM, parse_Ref, FtTab, parse_BIFF2Format, parse_XLHeaderFooter, parse_BIFF5OT, parse_Blank, parse_Scl, parse_String, DBF_SUPPORTED_VERSIONS, DBF, SYLK, DIF, ETH, PRN, WK_, parse_rs, rs_to_html, sitregex, sirregex, sstr1, sstr2, crypto_CreateXorArray_Method1, crypto_DecryptData_Method1, crypto_MakeXorDecryptor, DEF_MDW, MAX_MDW, MIN_MDW, MDW, DEF_PPI, PPI, XLMLPatternTypeMap, cellXF_uint, cellXF_bool, parse_sty_xml, parse_BrtFill, parse_BrtBorder, XLSXThemeClrScheme, parse_BrtCommentAuthor, CT_VBA, rc_to_a1, crefregex, a1_to_rc, parse_PtgMemErr, parse_PtgMemNoMem, parse_PtgTbl, parse_PtgElfCol, parse_PtgElfColS, parse_PtgElfColSV, parse_PtgElfColV, parse_PtgElfRadical, parse_PtgElfRadicalLel, parse_PtgElfRadicalS, parse_PtgElfRw, parse_PtgElfRwV, PtgListRT, PtgTypes, PtgDupes, Ptg18, Ptg19, PtgBinOp, parse_XLSBArrayParsedFormula, parse_XLSBCellParsedFormula, parse_XLSBNameParsedFormula, parse_XLSBSharedParsedFormula, Cetab, Ftab, FtabArgc, strs, _ssfopts, mergecregex, hlinkregex, dimregex, colregex, afregex, marginregex, sheetprregex, sviewregex, parse_ws_xml_data, parse_BrtWsDim, parse_BrtMergeCell, BrtMarginKeys, WBPropsDef, WBViewDef, SheetDef, CalcPrDef, badchars, wbnsregex, attregexg2, attregex2, XLMLFormatMap, CONTINUE_RT, PSCLSID, XLSBRecordEnum, XLSRecordEnum, HTML_BEGIN, HTML_END, subarray, numbers_lut_new, qreg, utils, version;
 var init_xlsx = __esm({
-  "node_modules/xlsx/xlsx.mjs"() {
+  "../../kit-ov-integrate/grokbot-override/node_modules/xlsx/xlsx.mjs"() {
     /*! xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */
     XLSX = {};
     XLSX.version = "0.20.3";
@@ -44720,24 +44720,66 @@ function createChatController(bot, deps, options = {}) {
     });
   }
   async function refresh() {
-    if (!state.storedId || state.chat.busy || state.phase !== "ready" || state.loadingMore) return;
+    await refreshTail();
+  }
+  async function refreshTail() {
+    if (!state.storedId || state.chat.busy || state.phase !== "ready" || state.loadingMore) return true;
     try {
       const tail = await readPage(0);
-      if (disposed || state.chat.busy || state.loadingMore) return;
+      if (disposed || state.chat.busy || state.loadingMore) return true;
       mergeTail(tail, keepLocal);
       resolveUnknownFrom(tail);
+      return true;
     } catch {
+      return false;
     }
   }
-  function scheduleIdleRefresh() {
+  const idleBaseMs = () => options.idleRefreshMs ?? IDLE_REFRESH_MS;
+  let idlePaused = false;
+  async function idleTick(force = false) {
+    const gate = deps.backgroundPoll;
+    if (typeof gate !== "function") {
+      await refreshTail();
+      return { nextMs: idleBaseMs() };
+    }
+    try {
+      return await gate("idle", state.bot, idleBaseMs(), refreshTail, { force }) || { nextMs: idleBaseMs() };
+    } catch {
+      return { nextMs: idleBaseMs() };
+    }
+  }
+  function scheduleIdleRefresh(delayMs) {
     if (disposed || retiring2) return;
     idleCancel?.();
+    idlePaused = false;
     idleCancel = setTimer2(async () => {
       idleCancel = null;
       if (disposed || retiring2) return;
-      await refresh();
-      scheduleIdleRefresh();
-    }, options.idleRefreshMs ?? IDLE_REFRESH_MS);
+      if (!visible2()) {
+        idlePaused = true;
+        return;
+      }
+      const result = await idleTick();
+      if (idleCancel || disposed || retiring2) return;
+      if (result?.hidden) {
+        idlePaused = true;
+        return;
+      }
+      scheduleIdleRefresh(Math.max(1, Number(result?.nextMs) || idleBaseMs()));
+    }, delayMs ?? idleBaseMs());
+  }
+  function wake() {
+    if (!idlePaused || disposed || retiring2 || state.phase !== "ready" || !visible2()) return;
+    idlePaused = false;
+    void (async () => {
+      const result = await idleTick(true);
+      if (idleCancel || disposed || retiring2) return;
+      if (result?.hidden) {
+        idlePaused = true;
+        return;
+      }
+      scheduleIdleRefresh(Math.max(1, Number(result?.nextMs) || idleBaseMs()));
+    })();
   }
   function onTurnSettled() {
     stopApprovalPoll();
@@ -45776,6 +45818,7 @@ ${body}` : body);
     attach: guard(attach, rejected),
     loadEarlier: guard(loadEarlier, nothing),
     refresh: guard(refresh, nothing),
+    wake,
     reconcile: guard(reconcile, nothing),
     send: guard(send, () => Promise.resolve(false)),
     sendDraft: guard(sendDraft, notSent),
@@ -46571,6 +46614,79 @@ async function createRoom(requestRoom2, route, name, bots) {
   if (checked.problem) throw new Error(checked.problem);
   const res = await requestRoom2(route, "groups.create", { room_id: uuid(), name: clean, members: checked.roster });
   return res?.room;
+}
+
+// src/core/backgroundPolls.js
+var SLOW_POLL_MS = 2e3;
+var POLL_BACKOFF_MAX_MS = 5 * 6e4;
+function createBackgroundPolls(deps = {}) {
+  const now = typeof deps.now === "function" ? deps.now : () => Date.now();
+  const visible2 = () => {
+    try {
+      return typeof deps.isVisible === "function" ? deps.isVisible() !== false : true;
+    } catch {
+      return true;
+    }
+  };
+  const lanes = /* @__PURE__ */ new Map();
+  function laneOf(key) {
+    const id = String(key || "local");
+    let lane = lanes.get(id);
+    if (!lane) {
+      lane = { busy: "", polls: /* @__PURE__ */ new Map() };
+      lanes.set(id, lane);
+    }
+    return lane;
+  }
+  function pollOf(lane, type, baseMs) {
+    const base4 = Math.max(0, Number(baseMs) || 0);
+    let poll = lane.polls.get(type);
+    if (!poll) {
+      poll = { base: base4, interval: base4, last: -Infinity };
+      lane.polls.set(type, poll);
+    }
+    if (poll.base !== base4) {
+      poll.base = base4;
+      if (poll.interval < base4) poll.interval = base4;
+    }
+    return poll;
+  }
+  function wait(key, type, baseMs) {
+    const poll = pollOf(laneOf(key), type, baseMs);
+    return Math.max(0, poll.last + poll.interval - now());
+  }
+  function due(key, type, baseMs) {
+    const lane = laneOf(key);
+    return visible2() && !lane.busy && wait(key, type, baseMs) === 0;
+  }
+  async function run(key, type, baseMs, fn, { force = false } = {}) {
+    const lane = laneOf(key);
+    const poll = pollOf(lane, type, baseMs);
+    if (!visible2()) return { ran: false, hidden: true, nextMs: poll.interval };
+    if (lane.busy) return { ran: false, busy: true, nextMs: Math.min(poll.interval, Math.max(1, poll.base)) };
+    if (!force && wait(key, type, baseMs) > 0) return { ran: false, nextMs: wait(key, type, baseMs) };
+    lane.busy = type;
+    const start2 = now();
+    poll.last = start2;
+    let ok = true;
+    try {
+      ok = await fn() !== false;
+    } catch {
+      ok = false;
+    } finally {
+      lane.busy = "";
+    }
+    const slow = now() - start2 > SLOW_POLL_MS;
+    poll.interval = ok && !slow ? poll.base : Math.min(Math.max(poll.interval, poll.base, 1) * 2, POLL_BACKOFF_MAX_MS);
+    return { ran: true, ok, slow, nextMs: poll.interval };
+  }
+  function interval(key, type, baseMs) {
+    return pollOf(laneOf(key), type, baseMs).interval;
+  }
+  function busy(key) {
+    return laneOf(key).busy;
+  }
+  return { run, due, wait, interval, busy };
 }
 
 // src/ui/sdk.ts
@@ -50884,8 +51000,9 @@ var CSS = (
 var PLUGIN_ID = "grokbot-override";
 var WORKSPACE_ID = "grokbot-override";
 var ROSTER_TICK_MS = 3e3;
-var OWN_FETCH_MIN_MS = 15e3;
+var OWN_FETCH_MIN_MS = 6e4;
 var OWN_VERIFY_MS = 6e4;
+var OWN_ROSTER_PARAMS = Object.freeze({});
 var DEFAULT_ON = true;
 var app = {
   ctx: null,
@@ -50951,15 +51068,24 @@ var observer = null;
 var rosterTimer = null;
 var remoteAvatars = null;
 var unwatchAvatars = null;
-var lastOwnFetch = 0;
 var lastOwnRead = 0;
 var liveNames = /* @__PURE__ */ new Map();
-var lastVerify = 0;
-var verifyInFlight = false;
+var pollClock = () => Date.now();
+var polls = createBackgroundPolls({ now: () => pollClock(), isVisible: () => isVisible() });
+function activeLane() {
+  return activeConnectionId() || "local";
+}
+function botLane(bot) {
+  try {
+    const route = resolveBotConnectionRoute(bot).route;
+    if (route?.connectionId) return String(route.connectionId);
+  } catch {
+  }
+  if (bot?.connectionId) return String(bot.connectionId);
+  return isLocalBot(bot, activeConnectionId()) ? "local" : activeLane();
+}
 async function verifySources() {
-  if (verifyInFlight || typeof host2?.agents !== "function") return;
-  verifyInFlight = true;
-  lastVerify = Date.now();
+  if (typeof host2?.agents !== "function") return true;
   try {
     const union = await host2.agents();
     liveNames = liveRosterNames(union);
@@ -50967,12 +51093,12 @@ async function verifySources() {
       const rows = dropDeadRows(s.rows, liveNames);
       return rows.length === s.rows.length ? s : { ...s, rows };
     });
+    return true;
   } catch {
-  } finally {
-    verifyInFlight = false;
+    return false;
   }
 }
-var ownFetchInFlight = false;
+var ownSeq = 0;
 var raf = 0;
 var unwatchPane = null;
 var unwatchComputer = null;
@@ -51028,12 +51154,10 @@ function mergeRosterState(s, patch) {
   return changed ? next : s;
 }
 async function fetchOwnRoster() {
-  if (ownFetchInFlight) return;
-  ownFetchInFlight = true;
-  lastOwnFetch = Date.now();
+  const seq = ++ownSeq;
   try {
     const active = activeConnectionId();
-    const local = await host2.request("profiles.list", {});
+    const local = await host2.request("profiles.list", { ...OWN_ROSTER_PARAMS });
     let union = null;
     if (typeof host2.agents === "function") {
       try {
@@ -51042,6 +51166,7 @@ async function fetchOwnRoster() {
         union = null;
       }
     }
+    if (seq !== ownSeq) return true;
     if (union) liveNames = liveRosterNames(union);
     const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames);
     lastOwnRead = Date.now();
@@ -51049,11 +51174,12 @@ async function fetchOwnRoster() {
       return mergeRosterState(s, { rows, sources: union?.sources || [], origin: "own", error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) });
     });
     trackActivity();
+    return true;
   } catch (error) {
+    if (seq !== ownSeq) return false;
     const message = String(error?.message || error);
     app.roster.set((s) => s.error === message ? s : { ...s, error: message });
-  } finally {
-    ownFetchInFlight = false;
+    return false;
   }
 }
 var activity = createActivityTracker({
@@ -51113,9 +51239,21 @@ function refreshRoster() {
     app.roster.set((s) => mergeRosterState(s, side));
   }
   trackActivity();
-  void refreshRooms();
-  if ((!cached2 || !cached2.fresh) && Date.now() - lastOwnFetch > OWN_FETCH_MIN_MS) void fetchOwnRoster();
-  else if (Date.now() - lastVerify > OWN_VERIFY_MS) void verifySources();
+  if (!isVisible()) return;
+  void backgroundTick(!cached2 || !cached2.fresh);
+}
+var tickInFlight = false;
+async function backgroundTick(ownRead) {
+  if (tickInFlight) return;
+  tickInFlight = true;
+  try {
+    const lane = activeLane();
+    if (ownRead) await polls.run(lane, "roster", OWN_FETCH_MIN_MS, fetchOwnRoster);
+    else await polls.run(lane, "verify", OWN_VERIFY_MS, verifySources);
+    await refreshRooms();
+  } finally {
+    tickInFlight = false;
+  }
 }
 function metaFor(bot) {
   return effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get());
@@ -51124,7 +51262,6 @@ function activeConnection() {
   return activeConnectionId();
 }
 function reloadRoster() {
-  lastOwnFetch = 0;
   void fetchOwnRoster();
 }
 function sections() {
@@ -51223,8 +51360,11 @@ function isVisible() {
     return true;
   }
 }
+function backgroundPoll(type, bot, baseMs, fn, options) {
+  return polls.run(botLane(bot), type, baseMs, fn, options);
+}
 function chatDeps() {
-  return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible };
+  return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible, backgroundPoll };
 }
 var SEED_MAX = 8;
 var chatSeeds = /* @__PURE__ */ new Map();
@@ -51515,7 +51655,6 @@ function openBotInNewTab(bot) {
   return true;
 }
 var requestRoom = null;
-var lastRoomList = 0;
 var roomListInFlight = false;
 var roomTabs = /* @__PURE__ */ new Map();
 function activeRoomRoute() {
@@ -51528,18 +51667,30 @@ function activeRoomRoute() {
   return roomRoute(activeConnectionId() || "local", profile || "default");
 }
 async function refreshRooms(force = false) {
-  if (roomListInFlight || !force && Date.now() - lastRoomList < ROOM_LIST_MS) return;
+  if (force) {
+    await listRoomsNow();
+    return;
+  }
+  if (!isVisible()) return;
+  await polls.run(activeLane(), "rooms", ROOM_LIST_MS, listRoomsNow);
+}
+async function listRoomsNow() {
+  if (roomListInFlight) return true;
   const route = activeRoomRoute();
-  if (!route) return;
+  if (!route) return true;
   roomListInFlight = true;
-  lastRoomList = Date.now();
   requestRoom ??= createRoomRequester(host2);
   try {
     const rooms = await listRooms(requestRoom, route);
     app.rooms.set({ route, rooms, error: null, loaded: true });
+    return true;
   } catch (error) {
-    if (looksUnsupported(error)) app.rooms.set({ route, rooms: [], error: null, loaded: true });
-    else app.rooms.set((s) => ({ ...s, route, error: String(error?.message || error), loaded: true }));
+    if (looksUnsupported(error)) {
+      app.rooms.set({ route, rooms: [], error: null, loaded: true });
+      return true;
+    }
+    app.rooms.set((s) => ({ ...s, route, error: String(error?.message || error), loaded: true }));
+    return false;
   } finally {
     roomListInFlight = false;
   }
@@ -51901,6 +52052,30 @@ function watchVisibility() {
     );
   }
 }
+var unwatchDocument = null;
+function onDocumentVisible() {
+  if (!app.enabled.get() || !isVisible()) return;
+  refreshRoster();
+  try {
+    controller?.wake?.();
+  } catch {
+  }
+  for (const tab of tabs.values()) {
+    try {
+      tab.controller?.wake?.();
+    } catch {
+    }
+  }
+}
+function watchDocumentVisibility() {
+  unwatchDocument?.();
+  unwatchDocument = null;
+  const doc = typeof document === "undefined" ? null : document;
+  if (typeof doc?.addEventListener !== "function") return;
+  const listener = () => onDocumentVisible();
+  doc.addEventListener("visibilitychange", listener);
+  unwatchDocument = () => doc.removeEventListener?.("visibilitychange", listener);
+}
 function startRemoteAvatars() {
   stopRemoteAvatars();
   const loader = createRemoteAvatars({
@@ -51935,6 +52110,7 @@ function enable() {
   startRemoteAvatars();
   refreshRoster();
   startRosterParity();
+  watchDocumentVisibility();
   const tick = () => {
     rosterTimer = setTimer(() => {
       refreshRoster();
@@ -51958,6 +52134,8 @@ function disable() {
   hermesView = null;
   rosterTimer?.();
   rosterTimer = null;
+  unwatchDocument?.();
+  unwatchDocument = null;
   stopRemoteAvatars();
   unwatchPane?.();
   unwatchPane = null;

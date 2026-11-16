@@ -44,6 +44,7 @@ import { botCanonicalSessionId, createActivityTracker } from '../core/activity.j
 import { looksUnsupported } from '../core/outcomes.js'
 import { resetMarker, SEEN_KEY, seenFrom, stepMarker } from '../core/newMarker.js'
 import { createRoom, createRoomController, createRoomRequester, listRooms, ROOM_LIST_MS, roomRoute } from '../core/rooms.js'
+import { createBackgroundPolls } from '../core/backgroundPolls.js'
 import { CANONICAL_HYDRATION_TIMEOUT_MS, host, queryClient, readPluginStorage, sdk } from './sdk'
 // ── roster-side parity (R6 R9 R11-R13 R15 P3 P4 P6 C21 C25) ──
 import { effectiveMeta } from '../core/botMeta.js'
@@ -59,10 +60,29 @@ declare const __GBO_PROBE__: boolean
 export const PLUGIN_ID = 'grokbot-override'
 export const WORKSPACE_ID = 'grokbot-override'
 const ROSTER_TICK_MS = 3_000
-const OWN_FETCH_MIN_MS = 15_000
+// The own roster read: the FULL `profiles.list` (with each profile's session
+// summaries) on the active gateway, plus host.agents. At most once per 60 s
+// while the window is visible, never while it is hidden, backed off while the
+// gateway is slow or failing (core/backgroundPolls.js).
+//
+// Why the full payload and not `{ include_sessions: false }`: the roster's
+// previews (roster.js previewOf), unread dots and activity toasts
+// (activity.js: canonical_session / last_session `last_active` + `preview`),
+// the "working" mark (rosterView.js worker_session), the canonical Bot Chat id
+// a click opens (canonical.js, botForSession, ackBot) all come ONLY from the
+// session fields, and `include_sessions` is the handler's only knob (Hermes
+// tui_gateway/methods_profiles.py "profiles.list": a boolean, no limit; the
+// gateway already reads just the Bot Chat row and the newest session per
+// profile). A light read would blank all of those, so the session data is
+// fetched less often instead of lighter. The cheap structural re-list
+// (verifySources: host.agents only, no profiles.list) runs on the same 60 s
+// cadence while Bot Mode's own snapshot is fresh.
+export const OWN_FETCH_MIN_MS = 60_000
 // Even while the stock snapshot is fresh, re-list the sources this often so
 // bots deleted on a machine leave the roster (dropDeadRows).
-const OWN_VERIFY_MS = 60_000
+export const OWN_VERIFY_MS = 60_000
+/** The periodic own read's request: the full roster (see above). */
+export const OWN_ROSTER_PARAMS = Object.freeze({})
 
 // The override starts on (it is the kit's main plugin); the palette toggle
 // switches back to stock Bot Mode and that choice is remembered.
@@ -157,21 +177,39 @@ let rosterTimer: null | (() => void) = null
 // Server avatars of bots on other connections (core/remoteAvatars.js).
 let remoteAvatars: null | ReturnType<typeof createRemoteAvatars> = null
 let unwatchAvatars: null | (() => void) = null
-let lastOwnFetch = 0
 // When the own read last answered (it may have changed nothing).
 let lastOwnRead = 0
 // What each source listed on the last fresh read (core/roster.js liveRosterNames).
 let liveNames: Map<string, Set<string>> = new Map()
-let lastVerify = 0
-let verifyInFlight = false
+// Background polls (roster, source re-list, rooms, the open chat's idle
+// refresh): one lane per connection, backoff, nothing while hidden.
+let pollClock: () => number = () => Date.now()
+export const polls = createBackgroundPolls({ now: () => pollClock(), isVisible: () => isVisible() })
+/** Tests: drive the background polls' clock. */
+export function setPollClock(now: null | (() => number)) {
+  pollClock = now || (() => Date.now())
+}
+/** The lane of the active connection (the roster, its re-list and rooms). */
+function activeLane() {
+  return activeConnectionId() || 'local'
+}
+/** The lane of a bot's own connection (its chat's idle refresh). */
+function botLane(bot: any) {
+  try {
+    const route = resolveBotConnectionRoute(bot).route
+    if (route?.connectionId) return String(route.connectionId)
+  } catch {
+    /* fall through */
+  }
+  if (bot?.connectionId) return String(bot.connectionId)
+  return isLocalBot(bot, activeConnectionId()) ? 'local' : activeLane()
+}
 
 /** Re-list the sources (host.agents) while the stock snapshot is in use, and
  *  drop the rows a source no longer returns. Read-only; rows are never added
- *  here (the snapshot or the own read does that). */
-async function verifySources() {
-  if (verifyInFlight || typeof host?.agents !== 'function') return
-  verifyInFlight = true
-  lastVerify = Date.now()
+ *  here (the snapshot or the own read does that). False: the read failed. */
+async function verifySources(): Promise<boolean> {
+  if (typeof host?.agents !== 'function') return true
   try {
     const union = await host.agents()
     liveNames = liveRosterNames(union)
@@ -179,13 +217,14 @@ async function verifySources() {
       const rows = dropDeadRows(s.rows, liveNames)
       return rows.length === s.rows.length ? s : { ...s, rows }
     })
+    return true
   } catch {
-    /* next tick */
-  } finally {
-    verifyInFlight = false
+    return false
   }
 }
-let ownFetchInFlight = false
+// Each own read is numbered: an older read that answers after a newer one
+// (a background poll overtaken by a foreground reload) is dropped.
+let ownSeq = 0
 let raf = 0
 let unwatchPane: null | (() => void) = null
 let unwatchComputer: null | (() => void) = null
@@ -257,13 +296,13 @@ function mergeRosterState(s: RosterState, patch: Partial<RosterState>): RosterSt
   return changed ? next : s
 }
 
-async function fetchOwnRoster() {
-  if (ownFetchInFlight) return
-  ownFetchInFlight = true
-  lastOwnFetch = Date.now()
+/** The own roster read (see OWN_FETCH_MIN_MS). Never throws; false = the
+ *  read failed (the roster shows the error, the background poll backs off). */
+async function fetchOwnRoster(): Promise<boolean> {
+  const seq = ++ownSeq
   try {
     const active = activeConnectionId()
-    const local = await host.request('profiles.list', {})
+    const local = await host.request('profiles.list', { ...OWN_ROSTER_PARAMS })
     let union: any = null
     if (typeof host.agents === 'function') {
       try {
@@ -272,6 +311,7 @@ async function fetchOwnRoster() {
         union = null
       }
     }
+    if (seq !== ownSeq) return true
     if (union) liveNames = liveRosterNames(union)
     const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames)
     lastOwnRead = Date.now()
@@ -280,11 +320,12 @@ async function fetchOwnRoster() {
       return mergeRosterState(s, { rows, sources: union?.sources || [], origin: 'own', error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) })
     })
     trackActivity()
+    return true
   } catch (error: any) {
+    if (seq !== ownSeq) return false
     const message = String(error?.message || error)
     app.roster.set(s => (s.error === message ? s : { ...s, error: message }))
-  } finally {
-    ownFetchInFlight = false
+    return false
   }
 }
 
@@ -360,9 +401,26 @@ export function refreshRoster() {
     app.roster.set(s => mergeRosterState(s, side))
   }
   trackActivity()
-  void refreshRooms()
-  if ((!cached || !cached.fresh) && Date.now() - lastOwnFetch > OWN_FETCH_MIN_MS) void fetchOwnRoster()
-  else if (Date.now() - lastVerify > OWN_VERIFY_MS) void verifySources()
+  // The network polls below: nothing while the window is hidden (resumed on
+  // visibilitychange), one at a time per connection, backed off when slow.
+  // The roster read (or re-list) goes first and the room list right after it,
+  // never beside it.
+  if (!isVisible()) return
+  void backgroundTick(!cached || !cached.fresh)
+}
+
+let tickInFlight = false
+async function backgroundTick(ownRead: boolean) {
+  if (tickInFlight) return
+  tickInFlight = true
+  try {
+    const lane = activeLane()
+    if (ownRead) await polls.run(lane, 'roster', OWN_FETCH_MIN_MS, fetchOwnRoster)
+    else await polls.run(lane, 'verify', OWN_VERIFY_MS, verifySources)
+    await refreshRooms()
+  } finally {
+    tickInFlight = false
+  }
 }
 
 /** Bot Mode's effective meta for a row: server ui_meta over the local
@@ -377,7 +435,8 @@ export function activeConnection(): null | string {
 
 /** Re-read the roster now (stock's invalidate-after-write, and R9 Retry). */
 export function reloadRoster() {
-  lastOwnFetch = 0
+  // Foreground (a write, R9 Retry): straight to the gateway, never through
+  // the background lanes, and it supersedes a background read in flight.
   void fetchOwnRoster()
 }
 
@@ -509,8 +568,13 @@ function isVisible() {
   }
 }
 
+/** The open chat's idle refresh as a background poll on the bot's own lane. */
+function backgroundPoll(type: string, bot: any, baseMs: number, fn: () => Promise<boolean>, options?: { force?: boolean }) {
+  return polls.run(botLane(bot), type, baseMs, fn, options)
+}
+
 export function chatDeps() {
-  return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible }
+  return { requestForBot, readHistory, onEvent, setTimer, retainRoute, isVisible, backgroundPoll }
 }
 
 // ── bot switch without the flash (T9) ────────────────────────────────────
@@ -910,7 +974,6 @@ export function openBotInNewTab(bot: any): boolean {
 // + profile, re-read every 10 s). Each opened room is its own chat tab.
 
 let requestRoom: any = null
-let lastRoomList = 0
 let roomListInFlight = false
 const roomTabs = new Map<string, { controller: any; close: () => void }>()
 
@@ -924,19 +987,34 @@ function activeRoomRoute() {
   return roomRoute(activeConnectionId() || 'local', profile || 'default')
 }
 
+/** The room list: `force` (a create or disband) reads now; otherwise it is a
+ *  background poll on the active connection's lane (core/backgroundPolls.js). */
 export async function refreshRooms(force = false) {
-  if (roomListInFlight || (!force && Date.now() - lastRoomList < ROOM_LIST_MS)) return
+  if (force) {
+    await listRoomsNow()
+    return
+  }
+  if (!isVisible()) return
+  await polls.run(activeLane(), 'rooms', ROOM_LIST_MS, listRoomsNow)
+}
+
+async function listRoomsNow(): Promise<boolean> {
+  if (roomListInFlight) return true
   const route = activeRoomRoute()
-  if (!route) return
+  if (!route) return true
   roomListInFlight = true
-  lastRoomList = Date.now()
   requestRoom ??= createRoomRequester(host)
   try {
     const rooms = await listRooms(requestRoom, route)
     app.rooms.set({ route, rooms, error: null, loaded: true })
+    return true
   } catch (error: any) {
-    if (looksUnsupported(error)) app.rooms.set({ route, rooms: [], error: null, loaded: true })
-    else app.rooms.set(s => ({ ...s, route, error: String(error?.message || error), loaded: true }))
+    if (looksUnsupported(error)) {
+      app.rooms.set({ route, rooms: [], error: null, loaded: true })
+      return true
+    }
+    app.rooms.set(s => ({ ...s, route, error: String(error?.message || error), loaded: true }))
+    return false
   } finally {
     roomListInFlight = false
   }
@@ -1405,6 +1483,39 @@ function watchVisibility() {
   }
 }
 
+// The window coming back from hidden: one refresh pass at once (whatever
+// background poll came due while hidden runs now), and the open chat's idle
+// refresh resumes. Hidden: the polls stop on their own (refreshRoster,
+// refreshRooms and the chat's idle timer check isVisible).
+let unwatchDocument: null | (() => void) = null
+
+export function onDocumentVisible() {
+  if (!app.enabled.get() || !isVisible()) return
+  refreshRoster()
+  try {
+    controller?.wake?.()
+  } catch {
+    /* the next tick */
+  }
+  for (const tab of tabs.values()) {
+    try {
+      tab.controller?.wake?.()
+    } catch {
+      /* the next tick */
+    }
+  }
+}
+
+function watchDocumentVisibility() {
+  unwatchDocument?.()
+  unwatchDocument = null
+  const doc = typeof document === 'undefined' ? null : (document as any)
+  if (typeof doc?.addEventListener !== 'function') return
+  const listener = () => onDocumentVisible()
+  doc.addEventListener('visibilitychange', listener)
+  unwatchDocument = () => doc.removeEventListener?.('visibilitychange', listener)
+}
+
 // ── server avatars of remote bots ────────────────────────────────────────
 
 /** Fetch the server avatar of every bot on another connection whose gateway
@@ -1448,6 +1559,7 @@ function enable() {
   startRemoteAvatars()
   refreshRoster()
   startRosterParity()
+  watchDocumentVisibility()
   const tick = () => {
     rosterTimer = setTimer(() => {
       refreshRoster()
@@ -1477,6 +1589,8 @@ function disable() {
   hermesView = null
   rosterTimer?.()
   rosterTimer = null
+  unwatchDocument?.()
+  unwatchDocument = null
   stopRemoteAvatars()
   unwatchPane?.()
   unwatchPane = null
