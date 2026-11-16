@@ -39,17 +39,55 @@ function runContractProbe() {
 }
 
 /** Once the override is on screen: probe, and if a required entry is gone,
- *  one quiet notice per app session (survives a plugin reload). */
-function contractStartupCheck() {
+ *  one quiet notice per app session (survives a plugin reload). Returns
+ *  false while the override is off or not mounted yet (nothing probed). */
+function contractStartupCheck(): boolean {
   try {
-    if (!app.enabled.get() || typeof document === 'undefined' || !document.querySelector('[data-gbo-root]')) return
+    if (!app.enabled.get() || typeof document === 'undefined' || !document.querySelector('[data-gbo-root]')) return false
     const notice = contractNotice(runContractProbe())
     const w = (globalThis as any).window ?? globalThis
-    if (!notice || w[NOTICE_FLAG]) return
-    w[NOTICE_FLAG] = true
-    host?.notify?.(notice)
+    if (notice && !w[NOTICE_FLAG]) {
+      w[NOTICE_FLAG] = true
+      host?.notify?.(notice)
+    }
+    return true
   } catch {
-    /* read-only and best-effort */
+    return true
+  }
+}
+
+/** The startup probe's schedule (review C-R1-04): 8 s after load, retried a
+ *  few times while the override is not on screen yet, and armed again each
+ *  time the override is switched on, until one probe has run. */
+const CONTRACT_PROBE_TRIES = 5
+function createContractSchedule(ctx: any) {
+  let done = false
+  let tries = 0
+  let cancel: null | (() => void) = null
+  const arm = () => {
+    if (done || cancel || typeof ctx?.setTimeout !== 'function') return
+    const handle = ctx.setTimeout(() => {
+      cancel = null
+      if (contractStartupCheck()) {
+        done = true
+        return
+      }
+      tries += 1
+      if (tries < CONTRACT_PROBE_TRIES && app.enabled.get()) arm()
+    }, CONTRACT_PROBE_MS)
+    cancel = typeof handle === 'function' ? handle : () => undefined
+  }
+  arm()
+  const off = app.enabled.subscribe(() => {
+    if (!app.enabled.get() || done) return
+    tries = 0
+    arm()
+  })
+  return () => {
+    off()
+    cancel?.()
+    cancel = null
+    done = true
   }
 }
 
@@ -223,12 +261,13 @@ export default {
     const unwire = wireParity()
     const offContractEvents = typeof ctx?.onEvent === 'function' ? ctx.onEvent('*', (event: any) => contractEvents.note(event?.type)) : null
     start(withContractReport(ctx))
-    ctx.setTimeout?.(contractStartupCheck, CONTRACT_PROBE_MS)
+    const stopContractSchedule = createContractSchedule(ctx)
     if (PROBE) ctx.setTimeout(() => void selfCheck({ notify: false }), 6_000)
     ctx.onDispose(() => {
       stop()
       unwire()
       if (typeof offContractEvents === 'function') offContractEvents()
+      stopContractSchedule()
     })
   }
 }

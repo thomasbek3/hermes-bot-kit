@@ -60401,14 +60401,48 @@ function runContractProbe() {
 }
 function contractStartupCheck() {
   try {
-    if (!app.enabled.get() || typeof document === "undefined" || !document.querySelector("[data-gbo-root]")) return;
+    if (!app.enabled.get() || typeof document === "undefined" || !document.querySelector("[data-gbo-root]")) return false;
     const notice = contractNotice(runContractProbe());
     const w = globalThis.window ?? globalThis;
-    if (!notice || w[NOTICE_FLAG]) return;
-    w[NOTICE_FLAG] = true;
-    host2?.notify?.(notice);
+    if (notice && !w[NOTICE_FLAG]) {
+      w[NOTICE_FLAG] = true;
+      host2?.notify?.(notice);
+    }
+    return true;
   } catch {
+    return true;
   }
+}
+var CONTRACT_PROBE_TRIES = 5;
+function createContractSchedule(ctx) {
+  let done = false;
+  let tries = 0;
+  let cancel = null;
+  const arm = () => {
+    if (done || cancel || typeof ctx?.setTimeout !== "function") return;
+    const handle = ctx.setTimeout(() => {
+      cancel = null;
+      if (contractStartupCheck()) {
+        done = true;
+        return;
+      }
+      tries += 1;
+      if (tries < CONTRACT_PROBE_TRIES && app.enabled.get()) arm();
+    }, CONTRACT_PROBE_MS);
+    cancel = typeof handle === "function" ? handle : () => void 0;
+  };
+  arm();
+  const off = app.enabled.subscribe(() => {
+    if (!app.enabled.get() || done) return;
+    tries = 0;
+    arm();
+  });
+  return () => {
+    off();
+    cancel?.();
+    cancel = null;
+    done = true;
+  };
 }
 function withContractReport(ctx) {
   const files = ctx?.files;
@@ -60545,12 +60579,13 @@ var index_default = {
     const unwire = wireParity();
     const offContractEvents = typeof ctx?.onEvent === "function" ? ctx.onEvent("*", (event) => contractEvents.note(event?.type)) : null;
     start(withContractReport(ctx));
-    ctx.setTimeout?.(contractStartupCheck, CONTRACT_PROBE_MS);
+    const stopContractSchedule = createContractSchedule(ctx);
     if (PROBE) ctx.setTimeout(() => void selfCheck({ notify: false }), 6e3);
     ctx.onDispose(() => {
       stop();
       unwire();
       if (typeof offContractEvents === "function") offContractEvents();
+      stopContractSchedule();
     });
   }
 };

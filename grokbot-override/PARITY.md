@@ -205,7 +205,8 @@ localStorage keys (`hermes.plugin.hermes-bots.{bot-meta-v2,activity-toasts,group
 while its anchor is in the DOM, so a renamed anchor drops its rule instead of hiding the wrong thing. The
 self-check writes the probe results as a `contract` block in `self-check.json`; a required entry that is missing
 (the tab, top header, titlebar cluster and tree-group anchors, `window.hermesDesktop.api`) shows one quiet notice
-per app session, once the override is on screen. Optional entries (a status bar the user turned off, a closed
+per app session, once the override is on screen (probed 8 s after load, retried while it is not mounted yet, and
+armed again when the override is switched on later). Optional entries (a status bar the user turned off, a closed
 sidebar, Bot Mode data not written yet) report `absent`; events report `seen` / `unseen`. Any new private touch
 point must be added to this list.
 
