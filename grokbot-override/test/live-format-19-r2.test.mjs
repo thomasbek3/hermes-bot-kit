@@ -129,7 +129,11 @@ test('parser check: half constructs at the very end wait; nothing raw flashes', 
   assert.equal(streamSafe('- a\n- [b'), '- a\n', 'a held line keeps no bare list marker')
   assert.equal(streamSafe('    lead **x'), '    lead **x**', 'the renderer trims the message: leading spaces are not code')
   assert.equal(streamSafe('Footnote[^1].\n\n[^1]: The **no'), 'Footnote[^1].\n\n[^1]: The **no**', 'a footnote definition is visible text')
-  assert.equal(streamSafe('https://e.com/a_'), 'https://e.com/a', 'GFM trims trailing punctuation from a bare URL')
+  // Integration with source links: a bare http(s) URL at the very end waits whole (its chip label depends on
+  // the whole URL), which also keeps GFM's trailing-punctuation trim from flashing; once a space arrives it shows.
+  assert.equal(streamSafe('https://e.com/a_'), '', 'a bare URL still typing waits whole (source links)')
+  assert.equal(streamSafe('https://e.com/a_ ok'), 'https://e.com/a_ ok')
+  assert.equal(streamSafe('www.e.com/a_'), 'www.e.com/a', 'GFM trims trailing punctuation from a bare www URL')
 })
 
 // ---- mounted (LF-R2-004 DOM parity, LF-R2-005) ----
@@ -191,7 +195,8 @@ test('LF-R2-004 (mounted): a table ending in a short row draws the same markup s
     const done = mountBody(e)
     done.draw(table, false)
     assert.equal(live.container.innerHTML.replace(/ is-streaming/g, ''), done.container.innerHTML)
-    assert.ok(live.container.textContent.includes('| 1 |'), 'the row is there while streaming')
+    // The fake SDK draws a GFM table since source links (header and cells); either way the short row is there.
+    assert.ok(live.container.textContent.includes('| 1 |') || [...live.container.querySelectorAll('tbody td')].some(td => td.textContent === '1'), 'the row is there while streaming')
     live.unmount()
     done.unmount()
   }

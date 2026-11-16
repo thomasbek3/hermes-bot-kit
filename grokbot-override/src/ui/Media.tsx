@@ -18,6 +18,8 @@ import { FileTile } from './FileIcons'
 import { FileViewer, type ViewerFile } from './FileViewer'
 import { IconDownload } from './icons'
 import { Markdown } from './sdk'
+import { protectSlackAppLinks } from '../core/sourceLinks.js'
+import { decorateSourceLinks, onSourceClickCapture, useHostSourceLinks } from './SourceLink'
 
 function saveDataUrl(dataUrl: string, name: string) {
   try {
@@ -323,7 +325,7 @@ export const BotText = memo(
     return (
       <>
         {parts.map((part: any, index: number) =>
-          part.kind === 'code' ? <CodeBlock key={index} code={part.code} lang={part.lang} /> : <MemoMarkdown key={index} text={part.text} />
+          part.kind === 'code' ? <CodeBlock key={index} code={part.code} lang={part.lang} /> : <MemoMarkdown key={index} text={protectSlackAppLinks(part.text)} decorateText={decorateSourceLinks} />
         )}
         <MediaStrip bot={bot} media={media} />
       </>
@@ -370,12 +372,14 @@ function BotProseView({ bot, text, pos, time, streaming = false }: BotProseProps
   const { text: clean, media } = React.useMemo(() => extractMedia(text), [text])
   const files = media.filter(item => item.kind === 'file')
   const bubble = Boolean(clean) || media.length > files.length
+  const prose = React.useRef<HTMLDivElement | null>(null)
+  useHostSourceLinks(prose)
   return (
     <>
       {bubble ? (
         <div className="bubble-wrap is-left">
           <div className={`bubble is-agent${pos}${streaming ? ' is-streaming' : ''}`}>
-            <div className="md">
+            <div className="md" ref={prose} onClickCapture={onSourceClickCapture} onAuxClickCapture={onSourceClickCapture}>
               <BotText bot={bot} text={text} />
             </div>
           </div>

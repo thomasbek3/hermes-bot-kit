@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **grokbot-override: source links with service logos in bot replies (2026-11-15)**: a markdown link in a
+  bot's reply to a known service now draws as the service's small logo (14 px, full colour, a fixed box so
+  nothing shifts) plus its underlined text, like "Her message" next to the Slack logo. About 27 services are
+  recognised by exact host or subdomain (lookalikes such as `slack.com.evil.io` are not); any other public
+  site gets a neutral globe, never a fetched favicon. A bare URL gets a short label ("Slack message", "Gmail",
+  "GitHub PR #12"). A click opens it through the plugin SDK's `openExternal`; a Slack permalink opens on
+  slack.com, which hands off to the Slack app at that message (no team id is ever guessed). A `slack://channel?team=…&id=…&message=…`
+  app link is carried past the renderer's link sanitizer and tried as itself first (the exact message);
+  when the host refuses app schemes, as Hermes does today, it opens that channel on app.slack.com. This is a
+  known limit (PARITY.md): Hermes's opener admits only http/https/mailto, so bots are told to use https
+  permalinks, which open the exact message. Titled, `<angle>`, upper-case and reference-style Slack links are
+  carried too; code, indented code and escaped text are never rewritten. Heading and table-header links get the
+  same logo, title and short bare-URL label, kept up to date as the reply streams. Unsafe links,
+  `mailto:`, private hosts and code stay as before. Logos are Simple Icons (CC0, bundled); dark marks such as
+  GitHub and X switch to the light text colour in dark mode. A bare URL still typing waits until it ends, so
+  its chip never changes mid-stream. The agent-cards skill gains "Link your sources": end a line about a
+  specific message, email, doc, ticket, PR or event with `[short label](permalink)`, with how to build Slack
+  and Gmail permalinks.
 - **grokbot-override: one guarded contract for private Hermes internals (T10, 2026-11-15)**: every private
   dependency (window-chrome DOM anchors, Bot Mode's roster cache key and localStorage keys, the
   `window.hermesDesktop` bridge calls, the gateway event names) is listed in `src/core/contract.js` with a

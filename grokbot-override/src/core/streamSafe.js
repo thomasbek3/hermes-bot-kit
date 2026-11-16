@@ -504,9 +504,16 @@ function inlineScan(t, defs) {
           if (i + m[0].length >= n && hold(i)) break
         }
       }
+      // A bare http(s) URL still typing (it autolinks into a source chip,
+      // ui/SourceLink.tsx, whose label and icon depend on the whole URL)
+      // waits from its start until a space or the line end arrives; so does
+      // a scheme still being typed (`https:`, `https:/`). Inside inline code
+      // this branch is never reached: code shows as it types.
+      if (ch === 'h' && (i === 0 || /[\s*_~(]/.test(t[i - 1])) && /^https?:\/{0,2}$/.test(tail) && hold(i)) break
       if ((ch === 'h' || ch === 'w') && (i === 0 || /[\s*_~(]/.test(t[i - 1])) && /^(?:https?:\/\/|www\.)/.test(tail)) {
         let j = i
         while (j < n && !/[\s<]/.test(t[j])) j += 1
+        if (j >= n && ch === 'h' && hold(i)) break
         if (j >= n) {
           // GFM leaves trailing punctuation out of a bare URL: at the very
           // end it may still be the middle of the URL, so it waits.

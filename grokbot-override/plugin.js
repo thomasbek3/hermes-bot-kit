@@ -34,6 +34,9 @@
  *    headed "xlsx.js (C) 2013-present SheetJS"), unmodified, Copyright (C)
  *    2012-present SheetJS LLC, Apache License 2.0 (text below);
  *    https://sheetjs.com, https://git.sheetjs.com/sheetjs/sheetjs.
+ *  - Source-link brand marks (src/ui/brandMarks.ts) are Simple Icons 15.22.0
+ *    paths, CC0 1.0 (https://simpleicons.org); brand names and logos are
+ *    their owners' trademarks (see NOTICE.md in the source).
  *
  * ─── MIT License (Grokbot Override / Hermes bot kit) ───────────────────────
  *
@@ -45894,9 +45897,9 @@ function createStockController({ document: document2, host: host3, now = () => D
       return false;
     }
   };
-  const writeStyle = (css, strip) => {
+  const writeStyle = (css, strip2) => {
     writeStyleAt(HIDE_STYLE_ID, css);
-    if (strip) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss(has));
+    if (strip2) writeStyleAt(HIDE_STRIP_STYLE_ID, overrideChromeCss(has));
     else removeStyleAt(HIDE_STRIP_STYLE_ID);
   };
   const removeStyle2 = () => {
@@ -46597,10 +46600,10 @@ function blobatarMarkup(seed, size, trait) {
   }
 }
 var MARKDOWN_SAFE_PROPS = Object.freeze({ media: false, previewOnly: true });
-function Markdown({ text: text3 }) {
+function Markdown({ text: text3, decorateText }) {
   const Component2 = sdk.MessageTextContent;
   if (typeof Component2 === "function" || Component2 && typeof Component2 === "object") {
-    return React.createElement(Component2, { text: text3, ...MARKDOWN_SAFE_PROPS });
+    return React.createElement(Component2, decorateText ? { text: text3, decorateText, ...MARKDOWN_SAFE_PROPS } : { text: text3, ...MARKDOWN_SAFE_PROPS });
   }
   return React.createElement("div", { className: "gbo-plain" }, text3);
 }
@@ -49484,6 +49487,7 @@ var ADAPT_SRC = (
   --color-sheet-focus: #2F7BF6;
 }
 :root[data-theme='dark'] {
+  --color-src-dark-ink: var(--color-text-primary);
   --color-bubble-agent-flat: #242424;
   --color-row-selected: #FFFFFF12;
   --color-row-hover: #FFFFFF0A;
@@ -49700,6 +49704,27 @@ var ADAPT_SRC = (
 .md .aui-md li::marker { color: var(--color-text-tertiary); }
 .md .aui-md a { color: var(--color-text-primary); font-weight: inherit; text-decoration: underline; text-decoration-color: var(--color-border-primary); text-underline-offset: 2px; }
 .md .aui-md a:hover { text-decoration-color: currentColor; }
+/* Source links (ui/SourceLink.tsx): the service's logo in a fixed 14px box,
+   then the underlined text; the logo is never underlined (the anchor has no
+   decoration, only the text span) and the box never shifts the line. In
+   dark, a mark too dark for the bubble (GitHub, X, Notion …) takes the text
+   colour. */
+.md .aui-md a.gbo-src, .md a.gbo-src { color: var(--color-text-primary); text-decoration: none; white-space: nowrap; border-radius: 4px; }
+.gbo-src-icon {
+  display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px;
+  line-height: 0; color: var(--gbo-src-color, var(--color-text-secondary));
+}
+.gbo-src-icon svg { width: 14px; height: 14px; display: block; }
+.gbo-src-icon.is-web { color: var(--color-text-secondary); }
+.gbo-src-icon.is-light-on-dark { color: var(--color-src-dark-ink, var(--gbo-src-color)); }
+.gbo-src-text { white-space: normal; text-decoration: underline; text-decoration-color: var(--color-border-primary); text-underline-offset: 2px; }
+.gbo-src:hover .gbo-src-text { text-decoration-color: currentColor; }
+.gbo-src:focus-visible, a.gbo-src-host:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+/* A bare URL in a heading or table header (SourceLink.tsx enhanceSourceLinks):
+   React's URL text stays in the anchor at size 0; the short label shows at
+   the anchor's measured size. */
+a.gbo-src-host.is-bare { font-size: 0; }
+a.gbo-src-host.is-bare .gbo-src-label { font-size: var(--gbo-src-label-size, 15px); }
 .md .aui-md :is(strong, b) { font-weight: 600; color: inherit; }
 .md .aui-md :is(h1, h2, h3, h4, h5, h6) { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: inherit; color: inherit; }
 .md .aui-md h1 { font-size: 17px; line-height: 24px; }
@@ -52317,7 +52342,7 @@ var OverrideBoundary = class extends React3.Component {
 };
 
 // src/ui/Chat.tsx
-import * as React25 from "react";
+import * as React26 from "react";
 
 // src/core/colors.js
 function expandHex(hex) {
@@ -52958,9 +52983,11 @@ function inlineScan(t, defs) {
           if (i + m[0].length >= n && hold(i)) break;
         }
       }
+      if (ch === "h" && (i === 0 || /[\s*_~(]/.test(t[i - 1])) && /^https?:\/{0,2}$/.test(tail) && hold(i)) break;
       if ((ch === "h" || ch === "w") && (i === 0 || /[\s*_~(]/.test(t[i - 1])) && /^(?:https?:\/\/|www\.)/.test(tail)) {
         let j = i;
         while (j < n && !/[\s<]/.test(t[j])) j += 1;
+        if (j >= n && ch === "h" && hold(i)) break;
         if (j >= n) {
           let k = j;
           while (k > i && "?!.,:*_~".includes(t[k - 1])) k -= 1;
@@ -54982,10 +55009,10 @@ function useDirectiveSegments(text3) {
 }
 
 // src/ui/EmailDraft.tsx
-import * as React12 from "react";
+import * as React13 from "react";
 
 // src/ui/Media.tsx
-import * as React11 from "react";
+import * as React12 from "react";
 
 // src/core/fences.js
 var CODE_FOLD_LINES = 60;
@@ -55663,1303 +55690,381 @@ function SheetGrid({ data }) {
   ] });
 }
 
-// src/ui/Media.tsx
-import { Fragment as Fragment8, jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
-function saveDataUrl(dataUrl, name) {
+// src/core/sourceLinks.js
+var SOURCE_SERVICES = Object.freeze([
+  { id: "slack", name: "Slack", domains: ["slack.com"] },
+  { id: "gmail", name: "Gmail", domains: ["mail.google.com"] },
+  { id: "googledocs", name: "Google Docs", domains: ["docs.google.com"], path: /^\/document\// },
+  { id: "googlesheets", name: "Google Sheets", domains: ["docs.google.com"], path: /^\/spreadsheets\// },
+  { id: "googleslides", name: "Google Slides", domains: ["docs.google.com"], path: /^\/presentation\// },
+  { id: "googledrive", name: "Google Drive", domains: ["drive.google.com", "docs.google.com"] },
+  { id: "googlecalendar", name: "Google Calendar", domains: ["calendar.google.com"] },
+  { id: "googlemeet", name: "Google Meet", domains: ["meet.google.com"] },
+  { id: "github", name: "GitHub", domains: ["github.com"] },
+  { id: "notion", name: "Notion", domains: ["notion.so", "notion.site", "notion.com"] },
+  { id: "linear", name: "Linear", domains: ["linear.app"] },
+  { id: "figma", name: "Figma", domains: ["figma.com"] },
+  { id: "zoom", name: "Zoom", domains: ["zoom.us", "zoom.com"] },
+  { id: "outlook", name: "Outlook", domains: ["outlook.office.com", "outlook.office365.com", "outlook.live.com", "outlook.com"] },
+  { id: "office365", name: "Office 365", domains: ["office.com", "microsoft365.com", "office365.com", "sharepoint.com"] },
+  { id: "dropbox", name: "Dropbox", domains: ["dropbox.com"] },
+  // Zoho's data centres: .com, .eu, .in, .com.au, .jp, .sa, .com.cn and the
+  // Canadian zohocloud.ca.
+  { id: "zoho", name: "Zoho", domains: ["zoho.com", "zoho.eu", "zoho.in", "zoho.com.au", "zoho.jp", "zoho.sa", "zoho.com.cn", "zohocloud.ca"] },
+  { id: "stripe", name: "Stripe", domains: ["stripe.com"] },
+  { id: "hubspot", name: "HubSpot", domains: ["hubspot.com"] },
+  { id: "airtable", name: "Airtable", domains: ["airtable.com"] },
+  { id: "trello", name: "Trello", domains: ["trello.com"] },
+  { id: "asana", name: "Asana", domains: ["asana.com"] },
+  { id: "calendly", name: "Calendly", domains: ["calendly.com"] },
+  { id: "loom", name: "Loom", domains: ["loom.com"] },
+  { id: "youtube", name: "YouTube", domains: ["youtube.com", "youtu.be"] },
+  { id: "x", name: "X", domains: ["x.com", "twitter.com"] },
+  { id: "linkedin", name: "LinkedIn", domains: ["linkedin.com"] }
+]);
+var SERVICE_BY_ID = new Map(SOURCE_SERVICES.map((service) => [service.id, service]));
+var WEB_SERVICE = Object.freeze({ id: "web", name: "Link", domains: [] });
+function parseSourceUrl(value) {
   try {
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = name;
-    link.rel = "noopener noreferrer";
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    return new URL(String(value ?? "").trim());
   } catch {
-  }
-}
-var MEDIA_IMAGE_MAX_PX = 360;
-var READY_MAX = 60;
-var readyMedia = /* @__PURE__ */ new Map();
-function rememberMedia(key, value) {
-  readyMedia.delete(key);
-  readyMedia.set(key, value);
-  while (readyMedia.size > READY_MAX) readyMedia.delete(readyMedia.keys().next().value);
-}
-function mediaBox(width, height) {
-  if (!(Number(width) > 0) || !(Number(height) > 0)) return null;
-  const w = Math.min(Number(width), MEDIA_IMAGE_MAX_PX);
-  return { width: Math.round(w), height: Math.round(w * Number(height) / Number(width)) };
-}
-function decodeSize(src) {
-  const Img = globalThis.window?.Image ?? globalThis.Image;
-  if (typeof Img !== "function") return Promise.resolve({});
-  let img;
-  try {
-    img = new Img();
-  } catch {
-    return Promise.resolve({});
-  }
-  if (typeof img.decode !== "function") return Promise.resolve({});
-  img.src = src;
-  const read = () => img.naturalWidth > 0 && img.naturalHeight > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : {};
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({}), 1500);
-    img.decode().then(
-      () => {
-        clearTimeout(timer);
-        resolve(read());
-      },
-      () => {
-        clearTimeout(timer);
-        resolve({});
-      }
-    );
-  });
-}
-function OwnerMedia({ bot, item }) {
-  const route = rowKey(bot);
-  const cacheKey = `${route}|${item.path}`;
-  const cached2 = !item.remote ? readyMedia.get(cacheKey) : void 0;
-  const [ready, setReady] = React11.useState(cached2 || null);
-  const [error, setError] = React11.useState("");
-  const botRef = React11.useRef(bot);
-  botRef.current = bot;
-  const wantsRead = !item.remote && item.kind !== "file";
-  React11.useEffect(() => {
-    if (!wantsRead) return void 0;
-    const hit = readyMedia.get(cacheKey);
-    if (hit) {
-      setReady((current) => current?.src === hit.src ? current : hit);
-      return void 0;
-    }
-    let live = true;
-    readBotMedia(botRef.current, item.path).then(async (url) => {
-      const size = item.kind === "image" && url ? await decodeSize(url) : {};
-      if (!live) return;
-      const value = { src: url, ...size };
-      if (url) rememberMedia(cacheKey, value);
-      setReady(value);
-    }).catch((err2) => {
-      if (live) setError(String(err2?.message || err2));
-    });
-    return () => {
-      live = false;
-    };
-  }, [cacheKey, item.path, item.kind, wantsRead]);
-  const src = ready?.src || "";
-  if (item.kind === "image" && item.remote && !src) {
-    const host3 = remoteImageHost(item.path);
-    return /* @__PURE__ */ jsxs12("button", { type: "button", className: "gbo-media-remote", title: item.path, onClick: () => setReady({ src: item.path }), children: [
-      /* @__PURE__ */ jsxs12("span", { className: "gbo-media-remote-host", children: [
-        "Image from ",
-        host3
-      ] }),
-      /* @__PURE__ */ jsx13("span", { "aria-hidden": "true", children: " · " }),
-      /* @__PURE__ */ jsx13("span", { className: "gbo-media-remote-load", children: "Load" })
-    ] });
-  }
-  if (item.kind === "image") {
-    if (error) return /* @__PURE__ */ jsxs12("span", { className: "gbo-media-file is-error", title: error, children: [
-      item.name,
-      ": not available"
-    ] });
-    const box = mediaBox(ready?.width, ready?.height);
-    return src ? /* @__PURE__ */ jsx13("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx13(
-      "img",
-      {
-        alt: item.name,
-        src,
-        loading: "lazy",
-        ...box ? { width: box.width, height: box.height, style: { aspectRatio: `${box.width} / ${box.height}` } } : {}
-      }
-    ) }) : /* @__PURE__ */ jsx13("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
-  }
-  if (item.kind === "audio" || item.kind === "video") {
-    if (src) {
-      return item.kind === "audio" ? /* @__PURE__ */ jsx13("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx13("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
-    }
-    if (!error) return /* @__PURE__ */ jsx13("span", { className: `gbo-media-${item.kind} is-loading`, role: "img", "aria-label": `Loading ${item.name}` });
-  }
-  return /* @__PURE__ */ jsx13(FileCard, { bot, item });
-}
-function FileCard({ bot, item }) {
-  const [state, setState] = React11.useState({ status: "idle" });
-  const [viewer, setViewer] = React11.useState(null);
-  const live = React11.useRef(true);
-  const main = React11.useRef(null);
-  React11.useEffect(() => {
-    live.current = true;
-    return () => {
-      live.current = false;
-    };
-  }, []);
-  const read = () => readBotMedia(bot, item.path).then((url) => {
-    if (!url) throw new Error(`Could not read ${item.name}`);
-    if (live.current) setState({ status: "ready", size: dataUrlBytes(url) ?? void 0 });
-    return url;
-  }).catch((err2) => {
-    if (live.current) setState({ status: "error", error: String(err2?.message || err2) });
     return null;
-  });
-  const peek = () => {
-    if (state.status !== "idle") return;
-    setState({ status: "loading" });
-    void read();
-  };
-  const save = () => {
-    void read().then((url) => {
-      if (url) saveDataUrl(url, item.name);
-    });
-  };
-  const open = () => {
-    if (state.status === "error") return;
-    setViewer({ url: null });
-    void readBotMedia(bot, item.path).then(
-      (url) => {
-        if (!live.current) return;
-        if (!url) {
-          setViewer((current) => current ? { url: null, error: `Could not read ${item.name}` } : current);
-          return;
-        }
-        setState({ status: "ready", size: dataUrlBytes(url) ?? void 0 });
-        setViewer((current) => current ? { url } : current);
-      },
-      (err2) => {
-        if (!live.current) return;
-        const error = String(err2?.message || err2);
-        setState({ status: "error", error });
-        setViewer((current) => current ? { url: null, error } : current);
-      }
-    );
-  };
-  const close = () => {
-    setViewer(null);
-    setTimeout(() => main.current?.focus(), 0);
-  };
-  const missing = state.status === "error";
-  const meta = missing ? "Not available" : state.size !== void 0 ? formatBytes(state.size) : "";
-  const icon = fileIconKind(item.name);
-  return /* @__PURE__ */ jsxs12(Fragment8, { children: [
-    /* @__PURE__ */ jsxs12(
-      "div",
-      {
-        className: `gbo-file-card${missing ? " is-error" : ""}`,
-        "data-path": item.path,
-        onMouseEnter: peek,
-        onFocus: peek,
-        children: [
-          /* @__PURE__ */ jsxs12(
-            "button",
-            {
-              ref: main,
-              type: "button",
-              className: "gbo-file-card-main",
-              title: missing ? `${item.name}: ${state.error || "not available"}` : item.name,
-              "aria-label": missing ? `${item.name}, not available` : `Open ${item.name}`,
-              "aria-disabled": missing || void 0,
-              "aria-haspopup": "dialog",
-              onClick: open,
-              children: [
-                /* @__PURE__ */ jsx13("span", { className: `gbo-file-card-icon is-${icon}`, children: /* @__PURE__ */ jsx13(FileTile, { kind: icon }) }),
-                /* @__PURE__ */ jsxs12("span", { className: "gbo-file-card-text", children: [
-                  /* @__PURE__ */ jsx13("span", { className: "gbo-file-card-name", children: middleTruncate(item.name) }),
-                  /* @__PURE__ */ jsx13("span", { className: "gbo-file-card-size", children: meta || " " })
-                ] })
-              ]
-            }
-          ),
-          missing ? null : /* @__PURE__ */ jsx13("button", { type: "button", className: "gbo-file-card-save", "aria-label": `Download ${item.name}`, title: "Download", onClick: save, children: /* @__PURE__ */ jsx13(IconDownload, {}) })
-        ]
-      }
-    ),
-    viewer ? /* @__PURE__ */ jsx13(FileViewer, { name: item.name, file: viewer, onSave: save, onClose: close }) : null
-  ] });
-}
-function FileCards({ bot, files }) {
-  if (!files.length) return null;
-  return /* @__PURE__ */ jsx13("div", { className: "gbo-files", children: files.map((item) => /* @__PURE__ */ jsx13(FileCard, { bot, item }, item.path)) });
-}
-function MediaStrip({ bot, media }) {
-  const shown = media.filter((item) => item.kind !== "file");
-  if (!shown.length) return null;
-  return /* @__PURE__ */ jsx13("div", { className: "gbo-media", children: shown.map((item) => /* @__PURE__ */ jsx13(OwnerMedia, { bot, item }, item.path)) });
-}
-function memo2(component, equal) {
-  return typeof React11.memo === "function" ? React11.memo(component, equal) : component;
-}
-var MemoMarkdown = memo2(Markdown);
-var sameBot = (a2, b2) => a2 === b2 || rowKey(a2) === rowKey(b2);
-var BotText = memo2(
-  function BotText2({ bot, text: text3 }) {
-    const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
-    const parts = React11.useMemo(() => clean ? splitFences(clean) : [], [clean]);
-    return /* @__PURE__ */ jsxs12(Fragment8, { children: [
-      parts.map(
-        (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx13(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx13(MemoMarkdown, { text: part.text }, index)
-      ),
-      /* @__PURE__ */ jsx13(MediaStrip, { bot, media })
-    ] });
-  },
-  (a2, b2) => a2.text === b2.text && sameBot(a2.bot, b2.bot)
-);
-function sameNode(a2, b2) {
-  if (a2 === b2) return true;
-  if (!React11.isValidElement(a2) || !React11.isValidElement(b2)) return false;
-  if (a2.type !== b2.type || a2.key !== b2.key) return false;
-  const pa = a2.props || {};
-  const pb = b2.props || {};
-  const keys2 = Object.keys(pa);
-  if (keys2.length !== Object.keys(pb).length) return false;
-  return keys2.every((key) => {
-    const x = pa[key];
-    const y = pb[key];
-    return x === y || (typeof x !== "object" || x === null) && (typeof y !== "object" || y === null) && Object.is(x, y) || key === "children" && sameNode(x, y);
-  });
-}
-function BotProseView({ bot, text: text3, pos, time, streaming = false }) {
-  const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
-  const files = media.filter((item) => item.kind === "file");
-  const bubble = Boolean(clean) || media.length > files.length;
-  return /* @__PURE__ */ jsxs12(Fragment8, { children: [
-    bubble ? /* @__PURE__ */ jsxs12("div", { className: "bubble-wrap is-left", children: [
-      /* @__PURE__ */ jsx13("div", { className: `bubble is-agent${pos}${streaming ? " is-streaming" : ""}`, children: /* @__PURE__ */ jsx13("div", { className: "md", children: /* @__PURE__ */ jsx13(BotText, { bot, text: text3 }) }) }),
-      time
-    ] }) : null,
-    /* @__PURE__ */ jsx13(FileCards, { bot, files })
-  ] });
-}
-var BotProse = memo2(
-  BotProseView,
-  (a2, b2) => a2.text === b2.text && a2.pos === b2.pos && Boolean(a2.streaming) === Boolean(b2.streaming) && sameBot(a2.bot, b2.bot) && sameNode(a2.time, b2.time)
-);
-
-// src/ui/EmailDraft.tsx
-import { jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
-var fieldsOf = (draft) => ({
-  to: addressText(draft?.to),
-  cc: addressText(draft?.cc),
-  subject: String(draft?.subject || ""),
-  body: String(draft?.body || "")
-});
-function Body2({ value, onChange, disabled }) {
-  const ref = React12.useRef(null);
-  React12.useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    if (el.scrollHeight) el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
-  return /* @__PURE__ */ jsx14(
-    "textarea",
-    {
-      ref,
-      className: "gbo-ed-body",
-      "aria-label": "Email body",
-      value,
-      disabled,
-      rows: Math.max(4, value.split("\n").length + 1),
-      onChange: (event) => onChange(event.target.value)
-    }
-  );
-}
-function RulesDialog({
-  open,
-  onClose,
-  rules,
-  botName,
-  act,
-  busy
-}) {
-  const allowed = Array.isArray(rules?.allowed) ? rules.allowed : [];
-  const mode = String(rules?.mode || "approval");
-  const modes = [
-    ["approval", "Needs approval"],
-    ["allow", "Send to allowed recipients"],
-    ["disabled", `Drafts off for ${botName}`]
-  ];
-  return /* @__PURE__ */ jsxs13(
-    Dialog,
-    {
-      open,
-      onClose,
-      label: "Email draft rules",
-      title: `Email rules for ${botName}`,
-      description: "Drafts to allowed recipients send on their own while the mode is “Send to allowed recipients”. Every other draft waits for you to click Send.",
-      footer: /* @__PURE__ */ jsx14("button", { type: "button", className: "btn btn--secondary", onClick: onClose, children: "Done" }),
-      children: [
-        /* @__PURE__ */ jsx14("div", { className: "gbo-ed-rules-modes", role: "radiogroup", "aria-label": "Mode", children: modes.map(([value, label]) => /* @__PURE__ */ jsx14(
-          "button",
-          {
-            type: "button",
-            role: "radio",
-            "aria-checked": mode === value,
-            className: `gbo-ed-mode${mode === value ? " is-on" : ""}`,
-            disabled: busy,
-            onClick: () => mode !== value && act("set_mode", { mode: value }),
-            children: label
-          },
-          value
-        )) }),
-        allowed.length ? /* @__PURE__ */ jsx14("ul", { className: "gbo-ed-rules-list", "aria-label": "Allowed recipients", children: allowed.map((address) => /* @__PURE__ */ jsxs13("li", { className: "gbo-ed-rules-item", children: [
-          /* @__PURE__ */ jsx14("span", { children: address }),
-          /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-ed-discard", disabled: busy, "aria-label": `Remove ${address}`, onClick: () => act("unallow", { addresses: [address] }), children: "Remove" })
-        ] }, address)) }) : /* @__PURE__ */ jsx14("p", { className: "gbo-ed-rules-empty", children: "No allowed recipients yet. “Allow recipient” on a draft adds its To addresses." })
-      ]
-    }
-  );
-}
-function EmailDraftCard({ item, bot, controller: controller2 }) {
-  const draftId = String(item.draftId);
-  const hint = item.hint || {};
-  const [draft, setDraft] = React12.useState(null);
-  const [fields, setFields] = React12.useState(() => fieldsOf(hint));
-  const [note, setNote] = React12.useState(null);
-  const [pending, setPending] = React12.useState("");
-  const [rulesOpen, setRulesOpen] = React12.useState(false);
-  const flight = React12.useRef(createSingleFlight());
-  const live = React12.useRef(true);
-  const latest = React12.useRef({ draft, fields });
-  latest.current = { draft, fields };
-  React12.useEffect(() => {
-    live.current = true;
-    return () => {
-      live.current = false;
-    };
-  }, []);
-  const request2 = typeof controller2?.pluginRequest === "function" ? controller2.pluginRequest : null;
-  const adopt2 = React12.useCallback((next, { keepEdits = true } = {}) => {
-    if (!live.current || !next) return;
-    const prev = latest.current;
-    setDraft(next);
-    if (!keepEdits || !prev.draft || !isDirty(prev.fields, prev.draft)) setFields(fieldsOf(next));
-  }, []);
-  const read = React12.useCallback(async () => {
-    try {
-      const res = await callDrafts(request2, "get", { id: draftId });
-      if (!live.current) return;
-      if (res.ok) adopt2(res.draft);
-      else setNote({ text: res.error || "This draft could not be read", error: true });
-    } catch (error) {
-      if (live.current) setNote({ text: String(error?.message || error), error: true });
-    }
-  }, [request2, draftId, adopt2]);
-  const hintKey = `${hint.status || ""}:${hint.rev || ""}`;
-  React12.useEffect(() => {
-    void read();
-  }, [read, hintKey]);
-  const shown = draft || { ...hint, to: hint.to || [], cc: hint.cc || [] };
-  const state = draftState(shown, (ms) => clock(ms));
-  const rules = draft?.rules || { mode: "approval", allowed: [] };
-  const botName = displayName(bot, metaFor(bot));
-  const busy = Boolean(pending);
-  const editable = Boolean(draft) && state.editable && !busy;
-  const toParsed = parseAddresses(fields.to);
-  const ccParsed = parseAddresses(fields.cc);
-  const badFields = toParsed.bad.length || ccParsed.bad.length;
-  const run = (kind, job) => flight.current.run(async () => {
-    setPending(kind);
-    setNote(null);
-    try {
-      await job();
-    } finally {
-      if (live.current) setPending("");
-    }
-  });
-  const send = () => {
-    if (!draft || badFields || !toParsed.list.length) {
-      setNote({ text: toParsed.list.length ? "Fix the addresses first" : "Add at least one To address", error: true });
-      return;
-    }
-    void run("send", async () => {
-      const edits = isDirty(fields, draft) ? editsFrom(fields) : {};
-      try {
-        const res = await callDrafts(request2, "send", { id: draftId, rev: draft.rev, ...edits }, { timeoutMs: SEND_TIMEOUT_MS });
-        if (res.draft) adopt2(res.draft, { keepEdits: false });
-        else if (!res.ok) {
-          setNote({ text: res.error || "Not sent", error: true });
-          await read();
-        }
-      } catch (error) {
-        setNote({ text: `Not confirmed (${String(error?.message || error)}). It may have been sent, so it was not sent again; checking…`, error: true });
-        await read();
-      }
-    });
-  };
-  const discard = () => void run("discard", async () => {
-    const before = latest.current.draft;
-    if (before) setDraft({ ...before, status: "discarded" });
-    try {
-      const res = await callDrafts(request2, "discard", { id: draftId });
-      if (res.draft) adopt2(res.draft, { keepEdits: false });
-      if (!res.ok) {
-        if (before && !res.draft) setDraft(before);
-        setNote({ text: res.error || "Not discarded", error: true });
-      }
-    } catch (error) {
-      setNote({ text: String(error?.message || error), error: true });
-      await read();
-    }
-  });
-  const act = (op, params) => void run("rules", async () => {
-    try {
-      const res = await callDrafts(request2, op, params);
-      if (!res.ok) setNote({ text: res.error || "Rule not changed", error: true });
-      else if (res.rules && live.current) setDraft((d2) => d2 ? { ...d2, rules: res.rules } : d2);
-    } catch (error) {
-      setNote({ text: String(error?.message || error), error: true });
-    }
-  });
-  const entries = [
-    { label: "Allow recipient", checked: rules.mode === "allow", disabled: !draft || busy, onSelect: () => act("allow", { id: draftId }) },
-    { label: "Needs approval", checked: rules.mode === "approval", disabled: !draft || busy, onSelect: () => act("set_mode", { mode: "approval" }) },
-    { label: `Disable drafts for ${botName}`, checked: rules.mode === "disabled", disabled: !draft || busy, onSelect: () => act("set_mode", { mode: "disabled" }) },
-    "sep",
-    { label: "Manage rules", disabled: !draft, onSelect: () => setRulesOpen(true) }
-  ];
-  const done = state.status === "sent" || state.status === "discarded";
-  const reply = inReplyText(shown.in_reply_to);
-  const files = Array.isArray(shown.attachments) ? shown.attachments.filter((a2) => a2 && typeof a2.path === "string") : [];
-  const set = (key) => (value) => setFields((f2) => ({ ...f2, [key]: value }));
-  return /* @__PURE__ */ jsxs13("div", { className: `gbo-email-draft${done ? " is-done" : ""}`, "data-draft-id": draftId, "data-status": state.status, "aria-label": "Email draft", children: [
-    editable ? /* @__PURE__ */ jsx14("input", { className: "gbo-ed-subject", "aria-label": "Subject", value: fields.subject, placeholder: "Subject", onChange: (event) => set("subject")(event.target.value) }) : /* @__PURE__ */ jsx14("div", { className: "gbo-ed-subject", children: shown.subject || "(no subject)" }),
-    /* @__PURE__ */ jsxs13("div", { className: "gbo-ed-row", children: [
-      /* @__PURE__ */ jsx14("span", { className: "gbo-ed-label", children: "From" }),
-      /* @__PURE__ */ jsx14("span", { className: `gbo-ed-value${shown.from ? "" : " is-empty"}`, children: shown.from_name && shown.from ? `${shown.from_name} <${shown.from}>` : shown.from || "No From address set" })
-    ] }),
-    reply ? /* @__PURE__ */ jsxs13("div", { className: "gbo-ed-row", children: [
-      /* @__PURE__ */ jsx14("span", { className: "gbo-ed-label", children: "In reply to" }),
-      /* @__PURE__ */ jsx14("span", { className: "gbo-ed-value", children: reply })
-    ] }) : null,
-    /* @__PURE__ */ jsxs13("div", { className: `gbo-ed-row${toParsed.bad.length ? " is-bad" : ""}`, children: [
-      /* @__PURE__ */ jsx14("span", { className: "gbo-ed-label", children: "To" }),
-      editable ? /* @__PURE__ */ jsx14("input", { className: "gbo-ed-input", "aria-label": "To", value: fields.to, onChange: (event) => set("to")(event.target.value) }) : /* @__PURE__ */ jsx14("span", { className: "gbo-ed-value", children: addressText(shown.to) })
-    ] }),
-    /* @__PURE__ */ jsxs13("div", { className: `gbo-ed-row${ccParsed.bad.length ? " is-bad" : ""}`, children: [
-      /* @__PURE__ */ jsx14("span", { className: "gbo-ed-label", children: "Cc" }),
-      editable ? /* @__PURE__ */ jsx14("input", { className: "gbo-ed-input", "aria-label": "Cc", value: fields.cc, placeholder: "name@example.com", onChange: (event) => set("cc")(event.target.value) }) : /* @__PURE__ */ jsx14("span", { className: `gbo-ed-value${shown.cc?.length ? "" : " is-empty"}`, children: addressText(shown.cc) || "—" })
-    ] }),
-    shown.bcc?.length ? /* @__PURE__ */ jsxs13("div", { className: "gbo-ed-row", children: [
-      /* @__PURE__ */ jsx14("span", { className: "gbo-ed-label", children: "Bcc" }),
-      /* @__PURE__ */ jsx14("span", { className: "gbo-ed-value", children: addressText(shown.bcc) })
-    ] }) : null,
-    editable ? /* @__PURE__ */ jsx14(Body2, { value: fields.body, onChange: set("body"), disabled: false }) : /* @__PURE__ */ jsx14("div", { className: "gbo-ed-body", children: shown.body || "" }),
-    shown.signature ? /* @__PURE__ */ jsx14("div", { className: "gbo-ed-signature", children: shown.signature }) : null,
-    files.length ? /* @__PURE__ */ jsx14("div", { className: "gbo-ed-files", children: /* @__PURE__ */ jsx14(FileCards, { bot, files: files.map((a2) => ({ path: a2.path, name: a2.name || a2.path.split(/[\\/]/).pop() })) }) }) : null,
-    note ? /* @__PURE__ */ jsx14("div", { className: `gbo-ed-note${note.error ? " is-error" : ""}`, role: note.error ? "alert" : "status", children: note.text }) : null,
-    /* @__PURE__ */ jsxs13("div", { className: "gbo-ed-foot", children: [
-      done ? null : /* @__PURE__ */ jsxs13(MenuButton, { entries, label: "Email rules", className: "gbo-ed-rules", align: "start", children: [
-        modeLabel(rules.mode),
-        /* @__PURE__ */ jsx14(IconChevronDown, {})
-      ] }),
-      /* @__PURE__ */ jsx14("span", { className: "gbo-ed-spacer" }),
-      state.line ? /* @__PURE__ */ jsx14("span", { className: `gbo-ed-state${state.status === "sent" ? " is-sent" : state.status === "failed" ? " is-failed" : ""}`, role: "status", children: pending === "send" ? "Sending…" : state.line }) : pending === "send" ? /* @__PURE__ */ jsx14("span", { className: "gbo-ed-state", role: "status", children: "Sending…" }) : null,
-      state.actions.includes("discard") ? /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-ed-discard", disabled: !draft || busy, onClick: discard, children: "Discard" }) : null,
-      state.actions.includes("send") || state.actions.includes("retry") ? /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-ed-send", disabled: !draft || busy || !request2, onClick: send, children: state.actions.includes("retry") ? "Retry" : "Send" }) : null
-    ] }),
-    /* @__PURE__ */ jsx14(RulesDialog, { open: rulesOpen, onClose: () => setRulesOpen(false), rules, botName, act, busy })
-  ] });
-}
-
-// src/ui/stickToBottom.ts
-import * as React13 from "react";
-var STICK_PX = 16;
-var JUMP_MAX_MS = 1200;
-var ANCHOR_ATTR = "data-gbo-key";
-var fromBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight;
-function reducedMotion() {
-  try {
-    const mm = globalThis.window?.matchMedia ?? globalThis.matchMedia;
-    return typeof mm === "function" && Boolean(mm("(prefers-reduced-motion: reduce)")?.matches);
-  } catch {
-    return false;
   }
 }
-function unitsOf(scroller) {
-  const column = scroller.firstElementChild;
-  if (!column) return [];
-  const out = [];
-  for (const row of Array.from(column.children)) {
-    if (row.classList.contains("gbo-more")) continue;
-    const messages = row.classList.contains("group") ? Array.from(row.children) : [];
-    if (messages.length) out.push(...messages);
-    else out.push(row);
+var onDomain = (host3, domain) => host3 === domain || host3.endsWith(`.${domain}`);
+function isPrivateHost(hostname) {
+  const host3 = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  if (!host3 || !host3.includes(".")) return true;
+  if (host3.startsWith("[")) return true;
+  if (/\.(?:local|localhost|internal|lan|home|corp|intranet)$/.test(host3)) return true;
+  const v4 = host3.split(".");
+  if (v4.length === 4 && v4.every((part) => /^\d{1,3}$/.test(part))) {
+    const [a2, b2] = v4.map(Number);
+    if (a2 === 10 || a2 === 127 || a2 === 0) return true;
+    if (a2 === 169 && b2 === 254) return true;
+    if (a2 === 172 && b2 >= 16 && b2 <= 31) return true;
+    if (a2 === 192 && b2 === 168) return true;
+    if (a2 === 100 && b2 >= 64 && b2 <= 127) return true;
   }
-  return out;
+  return false;
 }
-function captureAnchor(scroller) {
-  const top = scroller.getBoundingClientRect().top;
-  const view = scroller.clientHeight;
-  const marks = [];
-  for (const unit of unitsOf(scroller)) {
-    const rect = unit.getBoundingClientRect();
-    if (rect.bottom - top <= 0) continue;
-    if (view > 0 && rect.top - top >= view) break;
-    marks.push({ el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top });
-  }
-  if (!marks.length) return null;
-  return [...marks.filter((m) => m.key), ...marks.filter((m) => !m.key)];
-}
-function locate(scroller, anchor) {
-  const origin = scroller.getBoundingClientRect().top;
-  let units = null;
-  for (const mark of anchor) {
-    let unit = mark.el.isConnected && scroller.contains(mark.el) ? mark.el : null;
-    if (!unit && mark.key) {
-      units = units || unitsOf(scroller);
-      unit = units.find((u) => u.getAttribute(ANCHOR_ATTR) === mark.key) || null;
-    }
-    if (unit) return { mark, now: unit.getBoundingClientRect().top - origin };
+function serviceFor(value) {
+  const url = value instanceof URL ? value : parseSourceUrl(value);
+  if (!url) return null;
+  if (url.protocol === "slack:") return SERVICE_BY_ID.get("slack");
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  const host3 = url.hostname.toLowerCase().replace(/\.$/, "");
+  for (const service of SOURCE_SERVICES) {
+    if (!service.domains.some((domain) => onDomain(host3, domain))) continue;
+    if (service.path && !service.path.test(url.pathname)) continue;
+    return service;
   }
   return null;
 }
-function useStickToBottom(dep, mine, latest = "") {
-  const ref = React13.useRef(null);
-  const stick = React13.useRef(true);
-  const lastMine = React13.useRef(mine);
-  const lastLatest = React13.useRef(latest);
-  const keep = React13.useRef(null);
-  const keepGen = React13.useRef(0);
-  const wrote = React13.useRef(null);
-  const jumping = React13.useRef(null);
-  const [unseen, setUnseen] = React13.useState(false);
-  const setTop = (el, top) => {
-    el.scrollTop = top;
-    wrote.current = el.scrollTop;
+function parseSlackPermalink(value) {
+  const url = value instanceof URL ? value : parseSourceUrl(value);
+  if (!url || url.protocol !== "https:") return null;
+  const host3 = url.hostname.toLowerCase();
+  if (!onDomain(host3, "slack.com") || host3 === "slack.com" || host3 === "app.slack.com") return null;
+  const match = /^\/archives\/([A-Z0-9]{6,})\/p(\d{10})(\d{6})\/?$/.exec(url.pathname);
+  if (!match) return null;
+  const thread = url.searchParams.get("thread_ts");
+  return {
+    workspace: host3.slice(0, -".slack.com".length),
+    channel: match[1],
+    ts: `${match[2]}.${match[3]}`,
+    threadTs: thread && /^\d{10}\.\d{6}$/.test(thread) ? thread : null
   };
-  const restore = () => {
-    const el = ref.current;
-    const anchor = keep.current;
-    if (!el || !anchor) return;
-    const hit = locate(el, anchor);
-    if (!hit) return;
-    const shift = hit.now - hit.mark.top;
-    if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift);
-  };
-  const dropKeep = () => {
-    if (!keep.current) return;
-    keep.current = null;
-    keepGen.current += 1;
-  };
-  const scrollToBottom = (el, smooth) => {
-    const top = el.scrollHeight;
-    if (smooth && typeof el.scrollTo === "function") {
-      try {
-        el.scrollTo({ top, behavior: "smooth" });
-        return;
-      } catch {
+}
+var TEAM_ID = /^T[A-Z0-9]{4,}$/;
+var CHANNEL_ID = /^[CDG][A-Z0-9]{4,}$/;
+var MESSAGE_TS = /^\d{10}\.\d{6}$/;
+function slackOpenTarget(value, { teamId = "", appScheme = false } = {}) {
+  const url = value instanceof URL ? value : parseSourceUrl(value);
+  if (!url) return null;
+  if (url.protocol === "slack:") {
+    const team = url.searchParams.get("team") || "";
+    const id = url.searchParams.get("id") || "";
+    const message = url.searchParams.get("message") || "";
+    if (!TEAM_ID.test(team)) return null;
+    const kind = url.hostname || url.pathname.replace(/^\/+/, "");
+    if (kind === "channel" && CHANNEL_ID.test(id)) {
+      const params = new URLSearchParams({ team, id });
+      if (MESSAGE_TS.test(message)) params.set("message", message);
+      return { kind: "app", url: `slack://channel?${params}`, fallback: `https://app.slack.com/client/${team}/${id}` };
+    }
+    if (kind === "open") return { kind: "app", url: `slack://open?${new URLSearchParams({ team })}`, fallback: `https://app.slack.com/client/${team}` };
+    return null;
+  }
+  const permalink = parseSlackPermalink(url);
+  if (permalink && appScheme && TEAM_ID.test(String(teamId))) {
+    const params = new URLSearchParams({ team: teamId, id: permalink.channel, message: permalink.ts });
+    return { kind: "app", url: `slack://channel?${params}`, fallback: url.href };
+  }
+  return { kind: "web", url: url.href };
+}
+var SLACK_APP_MARK = "gbo-slack-app=";
+function markdownCodeMask(text3) {
+  const source = String(text3 ?? "");
+  const mask = new Uint8Array(source.length);
+  let offset = 0;
+  let prevBlank = true;
+  let prevCode = false;
+  let inList = false;
+  for (const line of source.split("\n")) {
+    const blank = !line.trim();
+    const indented = /^(?: {4}|\t| {0,3}\t)/.test(line);
+    let code = false;
+    if (!blank) {
+      if (indented && !inList && (prevBlank || prevCode)) code = true;
+      else if (/^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)/.test(line)) inList = true;
+      else if (!indented && prevBlank) inList = false;
+    }
+    if (code) mask.fill(1, offset, offset + line.length);
+    if (!blank) prevCode = code;
+    prevBlank = blank;
+    offset += line.length + 1;
+  }
+  let i = 0;
+  while (i < source.length) {
+    if (mask[i]) {
+      i += 1;
+      continue;
+    }
+    const ch = source[i];
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch !== "`") {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (source[j] === "`") j += 1;
+    const len = j - i;
+    const paragraphEnd = source.indexOf("\n\n", j);
+    const limit = paragraphEnd < 0 ? source.length : paragraphEnd;
+    let k = j;
+    let close = -1;
+    while (k < limit) {
+      if (source[k] !== "`") {
+        k += 1;
+        continue;
       }
-    }
-    setTop(el, top);
-  };
-  const finishJump = () => {
-    const run = jumping.current;
-    if (!run) return;
-    jumping.current = null;
-    clearTimeout(run.timer);
-    stick.current = true;
-    setUnseen(false);
-    const el = ref.current;
-    if (el) setTop(el, el.scrollHeight);
-  };
-  const endJump = () => {
-    const run = jumping.current;
-    if (!run) return;
-    jumping.current = null;
-    clearTimeout(run.timer);
-    const el = ref.current;
-    if (!el) return;
-    stick.current = fromBottom(el) < STICK_PX;
-    setUnseen(!stick.current && Boolean(lastLatest.current));
-  };
-  React13.useLayoutEffect(() => {
-    const el = ref.current;
-    if (mine !== lastMine.current) {
-      lastMine.current = mine;
-      if (mine) {
-        stick.current = true;
-        dropKeep();
+      let e2 = k;
+      while (source[e2] === "`") e2 += 1;
+      if (e2 - k === len) {
+        close = k;
+        break;
       }
+      k = e2;
     }
-    const newer = latest !== lastLatest.current;
-    lastLatest.current = latest;
-    if (!el) return;
-    if (keep.current) {
-      restore();
-      if (newer && latest && !stick.current) setUnseen(true);
-      return;
+    if (close < 0) {
+      i = j;
+      continue;
     }
-    if (jumping.current) scrollToBottom(el, !reducedMotion());
-    else if (stick.current) setTop(el, el.scrollHeight);
-    else if (newer && latest) setUnseen(true);
-  }, [dep, mine, latest]);
-  React13.useLayoutEffect(() => {
-    if (stick.current && unseen && !jumping.current) setUnseen(false);
-  });
-  React13.useEffect(() => {
-    const el = ref.current;
-    if (!el) return void 0;
-    const cancel = () => {
-      if (!jumping.current) return;
-      endJump();
-    };
-    const onKey = (event) => {
-      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event?.key)) cancel();
-    };
-    el.addEventListener("wheel", cancel, { passive: true });
-    el.addEventListener("touchstart", cancel, { passive: true });
-    el.addEventListener("pointerdown", cancel);
-    el.addEventListener("keydown", onKey);
-    return () => {
-      el.removeEventListener("wheel", cancel);
-      el.removeEventListener("touchstart", cancel);
-      el.removeEventListener("pointerdown", cancel);
-      el.removeEventListener("keydown", onKey);
-      if (jumping.current) clearTimeout(jumping.current.timer);
-    };
-  }, []);
-  const onScroll = () => {
-    const el = ref.current;
-    if (!el) return;
-    const ours = wrote.current !== null && Math.abs(el.scrollTop - wrote.current) < 1;
-    wrote.current = null;
-    if (jumping.current) {
-      if (fromBottom(el) < STICK_PX) endJump();
-      return;
-    }
-    if (keep.current && !ours) {
-      keep.current = captureAnchor(el) || keep.current;
-    }
-    stick.current = fromBottom(el) < STICK_PX;
-    if (stick.current) setUnseen(false);
-  };
-  const onContentResize = React13.useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (keep.current) restore();
-    else if (jumping.current) scrollToBottom(el, !reducedMotion());
-    else if (stick.current) setTop(el, el.scrollHeight);
-  }, []);
-  const pin = () => {
-    stick.current = true;
-    dropKeep();
-  };
-  const onReaderInput = () => {
-    if (jumping.current) endJump();
-  };
-  const keepPlace = async (load) => {
-    const el = ref.current;
-    const gen = keepGen.current += 1;
-    keep.current = el ? captureAnchor(el) : null;
-    const mineNow = () => keepGen.current === gen && keep.current !== null;
-    try {
-      await load();
-    } finally {
-      if (mineNow()) restore();
-      const done = () => {
-        if (!mineNow()) return;
-        restore();
-        keep.current = null;
-        const target = ref.current;
-        if (target) {
-          stick.current = fromBottom(target) < STICK_PX;
-          if (stick.current) setUnseen(false);
-        }
-      };
-      const raf2 = globalThis.requestAnimationFrame;
-      if (typeof raf2 === "function") raf2(() => done());
-      else setTimeout(done, 16);
-    }
-  };
-  const jump = () => {
-    const el = ref.current;
-    stick.current = true;
-    setUnseen(false);
-    dropKeep();
-    if (!el) return;
-    const smooth = !reducedMotion() && typeof el.scrollTo === "function";
-    if (jumping.current) clearTimeout(jumping.current.timer);
-    jumping.current = smooth ? { timer: setTimeout(finishJump, JUMP_MAX_MS) } : null;
-    scrollToBottom(el, smooth);
-  };
-  return { ref, onScroll, onContentResize, onReaderInput, pin, stick, keepPlace, jump, unseen };
+    mask.fill(1, i, close + len);
+    i = close + len;
+  }
+  return mask;
 }
-
-// src/ui/Profile.tsx
-import * as React22 from "react";
-
-// src/ui/BotDialogs.tsx
-import * as React18 from "react";
-
-// src/ui/CronDialogs.tsx
-import * as React14 from "react";
-import { Fragment as Fragment9, jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
-var digits = (v, n) => v.replace(/[^0-9]/g, "").slice(0, n);
-function timeLabel(id) {
-  const [h, m] = id.split(":").map(Number);
-  return new Date(2e3, 0, 1, h, m).toLocaleTimeString(void 0, { hour: "numeric", minute: "2-digit" });
-}
-function SchedulePicker({ state, setState }) {
-  const upd = (patch) => setState((s) => ({ ...s, ...patch }));
-  const needsTime = ["daily", "weekdays", "weekly", "monthly"].includes(state.freq);
-  const times = timeOptions().map((t) => [t.id, timeLabel(t.id)]);
-  const unitOptions = (suffix) => [
-    ["m", `minutes${suffix}`],
-    ["h", `hours${suffix}`],
-    ["d", `days${suffix}`]
-  ];
-  return /* @__PURE__ */ jsxs14("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
-    /* @__PURE__ */ jsxs14("div", { className: needsTime ? "gbo-row2" : "", children: [
-      /* @__PURE__ */ jsx15(Select, { label: "How often", value: state.freq, onChange: (v) => upd({ freq: v }), options: FREQUENCIES }),
-      needsTime ? /* @__PURE__ */ jsx15(Select, { label: "Time", value: state.time, onChange: (v) => upd({ time: v }), options: times }) : null
-    ] }),
-    state.freq === "once" ? /* @__PURE__ */ jsxs14("div", { className: "gbo-row2", children: [
-      /* @__PURE__ */ jsx15("input", { className: "gbo-input", "aria-label": "In", value: state.onceN, placeholder: "30", onChange: (e2) => upd({ onceN: digits(e2.target.value, 4) }) }),
-      /* @__PURE__ */ jsx15(Select, { label: "Unit", value: state.onceUnit, onChange: (v) => upd({ onceUnit: v }), options: unitOptions(" from now") })
-    ] }) : null,
-    state.freq === "weekly" ? /* @__PURE__ */ jsx15(Select, { label: "Day", value: state.weekday, onChange: (v) => upd({ weekday: v }), options: WEEKDAYS }) : null,
-    state.freq === "monthly" ? /* @__PURE__ */ jsx15(Field, { label: "Day of month", children: /* @__PURE__ */ jsx15("input", { className: "gbo-input", value: state.monthday, placeholder: "1", onChange: (e2) => upd({ monthday: digits(e2.target.value, 2) }) }) }) : null,
-    state.freq === "interval" ? /* @__PURE__ */ jsxs14("div", { className: "gbo-row2", children: [
-      /* @__PURE__ */ jsx15("input", { className: "gbo-input", "aria-label": "Every", value: state.intervalN, placeholder: "2", onChange: (e2) => upd({ intervalN: digits(e2.target.value, 4) }) }),
-      /* @__PURE__ */ jsx15(Select, { label: "Unit", value: state.intervalUnit, onChange: (v) => upd({ intervalUnit: v }), options: unitOptions("") })
-    ] }) : null,
-    state.freq === "advanced" ? /* @__PURE__ */ jsx15("input", { className: "gbo-input", style: { fontFamily: "var(--gbo-mono)" }, value: state.raw, placeholder: "every 1d · every 2h · 0 9 * * * (cron)", onChange: (e2) => upd({ raw: e2.target.value }) }) : null,
-    state.freq !== "once" && state.freq !== "advanced" && state.repeatN !== void 0 ? /* @__PURE__ */ jsxs14("label", { className: "gbo-check", children: [
-      /* @__PURE__ */ jsx15("span", { children: "Stop after" }),
-      /* @__PURE__ */ jsx15("input", { className: "gbo-input", style: { width: 64 }, value: state.repeatN, placeholder: "∞", onChange: (e2) => upd({ repeatN: digits(e2.target.value, 4) }) }),
-      /* @__PURE__ */ jsx15("span", { children: "runs" })
-    ] }) : null,
-    /* @__PURE__ */ jsxs14("span", { className: "gbo-field-hint", children: [
-      scheduleSummary(state, timeLabel(state.time || "9:0")),
-      " · ",
-      composeSchedule(state) || "—"
-    ] })
-  ] });
-}
-function JobDialog({ bot, job, onClose }) {
-  const editing = Boolean(job);
-  const [title, setTitle] = React14.useState(() => job ? routineTitle(job) : "");
-  const [stored, setStored] = React14.useState(() => ({ status: editing ? "loading" : "ready" }));
-  const [instruction, setInstruction] = React14.useState("");
-  const [sched, setSched] = React14.useState(() => job ? { ...scheduleStateFrom(job.schedule), repeatN: void 0 } : defaultScheduleState());
-  const [initialSchedule] = React14.useState(() => job ? composeSchedule({ ...scheduleStateFrom(job.schedule), repeatN: void 0 }).trim() : void 0);
-  const [continuity, setContinuity] = React14.useState(false);
-  const [target, setTarget] = React14.useState(() => job?.deliver === "bot-chat" ? "bot-chat" : "history");
-  const [busy, setBusy] = React14.useState(false);
-  const [error, setError] = React14.useState(null);
-  const who = displayName(bot, metaFor(bot));
-  const schedule = composeSchedule(sched).trim();
-  React14.useEffect(() => {
-    if (!editing) return;
-    let live = true;
-    loadJob(bot, job).then(
-      (full) => {
-        if (!live) return;
-        setStored({ status: "ready", job: full });
-        setInstruction(String(full.prompt || ""));
-      },
-      (err2) => live && setStored({ status: "failed", error: String(err2?.message || err2) })
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  const base4 = stored.job || job;
-  const scriptOnly = editing && stored.status === "ready" && !String(stored.job?.prompt || "").trim() && Boolean(stored.job?.script);
-  const instructionEditable = !editing || stored.status === "ready";
-  const instructionMissing = instructionEditable && !instruction.trim() && !scriptOnly;
-  const submit = async () => {
-    const t = title.trim();
-    const task = instruction.trim();
-    const bad = routineInputError(t, instructionEditable ? task : "");
-    if (bad) return setError(bad);
-    if (!t || instructionMissing || !schedule || busy || stored.status === "loading") return;
-    setBusy(true);
-    setError(null);
-    try {
-      if (editing) {
-        await editJob(bot, job, {
-          ...stored.job ? { stored: stored.job } : {},
-          title: t,
-          ...instructionEditable ? { prompt: task } : {},
-          sched,
-          initialSchedule,
-          deliver: target === "bot-chat" ? "bot-chat" : base4.deliver === "bot-chat" ? "local" : base4.deliver
-        });
-      } else {
-        await createJob(bot, { title: t, instruction: task, sched, continuity, target });
-      }
-      onClose();
-    } catch (err2) {
-      setBusy(false);
-      setError(String(err2?.message || err2));
+var isEscaped = (source, at) => {
+  let n = 0;
+  for (let k = at - 1; k >= 0 && source[k] === "\\"; k -= 1) n += 1;
+  return n % 2 === 1;
+};
+function labelOpen(source, close, mask) {
+  let depth = 0;
+  for (let k = close - 1; k >= 0 && close - k <= 1e3; k -= 1) {
+    if (source[k] === "\n" && source[k - 1] === "\n") return -1;
+    if (mask[k] || isEscaped(source, k)) continue;
+    if (source[k] === "]") depth += 1;
+    else if (source[k] === "[") {
+      if (depth === 0) return k;
+      depth -= 1;
     }
-  };
-  return /* @__PURE__ */ jsxs14(
-    Dialog,
-    {
-      open: true,
-      busy,
-      onClose,
-      title: editing ? "Edit scheduled job" : "New scheduled job",
-      description: editing ? `A job of ${who}. Saved through Hermes’s Cron API on ${who}’s machine.` : `${who} runs this on a schedule, in its own profile.`,
-      footer: /* @__PURE__ */ jsxs14(Fragment9, { children: [
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || stored.status === "loading" || !title.trim() || instructionMissing || !schedule, onClick: () => void submit(), children: busy ? "Saving…" : editing ? "Save" : "Create job" })
-      ] }),
-      children: [
-        /* @__PURE__ */ jsx15(Field, { label: "Name", children: /* @__PURE__ */ jsx15("input", { className: "gbo-input", autoFocus: true, value: title, placeholder: "Morning digest", onChange: (e2) => setTitle(e2.target.value) }) }),
-        /* @__PURE__ */ jsx15(Field, { label: "What should it do?", children: instructionEditable ? /* @__PURE__ */ jsx15("textarea", { className: "gbo-textarea", value: instruction, placeholder: scriptOnly ? "Optional: this job runs a script" : "Summarise yesterday’s alerts and send me the top three.", onChange: (e2) => setInstruction(e2.target.value) }) : /* @__PURE__ */ jsx15("textarea", { className: "gbo-textarea", value: stored.status === "loading" ? "" : String(job?.prompt_preview || ""), placeholder: stored.status === "loading" ? "Loading the full instruction…" : "", readOnly: true, disabled: stored.status === "loading" }) }),
-        stored.status === "failed" ? /* @__PURE__ */ jsxs14("div", { className: "gbo-form-note", children: [
-          "The full instruction could not be read (",
-          stored.error,
-          "). It is left unchanged; the other fields can still be saved."
-        ] }) : null,
-        /* @__PURE__ */ jsx15(Field, { label: "When to run", children: /* @__PURE__ */ jsx15(SchedulePicker, { state: sched, setState: setSched }) }),
-        /* @__PURE__ */ jsx15(Field, { label: "Send results to", children: /* @__PURE__ */ jsx15(
-          Select,
-          {
-            label: "Send results to",
-            value: target,
-            onChange: setTarget,
-            options: [
-              ["history", "Run history only"],
-              ["bot-chat", `${who}’s Bot Chat`]
-            ]
-          }
-        ) }),
-        editing ? null : /* @__PURE__ */ jsx15(Check, { checked: continuity, onChange: setContinuity, children: "Continue from the previous run (same session each time)" }),
-        error ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-error", children: error }) : null
-      ]
-    }
-  );
+  }
+  return -1;
 }
-function JobDetailDialog({ bot, job, onClose }) {
-  const rows = routineDetailRows(job);
-  const issue = routineDetailIssue(job);
-  const instruction = String(job?.prompt_preview || "").trim();
-  return /* @__PURE__ */ jsxs14(
-    Dialog,
-    {
-      open: true,
-      onClose,
-      title: routineTitle(job),
-      description: "What Hermes knows about this job.",
-      footer: /* @__PURE__ */ jsxs14(Fragment9, { children: [
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-ghost", onClick: () => openDialog({ kind: "cron-remove", bot, job }), children: "Delete" }),
-        /* @__PURE__ */ jsx15("span", { className: "gbo-spacer" }),
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn", onClick: () => openDialog({ kind: "cron-edit", bot, job }), children: "Edit" }),
-        /* @__PURE__ */ jsx15(
-          "button",
-          {
-            type: "button",
-            className: "gbo-btn",
-            onClick: () => {
-              void runJob(bot, job);
-              onClose();
-            },
-            children: "Run now"
-          }
-        ),
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-btn is-primary", onClick: onClose, children: "Close" })
-      ] }),
-      children: [
-        issue ? /* @__PURE__ */ jsx15("div", { className: "gbo-form-error", children: issue }) : null,
-        /* @__PURE__ */ jsx15("div", { className: "gbo-detail-rows", children: rows.map((row) => /* @__PURE__ */ jsxs14("div", { className: "gbo-detail-row", children: [
-          /* @__PURE__ */ jsx15("span", { children: row.label }),
-          /* @__PURE__ */ jsx15("span", { title: row.value, children: row.value })
-        ] }, row.label)) }),
-        instruction ? /* @__PURE__ */ jsx15(Field, { label: "Instruction", children: /* @__PURE__ */ jsx15("div", { className: "gbo-pre", children: instruction }) }) : null
-      ]
-    }
-  );
+function standIn(href) {
+  const target = slackOpenTarget(href);
+  return target?.fallback ? `${target.fallback}#${SLACK_APP_MARK}${encodeURIComponent(target.url)}` : null;
 }
-function JobRemoveDialog({ bot, job, onClose }) {
-  return /* @__PURE__ */ jsx15(
-    Confirm,
-    {
-      open: true,
-      title: "Delete this job?",
-      description: `“${routineTitle(job)}” stops running and is removed from ${displayName(bot, metaFor(bot))}’s schedule.`,
-      confirmLabel: "Delete job",
-      destructive: true,
-      onConfirm: () => removeJob(bot, job),
-      onClose
-    }
-  );
+var INLINE_DEST = /\]\([ \t]*(?:<(slack:[^<>\s]*)>|(slack:[^\s()<>]+))((?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*\))/gi;
+var REF_DEF = /^( {0,3}\[(?:[^\]\\\n]|\\.)+\]:[ \t]*)(?:<(slack:[^<>\s]*)>|(slack:\S+))(?=[ \t]|$)/gim;
+function protectSlackAppLinks(text3) {
+  const source = String(text3 ?? "");
+  if (!/slack:/i.test(source)) return source;
+  const mask = markdownCodeMask(source);
+  const edits = [];
+  for (const m of source.matchAll(INLINE_DEST)) {
+    const at = m.index;
+    if (mask[at] || isEscaped(source, at)) continue;
+    if (labelOpen(source, at, mask) < 0) continue;
+    const href = m[1] ?? m[2];
+    const replacement = standIn(href);
+    if (!replacement) continue;
+    const destStart = at + m[0].indexOf(m[1] !== void 0 ? `<${href}>` : href);
+    const destEnd = destStart + (m[1] !== void 0 ? href.length + 2 : href.length);
+    edits.push([destStart, destEnd, m[1] !== void 0 ? `<${replacement}>` : replacement]);
+  }
+  for (const m of source.matchAll(REF_DEF)) {
+    const at = m.index;
+    if (mask[at + m[1].length - 1] || mask[at]) continue;
+    const href = m[2] ?? m[3];
+    const replacement = standIn(href);
+    if (!replacement) continue;
+    const destStart = at + m[1].length;
+    const destEnd = destStart + (m[2] !== void 0 ? href.length + 2 : href.length);
+    edits.push([destStart, destEnd, m[2] !== void 0 ? `<${replacement}>` : replacement]);
+  }
+  if (!edits.length) return source;
+  edits.sort((a2, b2) => a2[0] - b2[0]);
+  let out = "";
+  let last = 0;
+  for (const [from, to, value] of edits) {
+    if (from < last) continue;
+    out += source.slice(last, from) + value;
+    last = to;
+  }
+  return out + source.slice(last);
 }
-
-// src/ui/ProfileConfig.tsx
-import * as React15 from "react";
-import { Fragment as Fragment10, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
-var modelCatalogue = createCatalogue();
-function modelKey(bot) {
-  let route = null;
+function slackAppFromStandIn(url) {
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "app.slack.com") return null;
+  if (!url.hash.startsWith(`#${SLACK_APP_MARK}`)) return null;
+  let decoded = "";
   try {
-    route = bot ? resolveBotConnectionRoute(bot).route : null;
+    decoded = decodeURIComponent(url.hash.slice(SLACK_APP_MARK.length + 1));
   } catch {
-    route = null;
+    return null;
   }
-  return catalogueKey(route);
+  return /^slack:/i.test(decoded) ? decoded : null;
 }
-function primeModelOptions(bot, value) {
-  modelCatalogue.prime(modelKey(bot), value);
-}
-function useModelOptions(bot, { foreground = false } = {}) {
-  const key = modelKey(bot);
-  const read = () => {
-    const data = modelCatalogue.peek(key);
-    return data ? { loading: false, error: null, data } : null;
-  };
-  const [state, setState] = React15.useState(() => read() || { loading: true, error: null, data: null });
-  React15.useEffect(() => {
-    let live = true;
-    const now = read();
-    if (now) setState(now);
-    const off = modelCatalogue.subscribe((changed) => {
-      if (live && changed === key) setState(read() || { loading: true, error: null, data: null });
-    });
-    modelCatalogue.load(key, () => boundedFetch(request(bot, "model.options", modelOptionsParams(), foreground ? { spawnPriority: "foreground" } : {}))).then((data) => live && setState({ loading: false, error: null, data })).catch((error) => live && !modelCatalogue.peek(key) && setState({ loading: false, error: String(error?.message || error), data: null }));
-    return () => {
-      live = false;
-      off();
-    };
-  }, [key]);
-  return state;
-}
-var NONE = "__default__";
-var CUSTOM = "__custom__";
-function ModelPicker({
-  bot,
-  value,
-  onChange,
-  foreground,
-  disabled,
-  children
-}) {
-  const { loading, error, data } = useModelOptions(bot, { foreground });
-  const [manual, setManual] = React15.useState(null);
-  const providers = usableProviders(data);
-  const known = !value.provider || providers.some((p) => providerMatches(p, value.provider));
-  const freeText = loading ? false : manual ?? !known;
-  const grid = children ? "gbo-row2 gbo-model-grid" : "gbo-row2";
-  if (!loading && (error || !providers.length || freeText)) {
-    return /* @__PURE__ */ jsxs15("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
-      /* @__PURE__ */ jsxs15("div", { className: grid, children: [
-        /* @__PURE__ */ jsx16(Field, { label: "Provider", children: /* @__PURE__ */ jsx16("input", { className: "gbo-input", value: value.provider, disabled, placeholder: "nous / openrouter / …", onChange: (e2) => onChange({ provider: e2.target.value }) }) }),
-        /* @__PURE__ */ jsx16(Field, { label: "Model", children: /* @__PURE__ */ jsx16("input", { className: "gbo-input", value: value.model, disabled, placeholder: "provider/model-name", onChange: (e2) => onChange({ model: e2.target.value }) }) }),
-        children
-      ] }),
-      providers.length ? /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setManual(false), children: "Back to the lists" }) : error ? /* @__PURE__ */ jsxs15("span", { className: "gbo-field-hint", children: [
-        "The model list did not load (",
-        error,
-        "); type them instead."
-      ] }) : null
-    ] });
+function sourceLinkFor(href) {
+  const url = parseSourceUrl(href);
+  if (!url) return null;
+  const app2 = url.protocol === "slack:" ? url.href : slackAppFromStandIn(url);
+  if (app2) {
+    const target = slackOpenTarget(app2);
+    if (!target?.fallback) return null;
+    return { service: SERVICE_BY_ID.get("slack"), href: target.url, opens: [target.url, target.fallback], openUrl: target.url };
   }
-  const active = providers.find((p) => providerMatches(p, value.provider)) || null;
-  const models = active ? providerModels(active) : [];
-  const providerOptions = loading ? [[NONE, "Default (the profile’s own)"], ...value.provider ? [[value.provider, value.provider]] : []] : [[NONE, "Default (the profile’s own)"], ...providers.map((p) => [p.slug, p.name || p.slug]), [CUSTOM, "Custom…"]];
-  const modelOptions = (models.includes(value.model) || !value.model ? models : [value.model, ...models]).map((m) => [m, m]);
-  return /* @__PURE__ */ jsxs15("div", { className: grid, "aria-busy": loading || void 0, children: [
-    /* @__PURE__ */ jsx16(Field, { label: "Provider", children: /* @__PURE__ */ jsx16(
-      Select,
-      {
-        label: "Provider",
-        value: loading ? value.provider || NONE : active ? active.slug : NONE,
-        disabled,
-        onChange: (v) => {
-          if (v === NONE) onChange({ provider: "", model: "" });
-          else if (v === CUSTOM) setManual(true);
-          else if (!loading) {
-            const prov = providers.find((p) => p.slug === v);
-            onChange({ provider: v, model: providerModels(prov)[0] || "" });
-          }
-        },
-        options: providerOptions
-      }
-    ) }),
-    /* @__PURE__ */ jsx16(Field, { label: "Model", children: /* @__PURE__ */ jsx16(Select, { label: "Model", value: value.model, disabled: disabled || !loading && !active, onChange: (v) => onChange({ model: v }), options: modelOptions }) }),
-    children
-  ] });
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if (url.username || url.password || isPrivateHost(url.hostname)) return null;
+  const service = serviceFor(url) || WEB_SERVICE;
+  const openUrl = service.id === "slack" ? slackOpenTarget(url)?.url || url.href : url.href;
+  return { service, href: url.href, opens: [openUrl], openUrl };
 }
-function ModelExtraFields({
-  bot,
-  provider,
-  model,
-  effort,
-  speed,
-  disabled,
-  onChange
-}) {
-  const { loading, data } = useModelOptions(bot, { foreground: true });
-  const providers = usableProviders(data);
-  const row = providers.find((p) => providerMatches(p, provider)) || null;
-  const caps = loading ? void 0 : model ? modelCaps(row, model) : null;
-  const e2 = effortChoices({ provider: row?.slug || provider, model, caps, current: effort });
-  const s = speedChoices({ caps, current: speed });
-  const hint = (choice) => choice.supported ? choice.pending ? "Loading options…" : " " : UNSUPPORTED_HINT;
-  return /* @__PURE__ */ jsxs15(Fragment10, { children: [
-    /* @__PURE__ */ jsx16(Field, { label: "Effort", hint: hint(e2), children: /* @__PURE__ */ jsx16(Select, { label: "Effort", value: effort, disabled: disabled || !e2.supported, onChange: (v) => onChange({ effort: v }), options: e2.options }) }),
-    /* @__PURE__ */ jsx16(Field, { label: "Speed", hint: hint(s), children: /* @__PURE__ */ jsx16(Select, { label: "Speed", value: speed, disabled: disabled || !s.supported, onChange: (v) => onChange({ speed: v }), options: s.options }) })
-  ] });
-}
-function SkillsHub({ bot, onInstalled }) {
-  const [query, setQuery] = React15.useState("");
-  const [results, setResults] = React15.useState(null);
-  const [busy, setBusy] = React15.useState(null);
-  const [error, setError] = React15.useState(null);
-  return /* @__PURE__ */ jsxs15("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
-    /* @__PURE__ */ jsxs15(
-      "form",
-      {
-        style: { display: "flex", gap: 6 },
-        onSubmit: async (event) => {
-          event.preventDefault();
-          if (!query.trim() || busy) return;
-          setBusy("search");
-          setError(null);
-          try {
-            setResults(await searchSkills(query));
-          } catch (err2) {
-            setResults([]);
-            setError(String(err2?.message || err2));
-          } finally {
-            setBusy(null);
-          }
-        },
-        children: [
-          /* @__PURE__ */ jsx16("input", { className: "gbo-input", placeholder: "Find skills in the hub", value: query, onChange: (e2) => setQuery(e2.target.value) }),
-          /* @__PURE__ */ jsx16("button", { type: "submit", className: "gbo-btn is-small", disabled: !query.trim() || Boolean(busy), children: busy === "search" ? "Searching…" : "Search" })
-        ]
-      }
-    ),
-    error ? /* @__PURE__ */ jsx16("div", { className: "gbo-form-error", children: error }) : null,
-    results && !results.length ? /* @__PURE__ */ jsx16("span", { className: "gbo-field-hint", children: "No skills found." }) : null,
-    (results || []).slice(0, 8).map((r) => /* @__PURE__ */ jsxs15("div", { className: "gbo-check", style: { cursor: "default" }, children: [
-      /* @__PURE__ */ jsx16("span", { className: "gbo-check-text", title: r.description || r.name, children: r.name }),
-      /* @__PURE__ */ jsx16(
-        "button",
-        {
-          type: "button",
-          className: "gbo-btn is-small",
-          disabled: Boolean(busy),
-          onClick: async () => {
-            setBusy(r.name);
-            setError(null);
-            try {
-              await installSkill(bot, r.name);
-              onInstalled(r.name);
-            } catch (err2) {
-              setError(String(err2?.message || err2));
-            } finally {
-              setBusy(null);
-            }
-          },
-          children: busy === r.name ? "Installing…" : "Install"
-        }
-      )
-    ] }, r.name))
-  ] });
-}
-function backendScope(bot) {
-  const route = resolveBotConnectionRoute(bot).route;
-  return route ? { connectionId: route.connectionId, profile: route.targetProfile || route.profile } : bot.name;
-}
-function McpSetup({ bot, entry, onDone }) {
-  const [phase, setPhase] = React15.useState("idle");
-  const [message, setMessage] = React15.useState("");
-  const fields = React15.useRef({});
-  const epoch = React15.useRef(0);
-  const pending = React15.useRef(null);
-  const wipePending = () => {
-    const held = pending.current;
-    pending.current = null;
-    if (!held) return;
-    for (let i = 0; i < held.entered.length; i += 1) held.entered[i] = [held.entered[i][0], ""];
-    held.entered.length = 0;
-    held.secrets.length = 0;
-  };
-  const isOAuth = String(entry.auth || "").toLowerCase() === "oauth";
-  const requires = entry.requires || [];
-  const clearFields = () => {
-    for (const input of Object.values(fields.current)) if (input) input.value = "";
-  };
-  React15.useEffect(
-    () => () => {
-      epoch.current += 1;
-      clearFields();
-      wipePending();
-    },
-    []
-  );
-  const fail = (text3) => {
-    setPhase("error");
-    setMessage(text3);
-  };
-  const ensureAdded = async () => {
-    if (entry.fromCatalog && !entry.installed) await request(bot, "mcp.servers.add", { profile: bot.name, name: entry.name, preset: entry.name });
-  };
-  const begin = async () => {
-    wipePending();
-    const mine = ++epoch.current;
-    const current = () => epoch.current === mine;
-    setPhase("busy");
-    setMessage("");
-    try {
-      await ensureAdded();
-    } catch (err2) {
-      if (current()) fail(String(err2?.message || err2) || "Could not add the server");
-      return;
+var clip2 = (text3, max) => text3.length <= max ? text3 : `${text3.slice(0, max - 1)}…`;
+function bareLinkLabel(href) {
+  const url = parseSourceUrl(href);
+  if (!url) return "Link";
+  const service = serviceFor(url);
+  const parts = url.pathname.split("/").filter(Boolean);
+  switch (service?.id) {
+    case "slack": {
+      const permalink = parseSlackPermalink(url);
+      if (permalink) return permalink.threadTs && permalink.threadTs !== permalink.ts ? "Slack thread reply" : "Slack message";
+      return "Slack";
     }
-    if (!current()) return;
-    if (!isOAuth) return setPhase("keys");
-    if (typeof host2?.completeMcpOAuth !== "function") return fail("This Hermes Desktop cannot run the sign-in; update it.");
-    const route = resolveBotConnectionRoute(bot).route;
-    try {
-      setMessage("Finish signing in in your browser…");
-      await host2.completeMcpOAuth({
-        serverName: entry.name,
-        profile: { connectionId: route?.connectionId ?? host2?.state?.connectionId?.get?.() ?? null, profile: route?.targetProfile || bot.name },
-        catalogPreset: entry.fromCatalog && !entry.installed ? entry.name : void 0,
-        cancelled: () => !current()
-      });
-      if (!current()) return;
-      setPhase("done");
-      onDone();
-    } catch (err2) {
-      if (current()) fail(String(err2?.message || err2));
+    case "gmail":
+      return "Gmail";
+    case "googledocs":
+      return "Google Doc";
+    case "googlesheets":
+      return "Google Sheet";
+    case "googleslides":
+      return "Google Slides";
+    case "googlecalendar":
+      return "Calendar event";
+    case "googlemeet":
+      return "Google Meet";
+    case "github": {
+      const [owner, repo, kind, number] = parts;
+      if (repo && kind === "pull" && /^\d+$/.test(number || "")) return `GitHub PR #${number}`;
+      if (repo && kind === "issues" && /^\d+$/.test(number || "")) return `GitHub issue #${number}`;
+      if (repo && kind === "commit" && number) return `GitHub commit ${number.slice(0, 7)}`;
+      if (owner && repo) return clip2(`GitHub ${owner}/${repo}`, 32);
+      return "GitHub";
     }
-  };
-  const submitKeys = async () => {
-    wipePending();
-    const mine = ++epoch.current;
-    const current = () => epoch.current === mine;
-    const entered = requires.map((k) => [k, String(fields.current[k]?.value || "").trim()]);
-    clearFields();
-    const secrets = entered.map(([, value]) => value).filter(Boolean);
-    const held = { entered, secrets };
-    pending.current = held;
-    const scrub = (text3) => secrets.reduce((out, value) => out.split(value).join("••••"), text3);
-    setPhase("busy");
-    try {
-      for (let i = 0; i < entered.length; i += 1) {
-        if (!current()) return;
-        const [k, value] = entered[i];
-        entered[i] = [k, ""];
-        if (value) await request(bot, "mcp.servers.set_api_key", { profile: bot.name, name: entry.name, env_var: k, value });
-      }
-      if (!current()) return;
-      const test = await request(bot, "mcp.servers.test", { profile: bot.name, name: entry.name });
-      if (!current()) return;
-      if (test && (test.ok || test.result?.ok)) {
-        setPhase("done");
-        onDone();
-      } else fail(scrub(String(test?.error || test?.result?.error || "The server did not pass its test")));
-    } catch (err2) {
-      if (current()) fail(`${scrub(String(err2?.message || err2))} Enter the keys again to retry.`);
-    } finally {
-      if (pending.current === held) pending.current = null;
-      entered.length = 0;
-      secrets.length = 0;
-    }
-  };
-  if (phase === "done") return /* @__PURE__ */ jsx16("span", { className: "gbo-field-hint", children: "Configured" });
-  if (phase === "keys") {
-    return /* @__PURE__ */ jsxs15("span", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }, children: [
-      requires.map((k) => /* @__PURE__ */ jsx16(
-        "input",
-        {
-          ref: (el) => {
-            fields.current[k] = el;
-          },
-          className: "gbo-input",
-          type: "password",
-          autoComplete: "off",
-          placeholder: k,
-          defaultValue: ""
-        },
-        k
-      )),
-      /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-small", onClick: () => void submitKeys(), children: "Save and test" })
-    ] });
+    case "linear":
+      return /\/issue\/[A-Za-z]+-\d+/.test(url.pathname) ? `Linear ${url.pathname.match(/\/issue\/([A-Za-z]+-\d+)/)[1].toUpperCase()}` : "Linear";
+    case "youtube":
+      return "YouTube video";
+    case void 0:
+    case null:
+      break;
+    default:
+      return service.name;
   }
-  return /* @__PURE__ */ jsxs15("span", { style: { display: "inline-flex", gap: 6, alignItems: "center" }, children: [
-    /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-small", disabled: phase === "busy", onClick: () => void begin(), children: phase === "busy" ? "Working…" : isOAuth ? "Sign in" : "Set up" }),
-    message ? /* @__PURE__ */ jsx16("span", { className: phase === "error" ? "gbo-card-error" : "gbo-field-hint", children: message }) : null
-  ] });
+  return clip2(url.hostname.replace(/^www\./, ""), 32);
 }
-function AdvancedConfig({ bot, state, setState }) {
-  const [unsupported, setUnsupported] = React15.useState(null);
-  const [filter, setFilter] = React15.useState("");
-  const [toolsetOpen, setToolsetOpen] = React15.useState("");
-  const ToolsetPanel = sdk.ToolsetConfigPanel;
-  const loadKey = `${bot?.connectionId || ""}::${bot?.name}`;
-  React15.useEffect(() => {
-    if (state.loaded) return;
-    let live = true;
-    loadProfileConfig(bot).then((next) => live && setState(() => next)).catch((error) => live && setUnsupported(String(error?.message || error)));
-    return () => {
-      live = false;
-    };
-  }, [loadKey]);
-  if (unsupported) return /* @__PURE__ */ jsxs15("div", { className: "gbo-form-note", children: [
-    "This bot’s Hermes cannot describe its profile here (",
-    unsupported,
-    "). Use `hermes -p ",
-    bot.name,
-    " config` on its machine."
-  ] });
-  if (!state.loaded) return /* @__PURE__ */ jsx16("div", { className: "gbo-form-note", children: "Loading the bot’s config…" });
-  const skills = filter.trim() ? state.skills.filter((s) => s.name.toLowerCase().includes(filter.trim().toLowerCase())) : state.skills;
-  const on = (list) => list.filter((x) => x.enabled).length;
-  return /* @__PURE__ */ jsxs15("div", { style: { display: "flex", flexDirection: "column", gap: 14 }, children: [
-    /* @__PURE__ */ jsx16(ModelPicker, { bot, value: { provider: state.provider, model: state.model }, onChange: (patch) => setState((s) => ({ ...s, dirtyModel: true, ...patch })) }),
-    /* @__PURE__ */ jsxs15(Field, { label: `Skills · ${on(state.skills)} of ${state.skills.length} on`, children: [
-      /* @__PURE__ */ jsx16("input", { className: "gbo-input", placeholder: "Filter skills", value: filter, onChange: (e2) => setFilter(e2.target.value) }),
-      /* @__PURE__ */ jsx16("div", { className: "gbo-check-list", children: skills.map((s) => /* @__PURE__ */ jsx16(Check, { title: s.description || s.name, checked: Boolean(s.enabled), onChange: (v) => setState((st) => toggleEntry(st, "skills", s.name, v)), children: s.name }, s.name)) })
-    ] }),
-    /* @__PURE__ */ jsx16(SkillsHub, { bot, onInstalled: (name) => setState((s) => s.skills.some((x) => x.name === name) ? s : { ...s, skills: [...s.skills, { name, enabled: true }] }) }),
-    /* @__PURE__ */ jsx16(Field, { label: `Toolsets · ${on(state.toolsets)} of ${state.toolsets.length} on`, children: /* @__PURE__ */ jsx16("div", { className: "gbo-check-list", children: state.toolsets.map((t) => /* @__PURE__ */ jsx16(Check, { title: t.description || t.name, checked: Boolean(t.enabled), meta: t.tool_count ? String(t.tool_count) : void 0, onChange: (v) => setState((st) => toggleEntry(st, "toolsets", t.name, v)), children: t.name }, t.name)) }) }),
-    ToolsetPanel && state.toolsets.length ? (
-      // profile-config.tsx:404: the SDK's own per-toolset config (keys,
-      // model, post-setup) scoped to this bot's backend, when exported.
-      /* @__PURE__ */ jsxs15("details", { className: "gbo-section-card", children: [
-        /* @__PURE__ */ jsx16("summary", { className: "gbo-field-hint", style: { cursor: "pointer" }, children: "Configure a toolset (keys and options)" }),
-        /* @__PURE__ */ jsx16(Select, { label: "Toolset", value: toolsetOpen || state.toolsets[0].name, onChange: setToolsetOpen, options: state.toolsets.map((t) => [t.name, t.name]) }),
-        /* @__PURE__ */ jsx16(ToolsetPanel, { profile: backendScope(bot), toolset: toolsetOpen || state.toolsets[0].name })
-      ] })
-    ) : null,
-    /* @__PURE__ */ jsx16(Field, { label: "MCP servers", children: state.mcp.length ? /* @__PURE__ */ jsx16("div", { className: "gbo-check-list is-one", children: state.mcp.map((m) => {
-      const setup = mcpNeedsSetup(m);
-      return /* @__PURE__ */ jsxs15("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
-        /* @__PURE__ */ jsx16(
-          Check,
-          {
-            title: m.description || m.name,
-            checked: Boolean(m.enabled),
-            disabled: setup,
-            meta: setup ? `needs ${(m.requires || []).join(", ") || "sign-in"}` : m.fromCatalog ? m.installed ? "catalog · installed" : "catalog" : void 0,
-            onChange: (v) => setState((st) => toggleEntry(st, "mcp", m.name, v)),
-            children: m.name
-          }
-        ),
-        setup ? /* @__PURE__ */ jsx16(
-          McpSetup,
-          {
-            bot,
-            entry: m,
-            onDone: () => setState((st) => ({ ...toggleEntry(st, "mcp", m.name, true), mcp: st.mcp.map((x) => x.name === m.name ? { ...x, installed: true, enabled: true } : x) }))
-          }
-        ) : null
-      ] }, m.name);
-    }) }) : /* @__PURE__ */ jsx16("span", { className: "gbo-field-hint", children: "No MCP servers." }) }),
-    /* @__PURE__ */ jsx16(Field, { label: "SOUL (who the bot is)", hint: "The agent-messaging section is kept or added on save, as Bot Mode does.", children: /* @__PURE__ */ jsx16("textarea", { className: "gbo-textarea is-mono", value: state.soul, onChange: (e2) => setState((s) => ({ ...s, dirtySoul: true, soul: e2.target.value })) }) })
-  ] });
+function isBareLink(text3, href) {
+  const label = String(text3 ?? "").trim();
+  if (!label) return true;
+  const strip2 = (value) => String(value || "").trim().replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "").toLowerCase();
+  return strip2(label) === strip2(href) || /^(?:https?:\/\/|www\.)\S+$/i.test(label);
+}
+var srgbChannel = (value) => {
+  const c2 = value / 255;
+  return c2 <= 0.03928 ? c2 / 12.92 : ((c2 + 0.055) / 1.055) ** 2.4;
+};
+function luminance(hex) {
+  const value = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""))?.[1];
+  if (!value) return 0;
+  const [r, g, b2] = [0, 2, 4].map((i) => srgbChannel(parseInt(value.slice(i, i + 2), 16)));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b2;
+}
+function needsLightOnDark(hex) {
+  const bg = luminance("2a2a2a");
+  return (luminance(hex) + 0.05) / (bg + 0.05) < 3;
 }
 
-// src/ui/SlackSetup.tsx
-import * as React17 from "react";
+// src/ui/SourceLink.tsx
+import * as React11 from "react";
+
+// src/ui/brandMarks.ts
+var BRAND_MARKS = {
+  // Multicolour: the Simple Icons path split into its pieces, each in the
+  // brand palette (the logo people recognise in a bubble).
+  slack: { hex: "4A154B", inner: '<path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52z"/><path fill="#E01E5A" d="M6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/><path fill="#36C5F0" d="M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834z"/><path fill="#36C5F0" d="M8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z"/><path fill="#2EB67D" d="M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834z"/><path fill="#2EB67D" d="M17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312z"/><path fill="#ECB22E" d="M15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52z"/><path fill="#ECB22E" d="M15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>' },
+  gmail: { hex: "EA4335", inner: '<path fill="#4285F4" d="M1.636 21.003h3.819V11.73L0 7.64v11.727c0 .904.732 1.636 1.636 1.636z"/><path fill="#34A853" d="M18.545 21.003h3.819c.904 0 1.636-.732 1.636-1.636V7.64l-5.455 4.09z"/><path fill="#FBBC04" d="M18.545 4.64v7.09L24 7.64V5.457c0-2.023-2.309-3.178-3.927-1.964z"/><path fill="#EA4335" d="M5.455 11.73V4.64L12 9.548l6.545-4.91v7.09L12 16.64z"/><path fill="#C5221F" d="M0 5.457V7.64l5.455 4.09V4.64L3.927 3.493C2.309 2.28 0 3.434 0 5.457z"/>' },
+  googledocs: { hex: "4285F4", path: "M14.727 6.727H14V0H4.91c-.905 0-1.637.732-1.637 1.636v20.728c0 .904.732 1.636 1.636 1.636h14.182c.904 0 1.636-.732 1.636-1.636V6.727h-6zm-.545 10.455H7.09v-1.364h7.09v1.364zm2.727-3.273H7.091v-1.364h9.818v1.364zm0-3.273H7.091V9.273h9.818v1.363zM14.727 6h6l-6-6v6z" },
+  googlesheets: { hex: "34A853", path: "M11.318 12.545H7.91v-1.909h3.41v1.91zM14.728 0v6h6l-6-6zm1.363 10.636h-3.41v1.91h3.41v-1.91zm0 3.273h-3.41v1.91h3.41v-1.91zM20.727 6.5v15.864c0 .904-.732 1.636-1.636 1.636H4.909a1.636 1.636 0 0 1-1.636-1.636V1.636C3.273.732 4.005 0 4.909 0h9.318v6.5h6.5zm-3.273 2.773H6.545v7.909h10.91v-7.91zm-6.136 4.636H7.91v1.91h3.41v-1.91z" },
+  googleslides: { hex: "FBBC04", path: "M16.09 15.273H7.91v-4.637h8.18v4.637zm1.728-8.523h2.91v15.614c0 .904-.733 1.636-1.637 1.636H4.909a1.636 1.636 0 0 1-1.636-1.636V1.636C3.273.732 4.005 0 4.909 0h9.068v6.75h3.841zm-.363 2.523H6.545v7.363h10.91V9.273zm-2.728-5.979V6h6.001l-6-6v3.294z" },
+  googledrive: { hex: "4285F4", path: "M12.01 1.485c-2.082 0-3.754.02-3.743.047.01.02 1.708 3.001 3.774 6.62l3.76 6.574h3.76c2.081 0 3.753-.02 3.742-.047-.005-.02-1.708-3.001-3.775-6.62l-3.76-6.574zm-4.76 1.73a789.828 789.861 0 0 0-3.63 6.319L0 15.868l1.89 3.298 1.885 3.297 3.62-6.335 3.618-6.33-1.88-3.287C8.1 4.704 7.255 3.22 7.25 3.214zm2.259 12.653-.203.348c-.114.198-.96 1.672-1.88 3.287a423.93 423.948 0 0 1-1.698 2.97c-.01.026 3.24.042 7.222.042h7.244l1.796-3.157c.992-1.734 1.85-3.23 1.906-3.323l.104-.167h-7.249z" },
+  googlecalendar: { hex: "4285F4", path: "M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632zm-7.207 6.25v-.065c.272-.144.5-.349.687-.617s.279-.595.279-.982c0-.379-.099-.72-.3-1.025a2.05 2.05 0 0 0-.832-.714 2.703 2.703 0 0 0-1.197-.257c-.6 0-1.094.156-1.481.467-.386.311-.65.671-.793 1.078l1.085.452c.086-.249.224-.461.413-.633.189-.172.445-.257.767-.257.33 0 .602.088.816.264a.86.86 0 0 1 .322.703c0 .33-.12.589-.36.778-.24.19-.535.284-.886.284h-.567v1.085h.633c.407 0 .748.109 1.02.327.272.218.407.499.407.843 0 .336-.129.614-.387.832s-.565.327-.924.327c-.351 0-.651-.103-.897-.311-.248-.208-.422-.502-.521-.881l-1.096.452c.178.616.505 1.082.977 1.401.472.319.984.478 1.538.477a2.84 2.84 0 0 0 1.293-.291c.382-.193.684-.458.902-.794.218-.336.327-.72.327-1.149 0-.429-.115-.797-.344-1.105a2.067 2.067 0 0 0-.881-.689zm2.093-1.931l.602.913L15 10.045v5.744h1.187V8.446h-.827l-2.158 1.557zM22.105 0h-3.289v5.184H24V1.895A1.894 1.894 0 0 0 22.105 0zm-3.289 23.5l4.684-4.684h-4.684V23.5zM0 22.105C0 23.152.848 24 1.895 24h3.289v-5.184H0v3.289z" },
+  googlemeet: { hex: "00897B", path: "M5.53 2.13 0 7.75h5.53zm.398 0v5.62h7.608v3.65l5.47-4.45c-.014-1.22.031-2.25-.025-3.46-.148-1.09-1.287-1.47-2.236-1.36zM23.1 4.32c-.802.295-1.358.995-2.047 1.49-2.506 2.05-4.982 4.12-7.468 6.19 3.025 2.59 6.04 5.18 9.065 7.76 1.218.671 1.428-.814 1.328-1.64v-13a.828.828 0 0 0-.877-.825zM.038 8.15v7.7h5.53v-7.7zm13.577 8.1H6.008v5.62c3.864-.006 7.737.011 11.58-.009 1.02-.07 1.618-1.12 1.468-2.07v-2.51l-5.47-4.68v3.65zm-13.577 0c.02 1.44-.041 2.88.033 4.31.162.948 1.158 1.43 2.047 1.31h3.464v-5.62z" },
+  github: { hex: "181717", path: "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" },
+  notion: { hex: "000000", path: "M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.934.653.934 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.047-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.447-1.632z" },
+  linear: { hex: "5E6AD2", path: "M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z" },
+  figma: { hex: "F24E1E", path: "M15.852 8.981h-4.588V0h4.588c2.476 0 4.49 2.014 4.49 4.49s-2.014 4.491-4.49 4.491zM12.735 7.51h3.117c1.665 0 3.019-1.355 3.019-3.019s-1.355-3.019-3.019-3.019h-3.117V7.51zm0 1.471H8.148c-2.476 0-4.49-2.014-4.49-4.49S5.672 0 8.148 0h4.588v8.981zm-4.587-7.51c-1.665 0-3.019 1.355-3.019 3.019s1.354 3.02 3.019 3.02h3.117V1.471H8.148zm4.587 15.019H8.148c-2.476 0-4.49-2.014-4.49-4.49s2.014-4.49 4.49-4.49h4.588v8.98zM8.148 8.981c-1.665 0-3.019 1.355-3.019 3.019s1.355 3.019 3.019 3.019h3.117V8.981H8.148zM8.172 24c-2.489 0-4.515-2.014-4.515-4.49s2.014-4.49 4.49-4.49h4.588v4.441c0 2.503-2.047 4.539-4.563 4.539zm-.024-7.51a3.023 3.023 0 0 0-3.019 3.019c0 1.665 1.365 3.019 3.044 3.019 1.705 0 3.093-1.376 3.093-3.068v-2.97H8.148zm7.704 0h-.098c-2.476 0-4.49-2.014-4.49-4.49s2.014-4.49 4.49-4.49h.098c2.476 0 4.49 2.014 4.49 4.49s-2.014 4.49-4.49 4.49zm-.097-7.509c-1.665 0-3.019 1.355-3.019 3.019s1.355 3.019 3.019 3.019h.098c1.665 0 3.019-1.355 3.019-3.019s-1.355-3.019-3.019-3.019h-.098z" },
+  zoom: { hex: "0B5CFF", path: "M5.033 14.649H.743a.74.74 0 0 1-.686-.458.74.74 0 0 1 .16-.808L3.19 10.41H1.06A1.06 1.06 0 0 1 0 9.35h3.957c.301 0 .57.18.686.458a.74.74 0 0 1-.161.808L1.51 13.59h2.464c.585 0 1.06.475 1.06 1.06zM24 11.338c0-1.14-.927-2.066-2.066-2.066-.61 0-1.158.265-1.537.686a2.061 2.061 0 0 0-1.536-.686c-1.14 0-2.066.926-2.066 2.066v3.311a1.06 1.06 0 0 0 1.06-1.06v-2.251a1.004 1.004 0 0 1 2.013 0v2.251c0 .586.474 1.06 1.06 1.06v-3.311a1.004 1.004 0 0 1 2.012 0v2.251c0 .586.475 1.06 1.06 1.06zM16.265 12a2.728 2.728 0 1 1-5.457 0 2.728 2.728 0 0 1 5.457 0zm-1.06 0a1.669 1.669 0 1 0-3.338 0 1.669 1.669 0 0 0 3.338 0zm-4.82 0a2.728 2.728 0 1 1-5.458 0 2.728 2.728 0 0 1 5.457 0zm-1.06 0a1.669 1.669 0 1 0-3.338 0 1.669 1.669 0 0 0 3.338 0z" },
+  dropbox: { hex: "0061FF", path: "M6 1.807L0 5.629l6 3.822 6.001-3.822L6 1.807zM18 1.807l-6 3.822 6 3.822 6-3.822-6-3.822zM0 13.274l6 3.822 6.001-3.822L6 9.452l-6 3.822zM18 9.452l-6 3.822 6 3.822 6-3.822-6-3.822zM6 18.371l6.001 3.822 6-3.822-6-3.822L6 18.371z" },
+  zoho: { hex: "E42527", path: "M8.66 6.897a1.299 1.299 0 0 0-1.205.765l-.642 1.44-.062-.385A1.291 1.291 0 0 0 5.27 7.648l-4.185.678A1.291 1.291 0 0 0 .016 9.807l.678 4.18a1.293 1.293 0 0 0 1.27 1.087c.074 0 .143-.01.216-.017l4.18-.678c.436-.07.784-.351.96-.723l2.933 1.307a1.304 1.304 0 0 0 .988.026c.321-.12.575-.365.716-.678l.28-.629.038.276a1.297 1.297 0 0 0 1.455 1.103l3.712-.501a1.29 1.29 0 0 0 1.03.514h4.236c.713 0 1.29-.58 1.291-1.291V9.545c0-.712-.58-1.291-1.291-1.291h-4.236c-.079 0-.155.008-.23.022a1.309 1.309 0 0 0-.275-.288c-.275-.21-.614-.3-.958-.253l-4.197.571c-.155.021-.3.07-.432.14L9.159 7.01a1.27 1.27 0 0 0-.499-.113zm-.025.705c.077 0 .159.013.24.052l2.971 1.324c-.128.238-.18.508-.142.782l.357 2.596h.002l-.745 1.672a.59.59 0 0 1-.777.296l-3.107-1.385-.004-.041-.41-2.526L8.1 7.95a.589.589 0 0 1 .536-.348zm-3.159.733c.125 0 .245.039.343.112.13.09.21.227.237.382l.234 1.446-.56 1.259a1.27 1.27 0 0 0-.026.987c.12.322.364.575.678.717l.295.131a.585.585 0 0 1-.428.314l-4.185.678a.59.59 0 0 1-.674-.485l-.678-4.18a.588.588 0 0 1 .485-.674l4.185-.678c.03-.004.064-.01.094-.01zm11.705.09a.59.59 0 0 1 .415.173 1.287 1.287 0 0 0-.416.947v4.237c0 .033.003.065.005.097l-3.55.482a.586.586 0 0 1-.66-.502l-.191-1.403.899-2.017a1.29 1.29 0 0 0-.333-1.5l3.754-.51c.026-.004.051-.004.077-.004zm1.3.532h4.227c.326 0 .588.266.588.588v4.237a.589.589 0 0 1-.588.588h-4.237a.564.564 0 0 1-.12-.013c.47-.246.758-.765.684-1.318zm-5.988.309.254.113c.296.133.43.48.296.777l-.432.97-.207-1.465a.58.58 0 0 1 .09-.395zm5.39.538.453 3.325a.583.583 0 0 1-.453.65zM6.496 11.545l.17 1.052a.588.588 0 0 1-.293-.776zm3.985 4.344a.588.588 0 0 0-.612.603c0 .358.244.61.601.61a.582.582 0 0 0 .607-.608c0-.35-.242-.605-.596-.605zm5.545 0a.588.588 0 0 0-.612.603c0 .358.245.61.602.61a.582.582 0 0 0 .606-.608c0-.35-.24-.605-.596-.605zm-8.537.018a.047.047 0 0 0-.048.047v.085c0 .026.021.047.048.047h.52l-.623.9a.052.052 0 0 0-.009.027v.027c0 .026.021.047.048.047h.815a.047.047 0 0 0 .047-.047v-.085a.047.047 0 0 0-.047-.047h-.55l.606-.9a.05.05 0 0 0 .008-.026v-.028a.047.047 0 0 0-.047-.047zm5.303 0a.047.047 0 0 0-.047.047v1.086c0 .026.02.047.047.047h.135a.047.047 0 0 0 .047-.047v-.454h.545v.454c0 .026.02.047.047.047h.134a.047.047 0 0 0 .047-.047v-1.086a.047.047 0 0 0-.047-.047h-.134a.047.047 0 0 0-.047.047v.453h-.545v-.453a.047.047 0 0 0-.047-.047zm-2.324.164c.25 0 .372.194.372.425 0 .219-.109.425-.358.426-.242 0-.375-.197-.375-.419 0-.235.108-.432.36-.432zm5.545 0c.25 0 .372.194.372.425 0 .219-.108.425-.358.426-.242 0-.374-.197-.374-.419 0-.235.108-.432.36-.432z" },
+  stripe: { hex: "635BFF", path: "M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.594-7.305h.003z" },
+  hubspot: { hex: "FF7A59", path: "M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z" },
+  airtable: { hex: "18BFFF", path: "M11.992 1.966c-.434 0-.87.086-1.28.257L1.779 5.917c-.503.208-.49.908.012 1.116l8.982 3.558a3.266 3.266 0 0 0 2.454 0l8.982-3.558c.503-.196.503-.908.012-1.116l-8.957-3.694a3.255 3.255 0 0 0-1.272-.257zM23.4 8.056a.589.589 0 0 0-.222.045l-10.012 3.877a.612.612 0 0 0-.38.564v8.896a.6.6 0 0 0 .821.552L23.62 18.1a.583.583 0 0 0 .38-.551V8.653a.6.6 0 0 0-.6-.596zM.676 8.095a.644.644 0 0 0-.48.19C.086 8.396 0 8.53 0 8.69v8.355c0 .442.515.737.908.54l6.27-3.006.307-.147 2.969-1.436c.466-.22.43-.908-.061-1.092L.883 8.138a.57.57 0 0 0-.207-.044z" },
+  trello: { hex: "0052CC", path: "M21.147 0H2.853A2.86 2.86 0 000 2.853v18.294A2.86 2.86 0 002.853 24h18.294A2.86 2.86 0 0024 21.147V2.853A2.86 2.86 0 0021.147 0zM10.34 17.287a.953.953 0 01-.953.953h-4a.954.954 0 01-.954-.953V5.38a.953.953 0 01.954-.953h4a.954.954 0 01.953.953zm9.233-5.467a.944.944 0 01-.953.947h-4a.947.947 0 01-.953-.947V5.38a.953.953 0 01.953-.953h4a.954.954 0 01.953.953z" },
+  asana: { hex: "F06A6A", path: "M18.78 12.653c-2.882 0-5.22 2.336-5.22 5.22s2.338 5.22 5.22 5.22 5.22-2.34 5.22-5.22-2.336-5.22-5.22-5.22zm-13.56 0c-2.88 0-5.22 2.337-5.22 5.22s2.338 5.22 5.22 5.22 5.22-2.338 5.22-5.22-2.336-5.22-5.22-5.22zm12-6.525c0 2.883-2.337 5.22-5.22 5.22-2.882 0-5.22-2.337-5.22-5.22 0-2.88 2.338-5.22 5.22-5.22 2.883 0 5.22 2.34 5.22 5.22z" },
+  calendly: { hex: "006BFF", path: "M19.655 14.262c.281 0 .557.023.828.064 0 .005-.005.01-.005.014-.105.267-.234.534-.381.786l-1.219 2.106c-1.112 1.936-3.177 3.127-5.411 3.127h-2.432c-2.23 0-4.294-1.191-5.412-3.127l-1.218-2.106a6.251 6.251 0 0 1 0-6.252l1.218-2.106C6.736 4.832 8.8 3.641 11.035 3.641h2.432c2.23 0 4.294 1.191 5.411 3.127l1.219 2.106c.147.252.271.519.381.786 0 .004.005.009.005.014-.267.041-.543.064-.828.064-1.816 0-2.501-.607-3.291-1.306-.764-.676-1.711-1.517-3.44-1.517h-1.029c-1.251 0-2.387.455-3.2 1.278-.796.805-1.233 1.904-1.233 3.099v1.411c0 1.196.437 2.295 1.233 3.099.813.823 1.949 1.278 3.2 1.278h1.034c1.729 0 2.676-.841 3.439-1.517.791-.703 1.471-1.306 3.287-1.301Zm.005-3.237c.399 0 .794-.036 1.179-.11-.002-.004-.002-.01-.002-.014-.073-.414-.193-.823-.349-1.218.731-.12 1.407-.396 1.986-.819 0-.004-.005-.013-.005-.018-.331-1.085-.832-2.101-1.489-3.03-.649-.915-1.435-1.719-2.331-2.395-1.867-1.398-4.088-2.138-6.428-2.138-1.448 0-2.855.28-4.175.841-1.273.543-2.423 1.315-3.407 2.299S2.878 6.552 2.341 7.83c-.557 1.324-.842 2.726-.842 4.175 0 1.448.281 2.855.842 4.174.542 1.274 1.314 2.423 2.298 3.407s2.129 1.761 3.407 2.299c1.324.556 2.727.841 4.175.841 2.34 0 4.561-.74 6.428-2.137a10.815 10.815 0 0 0 2.331-2.396c.652-.929 1.158-1.949 1.489-3.03 0-.004.005-.014.005-.018-.579-.423-1.255-.699-1.986-.819.161-.395.276-.804.349-1.218.005-.009.005-.014.005-.023.869.166 1.692.506 2.404 1.035.685.505.552 1.075.446 1.416C22.184 20.437 17.619 24 12.221 24c-6.625 0-12-5.375-12-12s5.37-12 12-12c5.398 0 9.963 3.563 11.471 8.464.106.341.239.915-.446 1.421-.717.529-1.535.873-2.404 1.034.128.716.128 1.45 0 2.166-.387-.074-.782-.11-1.182-.11-4.184 0-3.968 2.823-6.736 2.823h-1.029c-1.899 0-3.15-1.357-3.15-3.095v-1.411c0-1.738 1.251-3.094 3.15-3.094h1.034c2.768 0 2.552 2.823 6.731 2.827Z" },
+  loom: { hex: "625DF5", path: "M24 10.665h-7.018l6.078-3.509-1.335-2.312-6.078 3.509 3.508-6.077L16.843.94l-3.508 6.077V0h-2.67v7.018L7.156.94 4.844 2.275l3.509 6.077-6.078-3.508L.94 7.156l6.078 3.509H0v2.67h7.017L.94 16.844l1.335 2.313 6.077-3.508-3.509 6.077 2.312 1.335 3.509-6.078V24h2.67v-7.017l3.508 6.077 2.312-1.335-3.509-6.078 6.078 3.509 1.335-2.313-6.077-3.508h7.017v-2.67H24zm-12 4.966a3.645 3.645 0 1 1 0-7.29 3.645 3.645 0 0 1 0 7.29z" },
+  youtube: { hex: "FF0000", path: "M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" },
+  x: { hex: "000000", path: "M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z" },
+  outlook: {
+    hex: "0078D4",
+    inner: '<rect x="1" y="1" width="22" height="22" rx="5" fill="currentColor"/><circle cx="12" cy="12" r="5.25" fill="none" stroke="#fff" stroke-width="2.6"/>'
+  },
+  office365: {
+    hex: "D83B01",
+    inner: '<rect x="1" y="1" width="22" height="22" rx="5" fill="currentColor"/><rect x="6" y="6" width="5" height="5" rx="1" fill="#fff"/><rect x="13" y="6" width="5" height="5" rx="1" fill="#fff"/><rect x="6" y="13" width="5" height="5" rx="1" fill="#fff"/><rect x="13" y="13" width="5" height="5" rx="1" fill="#fff"/>'
+  },
+  linkedin: {
+    hex: "0A66C2",
+    inner: '<rect x="1" y="1" width="22" height="22" rx="4" fill="currentColor"/><circle cx="7.2" cy="7.2" r="1.8" fill="#fff"/><rect x="5.6" y="10" width="3.2" height="8.5" fill="#fff"/><path d="M11 10h3v1.3c.6-1 1.7-1.6 3-1.6 2.2 0 3.3 1.4 3.3 3.9v4.9h-3.2v-4.4c0-1.1-.4-1.8-1.4-1.8s-1.5.7-1.5 1.8v4.4H11z" fill="#fff"/>'
+  }
+};
 
 // src/core/slack.js
 var SLACK_PLATFORM = "slack";
@@ -57602,30 +56707,1545 @@ function enableSlackProvisioning(bot) {
   return bootstrapSlackConnect(botRest, botScope(bot));
 }
 
-// src/ui/SlackConnect.tsx
+// src/ui/SourceLink.tsx
+import { jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
+async function openSource(urls) {
+  const list = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
+  const open = app.ctx?.os?.openExternal;
+  if (typeof open === "function") {
+    for (const url of list) {
+      try {
+        if (await open.call(app.ctx.os, url) !== false) return;
+      } catch {
+      }
+    }
+  }
+  const web = list.find((url) => /^https?:\/\//i.test(url));
+  if (web) openExternalLink(web);
+}
+function GlobeMark() {
+  return /* @__PURE__ */ jsxs12("svg", { viewBox: "0 0 24 24", width: "14", height: "14", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", focusable: "false", children: [
+    /* @__PURE__ */ jsx13("circle", { cx: "12", cy: "12", r: "9" }),
+    /* @__PURE__ */ jsx13("path", { d: "M3 12h18M12 3c2.6 2.7 3.8 5.7 3.8 9s-1.2 6.3-3.8 9M12 3c-2.6 2.7-3.8 5.7-3.8 9s1.2 6.3 3.8 9" })
+  ] });
+}
+function SourceIcon({ id }) {
+  const mark = BRAND_MARKS[id];
+  if (!mark) {
+    return /* @__PURE__ */ jsx13("span", { className: "gbo-src-icon is-web", "aria-hidden": "true", children: /* @__PURE__ */ jsx13(GlobeMark, {}) });
+  }
+  const dark = Boolean(mark.path) && needsLightOnDark(mark.hex);
+  const style = { "--gbo-src-color": `#${mark.hex}` };
+  return /* @__PURE__ */ jsx13("span", { className: `gbo-src-icon${dark ? " is-light-on-dark" : ""}`, "data-service": id, "aria-hidden": "true", style, children: mark.path ? /* @__PURE__ */ jsx13("svg", { viewBox: "0 0 24 24", width: "14", height: "14", fill: "currentColor", focusable: "false", children: /* @__PURE__ */ jsx13("path", { d: mark.path }) }) : /* @__PURE__ */ jsx13("svg", { viewBox: "0 0 24 24", width: "14", height: "14", focusable: "false", dangerouslySetInnerHTML: { __html: String(mark.inner || "") } }) });
+}
+function SourceLink({ href, children }) {
+  const link = sourceLinkFor(href);
+  if (!link) return null;
+  const text3 = typeof children === "string" || typeof children === "number" ? String(children) : childText(children);
+  const label = isBareLink(text3, href) ? bareLinkLabel(href) : children;
+  return /* @__PURE__ */ jsxs12(
+    "a",
+    {
+      className: "gbo-src",
+      href: link.href,
+      title: link.href,
+      "data-service": link.service.id,
+      rel: "noopener noreferrer",
+      onClick: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void openSource(link.opens);
+      },
+      onAuxClick: (event) => {
+        if (event.button !== 1) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void openSource(link.opens);
+      },
+      children: [
+        /* @__PURE__ */ jsx13(SourceIcon, { id: link.service.id }),
+        /* @__PURE__ */ jsx13("span", { className: "gbo-src-text", children: label })
+      ]
+    }
+  );
+}
+function childText(node) {
+  if (node === null || node === void 0 || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(childText).join("");
+  if (React11.isValidElement(node)) return childText(node.props?.children);
+  return "";
+}
+var isCode = (el) => el.type === "code" || el.type === "pre" || el.props?.["data-gbo-code"] !== void 0;
+function decorate(children) {
+  let changed = false;
+  const next = React11.Children.map(children, (child) => {
+    if (!React11.isValidElement(child) || isCode(child)) return child;
+    const props = child.props;
+    if (typeof props?.href === "string") {
+      if (!sourceLinkFor(props.href)) return child;
+      changed = true;
+      return /* @__PURE__ */ jsx13(SourceLink, { href: props.href, children: props.children }, child.key ?? void 0);
+    }
+    if (props?.children === void 0 || typeof props.children === "string") return child;
+    const inner = decorate(props.children);
+    if (inner === props.children) return child;
+    changed = true;
+    return React11.cloneElement(child, void 0, inner);
+  });
+  return changed ? next : children;
+}
+var decorateSourceLinks = (children) => decorate(children);
+var SVG_NS = "http://www.w3.org/2000/svg";
+var HOST_LINKS = ":is(h1, h2, h3, h4, h5, h6, th) a[href]";
+function iconNode(doc, id) {
+  const span = doc.createElement("span");
+  span.setAttribute("aria-hidden", "true");
+  span.setAttribute("data-gbo-src-icon", "");
+  const svg = doc.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("focusable", "false");
+  const mark = BRAND_MARKS[id];
+  if (!mark) {
+    span.className = "gbo-src-icon is-web";
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.8");
+    svg.setAttribute("stroke-linecap", "round");
+    for (const d2 of ["M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0", "M3 12h18M12 3c2.6 2.7 3.8 5.7 3.8 9s-1.2 6.3-3.8 9M12 3c-2.6 2.7-3.8 5.7-3.8 9s1.2 6.3 3.8 9"]) {
+      const path = doc.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", d2);
+      svg.appendChild(path);
+    }
+  } else {
+    span.className = `gbo-src-icon${mark.path && needsLightOnDark(mark.hex) ? " is-light-on-dark" : ""}`;
+    span.setAttribute("data-service", id);
+    span.style.setProperty("--gbo-src-color", `#${mark.hex}`);
+    if (mark.path) {
+      svg.setAttribute("fill", "currentColor");
+      const path = doc.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", mark.path);
+      svg.appendChild(path);
+    } else {
+      svg.innerHTML = String(mark.inner || "");
+    }
+  }
+  span.appendChild(svg);
+  return span;
+}
+var PART = "[data-gbo-src-part]";
+function ownText(anchor) {
+  let text3 = "";
+  anchor.childNodes.forEach((node) => {
+    if (node.nodeType === 1 && node.matches(PART)) return;
+    text3 += node.textContent || "";
+  });
+  return text3;
+}
+function strip(anchor) {
+  anchor.querySelectorAll(`:scope > ${PART}`).forEach((node) => node.remove());
+  for (const name of ["data-gbo-src-host", "data-service", "aria-label", "title"]) anchor.removeAttribute(name);
+  anchor.classList.remove("gbo-src-host", "is-bare");
+  anchor.style.removeProperty("--gbo-src-label-size");
+}
+function enhanceSourceLinks(root) {
+  if (!root?.querySelectorAll) return 0;
+  let count = 0;
+  for (const anchor of Array.from(root.querySelectorAll(HOST_LINKS))) {
+    if (anchor.classList.contains("gbo-src") || anchor.closest("code, pre, .gbo-code")) continue;
+    const href = anchor.getAttribute("href") || "";
+    const link = sourceLinkFor(href);
+    if (!link) {
+      if (anchor.hasAttribute("data-gbo-src-host")) {
+        strip(anchor);
+        count += 1;
+      }
+      continue;
+    }
+    const text3 = ownText(anchor);
+    const label = isBareLink(text3, href) ? bareLinkLabel(href) : "";
+    const icon = anchor.firstElementChild;
+    const labelNode = anchor.querySelector(":scope > .gbo-src-label");
+    const current = anchor.getAttribute("data-gbo-src-host") === href && anchor.firstChild === icon && icon?.hasAttribute("data-gbo-src-icon") && (icon.getAttribute("data-service") || "web") === (BRAND_MARKS[link.service.id] ? link.service.id : "web") && (label ? labelNode?.textContent === label : !labelNode);
+    if (current) continue;
+    strip(anchor);
+    const doc = anchor.ownerDocument;
+    anchor.setAttribute("data-gbo-src-host", href);
+    anchor.setAttribute("data-service", link.service.id);
+    anchor.classList.add("gbo-src-host");
+    anchor.title = link.href;
+    const iconEl = iconNode(doc, link.service.id);
+    iconEl.setAttribute("data-gbo-src-part", "");
+    if (label) {
+      const size = doc.defaultView?.getComputedStyle?.(anchor).fontSize || "";
+      if (size && size !== "0px") anchor.style.setProperty("--gbo-src-label-size", size);
+      const labelEl = doc.createElement("span");
+      labelEl.className = "gbo-src-label";
+      labelEl.setAttribute("data-gbo-src-part", "");
+      labelEl.setAttribute("aria-hidden", "true");
+      labelEl.textContent = label;
+      anchor.appendChild(labelEl);
+      anchor.setAttribute("aria-label", label);
+      anchor.classList.add("is-bare");
+    }
+    anchor.insertBefore(iconEl, anchor.firstChild);
+    count += 1;
+  }
+  return count;
+}
+function onSourceClickCapture(event) {
+  if (event.type === "auxclick" && event.button !== 1) return;
+  const anchor = event.target?.closest?.("a[data-gbo-src-host]");
+  if (!anchor) return;
+  const link = sourceLinkFor(anchor.getAttribute("href") || "");
+  if (!link) return;
+  event.preventDefault();
+  event.stopPropagation();
+  void openSource(link.opens);
+}
+function useHostSourceLinks(ref) {
+  React11.useLayoutEffect(() => {
+    enhanceSourceLinks(ref.current);
+  });
+  React11.useLayoutEffect(() => {
+    const el = ref.current;
+    const Observer = globalThis.MutationObserver;
+    if (!el || typeof Observer !== "function") return void 0;
+    const observer2 = new Observer(() => {
+      enhanceSourceLinks(el);
+      observer2.takeRecords();
+    });
+    observer2.observe(el, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["href"] });
+    return () => observer2.disconnect();
+  }, [ref]);
+}
+
+// src/ui/Media.tsx
+import { Fragment as Fragment8, jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
+function saveDataUrl(dataUrl, name) {
+  try {
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = name;
+    link.rel = "noopener noreferrer";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } catch {
+  }
+}
+var MEDIA_IMAGE_MAX_PX = 360;
+var READY_MAX = 60;
+var readyMedia = /* @__PURE__ */ new Map();
+function rememberMedia(key, value) {
+  readyMedia.delete(key);
+  readyMedia.set(key, value);
+  while (readyMedia.size > READY_MAX) readyMedia.delete(readyMedia.keys().next().value);
+}
+function mediaBox(width, height) {
+  if (!(Number(width) > 0) || !(Number(height) > 0)) return null;
+  const w = Math.min(Number(width), MEDIA_IMAGE_MAX_PX);
+  return { width: Math.round(w), height: Math.round(w * Number(height) / Number(width)) };
+}
+function decodeSize(src) {
+  const Img = globalThis.window?.Image ?? globalThis.Image;
+  if (typeof Img !== "function") return Promise.resolve({});
+  let img;
+  try {
+    img = new Img();
+  } catch {
+    return Promise.resolve({});
+  }
+  if (typeof img.decode !== "function") return Promise.resolve({});
+  img.src = src;
+  const read = () => img.naturalWidth > 0 && img.naturalHeight > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : {};
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({}), 1500);
+    img.decode().then(
+      () => {
+        clearTimeout(timer);
+        resolve(read());
+      },
+      () => {
+        clearTimeout(timer);
+        resolve({});
+      }
+    );
+  });
+}
+function OwnerMedia({ bot, item }) {
+  const route = rowKey(bot);
+  const cacheKey = `${route}|${item.path}`;
+  const cached2 = !item.remote ? readyMedia.get(cacheKey) : void 0;
+  const [ready, setReady] = React12.useState(cached2 || null);
+  const [error, setError] = React12.useState("");
+  const botRef = React12.useRef(bot);
+  botRef.current = bot;
+  const wantsRead = !item.remote && item.kind !== "file";
+  React12.useEffect(() => {
+    if (!wantsRead) return void 0;
+    const hit = readyMedia.get(cacheKey);
+    if (hit) {
+      setReady((current) => current?.src === hit.src ? current : hit);
+      return void 0;
+    }
+    let live = true;
+    readBotMedia(botRef.current, item.path).then(async (url) => {
+      const size = item.kind === "image" && url ? await decodeSize(url) : {};
+      if (!live) return;
+      const value = { src: url, ...size };
+      if (url) rememberMedia(cacheKey, value);
+      setReady(value);
+    }).catch((err2) => {
+      if (live) setError(String(err2?.message || err2));
+    });
+    return () => {
+      live = false;
+    };
+  }, [cacheKey, item.path, item.kind, wantsRead]);
+  const src = ready?.src || "";
+  if (item.kind === "image" && item.remote && !src) {
+    const host3 = remoteImageHost(item.path);
+    return /* @__PURE__ */ jsxs13("button", { type: "button", className: "gbo-media-remote", title: item.path, onClick: () => setReady({ src: item.path }), children: [
+      /* @__PURE__ */ jsxs13("span", { className: "gbo-media-remote-host", children: [
+        "Image from ",
+        host3
+      ] }),
+      /* @__PURE__ */ jsx14("span", { "aria-hidden": "true", children: " · " }),
+      /* @__PURE__ */ jsx14("span", { className: "gbo-media-remote-load", children: "Load" })
+    ] });
+  }
+  if (item.kind === "image") {
+    if (error) return /* @__PURE__ */ jsxs13("span", { className: "gbo-media-file is-error", title: error, children: [
+      item.name,
+      ": not available"
+    ] });
+    const box = mediaBox(ready?.width, ready?.height);
+    return src ? /* @__PURE__ */ jsx14("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx14(
+      "img",
+      {
+        alt: item.name,
+        src,
+        loading: "lazy",
+        ...box ? { width: box.width, height: box.height, style: { aspectRatio: `${box.width} / ${box.height}` } } : {}
+      }
+    ) }) : /* @__PURE__ */ jsx14("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
+  }
+  if (item.kind === "audio" || item.kind === "video") {
+    if (src) {
+      return item.kind === "audio" ? /* @__PURE__ */ jsx14("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx14("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
+    }
+    if (!error) return /* @__PURE__ */ jsx14("span", { className: `gbo-media-${item.kind} is-loading`, role: "img", "aria-label": `Loading ${item.name}` });
+  }
+  return /* @__PURE__ */ jsx14(FileCard, { bot, item });
+}
+function FileCard({ bot, item }) {
+  const [state, setState] = React12.useState({ status: "idle" });
+  const [viewer, setViewer] = React12.useState(null);
+  const live = React12.useRef(true);
+  const main = React12.useRef(null);
+  React12.useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const read = () => readBotMedia(bot, item.path).then((url) => {
+    if (!url) throw new Error(`Could not read ${item.name}`);
+    if (live.current) setState({ status: "ready", size: dataUrlBytes(url) ?? void 0 });
+    return url;
+  }).catch((err2) => {
+    if (live.current) setState({ status: "error", error: String(err2?.message || err2) });
+    return null;
+  });
+  const peek = () => {
+    if (state.status !== "idle") return;
+    setState({ status: "loading" });
+    void read();
+  };
+  const save = () => {
+    void read().then((url) => {
+      if (url) saveDataUrl(url, item.name);
+    });
+  };
+  const open = () => {
+    if (state.status === "error") return;
+    setViewer({ url: null });
+    void readBotMedia(bot, item.path).then(
+      (url) => {
+        if (!live.current) return;
+        if (!url) {
+          setViewer((current) => current ? { url: null, error: `Could not read ${item.name}` } : current);
+          return;
+        }
+        setState({ status: "ready", size: dataUrlBytes(url) ?? void 0 });
+        setViewer((current) => current ? { url } : current);
+      },
+      (err2) => {
+        if (!live.current) return;
+        const error = String(err2?.message || err2);
+        setState({ status: "error", error });
+        setViewer((current) => current ? { url: null, error } : current);
+      }
+    );
+  };
+  const close = () => {
+    setViewer(null);
+    setTimeout(() => main.current?.focus(), 0);
+  };
+  const missing = state.status === "error";
+  const meta = missing ? "Not available" : state.size !== void 0 ? formatBytes(state.size) : "";
+  const icon = fileIconKind(item.name);
+  return /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    /* @__PURE__ */ jsxs13(
+      "div",
+      {
+        className: `gbo-file-card${missing ? " is-error" : ""}`,
+        "data-path": item.path,
+        onMouseEnter: peek,
+        onFocus: peek,
+        children: [
+          /* @__PURE__ */ jsxs13(
+            "button",
+            {
+              ref: main,
+              type: "button",
+              className: "gbo-file-card-main",
+              title: missing ? `${item.name}: ${state.error || "not available"}` : item.name,
+              "aria-label": missing ? `${item.name}, not available` : `Open ${item.name}`,
+              "aria-disabled": missing || void 0,
+              "aria-haspopup": "dialog",
+              onClick: open,
+              children: [
+                /* @__PURE__ */ jsx14("span", { className: `gbo-file-card-icon is-${icon}`, children: /* @__PURE__ */ jsx14(FileTile, { kind: icon }) }),
+                /* @__PURE__ */ jsxs13("span", { className: "gbo-file-card-text", children: [
+                  /* @__PURE__ */ jsx14("span", { className: "gbo-file-card-name", children: middleTruncate(item.name) }),
+                  /* @__PURE__ */ jsx14("span", { className: "gbo-file-card-size", children: meta || " " })
+                ] })
+              ]
+            }
+          ),
+          missing ? null : /* @__PURE__ */ jsx14("button", { type: "button", className: "gbo-file-card-save", "aria-label": `Download ${item.name}`, title: "Download", onClick: save, children: /* @__PURE__ */ jsx14(IconDownload, {}) })
+        ]
+      }
+    ),
+    viewer ? /* @__PURE__ */ jsx14(FileViewer, { name: item.name, file: viewer, onSave: save, onClose: close }) : null
+  ] });
+}
+function FileCards({ bot, files }) {
+  if (!files.length) return null;
+  return /* @__PURE__ */ jsx14("div", { className: "gbo-files", children: files.map((item) => /* @__PURE__ */ jsx14(FileCard, { bot, item }, item.path)) });
+}
+function MediaStrip({ bot, media }) {
+  const shown = media.filter((item) => item.kind !== "file");
+  if (!shown.length) return null;
+  return /* @__PURE__ */ jsx14("div", { className: "gbo-media", children: shown.map((item) => /* @__PURE__ */ jsx14(OwnerMedia, { bot, item }, item.path)) });
+}
+function memo2(component, equal) {
+  return typeof React12.memo === "function" ? React12.memo(component, equal) : component;
+}
+var MemoMarkdown = memo2(Markdown);
+var sameBot = (a2, b2) => a2 === b2 || rowKey(a2) === rowKey(b2);
+var BotText = memo2(
+  function BotText2({ bot, text: text3 }) {
+    const { text: clean, media } = React12.useMemo(() => extractMedia(text3), [text3]);
+    const parts = React12.useMemo(() => clean ? splitFences(clean) : [], [clean]);
+    return /* @__PURE__ */ jsxs13(Fragment8, { children: [
+      parts.map(
+        (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx14(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx14(MemoMarkdown, { text: protectSlackAppLinks(part.text), decorateText: decorateSourceLinks }, index)
+      ),
+      /* @__PURE__ */ jsx14(MediaStrip, { bot, media })
+    ] });
+  },
+  (a2, b2) => a2.text === b2.text && sameBot(a2.bot, b2.bot)
+);
+function sameNode(a2, b2) {
+  if (a2 === b2) return true;
+  if (!React12.isValidElement(a2) || !React12.isValidElement(b2)) return false;
+  if (a2.type !== b2.type || a2.key !== b2.key) return false;
+  const pa = a2.props || {};
+  const pb = b2.props || {};
+  const keys2 = Object.keys(pa);
+  if (keys2.length !== Object.keys(pb).length) return false;
+  return keys2.every((key) => {
+    const x = pa[key];
+    const y = pb[key];
+    return x === y || (typeof x !== "object" || x === null) && (typeof y !== "object" || y === null) && Object.is(x, y) || key === "children" && sameNode(x, y);
+  });
+}
+function BotProseView({ bot, text: text3, pos, time, streaming = false }) {
+  const { text: clean, media } = React12.useMemo(() => extractMedia(text3), [text3]);
+  const files = media.filter((item) => item.kind === "file");
+  const bubble = Boolean(clean) || media.length > files.length;
+  const prose = React12.useRef(null);
+  useHostSourceLinks(prose);
+  return /* @__PURE__ */ jsxs13(Fragment8, { children: [
+    bubble ? /* @__PURE__ */ jsxs13("div", { className: "bubble-wrap is-left", children: [
+      /* @__PURE__ */ jsx14("div", { className: `bubble is-agent${pos}${streaming ? " is-streaming" : ""}`, children: /* @__PURE__ */ jsx14("div", { className: "md", ref: prose, onClickCapture: onSourceClickCapture, onAuxClickCapture: onSourceClickCapture, children: /* @__PURE__ */ jsx14(BotText, { bot, text: text3 }) }) }),
+      time
+    ] }) : null,
+    /* @__PURE__ */ jsx14(FileCards, { bot, files })
+  ] });
+}
+var BotProse = memo2(
+  BotProseView,
+  (a2, b2) => a2.text === b2.text && a2.pos === b2.pos && Boolean(a2.streaming) === Boolean(b2.streaming) && sameBot(a2.bot, b2.bot) && sameNode(a2.time, b2.time)
+);
+
+// src/ui/EmailDraft.tsx
+import { jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
+var fieldsOf = (draft) => ({
+  to: addressText(draft?.to),
+  cc: addressText(draft?.cc),
+  subject: String(draft?.subject || ""),
+  body: String(draft?.body || "")
+});
+function Body2({ value, onChange, disabled }) {
+  const ref = React13.useRef(null);
+  React13.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    if (el.scrollHeight) el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return /* @__PURE__ */ jsx15(
+    "textarea",
+    {
+      ref,
+      className: "gbo-ed-body",
+      "aria-label": "Email body",
+      value,
+      disabled,
+      rows: Math.max(4, value.split("\n").length + 1),
+      onChange: (event) => onChange(event.target.value)
+    }
+  );
+}
+function RulesDialog({
+  open,
+  onClose,
+  rules,
+  botName,
+  act,
+  busy
+}) {
+  const allowed = Array.isArray(rules?.allowed) ? rules.allowed : [];
+  const mode = String(rules?.mode || "approval");
+  const modes = [
+    ["approval", "Needs approval"],
+    ["allow", "Send to allowed recipients"],
+    ["disabled", `Drafts off for ${botName}`]
+  ];
+  return /* @__PURE__ */ jsxs14(
+    Dialog,
+    {
+      open,
+      onClose,
+      label: "Email draft rules",
+      title: `Email rules for ${botName}`,
+      description: "Drafts to allowed recipients send on their own while the mode is “Send to allowed recipients”. Every other draft waits for you to click Send.",
+      footer: /* @__PURE__ */ jsx15("button", { type: "button", className: "btn btn--secondary", onClick: onClose, children: "Done" }),
+      children: [
+        /* @__PURE__ */ jsx15("div", { className: "gbo-ed-rules-modes", role: "radiogroup", "aria-label": "Mode", children: modes.map(([value, label]) => /* @__PURE__ */ jsx15(
+          "button",
+          {
+            type: "button",
+            role: "radio",
+            "aria-checked": mode === value,
+            className: `gbo-ed-mode${mode === value ? " is-on" : ""}`,
+            disabled: busy,
+            onClick: () => mode !== value && act("set_mode", { mode: value }),
+            children: label
+          },
+          value
+        )) }),
+        allowed.length ? /* @__PURE__ */ jsx15("ul", { className: "gbo-ed-rules-list", "aria-label": "Allowed recipients", children: allowed.map((address) => /* @__PURE__ */ jsxs14("li", { className: "gbo-ed-rules-item", children: [
+          /* @__PURE__ */ jsx15("span", { children: address }),
+          /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-ed-discard", disabled: busy, "aria-label": `Remove ${address}`, onClick: () => act("unallow", { addresses: [address] }), children: "Remove" })
+        ] }, address)) }) : /* @__PURE__ */ jsx15("p", { className: "gbo-ed-rules-empty", children: "No allowed recipients yet. “Allow recipient” on a draft adds its To addresses." })
+      ]
+    }
+  );
+}
+function EmailDraftCard({ item, bot, controller: controller2 }) {
+  const draftId = String(item.draftId);
+  const hint = item.hint || {};
+  const [draft, setDraft] = React13.useState(null);
+  const [fields, setFields] = React13.useState(() => fieldsOf(hint));
+  const [note, setNote] = React13.useState(null);
+  const [pending, setPending] = React13.useState("");
+  const [rulesOpen, setRulesOpen] = React13.useState(false);
+  const flight = React13.useRef(createSingleFlight());
+  const live = React13.useRef(true);
+  const latest = React13.useRef({ draft, fields });
+  latest.current = { draft, fields };
+  React13.useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const request2 = typeof controller2?.pluginRequest === "function" ? controller2.pluginRequest : null;
+  const adopt2 = React13.useCallback((next, { keepEdits = true } = {}) => {
+    if (!live.current || !next) return;
+    const prev = latest.current;
+    setDraft(next);
+    if (!keepEdits || !prev.draft || !isDirty(prev.fields, prev.draft)) setFields(fieldsOf(next));
+  }, []);
+  const read = React13.useCallback(async () => {
+    try {
+      const res = await callDrafts(request2, "get", { id: draftId });
+      if (!live.current) return;
+      if (res.ok) adopt2(res.draft);
+      else setNote({ text: res.error || "This draft could not be read", error: true });
+    } catch (error) {
+      if (live.current) setNote({ text: String(error?.message || error), error: true });
+    }
+  }, [request2, draftId, adopt2]);
+  const hintKey = `${hint.status || ""}:${hint.rev || ""}`;
+  React13.useEffect(() => {
+    void read();
+  }, [read, hintKey]);
+  const shown = draft || { ...hint, to: hint.to || [], cc: hint.cc || [] };
+  const state = draftState(shown, (ms) => clock(ms));
+  const rules = draft?.rules || { mode: "approval", allowed: [] };
+  const botName = displayName(bot, metaFor(bot));
+  const busy = Boolean(pending);
+  const editable = Boolean(draft) && state.editable && !busy;
+  const toParsed = parseAddresses(fields.to);
+  const ccParsed = parseAddresses(fields.cc);
+  const badFields = toParsed.bad.length || ccParsed.bad.length;
+  const run = (kind, job) => flight.current.run(async () => {
+    setPending(kind);
+    setNote(null);
+    try {
+      await job();
+    } finally {
+      if (live.current) setPending("");
+    }
+  });
+  const send = () => {
+    if (!draft || badFields || !toParsed.list.length) {
+      setNote({ text: toParsed.list.length ? "Fix the addresses first" : "Add at least one To address", error: true });
+      return;
+    }
+    void run("send", async () => {
+      const edits = isDirty(fields, draft) ? editsFrom(fields) : {};
+      try {
+        const res = await callDrafts(request2, "send", { id: draftId, rev: draft.rev, ...edits }, { timeoutMs: SEND_TIMEOUT_MS });
+        if (res.draft) adopt2(res.draft, { keepEdits: false });
+        else if (!res.ok) {
+          setNote({ text: res.error || "Not sent", error: true });
+          await read();
+        }
+      } catch (error) {
+        setNote({ text: `Not confirmed (${String(error?.message || error)}). It may have been sent, so it was not sent again; checking…`, error: true });
+        await read();
+      }
+    });
+  };
+  const discard = () => void run("discard", async () => {
+    const before = latest.current.draft;
+    if (before) setDraft({ ...before, status: "discarded" });
+    try {
+      const res = await callDrafts(request2, "discard", { id: draftId });
+      if (res.draft) adopt2(res.draft, { keepEdits: false });
+      if (!res.ok) {
+        if (before && !res.draft) setDraft(before);
+        setNote({ text: res.error || "Not discarded", error: true });
+      }
+    } catch (error) {
+      setNote({ text: String(error?.message || error), error: true });
+      await read();
+    }
+  });
+  const act = (op, params) => void run("rules", async () => {
+    try {
+      const res = await callDrafts(request2, op, params);
+      if (!res.ok) setNote({ text: res.error || "Rule not changed", error: true });
+      else if (res.rules && live.current) setDraft((d2) => d2 ? { ...d2, rules: res.rules } : d2);
+    } catch (error) {
+      setNote({ text: String(error?.message || error), error: true });
+    }
+  });
+  const entries = [
+    { label: "Allow recipient", checked: rules.mode === "allow", disabled: !draft || busy, onSelect: () => act("allow", { id: draftId }) },
+    { label: "Needs approval", checked: rules.mode === "approval", disabled: !draft || busy, onSelect: () => act("set_mode", { mode: "approval" }) },
+    { label: `Disable drafts for ${botName}`, checked: rules.mode === "disabled", disabled: !draft || busy, onSelect: () => act("set_mode", { mode: "disabled" }) },
+    "sep",
+    { label: "Manage rules", disabled: !draft, onSelect: () => setRulesOpen(true) }
+  ];
+  const done = state.status === "sent" || state.status === "discarded";
+  const reply = inReplyText(shown.in_reply_to);
+  const files = Array.isArray(shown.attachments) ? shown.attachments.filter((a2) => a2 && typeof a2.path === "string") : [];
+  const set = (key) => (value) => setFields((f2) => ({ ...f2, [key]: value }));
+  return /* @__PURE__ */ jsxs14("div", { className: `gbo-email-draft${done ? " is-done" : ""}`, "data-draft-id": draftId, "data-status": state.status, "aria-label": "Email draft", children: [
+    editable ? /* @__PURE__ */ jsx15("input", { className: "gbo-ed-subject", "aria-label": "Subject", value: fields.subject, placeholder: "Subject", onChange: (event) => set("subject")(event.target.value) }) : /* @__PURE__ */ jsx15("div", { className: "gbo-ed-subject", children: shown.subject || "(no subject)" }),
+    /* @__PURE__ */ jsxs14("div", { className: "gbo-ed-row", children: [
+      /* @__PURE__ */ jsx15("span", { className: "gbo-ed-label", children: "From" }),
+      /* @__PURE__ */ jsx15("span", { className: `gbo-ed-value${shown.from ? "" : " is-empty"}`, children: shown.from_name && shown.from ? `${shown.from_name} <${shown.from}>` : shown.from || "No From address set" })
+    ] }),
+    reply ? /* @__PURE__ */ jsxs14("div", { className: "gbo-ed-row", children: [
+      /* @__PURE__ */ jsx15("span", { className: "gbo-ed-label", children: "In reply to" }),
+      /* @__PURE__ */ jsx15("span", { className: "gbo-ed-value", children: reply })
+    ] }) : null,
+    /* @__PURE__ */ jsxs14("div", { className: `gbo-ed-row${toParsed.bad.length ? " is-bad" : ""}`, children: [
+      /* @__PURE__ */ jsx15("span", { className: "gbo-ed-label", children: "To" }),
+      editable ? /* @__PURE__ */ jsx15("input", { className: "gbo-ed-input", "aria-label": "To", value: fields.to, onChange: (event) => set("to")(event.target.value) }) : /* @__PURE__ */ jsx15("span", { className: "gbo-ed-value", children: addressText(shown.to) })
+    ] }),
+    /* @__PURE__ */ jsxs14("div", { className: `gbo-ed-row${ccParsed.bad.length ? " is-bad" : ""}`, children: [
+      /* @__PURE__ */ jsx15("span", { className: "gbo-ed-label", children: "Cc" }),
+      editable ? /* @__PURE__ */ jsx15("input", { className: "gbo-ed-input", "aria-label": "Cc", value: fields.cc, placeholder: "name@example.com", onChange: (event) => set("cc")(event.target.value) }) : /* @__PURE__ */ jsx15("span", { className: `gbo-ed-value${shown.cc?.length ? "" : " is-empty"}`, children: addressText(shown.cc) || "—" })
+    ] }),
+    shown.bcc?.length ? /* @__PURE__ */ jsxs14("div", { className: "gbo-ed-row", children: [
+      /* @__PURE__ */ jsx15("span", { className: "gbo-ed-label", children: "Bcc" }),
+      /* @__PURE__ */ jsx15("span", { className: "gbo-ed-value", children: addressText(shown.bcc) })
+    ] }) : null,
+    editable ? /* @__PURE__ */ jsx15(Body2, { value: fields.body, onChange: set("body"), disabled: false }) : /* @__PURE__ */ jsx15("div", { className: "gbo-ed-body", children: shown.body || "" }),
+    shown.signature ? /* @__PURE__ */ jsx15("div", { className: "gbo-ed-signature", children: shown.signature }) : null,
+    files.length ? /* @__PURE__ */ jsx15("div", { className: "gbo-ed-files", children: /* @__PURE__ */ jsx15(FileCards, { bot, files: files.map((a2) => ({ path: a2.path, name: a2.name || a2.path.split(/[\\/]/).pop() })) }) }) : null,
+    note ? /* @__PURE__ */ jsx15("div", { className: `gbo-ed-note${note.error ? " is-error" : ""}`, role: note.error ? "alert" : "status", children: note.text }) : null,
+    /* @__PURE__ */ jsxs14("div", { className: "gbo-ed-foot", children: [
+      done ? null : /* @__PURE__ */ jsxs14(MenuButton, { entries, label: "Email rules", className: "gbo-ed-rules", align: "start", children: [
+        modeLabel(rules.mode),
+        /* @__PURE__ */ jsx15(IconChevronDown, {})
+      ] }),
+      /* @__PURE__ */ jsx15("span", { className: "gbo-ed-spacer" }),
+      state.line ? /* @__PURE__ */ jsx15("span", { className: `gbo-ed-state${state.status === "sent" ? " is-sent" : state.status === "failed" ? " is-failed" : ""}`, role: "status", children: pending === "send" ? "Sending…" : state.line }) : pending === "send" ? /* @__PURE__ */ jsx15("span", { className: "gbo-ed-state", role: "status", children: "Sending…" }) : null,
+      state.actions.includes("discard") ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-ed-discard", disabled: !draft || busy, onClick: discard, children: "Discard" }) : null,
+      state.actions.includes("send") || state.actions.includes("retry") ? /* @__PURE__ */ jsx15("button", { type: "button", className: "gbo-ed-send", disabled: !draft || busy || !request2, onClick: send, children: state.actions.includes("retry") ? "Retry" : "Send" }) : null
+    ] }),
+    /* @__PURE__ */ jsx15(RulesDialog, { open: rulesOpen, onClose: () => setRulesOpen(false), rules, botName, act, busy })
+  ] });
+}
+
+// src/ui/stickToBottom.ts
+import * as React14 from "react";
+var STICK_PX = 16;
+var JUMP_MAX_MS = 1200;
+var ANCHOR_ATTR = "data-gbo-key";
+var fromBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight;
+function reducedMotion() {
+  try {
+    const mm = globalThis.window?.matchMedia ?? globalThis.matchMedia;
+    return typeof mm === "function" && Boolean(mm("(prefers-reduced-motion: reduce)")?.matches);
+  } catch {
+    return false;
+  }
+}
+function unitsOf(scroller) {
+  const column = scroller.firstElementChild;
+  if (!column) return [];
+  const out = [];
+  for (const row of Array.from(column.children)) {
+    if (row.classList.contains("gbo-more")) continue;
+    const messages = row.classList.contains("group") ? Array.from(row.children) : [];
+    if (messages.length) out.push(...messages);
+    else out.push(row);
+  }
+  return out;
+}
+function captureAnchor(scroller) {
+  const top = scroller.getBoundingClientRect().top;
+  const view = scroller.clientHeight;
+  const marks = [];
+  for (const unit of unitsOf(scroller)) {
+    const rect = unit.getBoundingClientRect();
+    if (rect.bottom - top <= 0) continue;
+    if (view > 0 && rect.top - top >= view) break;
+    marks.push({ el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top });
+  }
+  if (!marks.length) return null;
+  return [...marks.filter((m) => m.key), ...marks.filter((m) => !m.key)];
+}
+function locate(scroller, anchor) {
+  const origin = scroller.getBoundingClientRect().top;
+  let units = null;
+  for (const mark of anchor) {
+    let unit = mark.el.isConnected && scroller.contains(mark.el) ? mark.el : null;
+    if (!unit && mark.key) {
+      units = units || unitsOf(scroller);
+      unit = units.find((u) => u.getAttribute(ANCHOR_ATTR) === mark.key) || null;
+    }
+    if (unit) return { mark, now: unit.getBoundingClientRect().top - origin };
+  }
+  return null;
+}
+function useStickToBottom(dep, mine, latest = "") {
+  const ref = React14.useRef(null);
+  const stick = React14.useRef(true);
+  const lastMine = React14.useRef(mine);
+  const lastLatest = React14.useRef(latest);
+  const keep = React14.useRef(null);
+  const keepGen = React14.useRef(0);
+  const wrote = React14.useRef(null);
+  const jumping = React14.useRef(null);
+  const [unseen, setUnseen] = React14.useState(false);
+  const setTop = (el, top) => {
+    el.scrollTop = top;
+    wrote.current = el.scrollTop;
+  };
+  const restore = () => {
+    const el = ref.current;
+    const anchor = keep.current;
+    if (!el || !anchor) return;
+    const hit = locate(el, anchor);
+    if (!hit) return;
+    const shift = hit.now - hit.mark.top;
+    if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift);
+  };
+  const dropKeep = () => {
+    if (!keep.current) return;
+    keep.current = null;
+    keepGen.current += 1;
+  };
+  const scrollToBottom = (el, smooth) => {
+    const top = el.scrollHeight;
+    if (smooth && typeof el.scrollTo === "function") {
+      try {
+        el.scrollTo({ top, behavior: "smooth" });
+        return;
+      } catch {
+      }
+    }
+    setTop(el, top);
+  };
+  const finishJump = () => {
+    const run = jumping.current;
+    if (!run) return;
+    jumping.current = null;
+    clearTimeout(run.timer);
+    stick.current = true;
+    setUnseen(false);
+    const el = ref.current;
+    if (el) setTop(el, el.scrollHeight);
+  };
+  const endJump = () => {
+    const run = jumping.current;
+    if (!run) return;
+    jumping.current = null;
+    clearTimeout(run.timer);
+    const el = ref.current;
+    if (!el) return;
+    stick.current = fromBottom(el) < STICK_PX;
+    setUnseen(!stick.current && Boolean(lastLatest.current));
+  };
+  React14.useLayoutEffect(() => {
+    const el = ref.current;
+    if (mine !== lastMine.current) {
+      lastMine.current = mine;
+      if (mine) {
+        stick.current = true;
+        dropKeep();
+      }
+    }
+    const newer = latest !== lastLatest.current;
+    lastLatest.current = latest;
+    if (!el) return;
+    if (keep.current) {
+      restore();
+      if (newer && latest && !stick.current) setUnseen(true);
+      return;
+    }
+    if (jumping.current) scrollToBottom(el, !reducedMotion());
+    else if (stick.current) setTop(el, el.scrollHeight);
+    else if (newer && latest) setUnseen(true);
+  }, [dep, mine, latest]);
+  React14.useLayoutEffect(() => {
+    if (stick.current && unseen && !jumping.current) setUnseen(false);
+  });
+  React14.useEffect(() => {
+    const el = ref.current;
+    if (!el) return void 0;
+    const cancel = () => {
+      if (!jumping.current) return;
+      endJump();
+    };
+    const onKey = (event) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event?.key)) cancel();
+    };
+    el.addEventListener("wheel", cancel, { passive: true });
+    el.addEventListener("touchstart", cancel, { passive: true });
+    el.addEventListener("pointerdown", cancel);
+    el.addEventListener("keydown", onKey);
+    return () => {
+      el.removeEventListener("wheel", cancel);
+      el.removeEventListener("touchstart", cancel);
+      el.removeEventListener("pointerdown", cancel);
+      el.removeEventListener("keydown", onKey);
+      if (jumping.current) clearTimeout(jumping.current.timer);
+    };
+  }, []);
+  const onScroll = () => {
+    const el = ref.current;
+    if (!el) return;
+    const ours = wrote.current !== null && Math.abs(el.scrollTop - wrote.current) < 1;
+    wrote.current = null;
+    if (jumping.current) {
+      if (fromBottom(el) < STICK_PX) endJump();
+      return;
+    }
+    if (keep.current && !ours) {
+      keep.current = captureAnchor(el) || keep.current;
+    }
+    stick.current = fromBottom(el) < STICK_PX;
+    if (stick.current) setUnseen(false);
+  };
+  const onContentResize = React14.useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (keep.current) restore();
+    else if (jumping.current) scrollToBottom(el, !reducedMotion());
+    else if (stick.current) setTop(el, el.scrollHeight);
+  }, []);
+  const pin = () => {
+    stick.current = true;
+    dropKeep();
+  };
+  const onReaderInput = () => {
+    if (jumping.current) endJump();
+  };
+  const keepPlace = async (load) => {
+    const el = ref.current;
+    const gen = keepGen.current += 1;
+    keep.current = el ? captureAnchor(el) : null;
+    const mineNow = () => keepGen.current === gen && keep.current !== null;
+    try {
+      await load();
+    } finally {
+      if (mineNow()) restore();
+      const done = () => {
+        if (!mineNow()) return;
+        restore();
+        keep.current = null;
+        const target = ref.current;
+        if (target) {
+          stick.current = fromBottom(target) < STICK_PX;
+          if (stick.current) setUnseen(false);
+        }
+      };
+      const raf2 = globalThis.requestAnimationFrame;
+      if (typeof raf2 === "function") raf2(() => done());
+      else setTimeout(done, 16);
+    }
+  };
+  const jump = () => {
+    const el = ref.current;
+    stick.current = true;
+    setUnseen(false);
+    dropKeep();
+    if (!el) return;
+    const smooth = !reducedMotion() && typeof el.scrollTo === "function";
+    if (jumping.current) clearTimeout(jumping.current.timer);
+    jumping.current = smooth ? { timer: setTimeout(finishJump, JUMP_MAX_MS) } : null;
+    scrollToBottom(el, smooth);
+  };
+  return { ref, onScroll, onContentResize, onReaderInput, pin, stick, keepPlace, jump, unseen };
+}
+
+// src/ui/Profile.tsx
+import * as React23 from "react";
+
+// src/ui/BotDialogs.tsx
+import * as React19 from "react";
+
+// src/ui/CronDialogs.tsx
+import * as React15 from "react";
+import { Fragment as Fragment9, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
+var digits = (v, n) => v.replace(/[^0-9]/g, "").slice(0, n);
+function timeLabel(id) {
+  const [h, m] = id.split(":").map(Number);
+  return new Date(2e3, 0, 1, h, m).toLocaleTimeString(void 0, { hour: "numeric", minute: "2-digit" });
+}
+function SchedulePicker({ state, setState }) {
+  const upd = (patch) => setState((s) => ({ ...s, ...patch }));
+  const needsTime = ["daily", "weekdays", "weekly", "monthly"].includes(state.freq);
+  const times = timeOptions().map((t) => [t.id, timeLabel(t.id)]);
+  const unitOptions = (suffix) => [
+    ["m", `minutes${suffix}`],
+    ["h", `hours${suffix}`],
+    ["d", `days${suffix}`]
+  ];
+  return /* @__PURE__ */ jsxs15("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
+    /* @__PURE__ */ jsxs15("div", { className: needsTime ? "gbo-row2" : "", children: [
+      /* @__PURE__ */ jsx16(Select, { label: "How often", value: state.freq, onChange: (v) => upd({ freq: v }), options: FREQUENCIES }),
+      needsTime ? /* @__PURE__ */ jsx16(Select, { label: "Time", value: state.time, onChange: (v) => upd({ time: v }), options: times }) : null
+    ] }),
+    state.freq === "once" ? /* @__PURE__ */ jsxs15("div", { className: "gbo-row2", children: [
+      /* @__PURE__ */ jsx16("input", { className: "gbo-input", "aria-label": "In", value: state.onceN, placeholder: "30", onChange: (e2) => upd({ onceN: digits(e2.target.value, 4) }) }),
+      /* @__PURE__ */ jsx16(Select, { label: "Unit", value: state.onceUnit, onChange: (v) => upd({ onceUnit: v }), options: unitOptions(" from now") })
+    ] }) : null,
+    state.freq === "weekly" ? /* @__PURE__ */ jsx16(Select, { label: "Day", value: state.weekday, onChange: (v) => upd({ weekday: v }), options: WEEKDAYS }) : null,
+    state.freq === "monthly" ? /* @__PURE__ */ jsx16(Field, { label: "Day of month", children: /* @__PURE__ */ jsx16("input", { className: "gbo-input", value: state.monthday, placeholder: "1", onChange: (e2) => upd({ monthday: digits(e2.target.value, 2) }) }) }) : null,
+    state.freq === "interval" ? /* @__PURE__ */ jsxs15("div", { className: "gbo-row2", children: [
+      /* @__PURE__ */ jsx16("input", { className: "gbo-input", "aria-label": "Every", value: state.intervalN, placeholder: "2", onChange: (e2) => upd({ intervalN: digits(e2.target.value, 4) }) }),
+      /* @__PURE__ */ jsx16(Select, { label: "Unit", value: state.intervalUnit, onChange: (v) => upd({ intervalUnit: v }), options: unitOptions("") })
+    ] }) : null,
+    state.freq === "advanced" ? /* @__PURE__ */ jsx16("input", { className: "gbo-input", style: { fontFamily: "var(--gbo-mono)" }, value: state.raw, placeholder: "every 1d · every 2h · 0 9 * * * (cron)", onChange: (e2) => upd({ raw: e2.target.value }) }) : null,
+    state.freq !== "once" && state.freq !== "advanced" && state.repeatN !== void 0 ? /* @__PURE__ */ jsxs15("label", { className: "gbo-check", children: [
+      /* @__PURE__ */ jsx16("span", { children: "Stop after" }),
+      /* @__PURE__ */ jsx16("input", { className: "gbo-input", style: { width: 64 }, value: state.repeatN, placeholder: "∞", onChange: (e2) => upd({ repeatN: digits(e2.target.value, 4) }) }),
+      /* @__PURE__ */ jsx16("span", { children: "runs" })
+    ] }) : null,
+    /* @__PURE__ */ jsxs15("span", { className: "gbo-field-hint", children: [
+      scheduleSummary(state, timeLabel(state.time || "9:0")),
+      " · ",
+      composeSchedule(state) || "—"
+    ] })
+  ] });
+}
+function JobDialog({ bot, job, onClose }) {
+  const editing = Boolean(job);
+  const [title, setTitle] = React15.useState(() => job ? routineTitle(job) : "");
+  const [stored, setStored] = React15.useState(() => ({ status: editing ? "loading" : "ready" }));
+  const [instruction, setInstruction] = React15.useState("");
+  const [sched, setSched] = React15.useState(() => job ? { ...scheduleStateFrom(job.schedule), repeatN: void 0 } : defaultScheduleState());
+  const [initialSchedule] = React15.useState(() => job ? composeSchedule({ ...scheduleStateFrom(job.schedule), repeatN: void 0 }).trim() : void 0);
+  const [continuity, setContinuity] = React15.useState(false);
+  const [target, setTarget] = React15.useState(() => job?.deliver === "bot-chat" ? "bot-chat" : "history");
+  const [busy, setBusy] = React15.useState(false);
+  const [error, setError] = React15.useState(null);
+  const who = displayName(bot, metaFor(bot));
+  const schedule = composeSchedule(sched).trim();
+  React15.useEffect(() => {
+    if (!editing) return;
+    let live = true;
+    loadJob(bot, job).then(
+      (full) => {
+        if (!live) return;
+        setStored({ status: "ready", job: full });
+        setInstruction(String(full.prompt || ""));
+      },
+      (err2) => live && setStored({ status: "failed", error: String(err2?.message || err2) })
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  const base4 = stored.job || job;
+  const scriptOnly = editing && stored.status === "ready" && !String(stored.job?.prompt || "").trim() && Boolean(stored.job?.script);
+  const instructionEditable = !editing || stored.status === "ready";
+  const instructionMissing = instructionEditable && !instruction.trim() && !scriptOnly;
+  const submit = async () => {
+    const t = title.trim();
+    const task = instruction.trim();
+    const bad = routineInputError(t, instructionEditable ? task : "");
+    if (bad) return setError(bad);
+    if (!t || instructionMissing || !schedule || busy || stored.status === "loading") return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (editing) {
+        await editJob(bot, job, {
+          ...stored.job ? { stored: stored.job } : {},
+          title: t,
+          ...instructionEditable ? { prompt: task } : {},
+          sched,
+          initialSchedule,
+          deliver: target === "bot-chat" ? "bot-chat" : base4.deliver === "bot-chat" ? "local" : base4.deliver
+        });
+      } else {
+        await createJob(bot, { title: t, instruction: task, sched, continuity, target });
+      }
+      onClose();
+    } catch (err2) {
+      setBusy(false);
+      setError(String(err2?.message || err2));
+    }
+  };
+  return /* @__PURE__ */ jsxs15(
+    Dialog,
+    {
+      open: true,
+      busy,
+      onClose,
+      title: editing ? "Edit scheduled job" : "New scheduled job",
+      description: editing ? `A job of ${who}. Saved through Hermes’s Cron API on ${who}’s machine.` : `${who} runs this on a schedule, in its own profile.`,
+      footer: /* @__PURE__ */ jsxs15(Fragment9, { children: [
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || stored.status === "loading" || !title.trim() || instructionMissing || !schedule, onClick: () => void submit(), children: busy ? "Saving…" : editing ? "Save" : "Create job" })
+      ] }),
+      children: [
+        /* @__PURE__ */ jsx16(Field, { label: "Name", children: /* @__PURE__ */ jsx16("input", { className: "gbo-input", autoFocus: true, value: title, placeholder: "Morning digest", onChange: (e2) => setTitle(e2.target.value) }) }),
+        /* @__PURE__ */ jsx16(Field, { label: "What should it do?", children: instructionEditable ? /* @__PURE__ */ jsx16("textarea", { className: "gbo-textarea", value: instruction, placeholder: scriptOnly ? "Optional: this job runs a script" : "Summarise yesterday’s alerts and send me the top three.", onChange: (e2) => setInstruction(e2.target.value) }) : /* @__PURE__ */ jsx16("textarea", { className: "gbo-textarea", value: stored.status === "loading" ? "" : String(job?.prompt_preview || ""), placeholder: stored.status === "loading" ? "Loading the full instruction…" : "", readOnly: true, disabled: stored.status === "loading" }) }),
+        stored.status === "failed" ? /* @__PURE__ */ jsxs15("div", { className: "gbo-form-note", children: [
+          "The full instruction could not be read (",
+          stored.error,
+          "). It is left unchanged; the other fields can still be saved."
+        ] }) : null,
+        /* @__PURE__ */ jsx16(Field, { label: "When to run", children: /* @__PURE__ */ jsx16(SchedulePicker, { state: sched, setState: setSched }) }),
+        /* @__PURE__ */ jsx16(Field, { label: "Send results to", children: /* @__PURE__ */ jsx16(
+          Select,
+          {
+            label: "Send results to",
+            value: target,
+            onChange: setTarget,
+            options: [
+              ["history", "Run history only"],
+              ["bot-chat", `${who}’s Bot Chat`]
+            ]
+          }
+        ) }),
+        editing ? null : /* @__PURE__ */ jsx16(Check, { checked: continuity, onChange: setContinuity, children: "Continue from the previous run (same session each time)" }),
+        error ? /* @__PURE__ */ jsx16("div", { className: "gbo-form-error", children: error }) : null
+      ]
+    }
+  );
+}
+function JobDetailDialog({ bot, job, onClose }) {
+  const rows = routineDetailRows(job);
+  const issue = routineDetailIssue(job);
+  const instruction = String(job?.prompt_preview || "").trim();
+  return /* @__PURE__ */ jsxs15(
+    Dialog,
+    {
+      open: true,
+      onClose,
+      title: routineTitle(job),
+      description: "What Hermes knows about this job.",
+      footer: /* @__PURE__ */ jsxs15(Fragment9, { children: [
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-ghost", onClick: () => openDialog({ kind: "cron-remove", bot, job }), children: "Delete" }),
+        /* @__PURE__ */ jsx16("span", { className: "gbo-spacer" }),
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn", onClick: () => openDialog({ kind: "cron-edit", bot, job }), children: "Edit" }),
+        /* @__PURE__ */ jsx16(
+          "button",
+          {
+            type: "button",
+            className: "gbo-btn",
+            onClick: () => {
+              void runJob(bot, job);
+              onClose();
+            },
+            children: "Run now"
+          }
+        ),
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "gbo-btn is-primary", onClick: onClose, children: "Close" })
+      ] }),
+      children: [
+        issue ? /* @__PURE__ */ jsx16("div", { className: "gbo-form-error", children: issue }) : null,
+        /* @__PURE__ */ jsx16("div", { className: "gbo-detail-rows", children: rows.map((row) => /* @__PURE__ */ jsxs15("div", { className: "gbo-detail-row", children: [
+          /* @__PURE__ */ jsx16("span", { children: row.label }),
+          /* @__PURE__ */ jsx16("span", { title: row.value, children: row.value })
+        ] }, row.label)) }),
+        instruction ? /* @__PURE__ */ jsx16(Field, { label: "Instruction", children: /* @__PURE__ */ jsx16("div", { className: "gbo-pre", children: instruction }) }) : null
+      ]
+    }
+  );
+}
+function JobRemoveDialog({ bot, job, onClose }) {
+  return /* @__PURE__ */ jsx16(
+    Confirm,
+    {
+      open: true,
+      title: "Delete this job?",
+      description: `“${routineTitle(job)}” stops running and is removed from ${displayName(bot, metaFor(bot))}’s schedule.`,
+      confirmLabel: "Delete job",
+      destructive: true,
+      onConfirm: () => removeJob(bot, job),
+      onClose
+    }
+  );
+}
+
+// src/ui/ProfileConfig.tsx
 import * as React16 from "react";
-import { Fragment as Fragment11, jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
+var modelCatalogue = createCatalogue();
+function modelKey(bot) {
+  let route = null;
+  try {
+    route = bot ? resolveBotConnectionRoute(bot).route : null;
+  } catch {
+    route = null;
+  }
+  return catalogueKey(route);
+}
+function primeModelOptions(bot, value) {
+  modelCatalogue.prime(modelKey(bot), value);
+}
+function useModelOptions(bot, { foreground = false } = {}) {
+  const key = modelKey(bot);
+  const read = () => {
+    const data = modelCatalogue.peek(key);
+    return data ? { loading: false, error: null, data } : null;
+  };
+  const [state, setState] = React16.useState(() => read() || { loading: true, error: null, data: null });
+  React16.useEffect(() => {
+    let live = true;
+    const now = read();
+    if (now) setState(now);
+    const off = modelCatalogue.subscribe((changed) => {
+      if (live && changed === key) setState(read() || { loading: true, error: null, data: null });
+    });
+    modelCatalogue.load(key, () => boundedFetch(request(bot, "model.options", modelOptionsParams(), foreground ? { spawnPriority: "foreground" } : {}))).then((data) => live && setState({ loading: false, error: null, data })).catch((error) => live && !modelCatalogue.peek(key) && setState({ loading: false, error: String(error?.message || error), data: null }));
+    return () => {
+      live = false;
+      off();
+    };
+  }, [key]);
+  return state;
+}
+var NONE = "__default__";
+var CUSTOM = "__custom__";
+function ModelPicker({
+  bot,
+  value,
+  onChange,
+  foreground,
+  disabled,
+  children
+}) {
+  const { loading, error, data } = useModelOptions(bot, { foreground });
+  const [manual, setManual] = React16.useState(null);
+  const providers = usableProviders(data);
+  const known = !value.provider || providers.some((p) => providerMatches(p, value.provider));
+  const freeText = loading ? false : manual ?? !known;
+  const grid = children ? "gbo-row2 gbo-model-grid" : "gbo-row2";
+  if (!loading && (error || !providers.length || freeText)) {
+    return /* @__PURE__ */ jsxs16("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: [
+      /* @__PURE__ */ jsxs16("div", { className: grid, children: [
+        /* @__PURE__ */ jsx17(Field, { label: "Provider", children: /* @__PURE__ */ jsx17("input", { className: "gbo-input", value: value.provider, disabled, placeholder: "nous / openrouter / …", onChange: (e2) => onChange({ provider: e2.target.value }) }) }),
+        /* @__PURE__ */ jsx17(Field, { label: "Model", children: /* @__PURE__ */ jsx17("input", { className: "gbo-input", value: value.model, disabled, placeholder: "provider/model-name", onChange: (e2) => onChange({ model: e2.target.value }) }) }),
+        children
+      ] }),
+      providers.length ? /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setManual(false), children: "Back to the lists" }) : error ? /* @__PURE__ */ jsxs16("span", { className: "gbo-field-hint", children: [
+        "The model list did not load (",
+        error,
+        "); type them instead."
+      ] }) : null
+    ] });
+  }
+  const active = providers.find((p) => providerMatches(p, value.provider)) || null;
+  const models = active ? providerModels(active) : [];
+  const providerOptions = loading ? [[NONE, "Default (the profile’s own)"], ...value.provider ? [[value.provider, value.provider]] : []] : [[NONE, "Default (the profile’s own)"], ...providers.map((p) => [p.slug, p.name || p.slug]), [CUSTOM, "Custom…"]];
+  const modelOptions = (models.includes(value.model) || !value.model ? models : [value.model, ...models]).map((m) => [m, m]);
+  return /* @__PURE__ */ jsxs16("div", { className: grid, "aria-busy": loading || void 0, children: [
+    /* @__PURE__ */ jsx17(Field, { label: "Provider", children: /* @__PURE__ */ jsx17(
+      Select,
+      {
+        label: "Provider",
+        value: loading ? value.provider || NONE : active ? active.slug : NONE,
+        disabled,
+        onChange: (v) => {
+          if (v === NONE) onChange({ provider: "", model: "" });
+          else if (v === CUSTOM) setManual(true);
+          else if (!loading) {
+            const prov = providers.find((p) => p.slug === v);
+            onChange({ provider: v, model: providerModels(prov)[0] || "" });
+          }
+        },
+        options: providerOptions
+      }
+    ) }),
+    /* @__PURE__ */ jsx17(Field, { label: "Model", children: /* @__PURE__ */ jsx17(Select, { label: "Model", value: value.model, disabled: disabled || !loading && !active, onChange: (v) => onChange({ model: v }), options: modelOptions }) }),
+    children
+  ] });
+}
+function ModelExtraFields({
+  bot,
+  provider,
+  model,
+  effort,
+  speed,
+  disabled,
+  onChange
+}) {
+  const { loading, data } = useModelOptions(bot, { foreground: true });
+  const providers = usableProviders(data);
+  const row = providers.find((p) => providerMatches(p, provider)) || null;
+  const caps = loading ? void 0 : model ? modelCaps(row, model) : null;
+  const e2 = effortChoices({ provider: row?.slug || provider, model, caps, current: effort });
+  const s = speedChoices({ caps, current: speed });
+  const hint = (choice) => choice.supported ? choice.pending ? "Loading options…" : " " : UNSUPPORTED_HINT;
+  return /* @__PURE__ */ jsxs16(Fragment10, { children: [
+    /* @__PURE__ */ jsx17(Field, { label: "Effort", hint: hint(e2), children: /* @__PURE__ */ jsx17(Select, { label: "Effort", value: effort, disabled: disabled || !e2.supported, onChange: (v) => onChange({ effort: v }), options: e2.options }) }),
+    /* @__PURE__ */ jsx17(Field, { label: "Speed", hint: hint(s), children: /* @__PURE__ */ jsx17(Select, { label: "Speed", value: speed, disabled: disabled || !s.supported, onChange: (v) => onChange({ speed: v }), options: s.options }) })
+  ] });
+}
+function SkillsHub({ bot, onInstalled }) {
+  const [query, setQuery] = React16.useState("");
+  const [results, setResults] = React16.useState(null);
+  const [busy, setBusy] = React16.useState(null);
+  const [error, setError] = React16.useState(null);
+  return /* @__PURE__ */ jsxs16("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
+    /* @__PURE__ */ jsxs16(
+      "form",
+      {
+        style: { display: "flex", gap: 6 },
+        onSubmit: async (event) => {
+          event.preventDefault();
+          if (!query.trim() || busy) return;
+          setBusy("search");
+          setError(null);
+          try {
+            setResults(await searchSkills(query));
+          } catch (err2) {
+            setResults([]);
+            setError(String(err2?.message || err2));
+          } finally {
+            setBusy(null);
+          }
+        },
+        children: [
+          /* @__PURE__ */ jsx17("input", { className: "gbo-input", placeholder: "Find skills in the hub", value: query, onChange: (e2) => setQuery(e2.target.value) }),
+          /* @__PURE__ */ jsx17("button", { type: "submit", className: "gbo-btn is-small", disabled: !query.trim() || Boolean(busy), children: busy === "search" ? "Searching…" : "Search" })
+        ]
+      }
+    ),
+    error ? /* @__PURE__ */ jsx17("div", { className: "gbo-form-error", children: error }) : null,
+    results && !results.length ? /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint", children: "No skills found." }) : null,
+    (results || []).slice(0, 8).map((r) => /* @__PURE__ */ jsxs16("div", { className: "gbo-check", style: { cursor: "default" }, children: [
+      /* @__PURE__ */ jsx17("span", { className: "gbo-check-text", title: r.description || r.name, children: r.name }),
+      /* @__PURE__ */ jsx17(
+        "button",
+        {
+          type: "button",
+          className: "gbo-btn is-small",
+          disabled: Boolean(busy),
+          onClick: async () => {
+            setBusy(r.name);
+            setError(null);
+            try {
+              await installSkill(bot, r.name);
+              onInstalled(r.name);
+            } catch (err2) {
+              setError(String(err2?.message || err2));
+            } finally {
+              setBusy(null);
+            }
+          },
+          children: busy === r.name ? "Installing…" : "Install"
+        }
+      )
+    ] }, r.name))
+  ] });
+}
+function backendScope(bot) {
+  const route = resolveBotConnectionRoute(bot).route;
+  return route ? { connectionId: route.connectionId, profile: route.targetProfile || route.profile } : bot.name;
+}
+function McpSetup({ bot, entry, onDone }) {
+  const [phase, setPhase] = React16.useState("idle");
+  const [message, setMessage] = React16.useState("");
+  const fields = React16.useRef({});
+  const epoch = React16.useRef(0);
+  const pending = React16.useRef(null);
+  const wipePending = () => {
+    const held = pending.current;
+    pending.current = null;
+    if (!held) return;
+    for (let i = 0; i < held.entered.length; i += 1) held.entered[i] = [held.entered[i][0], ""];
+    held.entered.length = 0;
+    held.secrets.length = 0;
+  };
+  const isOAuth = String(entry.auth || "").toLowerCase() === "oauth";
+  const requires = entry.requires || [];
+  const clearFields = () => {
+    for (const input of Object.values(fields.current)) if (input) input.value = "";
+  };
+  React16.useEffect(
+    () => () => {
+      epoch.current += 1;
+      clearFields();
+      wipePending();
+    },
+    []
+  );
+  const fail = (text3) => {
+    setPhase("error");
+    setMessage(text3);
+  };
+  const ensureAdded = async () => {
+    if (entry.fromCatalog && !entry.installed) await request(bot, "mcp.servers.add", { profile: bot.name, name: entry.name, preset: entry.name });
+  };
+  const begin = async () => {
+    wipePending();
+    const mine = ++epoch.current;
+    const current = () => epoch.current === mine;
+    setPhase("busy");
+    setMessage("");
+    try {
+      await ensureAdded();
+    } catch (err2) {
+      if (current()) fail(String(err2?.message || err2) || "Could not add the server");
+      return;
+    }
+    if (!current()) return;
+    if (!isOAuth) return setPhase("keys");
+    if (typeof host2?.completeMcpOAuth !== "function") return fail("This Hermes Desktop cannot run the sign-in; update it.");
+    const route = resolveBotConnectionRoute(bot).route;
+    try {
+      setMessage("Finish signing in in your browser…");
+      await host2.completeMcpOAuth({
+        serverName: entry.name,
+        profile: { connectionId: route?.connectionId ?? host2?.state?.connectionId?.get?.() ?? null, profile: route?.targetProfile || bot.name },
+        catalogPreset: entry.fromCatalog && !entry.installed ? entry.name : void 0,
+        cancelled: () => !current()
+      });
+      if (!current()) return;
+      setPhase("done");
+      onDone();
+    } catch (err2) {
+      if (current()) fail(String(err2?.message || err2));
+    }
+  };
+  const submitKeys = async () => {
+    wipePending();
+    const mine = ++epoch.current;
+    const current = () => epoch.current === mine;
+    const entered = requires.map((k) => [k, String(fields.current[k]?.value || "").trim()]);
+    clearFields();
+    const secrets = entered.map(([, value]) => value).filter(Boolean);
+    const held = { entered, secrets };
+    pending.current = held;
+    const scrub = (text3) => secrets.reduce((out, value) => out.split(value).join("••••"), text3);
+    setPhase("busy");
+    try {
+      for (let i = 0; i < entered.length; i += 1) {
+        if (!current()) return;
+        const [k, value] = entered[i];
+        entered[i] = [k, ""];
+        if (value) await request(bot, "mcp.servers.set_api_key", { profile: bot.name, name: entry.name, env_var: k, value });
+      }
+      if (!current()) return;
+      const test = await request(bot, "mcp.servers.test", { profile: bot.name, name: entry.name });
+      if (!current()) return;
+      if (test && (test.ok || test.result?.ok)) {
+        setPhase("done");
+        onDone();
+      } else fail(scrub(String(test?.error || test?.result?.error || "The server did not pass its test")));
+    } catch (err2) {
+      if (current()) fail(`${scrub(String(err2?.message || err2))} Enter the keys again to retry.`);
+    } finally {
+      if (pending.current === held) pending.current = null;
+      entered.length = 0;
+      secrets.length = 0;
+    }
+  };
+  if (phase === "done") return /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint", children: "Configured" });
+  if (phase === "keys") {
+    return /* @__PURE__ */ jsxs16("span", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }, children: [
+      requires.map((k) => /* @__PURE__ */ jsx17(
+        "input",
+        {
+          ref: (el) => {
+            fields.current[k] = el;
+          },
+          className: "gbo-input",
+          type: "password",
+          autoComplete: "off",
+          placeholder: k,
+          defaultValue: ""
+        },
+        k
+      )),
+      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-btn is-small", onClick: () => void submitKeys(), children: "Save and test" })
+    ] });
+  }
+  return /* @__PURE__ */ jsxs16("span", { style: { display: "inline-flex", gap: 6, alignItems: "center" }, children: [
+    /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-btn is-small", disabled: phase === "busy", onClick: () => void begin(), children: phase === "busy" ? "Working…" : isOAuth ? "Sign in" : "Set up" }),
+    message ? /* @__PURE__ */ jsx17("span", { className: phase === "error" ? "gbo-card-error" : "gbo-field-hint", children: message }) : null
+  ] });
+}
+function AdvancedConfig({ bot, state, setState }) {
+  const [unsupported, setUnsupported] = React16.useState(null);
+  const [filter, setFilter] = React16.useState("");
+  const [toolsetOpen, setToolsetOpen] = React16.useState("");
+  const ToolsetPanel = sdk.ToolsetConfigPanel;
+  const loadKey = `${bot?.connectionId || ""}::${bot?.name}`;
+  React16.useEffect(() => {
+    if (state.loaded) return;
+    let live = true;
+    loadProfileConfig(bot).then((next) => live && setState(() => next)).catch((error) => live && setUnsupported(String(error?.message || error)));
+    return () => {
+      live = false;
+    };
+  }, [loadKey]);
+  if (unsupported) return /* @__PURE__ */ jsxs16("div", { className: "gbo-form-note", children: [
+    "This bot’s Hermes cannot describe its profile here (",
+    unsupported,
+    "). Use `hermes -p ",
+    bot.name,
+    " config` on its machine."
+  ] });
+  if (!state.loaded) return /* @__PURE__ */ jsx17("div", { className: "gbo-form-note", children: "Loading the bot’s config…" });
+  const skills = filter.trim() ? state.skills.filter((s) => s.name.toLowerCase().includes(filter.trim().toLowerCase())) : state.skills;
+  const on = (list) => list.filter((x) => x.enabled).length;
+  return /* @__PURE__ */ jsxs16("div", { style: { display: "flex", flexDirection: "column", gap: 14 }, children: [
+    /* @__PURE__ */ jsx17(ModelPicker, { bot, value: { provider: state.provider, model: state.model }, onChange: (patch) => setState((s) => ({ ...s, dirtyModel: true, ...patch })) }),
+    /* @__PURE__ */ jsxs16(Field, { label: `Skills · ${on(state.skills)} of ${state.skills.length} on`, children: [
+      /* @__PURE__ */ jsx17("input", { className: "gbo-input", placeholder: "Filter skills", value: filter, onChange: (e2) => setFilter(e2.target.value) }),
+      /* @__PURE__ */ jsx17("div", { className: "gbo-check-list", children: skills.map((s) => /* @__PURE__ */ jsx17(Check, { title: s.description || s.name, checked: Boolean(s.enabled), onChange: (v) => setState((st) => toggleEntry(st, "skills", s.name, v)), children: s.name }, s.name)) })
+    ] }),
+    /* @__PURE__ */ jsx17(SkillsHub, { bot, onInstalled: (name) => setState((s) => s.skills.some((x) => x.name === name) ? s : { ...s, skills: [...s.skills, { name, enabled: true }] }) }),
+    /* @__PURE__ */ jsx17(Field, { label: `Toolsets · ${on(state.toolsets)} of ${state.toolsets.length} on`, children: /* @__PURE__ */ jsx17("div", { className: "gbo-check-list", children: state.toolsets.map((t) => /* @__PURE__ */ jsx17(Check, { title: t.description || t.name, checked: Boolean(t.enabled), meta: t.tool_count ? String(t.tool_count) : void 0, onChange: (v) => setState((st) => toggleEntry(st, "toolsets", t.name, v)), children: t.name }, t.name)) }) }),
+    ToolsetPanel && state.toolsets.length ? (
+      // profile-config.tsx:404: the SDK's own per-toolset config (keys,
+      // model, post-setup) scoped to this bot's backend, when exported.
+      /* @__PURE__ */ jsxs16("details", { className: "gbo-section-card", children: [
+        /* @__PURE__ */ jsx17("summary", { className: "gbo-field-hint", style: { cursor: "pointer" }, children: "Configure a toolset (keys and options)" }),
+        /* @__PURE__ */ jsx17(Select, { label: "Toolset", value: toolsetOpen || state.toolsets[0].name, onChange: setToolsetOpen, options: state.toolsets.map((t) => [t.name, t.name]) }),
+        /* @__PURE__ */ jsx17(ToolsetPanel, { profile: backendScope(bot), toolset: toolsetOpen || state.toolsets[0].name })
+      ] })
+    ) : null,
+    /* @__PURE__ */ jsx17(Field, { label: "MCP servers", children: state.mcp.length ? /* @__PURE__ */ jsx17("div", { className: "gbo-check-list is-one", children: state.mcp.map((m) => {
+      const setup = mcpNeedsSetup(m);
+      return /* @__PURE__ */ jsxs16("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
+        /* @__PURE__ */ jsx17(
+          Check,
+          {
+            title: m.description || m.name,
+            checked: Boolean(m.enabled),
+            disabled: setup,
+            meta: setup ? `needs ${(m.requires || []).join(", ") || "sign-in"}` : m.fromCatalog ? m.installed ? "catalog · installed" : "catalog" : void 0,
+            onChange: (v) => setState((st) => toggleEntry(st, "mcp", m.name, v)),
+            children: m.name
+          }
+        ),
+        setup ? /* @__PURE__ */ jsx17(
+          McpSetup,
+          {
+            bot,
+            entry: m,
+            onDone: () => setState((st) => ({ ...toggleEntry(st, "mcp", m.name, true), mcp: st.mcp.map((x) => x.name === m.name ? { ...x, installed: true, enabled: true } : x) }))
+          }
+        ) : null
+      ] }, m.name);
+    }) }) : /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint", children: "No MCP servers." }) }),
+    /* @__PURE__ */ jsx17(Field, { label: "SOUL (who the bot is)", hint: "The agent-messaging section is kept or added on save, as Bot Mode does.", children: /* @__PURE__ */ jsx17("textarea", { className: "gbo-textarea is-mono", value: state.soul, onChange: (e2) => setState((s) => ({ ...s, dirtySoul: true, soul: e2.target.value })) }) })
+  ] });
+}
+
+// src/ui/SlackSetup.tsx
+import * as React18 from "react";
+
+// src/ui/SlackConnect.tsx
+import * as React17 from "react";
+import { Fragment as Fragment11, jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
 function SlackConnect({ bot, name, initial, onClose }) {
-  const [workspaces, setWorkspaces] = React16.useState(initial.workspaces);
-  const [selected, setSelected] = React16.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
-  const [phase, setPhase] = React16.useState(initial.status?.phase || "none");
-  const [teamName, setTeamName] = React16.useState(initial.status?.team_name || "");
-  const [adding, setAdding] = React16.useState(needsWorkspace(initial.workspaces));
-  const [refresh, setRefresh] = React16.useState("");
-  const [authorize, setAuthorize] = React16.useState("");
-  const [busy, setBusy] = React16.useState(false);
-  const [confirm, setConfirm] = React16.useState(false);
-  const [error, setError] = React16.useState("");
-  const [timedOut, setTimedOut] = React16.useState(false);
-  const [testResult, setTestResult] = React16.useState("");
-  const [needsBootstrap, setNeedsBootstrap] = React16.useState(Boolean(initial.bootstrap));
-  const phaseRef = React16.useRef(phase);
-  const alive = React16.useRef(true);
+  const [workspaces, setWorkspaces] = React17.useState(initial.workspaces);
+  const [selected, setSelected] = React17.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
+  const [phase, setPhase] = React17.useState(initial.status?.phase || "none");
+  const [teamName, setTeamName] = React17.useState(initial.status?.team_name || "");
+  const [adding, setAdding] = React17.useState(needsWorkspace(initial.workspaces));
+  const [refresh, setRefresh] = React17.useState("");
+  const [authorize, setAuthorize] = React17.useState("");
+  const [busy, setBusy] = React17.useState(false);
+  const [confirm, setConfirm] = React17.useState(false);
+  const [error, setError] = React17.useState("");
+  const [timedOut, setTimedOut] = React17.useState(false);
+  const [testResult, setTestResult] = React17.useState("");
+  const [needsBootstrap, setNeedsBootstrap] = React17.useState(Boolean(initial.bootstrap));
+  const phaseRef = React17.useRef(phase);
+  const alive = React17.useRef(true);
   phaseRef.current = phase;
-  React16.useEffect(() => () => {
+  React17.useEffect(() => () => {
     alive.current = false;
   }, []);
-  React16.useEffect(() => {
+  React17.useEffect(() => {
     if (phase !== "created" && phase !== "installed") return;
     let stopped = false;
     const started = Date.now();
@@ -57738,111 +58358,111 @@ function SlackConnect({ bot, name, initial, onClose }) {
   const waiting = phase === "created" || phase === "installed";
   const workspace = teamName || workspaceLabel(workspaces.find((w) => w.team_id === selected) || { team_id: selected }, Object.values(slack.checks.get()));
   const title = confirm ? `Remove the Slack app for ${name}?` : connected ? `Connected to ${workspace} Slack` : adding ? "Connect another workspace" : `Bring ${name} to Slack`;
-  const cancel = /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: confirm ? () => setConfirm(false) : close, children: "Cancel" });
+  const cancel = /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: confirm ? () => setConfirm(false) : close, children: "Cancel" });
   let body;
   let footer;
   if (confirm) {
-    body = /* @__PURE__ */ jsxs16("p", { className: "gbo-sheet-text", children: [
+    body = /* @__PURE__ */ jsxs17("p", { className: "gbo-sheet-text", children: [
       "This deletes the app from the Slack workspace. Teammates can no longer reach ",
       name,
       " from Slack until it is added again."
     ] });
-    footer = /* @__PURE__ */ jsxs16(Fragment11, { children: [
+    footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-primary gbo-slack-remove-primary", disabled: busy, onClick: () => void remove(), children: "Remove" })
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary gbo-slack-remove-primary", disabled: busy, onClick: () => void remove(), children: "Remove" })
     ] });
   } else if (connected) {
-    body = /* @__PURE__ */ jsxs16(Fragment11, { children: [
-      /* @__PURE__ */ jsxs16("p", { className: "gbo-sheet-text", children: [
+    body = /* @__PURE__ */ jsxs17(Fragment11, { children: [
+      /* @__PURE__ */ jsxs17("p", { className: "gbo-sheet-text", children: [
         "You can DM or @mention ",
         name,
         " in ",
         workspace,
         " Slack. It’ll respond with the same plugins, context, and memories it uses here."
       ] }),
-      testResult ? /* @__PURE__ */ jsx17("div", { className: "gbo-sheet-note", role: "status", children: testResult }) : null
+      testResult ? /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-note", role: "status", children: testResult }) : null
     ] });
-    footer = /* @__PURE__ */ jsxs16(Fragment11, { children: [
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: () => void testConnection(), children: busy ? "Testing…" : "Test connection" }),
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", disabled: busy, onClick: () => setConfirm(true), children: "Remove from Slack" }),
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: onClose, children: "Done" })
+    footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: () => void testConnection(), children: busy ? "Testing…" : "Test connection" }),
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", disabled: busy, onClick: () => setConfirm(true), children: "Remove from Slack" }),
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: onClose, children: "Done" })
     ] });
   } else if (waiting) {
-    body = /* @__PURE__ */ jsxs16("div", { className: "gbo-sheet-note", children: [
+    body = /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-note", children: [
       phase === "installed" ? "Slack is installed. Waiting for the bot connection…" : "Finish in Slack… Allow the bot in the browser tab that just opened.",
       timedOut ? " The connection timed out. Select Cancel to remove the incomplete app." : ""
     ] });
-    footer = /* @__PURE__ */ jsxs16(Fragment11, { children: [
+    footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,
-      phase === "installed" ? /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", onClick: () => setConfirm(true), children: "Remove from Slack" }) : authorize ? /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(authorize), children: "Open again ↗" }) : null
+      phase === "installed" ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-cancel gbo-slack-remove", onClick: () => setConfirm(true), children: "Remove from Slack" }) : authorize ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(authorize), children: "Open again ↗" }) : null
     ] });
   } else if (phase === "denied" || phase === "error") {
-    body = /* @__PURE__ */ jsxs16("div", { className: "gbo-sheet-note", children: [
+    body = /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-note", children: [
       phase === "denied" ? "Slack install was cancelled." : "Slack setup needs attention.",
       " Remove the incomplete app before trying again."
     ] });
-    footer = /* @__PURE__ */ jsxs16(Fragment11, { children: [
+    footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: () => void remove(), children: "Remove and try again" })
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: () => void remove(), children: "Remove and try again" })
     ] });
   } else if (adding) {
-    body = /* @__PURE__ */ jsxs16("div", { className: "gbo-sheet-form", children: [
-      /* @__PURE__ */ jsxs16("p", { className: "gbo-sheet-text gbo-slack-howto", children: [
+    body = /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-form", children: [
+      /* @__PURE__ */ jsxs17("p", { className: "gbo-sheet-text gbo-slack-howto", children: [
         "On api.slack.com/apps, scroll to Your App Configuration Tokens and click Generate Token for your workspace.",
-        /* @__PURE__ */ jsx17("br", {}),
+        /* @__PURE__ */ jsx18("br", {}),
         "Paste the Refresh token (it starts with xoxe-) below. Hermes keeps it on the bot’s server."
       ] }),
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-link-btn", onClick: () => openExternalLink("https://api.slack.com/apps"), children: "Open Slack app settings ↗" }),
-      /* @__PURE__ */ jsxs16("label", { className: "gbo-sheet-field", children: [
-        /* @__PURE__ */ jsx17("span", { children: "Refresh token" }),
-        /* @__PURE__ */ jsx17("input", { className: "gbo-input", type: "password", autoComplete: "off", spellCheck: false, value: refresh, onChange: (e2) => setRefresh(e2.target.value) })
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn", onClick: () => openExternalLink("https://api.slack.com/apps"), children: "Open Slack app settings ↗" }),
+      /* @__PURE__ */ jsxs17("label", { className: "gbo-sheet-field", children: [
+        /* @__PURE__ */ jsx18("span", { children: "Refresh token" }),
+        /* @__PURE__ */ jsx18("input", { className: "gbo-input", type: "password", autoComplete: "off", spellCheck: false, value: refresh, onChange: (e2) => setRefresh(e2.target.value) })
       ] })
     ] });
-    footer = /* @__PURE__ */ jsxs16(Fragment11, { children: [
+    footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || Boolean(refreshTokenError(refresh)), onClick: () => void add2(), children: "Add" })
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || Boolean(refreshTokenError(refresh)), onClick: () => void add2(), children: "Add" })
     ] });
   } else {
-    body = /* @__PURE__ */ jsxs16(Fragment11, { children: [
-      /* @__PURE__ */ jsxs16("p", { className: "gbo-sheet-text", children: [
+    body = /* @__PURE__ */ jsxs17(Fragment11, { children: [
+      /* @__PURE__ */ jsxs17("p", { className: "gbo-sheet-text", children: [
         "You can DM or @mention ",
         name,
         " in Slack. It’ll respond with the same plugins, context, and memories it uses here."
       ] }),
-      phase === "denied" ? /* @__PURE__ */ jsx17("div", { className: "gbo-sheet-note", children: "Slack install was cancelled. Try again." }) : null,
-      workspaces.map((w) => /* @__PURE__ */ jsxs16("label", { className: "gbo-sheet-choice", children: [
-        /* @__PURE__ */ jsx17("input", { className: "gbo-slack-workspace-choice", type: "radio", name: "slack-workspace", checked: selected === w.team_id, onChange: () => setSelected(w.team_id) }),
+      phase === "denied" ? /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-note", children: "Slack install was cancelled. Try again." }) : null,
+      workspaces.map((w) => /* @__PURE__ */ jsxs17("label", { className: "gbo-sheet-choice", children: [
+        /* @__PURE__ */ jsx18("input", { className: "gbo-slack-workspace-choice", type: "radio", name: "slack-workspace", checked: selected === w.team_id, onChange: () => setSelected(w.team_id) }),
         workspaceLabel(w, Object.values(slack.checks.get()))
       ] }, w.team_id)),
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-link-btn gbo-slack-add-workspace", onClick: () => setAdding(true), children: "+ Connect another workspace" })
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-add-workspace", onClick: () => setAdding(true), children: "+ Connect another workspace" })
     ] });
-    footer = /* @__PURE__ */ jsxs16(Fragment11, { children: [
+    footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || !selected, onClick: () => void connect(), children: "Connect ↗" })
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || !selected, onClick: () => void connect(), children: "Connect ↗" })
     ] });
   }
-  return /* @__PURE__ */ jsxs16(Sheet, { onClose: close, busy, label: title, title, subtitle: "Uses your Slack connection", emblem: /* @__PURE__ */ jsx17(SlackMark, { size: 40 }), footer, children: [
+  return /* @__PURE__ */ jsxs17(Sheet, { onClose: close, busy, label: title, title, subtitle: "Uses your Slack connection", emblem: /* @__PURE__ */ jsx18(SlackMark, { size: 40 }), footer, children: [
     body,
-    error ? /* @__PURE__ */ jsx17("div", { className: "gbo-form-error", role: "alert", children: error }) : null
+    error ? /* @__PURE__ */ jsx18("div", { className: "gbo-form-error", role: "alert", children: error }) : null
   ] });
 }
 
 // src/ui/SlackSetup.tsx
-import { Fragment as Fragment12, jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
-var SlackMark = ({ size = 18 }) => /* @__PURE__ */ jsxs17("svg", { width: size, height: size, viewBox: "0 0 24 24", "aria-hidden": true, className: "gbo-slack-mark", children: [
-  /* @__PURE__ */ jsx18("rect", { x: "3", y: "8.5", width: "8.5", height: "3", rx: "1.5", fill: "#36C5F0" }),
-  /* @__PURE__ */ jsx18("rect", { x: "8.5", y: "3", width: "3", height: "4.5", rx: "1.5", fill: "#36C5F0" }),
-  /* @__PURE__ */ jsx18("rect", { x: "12.5", y: "3", width: "3", height: "8.5", rx: "1.5", fill: "#2EB67D" }),
-  /* @__PURE__ */ jsx18("rect", { x: "16.5", y: "8.5", width: "4.5", height: "3", rx: "1.5", fill: "#2EB67D" }),
-  /* @__PURE__ */ jsx18("rect", { x: "12.5", y: "12.5", width: "8.5", height: "3", rx: "1.5", fill: "#ECB22E" }),
-  /* @__PURE__ */ jsx18("rect", { x: "12.5", y: "16.5", width: "3", height: "4.5", rx: "1.5", fill: "#ECB22E" }),
-  /* @__PURE__ */ jsx18("rect", { x: "8.5", y: "12.5", width: "3", height: "8.5", rx: "1.5", fill: "#E01E5A" }),
-  /* @__PURE__ */ jsx18("rect", { x: "3", y: "12.5", width: "4.5", height: "3", rx: "1.5", fill: "#E01E5A" })
+import { Fragment as Fragment12, jsx as jsx19, jsxs as jsxs18 } from "react/jsx-runtime";
+var SlackMark = ({ size = 18 }) => /* @__PURE__ */ jsxs18("svg", { width: size, height: size, viewBox: "0 0 24 24", "aria-hidden": true, className: "gbo-slack-mark", children: [
+  /* @__PURE__ */ jsx19("rect", { x: "3", y: "8.5", width: "8.5", height: "3", rx: "1.5", fill: "#36C5F0" }),
+  /* @__PURE__ */ jsx19("rect", { x: "8.5", y: "3", width: "3", height: "4.5", rx: "1.5", fill: "#36C5F0" }),
+  /* @__PURE__ */ jsx19("rect", { x: "12.5", y: "3", width: "3", height: "8.5", rx: "1.5", fill: "#2EB67D" }),
+  /* @__PURE__ */ jsx19("rect", { x: "16.5", y: "8.5", width: "4.5", height: "3", rx: "1.5", fill: "#2EB67D" }),
+  /* @__PURE__ */ jsx19("rect", { x: "12.5", y: "12.5", width: "8.5", height: "3", rx: "1.5", fill: "#ECB22E" }),
+  /* @__PURE__ */ jsx19("rect", { x: "12.5", y: "16.5", width: "3", height: "4.5", rx: "1.5", fill: "#ECB22E" }),
+  /* @__PURE__ */ jsx19("rect", { x: "8.5", y: "12.5", width: "3", height: "8.5", rx: "1.5", fill: "#E01E5A" }),
+  /* @__PURE__ */ jsx19("rect", { x: "3", y: "12.5", width: "4.5", height: "3", rx: "1.5", fill: "#E01E5A" })
 ] });
-var Emblem = () => /* @__PURE__ */ jsx18(SlackMark, { size: 40 });
-var Out = () => /* @__PURE__ */ jsx18("span", { className: "gbo-sheet-out", "aria-hidden": true, children: "↗" });
+var Emblem = () => /* @__PURE__ */ jsx19(SlackMark, { size: 40 });
+var Out = () => /* @__PURE__ */ jsx19("span", { className: "gbo-sheet-out", "aria-hidden": true, children: "↗" });
 function Intro({ name }) {
-  return /* @__PURE__ */ jsxs17("p", { className: "gbo-sheet-text", children: [
+  return /* @__PURE__ */ jsxs18("p", { className: "gbo-sheet-text", children: [
     "You can DM or @mention ",
     name,
     " in Slack. It’ll respond with the same skills, context and memories it uses here."
@@ -57852,24 +58472,24 @@ function SuggestedSlack({ bot }) {
   const state = useStore(slack.state);
   const hidden = useStore(slack.hidden);
   const key = rowKey(bot);
-  React17.useEffect(() => {
+  React18.useEffect(() => {
     loadSlackHidden();
   }, []);
-  React17.useEffect(() => {
+  React18.useEffect(() => {
     void loadSlackState(bot);
   }, [key]);
   if (state.key === key && ["created", "installed", "connected", "denied", "error"].includes(state.connectStatus?.phase)) return null;
   if (slackPanelCard(state, key, hidden) !== "suggested") return null;
   const name = displayName(bot, metaFor(bot));
-  return /* @__PURE__ */ jsxs17("section", { className: "gbo-panel-section", "aria-label": "Suggested", children: [
-    /* @__PURE__ */ jsxs17("div", { className: "section-label section-label--row gbo-panel-label", children: [
-      /* @__PURE__ */ jsx18("span", { children: "Suggested" }),
-      /* @__PURE__ */ jsx18("button", { type: "button", className: "link-btn link-btn--small gbo-suggest-hide", onClick: () => hideSlackCard(bot), children: "Hide" })
+  return /* @__PURE__ */ jsxs18("section", { className: "gbo-panel-section", "aria-label": "Suggested", children: [
+    /* @__PURE__ */ jsxs18("div", { className: "section-label section-label--row gbo-panel-label", children: [
+      /* @__PURE__ */ jsx19("span", { children: "Suggested" }),
+      /* @__PURE__ */ jsx19("button", { type: "button", className: "link-btn link-btn--small gbo-suggest-hide", onClick: () => hideSlackCard(bot), children: "Hide" })
     ] }),
-    /* @__PURE__ */ jsx18("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--link gbo-slack-card gbo-suggest-card", title: `Bring ${name} to Slack`, onClick: () => openDialog({ kind: "slack", bot }), children: [
-      /* @__PURE__ */ jsx18("span", { className: "panel-row__glyph gbo-slack-card-mark", children: /* @__PURE__ */ jsx18(SlackMark, {}) }),
-      /* @__PURE__ */ jsx18("span", { className: "panel-row__title gbo-slack-card-line", children: "Add to Slack" }),
-      /* @__PURE__ */ jsx18(IconChevron, {})
+    /* @__PURE__ */ jsx19("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--link gbo-slack-card gbo-suggest-card", title: `Bring ${name} to Slack`, onClick: () => openDialog({ kind: "slack", bot }), children: [
+      /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph gbo-slack-card-mark", children: /* @__PURE__ */ jsx19(SlackMark, {}) }),
+      /* @__PURE__ */ jsx19("span", { className: "panel-row__title gbo-slack-card-line", children: "Add to Slack" }),
+      /* @__PURE__ */ jsx19(IconChevron, {})
     ] }) })
   ] });
 }
@@ -57879,13 +58499,13 @@ function SlackStatusCard({ bot }) {
   const phase = state.key === rowKey(bot) ? state.connectStatus?.phase : null;
   if (!["created", "installed", "connected", "denied", "error"].includes(phase) && slackPanelCard(state, rowKey(bot), hidden) !== "status") return null;
   const status = ["created", "installed", "connected", "denied", "error"].includes(phase) ? { label: phase === "connected" ? "Connected" : phase === "denied" || phase === "error" ? "Needs attention" : "Connecting…", tone: phase === "connected" ? "ok" : "warn" } : slackStatus(state.platform, { served: Boolean(state.served), gateway: state.gateway });
-  return /* @__PURE__ */ jsx18("section", { className: "gbo-panel-section gbo-slack-section", children: /* @__PURE__ */ jsx18("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs17("button", { type: "button", className: "panel-row panel-row--link gbo-slack-card is-status", title: `Slack · ${status?.label || ""}`, onClick: () => openDialog({ kind: "slack-status", bot }), children: [
-    /* @__PURE__ */ jsx18("span", { className: "panel-row__glyph gbo-slack-card-mark", children: /* @__PURE__ */ jsx18(SlackMark, {}) }),
-    /* @__PURE__ */ jsxs17("span", { className: "panel-row__text gbo-slack-card-text", children: [
-      /* @__PURE__ */ jsx18("span", { className: "panel-row__title gbo-slack-card-title", children: "Slack" }),
-      /* @__PURE__ */ jsx18("span", { className: `panel-row__sub gbo-slack-card-sub is-${status?.tone || "warn"}`, children: status?.label })
+  return /* @__PURE__ */ jsx19("section", { className: "gbo-panel-section gbo-slack-section", children: /* @__PURE__ */ jsx19("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs18("button", { type: "button", className: "panel-row panel-row--link gbo-slack-card is-status", title: `Slack · ${status?.label || ""}`, onClick: () => openDialog({ kind: "slack-status", bot }), children: [
+    /* @__PURE__ */ jsx19("span", { className: "panel-row__glyph gbo-slack-card-mark", children: /* @__PURE__ */ jsx19(SlackMark, {}) }),
+    /* @__PURE__ */ jsxs18("span", { className: "panel-row__text gbo-slack-card-text", children: [
+      /* @__PURE__ */ jsx19("span", { className: "panel-row__title gbo-slack-card-title", children: "Slack" }),
+      /* @__PURE__ */ jsx19("span", { className: `panel-row__sub gbo-slack-card-sub is-${status?.tone || "warn"}`, children: status?.label })
     ] }),
-    /* @__PURE__ */ jsx18(IconChevron, {})
+    /* @__PURE__ */ jsx19(IconChevron, {})
   ] }) }) });
 }
 function LegacySlackStatusDialog({ bot, onClose }) {
@@ -57895,10 +58515,10 @@ function LegacySlackStatusDialog({ bot, onClose }) {
   const entry = state.key === key ? state.platform : null;
   const served = state.key === key && Boolean(state.served);
   const name = displayName(bot, metaFor(bot));
-  const [testing, setTesting] = React17.useState(false);
-  const [result, setResult] = React17.useState(null);
-  const alive = React17.useRef(true);
-  React17.useEffect(() => {
+  const [testing, setTesting] = React18.useState(false);
+  const [result, setResult] = React18.useState(null);
+  const alive = React18.useRef(true);
+  React18.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
@@ -57921,38 +58541,38 @@ function LegacySlackStatusDialog({ bot, onClose }) {
     setTesting(false);
     void loadSlackState(bot);
   };
-  return /* @__PURE__ */ jsxs17(
+  return /* @__PURE__ */ jsxs18(
     Sheet,
     {
       onClose,
       label: `${name} is in Slack`,
-      emblem: /* @__PURE__ */ jsx18(Emblem, {}),
+      emblem: /* @__PURE__ */ jsx19(Emblem, {}),
       title: `${name} is in Slack`,
       subtitle: "Uses its own Slack app",
-      footer: /* @__PURE__ */ jsxs17(Fragment12, { children: [
-        testable ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-cancel", disabled: testing, onClick: () => void test(), children: testing ? "Testing…" : "Test connection" }) : /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }),
-        /* @__PURE__ */ jsxs17("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(SLACK_OPEN_URL), children: [
+      footer: /* @__PURE__ */ jsxs18(Fragment12, { children: [
+        testable ? /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-cancel", disabled: testing, onClick: () => void test(), children: testing ? "Testing…" : "Test connection" }) : /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }),
+        /* @__PURE__ */ jsxs18("button", { type: "button", className: "gbo-sheet-primary", onClick: () => openExternalLink(SLACK_OPEN_URL), children: [
           "Open Slack ",
-          /* @__PURE__ */ jsx18(Out, {})
+          /* @__PURE__ */ jsx19(Out, {})
         ] })
       ] }),
       children: [
-        /* @__PURE__ */ jsx18(Intro, { name }),
-        workspace ? /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-choice is-checked", children: [
-          /* @__PURE__ */ jsx18("span", { className: "gbo-sheet-check", children: /* @__PURE__ */ jsx18(IconCheck, {}) }),
-          /* @__PURE__ */ jsx18("span", { children: workspace })
+        /* @__PURE__ */ jsx19(Intro, { name }),
+        workspace ? /* @__PURE__ */ jsxs18("div", { className: "gbo-sheet-choice is-checked", children: [
+          /* @__PURE__ */ jsx19("span", { className: "gbo-sheet-check", children: /* @__PURE__ */ jsx19(IconCheck, {}) }),
+          /* @__PURE__ */ jsx19("span", { children: workspace })
         ] }) : null,
-        entry ? /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-rows", children: rows.map((row) => /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-row", children: [
-          /* @__PURE__ */ jsx18("span", { children: row.label }),
-          /* @__PURE__ */ jsx18("span", { title: row.value, children: row.value })
-        ] }, row.label)) }) : /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-note", children: state.loading ? "Loading…" : "Slack status is not known yet." }),
-        message ? /* @__PURE__ */ jsx18("div", { className: "gbo-form-error", children: message }) : null,
-        result ? /* @__PURE__ */ jsxs17("div", { className: `gbo-slack-check is-${result.tone}`, role: "status", children: [
-          /* @__PURE__ */ jsx18("div", { className: result.tone === "ok" ? "gbo-slack-ok" : "gbo-form-error", children: [result.message, ...result.lines.filter((line) => result.tone === "ok" && !/failed/.test(line))].join(" · ") }),
-          result.lines.filter((line) => result.tone !== "ok" || /failed/.test(line)).map((line) => /* @__PURE__ */ jsx18("div", { className: "gbo-form-error", children: line }, line)),
-          result.log ? /* @__PURE__ */ jsx18("div", { className: "gbo-slack-log", title: result.log, children: result.log }) : null
+        entry ? /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-rows", children: rows.map((row) => /* @__PURE__ */ jsxs18("div", { className: "gbo-sheet-row", children: [
+          /* @__PURE__ */ jsx19("span", { children: row.label }),
+          /* @__PURE__ */ jsx19("span", { title: row.value, children: row.value })
+        ] }, row.label)) }) : /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-note", children: state.loading ? "Loading…" : "Slack status is not known yet." }),
+        message ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: message }) : null,
+        result ? /* @__PURE__ */ jsxs18("div", { className: `gbo-slack-check is-${result.tone}`, role: "status", children: [
+          /* @__PURE__ */ jsx19("div", { className: result.tone === "ok" ? "gbo-slack-ok" : "gbo-form-error", children: [result.message, ...result.lines.filter((line) => result.tone === "ok" && !/failed/.test(line))].join(" · ") }),
+          result.lines.filter((line) => result.tone !== "ok" || /failed/.test(line)).map((line) => /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: line }, line)),
+          result.log ? /* @__PURE__ */ jsx19("div", { className: "gbo-slack-log", title: result.log, children: result.log }) : null
         ] }) : null,
-        cache.missing ? /* @__PURE__ */ jsx18("div", { className: "gbo-slack-hint", children: SLACK_CHECK_HINT }) : null
+        cache.missing ? /* @__PURE__ */ jsx19("div", { className: "gbo-slack-hint", children: SLACK_CHECK_HINT }) : null
       ]
     }
   );
@@ -57969,18 +58589,18 @@ function sleep(ms, cancelled) {
 var STEP_NAMES = ["Create the Slack app", "Paste two tokens", "Connect", "Approve your first DM"];
 function LegacySlackDialog({ bot, initial, onClose }) {
   const name = displayName(bot, metaFor(bot));
-  const [stage, setStage] = React17.useState(initial?.stage || "create");
-  const [appToken, setAppToken] = React17.useState("");
-  const [botToken, setBotToken] = React17.useState("");
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(initial?.error ?? null);
-  const [note, setNote] = React17.useState(initial?.note ?? null);
-  const [pending, setPending] = React17.useState(initial?.pending || []);
-  const [approving, setApproving] = React17.useState("");
-  const [approved, setApproved] = React17.useState([]);
-  const [polling, setPolling] = React17.useState(false);
-  const alive = React17.useRef(true);
-  React17.useEffect(() => {
+  const [stage, setStage] = React18.useState(initial?.stage || "create");
+  const [appToken, setAppToken] = React18.useState("");
+  const [botToken, setBotToken] = React18.useState("");
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(initial?.error ?? null);
+  const [note, setNote] = React18.useState(initial?.note ?? null);
+  const [pending, setPending] = React18.useState(initial?.pending || []);
+  const [approving, setApproving] = React18.useState("");
+  const [approved, setApproved] = React18.useState([]);
+  const [polling, setPolling] = React18.useState(false);
+  const alive = React18.useRef(true);
+  React18.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
@@ -57992,7 +58612,7 @@ function LegacySlackDialog({ bot, initial, onClose }) {
     setBotToken("");
     onClose();
   };
-  React17.useEffect(() => {
+  React18.useEffect(() => {
     if (stage !== "connected" || initial?.pending) return;
     let stopped = false;
     const done = () => stopped || gone();
@@ -58089,18 +58709,18 @@ function LegacySlackDialog({ bot, initial, onClose }) {
   };
   const order = ["create", "tokens", "restart", "connected"];
   const at = Math.max(0, order.indexOf(stage === "restarting" || stage === "restart-timeout" ? "restart" : stage));
-  const cancel = (label = "Cancel") => /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: close, children: label });
+  const cancel = (label = "Cancel") => /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-cancel", disabled: busy, onClick: close, children: label });
   let body = null;
   let footer = null;
   if (stage === "create") {
-    body = /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-note", children: [
+    body = /* @__PURE__ */ jsxs18("div", { className: "gbo-sheet-note", children: [
       "Pick your workspace, press Create, then Install to Workspace.",
       " ",
-      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn", onClick: () => setStage("tokens"), children: "I already have the app" })
+      /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-link-btn", onClick: () => setStage("tokens"), children: "I already have the app" })
     ] });
-    footer = /* @__PURE__ */ jsxs17(Fragment12, { children: [
+    footer = /* @__PURE__ */ jsxs18(Fragment12, { children: [
       cancel(),
-      /* @__PURE__ */ jsxs17(
+      /* @__PURE__ */ jsxs18(
         "button",
         {
           type: "button",
@@ -58111,13 +58731,13 @@ function LegacySlackDialog({ bot, initial, onClose }) {
           },
           children: [
             "Create Slack app ",
-            /* @__PURE__ */ jsx18(Out, {})
+            /* @__PURE__ */ jsx19(Out, {})
           ]
         }
       )
     ] });
   } else if (stage === "tokens") {
-    body = /* @__PURE__ */ jsxs17(
+    body = /* @__PURE__ */ jsxs18(
       "form",
       {
         className: "gbo-sheet-form",
@@ -58127,9 +58747,9 @@ function LegacySlackDialog({ bot, initial, onClose }) {
           void connect();
         },
         children: [
-          /* @__PURE__ */ jsxs17("label", { className: "gbo-sheet-field", children: [
-            /* @__PURE__ */ jsx18("span", { children: "App-level token" }),
-            /* @__PURE__ */ jsx18(
+          /* @__PURE__ */ jsxs18("label", { className: "gbo-sheet-field", children: [
+            /* @__PURE__ */ jsx19("span", { children: "App-level token" }),
+            /* @__PURE__ */ jsx19(
               "input",
               {
                 className: "gbo-input",
@@ -58145,11 +58765,11 @@ function LegacySlackDialog({ bot, initial, onClose }) {
                 onChange: (e2) => setAppToken(e2.target.value)
               }
             ),
-            /* @__PURE__ */ jsx18("span", { className: `gbo-field-hint${appError ? " is-error" : ""}`, children: appError || "Basic Information → App-Level Tokens → Generate, with connections:write." })
+            /* @__PURE__ */ jsx19("span", { className: `gbo-field-hint${appError ? " is-error" : ""}`, children: appError || "Basic Information → App-Level Tokens → Generate, with connections:write." })
           ] }),
-          /* @__PURE__ */ jsxs17("label", { className: "gbo-sheet-field", children: [
-            /* @__PURE__ */ jsx18("span", { children: "Bot token" }),
-            /* @__PURE__ */ jsx18(
+          /* @__PURE__ */ jsxs18("label", { className: "gbo-sheet-field", children: [
+            /* @__PURE__ */ jsx19("span", { children: "Bot token" }),
+            /* @__PURE__ */ jsx19(
               "input",
               {
                 className: "gbo-input",
@@ -58165,66 +58785,66 @@ function LegacySlackDialog({ bot, initial, onClose }) {
                 onChange: (e2) => setBotToken(e2.target.value)
               }
             ),
-            /* @__PURE__ */ jsx18("span", { className: `gbo-field-hint${botError ? " is-error" : ""}`, children: botError || "OAuth & Permissions → Bot User OAuth Token." })
+            /* @__PURE__ */ jsx19("span", { className: `gbo-field-hint${botError ? " is-error" : ""}`, children: botError || "OAuth & Permissions → Bot User OAuth Token." })
           ] }),
-          /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-sheet-back", disabled: busy, onClick: () => setStage("create"), children: "← Back to creating the app" }),
-          /* @__PURE__ */ jsx18("button", { type: "submit", hidden: true })
+          /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-link-btn gbo-sheet-back", disabled: busy, onClick: () => setStage("create"), children: "← Back to creating the app" }),
+          /* @__PURE__ */ jsx19("button", { type: "submit", hidden: true })
         ]
       }
     );
-    footer = /* @__PURE__ */ jsxs17(Fragment12, { children: [
+    footer = /* @__PURE__ */ jsxs18(Fragment12, { children: [
       cancel(),
-      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: !ready || busy, onClick: () => void connect(), children: busy ? "Connecting…" : "Connect" })
+      /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-primary", disabled: !ready || busy, onClick: () => void connect(), children: busy ? "Connecting…" : "Connect" })
     ] });
   } else if (stage === "restart" || stage === "restarting" || stage === "restart-timeout") {
-    body = /* @__PURE__ */ jsxs17(Fragment12, { children: [
-      /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-note", children: slackConnectedText(name, { hotServed: false }) }),
-      stage === "restart" ? /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-warn", children: slackRestartWarning(name) }) : null,
-      stage === "restarting" ? /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-note", children: [
+    body = /* @__PURE__ */ jsxs18(Fragment12, { children: [
+      /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-note", children: slackConnectedText(name, { hotServed: false }) }),
+      stage === "restart" ? /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-warn", children: slackRestartWarning(name) }) : null,
+      stage === "restarting" ? /* @__PURE__ */ jsxs18("div", { className: "gbo-sheet-note", children: [
         "Restarting ",
         name,
         "’s connection…"
       ] }) : null,
-      stage === "restart-timeout" ? /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-note", children: SLACK_RESTART_TIMEOUT_TEXT }) : null
+      stage === "restart-timeout" ? /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-note", children: SLACK_RESTART_TIMEOUT_TEXT }) : null
     ] });
-    footer = /* @__PURE__ */ jsxs17(Fragment12, { children: [
+    footer = /* @__PURE__ */ jsxs18(Fragment12, { children: [
       cancel(stage === "restart" ? "Cancel" : "Close"),
-      stage === "restart-timeout" ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", onClick: () => void waitThenTest(), children: "Check again" }) : /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || stage === "restarting", onClick: () => void restart(), children: busy || stage === "restarting" ? "Restarting…" : "Restart now" })
+      stage === "restart-timeout" ? /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-primary", onClick: () => void waitThenTest(), children: "Check again" }) : /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-primary", disabled: busy || stage === "restarting", onClick: () => void restart(), children: busy || stage === "restarting" ? "Restarting…" : "Restart now" })
     ] });
   } else {
-    body = /* @__PURE__ */ jsxs17(Fragment12, { children: [
-      note ? /* @__PURE__ */ jsxs17("div", { className: "gbo-form-error", children: [
+    body = /* @__PURE__ */ jsxs18(Fragment12, { children: [
+      note ? /* @__PURE__ */ jsxs18("div", { className: "gbo-form-error", children: [
         "Saved, but the check failed: ",
         note
-      ] }) : /* @__PURE__ */ jsx18("div", { className: "gbo-slack-ok", children: slackConnectedText(name, { hotServed: true }) }),
-      /* @__PURE__ */ jsxs17("div", { className: "gbo-slack-pairing", "aria-label": "First DM", children: [
-        /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-hint", children: pending.length ? "Someone sent a first DM. Approve it so they can chat:" : polling ? `Waiting for your first DM to ${name}…` : approved.length ? "Approved. They can chat now." : `When someone DMs ${name} for the first time, approve them in Hermes’s Messaging settings.` }),
-        pending.map((row) => /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-choice", children: [
-          /* @__PURE__ */ jsx18("span", { title: String(row.user_id || ""), children: String(row.user_name || row.user_id || "Slack user") }),
-          /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary is-small", disabled: approving === row.request_id, onClick: () => void approve(row), children: approving === row.request_id ? "Approving…" : "Approve" })
+      ] }) : /* @__PURE__ */ jsx19("div", { className: "gbo-slack-ok", children: slackConnectedText(name, { hotServed: true }) }),
+      /* @__PURE__ */ jsxs18("div", { className: "gbo-slack-pairing", "aria-label": "First DM", children: [
+        /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-hint", children: pending.length ? "Someone sent a first DM. Approve it so they can chat:" : polling ? `Waiting for your first DM to ${name}…` : approved.length ? "Approved. They can chat now." : `When someone DMs ${name} for the first time, approve them in Hermes’s Messaging settings.` }),
+        pending.map((row) => /* @__PURE__ */ jsxs18("div", { className: "gbo-sheet-choice", children: [
+          /* @__PURE__ */ jsx19("span", { title: String(row.user_id || ""), children: String(row.user_name || row.user_id || "Slack user") }),
+          /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-primary is-small", disabled: approving === row.request_id, onClick: () => void approve(row), children: approving === row.request_id ? "Approving…" : "Approve" })
         ] }, row.request_id))
       ] })
     ] });
-    footer = /* @__PURE__ */ jsxs17(Fragment12, { children: [
-      /* @__PURE__ */ jsx18("span", {}),
-      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", onClick: close, children: "Done" })
+    footer = /* @__PURE__ */ jsxs18(Fragment12, { children: [
+      /* @__PURE__ */ jsx19("span", {}),
+      /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-primary", onClick: close, children: "Done" })
     ] });
   }
-  return /* @__PURE__ */ jsxs17(Sheet, { onClose: close, busy, label: `Bring ${name} to Slack`, emblem: /* @__PURE__ */ jsx18(Emblem, {}), title: `Bring ${name} to Slack`, subtitle: "Uses its own Slack app", footer, children: [
-    /* @__PURE__ */ jsx18(Intro, { name }),
-    /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-step", "aria-label": `Step ${at + 1} of 4`, children: [
+  return /* @__PURE__ */ jsxs18(Sheet, { onClose: close, busy, label: `Bring ${name} to Slack`, emblem: /* @__PURE__ */ jsx19(Emblem, {}), title: `Bring ${name} to Slack`, subtitle: "Uses its own Slack app", footer, children: [
+    /* @__PURE__ */ jsx19(Intro, { name }),
+    /* @__PURE__ */ jsxs18("div", { className: "gbo-sheet-step", "aria-label": `Step ${at + 1} of 4`, children: [
       "Step ",
       at + 1,
       " of 4 · ",
       STEP_NAMES[at]
     ] }),
-    error ? /* @__PURE__ */ jsx18("div", { className: "gbo-form-error", children: error }) : null,
+    error ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: error }) : null,
     body
   ] });
 }
 function SlackConnectRouter({ bot, initial, onClose, status }) {
-  const [result, setResult] = React17.useState(initial ? { kind: "missing" } : null);
-  React17.useEffect(() => {
+  const [result, setResult] = React18.useState(initial ? { kind: "missing" } : null);
+  React18.useEffect(() => {
     if (initial) return;
     let cancelled = false;
     setResult(null);
@@ -58236,30 +58856,30 @@ function SlackConnectRouter({ bot, initial, onClose, status }) {
     };
   }, [bot, initial]);
   if (result?.kind === "missing" || result?.kind === "available" && (result.status?.mode === "socket" || status && result.bootstrap)) {
-    return status ? /* @__PURE__ */ jsx18(LegacySlackStatusDialog, { bot, onClose }) : /* @__PURE__ */ jsx18(LegacySlackDialog, { bot, initial, onClose });
+    return status ? /* @__PURE__ */ jsx19(LegacySlackStatusDialog, { bot, onClose }) : /* @__PURE__ */ jsx19(LegacySlackDialog, { bot, initial, onClose });
   }
-  if (result?.kind === "available") return /* @__PURE__ */ jsx18(SlackConnect, { bot, name: displayName(bot, metaFor(bot)), initial: result, onClose });
-  return /* @__PURE__ */ jsx18(Sheet, { onClose, label: "Slack connection", title: "Slack connection", emblem: /* @__PURE__ */ jsx18(SlackMark, { size: 40 }), footer: /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }), children: /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-note", children: result?.kind === "error" ? withoutSecrets(result.message, []) : "Loading…" }) });
+  if (result?.kind === "available") return /* @__PURE__ */ jsx19(SlackConnect, { bot, name: displayName(bot, metaFor(bot)), initial: result, onClose });
+  return /* @__PURE__ */ jsx19(Sheet, { onClose, label: "Slack connection", title: "Slack connection", emblem: /* @__PURE__ */ jsx19(SlackMark, { size: 40 }), footer: /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-cancel", onClick: onClose, children: "Close" }), children: /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-note", children: result?.kind === "error" ? withoutSecrets(result.message, []) : "Loading…" }) });
 }
 function SlackDialog({ bot, initial, onClose }) {
-  return /* @__PURE__ */ jsx18(SlackConnectRouter, { bot, initial, onClose, status: false });
+  return /* @__PURE__ */ jsx19(SlackConnectRouter, { bot, initial, onClose, status: false });
 }
 function SlackStatusDialog({ bot, onClose }) {
   const state = useStore(slack.state);
   const vars = state.key === rowKey(bot) && Array.isArray(state.platform?.env_vars) ? state.platform.env_vars : [];
-  if (vars.some((entry) => entry?.key === "SLACK_APP_TOKEN" && entry?.is_set === true)) return /* @__PURE__ */ jsx18(LegacySlackStatusDialog, { bot, onClose });
-  return /* @__PURE__ */ jsx18(SlackConnectRouter, { bot, onClose, status: true });
+  if (vars.some((entry) => entry?.key === "SLACK_APP_TOKEN" && entry?.is_set === true)) return /* @__PURE__ */ jsx19(LegacySlackStatusDialog, { bot, onClose });
+  return /* @__PURE__ */ jsx19(SlackConnectRouter, { bot, onClose, status: true });
 }
 
 // src/ui/BotDialogs.tsx
-import { Fragment as Fragment13, jsx as jsx19, jsxs as jsxs18 } from "react/jsx-runtime";
+import { Fragment as Fragment13, jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
 var hostSeq = 0;
 var hosts = [];
 var hostChange = /* @__PURE__ */ new Set();
 function useIsDialogHost() {
-  const [id] = React18.useState(() => ++hostSeq);
-  const [, force] = React18.useReducer((n) => n + 1, 0);
-  React18.useEffect(() => {
+  const [id] = React19.useState(() => ++hostSeq);
+  const [, force] = React19.useReducer((n) => n + 1, 0);
+  React19.useEffect(() => {
     hosts.push(id);
     hostChange.forEach((fn) => fn());
     hostChange.add(force);
@@ -58275,33 +58895,33 @@ function useIsDialogHost() {
 function RosterDialogs() {
   const isHost = useIsDialogHost();
   const dialog = useStore(roster2.dialog);
-  const [confirm, setConfirm] = React18.useState(null);
-  React18.useEffect(() => {
+  const [confirm, setConfirm] = React19.useState(null);
+  React19.useEffect(() => {
     if (!isHost) return;
     setConfirm(null);
     setConfirmAsker((message) => new Promise((resolve) => setConfirm({ message, resolve })));
     return () => setConfirmAsker(null);
   }, [isHost]);
-  const close = React18.useCallback(() => closeDialogIf(dialog), [dialog]);
+  const close = React19.useCallback(() => closeDialogIf(dialog), [dialog]);
   if (!isHost) return null;
-  return /* @__PURE__ */ jsxs18(OverrideBoundary, { area: "dialog", onReset: close, children: [
-    dialog?.kind === "edit" ? /* @__PURE__ */ jsx19(EditProfileDialog, { bot: dialog.bot, onClose: close }) : null,
-    dialog?.kind === "config" ? /* @__PURE__ */ jsx19(ConfigDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
-    dialog?.kind === "model" ? /* @__PURE__ */ jsx19(ModelDialog, { bot: dialog.bot, onClose: close }) : null,
-    dialog?.kind === "groups" ? /* @__PURE__ */ jsx19(GroupsDialog, { bot: dialog.bot, onClose: close }) : null,
-    dialog?.kind === "create" ? /* @__PURE__ */ jsx19(CreateBotDialog, { initialTab: dialog.tab, initialCaps: dialog.caps, onClose: close }) : null,
-    dialog?.kind === "delete" ? /* @__PURE__ */ jsx19(
+  return /* @__PURE__ */ jsxs19(OverrideBoundary, { area: "dialog", onReset: close, children: [
+    dialog?.kind === "edit" ? /* @__PURE__ */ jsx20(EditProfileDialog, { bot: dialog.bot, onClose: close }) : null,
+    dialog?.kind === "config" ? /* @__PURE__ */ jsx20(ConfigDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
+    dialog?.kind === "model" ? /* @__PURE__ */ jsx20(ModelDialog, { bot: dialog.bot, onClose: close }) : null,
+    dialog?.kind === "groups" ? /* @__PURE__ */ jsx20(GroupsDialog, { bot: dialog.bot, onClose: close }) : null,
+    dialog?.kind === "create" ? /* @__PURE__ */ jsx20(CreateBotDialog, { initialTab: dialog.tab, initialCaps: dialog.caps, onClose: close }) : null,
+    dialog?.kind === "delete" ? /* @__PURE__ */ jsx20(
       Confirm,
       {
         open: true,
         title: "Delete this bot?",
-        description: /* @__PURE__ */ jsxs18("span", { children: [
+        description: /* @__PURE__ */ jsxs19("span", { children: [
           "This permanently deletes ",
-          /* @__PURE__ */ jsx19("strong", { children: dialog.bot.name }),
+          /* @__PURE__ */ jsx20("strong", { children: dialog.bot.name }),
           " and its Hermes profile",
-          dialog.bot.path ? /* @__PURE__ */ jsxs18(Fragment13, { children: [
+          dialog.bot.path ? /* @__PURE__ */ jsxs19(Fragment13, { children: [
             " at ",
-            /* @__PURE__ */ jsx19("code", { children: dialog.bot.path })
+            /* @__PURE__ */ jsx20("code", { children: dialog.bot.path })
           ] }) : null,
           dialog.bot.connectionLabel ? ` on ${dialog.bot.connectionLabel}` : "",
           ". This cannot be undone."
@@ -58312,12 +58932,12 @@ function RosterDialogs() {
         onClose: close
       }
     ) : null,
-    dialog?.kind === "cron-edit" ? /* @__PURE__ */ jsx19(JobDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
-    dialog?.kind === "cron-detail" ? /* @__PURE__ */ jsx19(JobDetailDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
-    dialog?.kind === "cron-remove" ? /* @__PURE__ */ jsx19(JobRemoveDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
-    dialog?.kind === "slack" ? /* @__PURE__ */ jsx19(SlackDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
-    dialog?.kind === "slack-status" ? /* @__PURE__ */ jsx19(SlackStatusDialog, { bot: dialog.bot, onClose: close }) : null,
-    confirm ? /* @__PURE__ */ jsx19(
+    dialog?.kind === "cron-edit" ? /* @__PURE__ */ jsx20(JobDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
+    dialog?.kind === "cron-detail" ? /* @__PURE__ */ jsx20(JobDetailDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
+    dialog?.kind === "cron-remove" ? /* @__PURE__ */ jsx20(JobRemoveDialog, { bot: dialog.bot, job: dialog.job, onClose: close }) : null,
+    dialog?.kind === "slack" ? /* @__PURE__ */ jsx20(SlackDialog, { bot: dialog.bot, initial: dialog.initial, onClose: close }) : null,
+    dialog?.kind === "slack-status" ? /* @__PURE__ */ jsx20(SlackStatusDialog, { bot: dialog.bot, onClose: close }) : null,
+    confirm ? /* @__PURE__ */ jsx20(
       Confirm,
       {
         open: true,
@@ -58366,15 +58986,15 @@ function normalizeImage(dataUrl, edge = 256) {
   });
 }
 function AvatarPicker({ name, title, description, look, setLook }) {
-  const [tab, setTab] = React18.useState("face");
-  const [gen, setGen] = React18.useState({ available: null, busy: false, error: null });
+  const [tab, setTab] = React19.useState("face");
+  const [gen, setGen] = React19.useState({ available: null, busy: false, error: null });
   const seedName = name || "agent";
   const { seedPart, kind } = parseBlob(look.shape);
-  React18.useEffect(() => {
+  React19.useEffect(() => {
     if (tab === "generate" && gen.available !== true) void probeImageGeneration().then((available) => setGen((g) => ({ ...g, available })));
   }, [tab]);
-  return /* @__PURE__ */ jsxs18("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [
-    /* @__PURE__ */ jsx19(
+  return /* @__PURE__ */ jsxs19("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [
+    /* @__PURE__ */ jsx20(
       Tabs,
       {
         value: tab,
@@ -58386,8 +59006,8 @@ function AvatarPicker({ name, title, description, look, setLook }) {
         ]
       }
     ),
-    tab === "face" ? /* @__PURE__ */ jsxs18(Fragment13, { children: [
-      blobatarMarkup("x", 8) !== null ? /* @__PURE__ */ jsx19("div", { className: "gbo-face-grid", children: BLOB_KINDS.map((k) => /* @__PURE__ */ jsx19(
+    tab === "face" ? /* @__PURE__ */ jsxs19(Fragment13, { children: [
+      blobatarMarkup("x", 8) !== null ? /* @__PURE__ */ jsx20("div", { className: "gbo-face-grid", children: BLOB_KINDS.map((k) => /* @__PURE__ */ jsx20(
         "button",
         {
           type: "button",
@@ -58395,20 +59015,20 @@ function AvatarPicker({ name, title, description, look, setLook }) {
           "aria-pressed": !look.image && String(look.shape || "").startsWith("blobatar") && kind === k,
           title: k,
           onClick: () => setLook((l) => ({ ...l, image: null, shape: blobShape(seedPart, k) })),
-          children: /* @__PURE__ */ jsx19(BotAvatar, { look: "hermes", name: seedName, meta: { shape: blobShape(seedPart, k), color: look.color, custom: true }, size: 34 })
+          children: /* @__PURE__ */ jsx20(BotAvatar, { look: "hermes", name: seedName, meta: { shape: blobShape(seedPart, k), color: look.color, custom: true }, size: 34 })
         },
         k
       )) }) : null,
-      /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setLook((l) => ({ ...l, image: null, shape: blobShape(Math.random().toString(36).slice(2, 10), kind) })), children: "Shuffle face" }),
-      /* @__PURE__ */ jsxs18("div", { className: "gbo-swatches", role: "group", "aria-label": "Colour", children: [
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-swatch is-auto", "aria-pressed": !look.color, title: "From the name", onClick: () => setLook((l) => ({ ...l, color: null })) }),
-        SWATCHES.map((c2) => /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-swatch", style: { background: c2 }, "aria-pressed": look.color === c2, title: c2, onClick: () => setLook((l) => ({ ...l, color: c2 })) }, c2))
+      /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-link-btn", style: { alignSelf: "flex-start" }, onClick: () => setLook((l) => ({ ...l, image: null, shape: blobShape(Math.random().toString(36).slice(2, 10), kind) })), children: "Shuffle face" }),
+      /* @__PURE__ */ jsxs19("div", { className: "gbo-swatches", role: "group", "aria-label": "Colour", children: [
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-swatch is-auto", "aria-pressed": !look.color, title: "From the name", onClick: () => setLook((l) => ({ ...l, color: null })) }),
+        SWATCHES.map((c2) => /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-swatch", style: { background: c2 }, "aria-pressed": look.color === c2, title: c2, onClick: () => setLook((l) => ({ ...l, color: c2 })) }, c2))
       ] })
     ] }) : null,
-    tab === "upload" ? /* @__PURE__ */ jsxs18("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
-      /* @__PURE__ */ jsxs18("label", { className: "gbo-btn is-small", children: [
+    tab === "upload" ? /* @__PURE__ */ jsxs19("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+      /* @__PURE__ */ jsxs19("label", { className: "gbo-btn is-small", children: [
         "Choose a picture…",
-        /* @__PURE__ */ jsx19(
+        /* @__PURE__ */ jsx20(
           "input",
           {
             type: "file",
@@ -58429,10 +59049,10 @@ function AvatarPicker({ name, title, description, look, setLook }) {
           }
         )
       ] }),
-      look.image ? /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-small is-ghost", onClick: () => setLook((l) => ({ ...l, image: null })), children: "Remove picture" }) : null
+      look.image ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-small is-ghost", onClick: () => setLook((l) => ({ ...l, image: null })), children: "Remove picture" }) : null
     ] }) : null,
-    tab === "generate" ? gen.available === false ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-note", children: "No image generator is configured on this Hermes." }) : /* @__PURE__ */ jsxs18("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
-      /* @__PURE__ */ jsx19(
+    tab === "generate" ? gen.available === false ? /* @__PURE__ */ jsx20("div", { className: "gbo-form-note", children: "No image generator is configured on this Hermes." }) : /* @__PURE__ */ jsxs19("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+      /* @__PURE__ */ jsx20(
         "button",
         {
           type: "button",
@@ -58452,7 +59072,7 @@ function AvatarPicker({ name, title, description, look, setLook }) {
           children: gen.busy ? "Generating…" : gen.available === null ? "Checking…" : "Generate a picture"
         }
       ),
-      gen.error ? /* @__PURE__ */ jsx19("span", { className: "gbo-card-error", children: gen.error }) : null
+      gen.error ? /* @__PURE__ */ jsx20("span", { className: "gbo-card-error", children: gen.error }) : null
     ] }) : null
   ] });
 }
@@ -58460,21 +59080,21 @@ function lookOf(bot, meta) {
   return { shape: meta?.shape || "blobatar", color: meta?.color ?? null, image: meta?.image ?? null, title: meta?.title || bot?.title || "" };
 }
 function EditProfileDialog({ bot: row, onClose }) {
-  const [bot, setBot] = React18.useState(row);
+  const [bot, setBot] = React19.useState(row);
   const meta = metaFor(row);
-  const [opened] = React18.useState(() => lookOf(row, meta));
-  const [look, setLook] = React18.useState(() => lookOf(row, meta));
-  const [description, setDescriptionState] = React18.useState(String(row.description || ""));
-  const descriptionTouched = React18.useRef(false);
+  const [opened] = React19.useState(() => lookOf(row, meta));
+  const [look, setLook] = React19.useState(() => lookOf(row, meta));
+  const [description, setDescriptionState] = React19.useState(String(row.description || ""));
+  const descriptionTouched = React19.useRef(false);
   const setDescription = (value) => {
     descriptionTouched.current = true;
     setDescriptionState(value);
   };
-  const [advancedOpen, setAdvancedOpen] = React18.useState(false);
-  const [adv, setAdv] = React18.useState(emptyAdvancedState());
-  const [busy, setBusy] = React18.useState(false);
-  const [error, setError] = React18.useState(null);
-  React18.useEffect(() => {
+  const [advancedOpen, setAdvancedOpen] = React19.useState(false);
+  const [adv, setAdv] = React19.useState(emptyAdvancedState());
+  const [busy, setBusy] = React19.useState(false);
+  const [error, setError] = React19.useState(null);
+  React19.useEffect(() => {
     let live = true;
     void ensureBotProfile(row).then((next) => {
       if (!live) return;
@@ -58498,7 +59118,7 @@ function EditProfileDialog({ bot: row, onClose }) {
       setBusy(false);
     }
   };
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs19(
     Dialog,
     {
       open: true,
@@ -58507,31 +59127,31 @@ function EditProfileDialog({ bot: row, onClose }) {
       onClose,
       title: "Edit profile",
       description: `${displayName(bot, null)} · profile ${bot.name}${bot.connectionLabel ? ` on ${bot.connectionLabel}` : ""}`,
-      footer: /* @__PURE__ */ jsxs18(Fragment13, { children: [
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void submit(), children: busy ? "Saving…" : "Save" })
+      footer: /* @__PURE__ */ jsxs19(Fragment13, { children: [
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void submit(), children: busy ? "Saving…" : "Save" })
       ] }),
       children: [
-        /* @__PURE__ */ jsx19("div", { className: "gbo-avatar-hero", children: /* @__PURE__ */ jsx19(BotAvatar, { look: "hermes", name: bot.name, meta: { ...look, custom: true }, size: 64 }) }),
-        /* @__PURE__ */ jsx19(AvatarPicker, { name: bot.name, title: look.title, description, look, setLook }),
-        /* @__PURE__ */ jsx19(Field, { label: "Name shown", children: /* @__PURE__ */ jsx19("input", { className: "gbo-input", value: look.title, placeholder: displayName(bot, null), onChange: (e2) => setLook((l) => ({ ...l, title: e2.target.value })) }) }),
-        /* @__PURE__ */ jsx19(Field, { label: "Description", children: /* @__PURE__ */ jsx19("textarea", { className: "gbo-textarea", value: description, placeholder: "What this bot is for", onChange: (e2) => setDescription(e2.target.value) }) }),
-        /* @__PURE__ */ jsxs18("button", { type: "button", className: "gbo-disclosure", "aria-expanded": advancedOpen, onClick: () => setAdvancedOpen((v) => !v), children: [
-          /* @__PURE__ */ jsx19("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx19("path", { d: "m6 9 6 6 6-6" }) }),
+        /* @__PURE__ */ jsx20("div", { className: "gbo-avatar-hero", children: /* @__PURE__ */ jsx20(BotAvatar, { look: "hermes", name: bot.name, meta: { ...look, custom: true }, size: 64 }) }),
+        /* @__PURE__ */ jsx20(AvatarPicker, { name: bot.name, title: look.title, description, look, setLook }),
+        /* @__PURE__ */ jsx20(Field, { label: "Name shown", children: /* @__PURE__ */ jsx20("input", { className: "gbo-input", value: look.title, placeholder: displayName(bot, null), onChange: (e2) => setLook((l) => ({ ...l, title: e2.target.value })) }) }),
+        /* @__PURE__ */ jsx20(Field, { label: "Description", children: /* @__PURE__ */ jsx20("textarea", { className: "gbo-textarea", value: description, placeholder: "What this bot is for", onChange: (e2) => setDescription(e2.target.value) }) }),
+        /* @__PURE__ */ jsxs19("button", { type: "button", className: "gbo-disclosure", "aria-expanded": advancedOpen, onClick: () => setAdvancedOpen((v) => !v), children: [
+          /* @__PURE__ */ jsx20("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx20("path", { d: "m6 9 6 6 6-6" }) }),
           "Skills, tools, MCP, model and SOUL"
         ] }),
-        advancedOpen ? /* @__PURE__ */ jsx19("div", { className: "gbo-section-card", children: /* @__PURE__ */ jsx19(AdvancedConfig, { bot, state: adv, setState: setAdv }) }) : null,
-        error ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: error }) : null
+        advancedOpen ? /* @__PURE__ */ jsx20("div", { className: "gbo-section-card", children: /* @__PURE__ */ jsx20(AdvancedConfig, { bot, state: adv, setState: setAdv }) }) : null,
+        error ? /* @__PURE__ */ jsx20("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
 }
 function ConfigDialog({ bot, initial, onClose }) {
-  const [adv, setAdv] = React18.useState(() => initial?.loaded ? initial : emptyAdvancedState());
-  const [busy, setBusy] = React18.useState(false);
-  const [error, setError] = React18.useState(null);
+  const [adv, setAdv] = React19.useState(() => initial?.loaded ? initial : emptyAdvancedState());
+  const [busy, setBusy] = React19.useState(false);
+  const [error, setError] = React19.useState(null);
   const dirty = adv.dirtyModel || adv.dirtySoul || adv.dirtySkills || adv.dirtyToolsets || adv.dirtyMcp;
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs19(
     Dialog,
     {
       open: true,
@@ -58540,9 +59160,9 @@ function ConfigDialog({ bot, initial, onClose }) {
       onClose,
       title: `${displayName(bot, metaFor(bot))}: skills, tools and model`,
       description: "Changes are written to the bot’s own Hermes profile on save.",
-      footer: /* @__PURE__ */ jsxs18(Fragment13, { children: [
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx19(
+      footer: /* @__PURE__ */ jsxs19(Fragment13, { children: [
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx20(
           "button",
           {
             type: "button",
@@ -58567,8 +59187,8 @@ function ConfigDialog({ bot, initial, onClose }) {
         )
       ] }),
       children: [
-        /* @__PURE__ */ jsx19(AdvancedConfig, { bot, state: adv, setState: setAdv }),
-        error ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: error }) : null
+        /* @__PURE__ */ jsx20(AdvancedConfig, { bot, state: adv, setState: setAdv }),
+        error ? /* @__PURE__ */ jsx20("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
@@ -58577,10 +59197,10 @@ function ModelDialog({ bot, onClose }) {
   const key = rowKey(bot);
   const current = useStore(roster2.models)[key];
   const settings = useStore(roster2.modelSettings)[key];
-  const [edits, setEdits] = React18.useState({});
-  const [busy, setBusy] = React18.useState(false);
-  const [error, setError] = React18.useState(null);
-  React18.useEffect(() => {
+  const [edits, setEdits] = React19.useState({});
+  const [busy, setBusy] = React19.useState(false);
+  const [error, setError] = React19.useState(null);
+  React19.useEffect(() => {
     void loadBotModel(bot, { foreground: true });
     void loadBotModelSettings(bot, { foreground: true });
   }, [key]);
@@ -58612,7 +59232,7 @@ function ModelDialog({ bot, onClose }) {
       setBusy(false);
     }
   };
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs19(
     Dialog,
     {
       open: true,
@@ -58620,12 +59240,12 @@ function ModelDialog({ bot, onClose }) {
       onClose,
       title: `${displayName(bot, metaFor(bot))}: model`,
       description: "Written to the bot’s own Hermes profile on save.",
-      footer: /* @__PURE__ */ jsxs18(Fragment13, { children: [
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !dirty || !modelReady, onClick: () => void save(), children: busy ? "Saving…" : "Save" })
+      footer: /* @__PURE__ */ jsxs19(Fragment13, { children: [
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !dirty || !modelReady, onClick: () => void save(), children: busy ? "Saving…" : "Save" })
       ] }),
       children: [
-        /* @__PURE__ */ jsx19(
+        /* @__PURE__ */ jsx20(
           ModelPicker,
           {
             bot,
@@ -58633,7 +59253,7 @@ function ModelDialog({ bot, onClose }) {
             disabled: !modelReady,
             value: { provider: value.provider, model: value.model },
             onChange: (patch) => setEdits((e2) => ({ ...e2, ...patch })),
-            children: /* @__PURE__ */ jsx19(
+            children: /* @__PURE__ */ jsx20(
               ModelExtraFields,
               {
                 bot,
@@ -58647,15 +59267,15 @@ function ModelDialog({ bot, onClose }) {
             )
           }
         ),
-        current?.error && !modelReady ? /* @__PURE__ */ jsxs18("div", { className: "gbo-form-error", children: [
+        current?.error && !modelReady ? /* @__PURE__ */ jsxs19("div", { className: "gbo-form-error", children: [
           "Could not read the bot’s model: ",
           current.error
         ] }) : null,
-        settings?.error && !settingsReady ? /* @__PURE__ */ jsxs18("div", { className: "gbo-form-error", children: [
+        settings?.error && !settingsReady ? /* @__PURE__ */ jsxs19("div", { className: "gbo-form-error", children: [
           "Could not read the bot’s effort and speed: ",
           settings.error
         ] }) : null,
-        error ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: error }) : null
+        error ? /* @__PURE__ */ jsx20("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
@@ -58663,9 +59283,9 @@ function ModelDialog({ bot, onClose }) {
 function GroupsDialog({ bot, onClose }) {
   useStore(roster2.metaWrites);
   useStore(app.roster);
-  const [name, setName] = React18.useState("");
-  const [error, setError] = React18.useState(null);
-  const [busy, setBusy] = React18.useState(false);
+  const [name, setName] = React19.useState("");
+  const [error, setError] = React19.useState(null);
+  const [busy, setBusy] = React19.useState(false);
   const meta = metaFor(bot);
   const current = botGroups(meta);
   const groups = knownGroups(app.roster.get().rows.map((r) => metaFor(r)));
@@ -58695,7 +59315,7 @@ function GroupsDialog({ bot, onClose }) {
       setBusy(false);
     }
   };
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs19(
     Dialog,
     {
       open: true,
@@ -58703,8 +59323,8 @@ function GroupsDialog({ bot, onClose }) {
       onClose,
       title: "Groups",
       description: `Groups ${who} belongs to. A bot can be in several.`,
-      footer: /* @__PURE__ */ jsxs18(Fragment13, { children: [
-        current.length ? /* @__PURE__ */ jsx19(
+      footer: /* @__PURE__ */ jsxs19(Fragment13, { children: [
+        current.length ? /* @__PURE__ */ jsx20(
           "button",
           {
             type: "button",
@@ -58716,16 +59336,16 @@ function GroupsDialog({ bot, onClose }) {
             children: "Remove from all groups"
           }
         ) : null,
-        /* @__PURE__ */ jsx19("span", { className: "gbo-spacer" }),
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-primary", onClick: onClose, children: "Done" })
+        /* @__PURE__ */ jsx20("span", { className: "gbo-spacer" }),
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-primary", onClick: onClose, children: "Done" })
       ] }),
       children: [
-        groups.length ? /* @__PURE__ */ jsx19("div", { className: "gbo-check-list is-one", children: groups.map((group) => /* @__PURE__ */ jsx19(Check, { checked: current.includes(group), disabled: locked || busy, onChange: (v) => void setMembership(group, v), children: group }, group)) }) : null,
-        locked ? /* @__PURE__ */ jsxs18("div", { className: "gbo-form-note", children: [
+        groups.length ? /* @__PURE__ */ jsx20("div", { className: "gbo-check-list is-one", children: groups.map((group) => /* @__PURE__ */ jsx20(Check, { checked: current.includes(group), disabled: locked || busy, onChange: (v) => void setMembership(group, v), children: group }, group)) }) : null,
+        locked ? /* @__PURE__ */ jsxs19("div", { className: "gbo-form-note", children: [
           who,
           "’s machine is offline; its groups can change once it is back."
         ] }) : null,
-        /* @__PURE__ */ jsxs18(
+        /* @__PURE__ */ jsxs19(
           "form",
           {
             style: { display: "flex", gap: 8 },
@@ -58738,36 +59358,36 @@ function GroupsDialog({ bot, onClose }) {
               }
             },
             children: [
-              /* @__PURE__ */ jsx19("input", { className: "gbo-input", autoFocus: true, disabled: locked, value: name, placeholder: groups.length ? "New group…" : "Group name (e.g. Research)", onChange: (e2) => setName(e2.target.value) }),
-              /* @__PURE__ */ jsx19("button", { type: "submit", className: "gbo-btn is-small", disabled: locked || !name.trim() || busy, children: "Create & join" })
+              /* @__PURE__ */ jsx20("input", { className: "gbo-input", autoFocus: true, disabled: locked, value: name, placeholder: groups.length ? "New group…" : "Group name (e.g. Research)", onChange: (e2) => setName(e2.target.value) }),
+              /* @__PURE__ */ jsx20("button", { type: "submit", className: "gbo-btn is-small", disabled: locked || !name.trim() || busy, children: "Create & join" })
             ]
           }
         ),
-        error ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: error }) : null
+        error ? /* @__PURE__ */ jsx20("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
 }
 function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }) {
   useStore(app.roster);
-  const [name, setName] = React18.useState("");
-  const [title, setTitle] = React18.useState("");
-  const [description, setDescription] = React18.useState("");
-  const [look, setLook] = React18.useState({ shape: blobatarMarkup("x", 8) !== null ? "blobatar" : "circle", color: null, image: null });
-  const [tab, setTab] = React18.useState(initialTab);
-  const [target, setTarget] = React18.useState("");
-  const [connections, setConnections] = React18.useState([]);
-  const [cloneFrom, setCloneFrom] = React18.useState("default");
-  const [model, setModel] = React18.useState({ provider: "", model: "" });
-  const [soul, setSoul] = React18.useState("");
-  const [noSkills, setNoSkills] = React18.useState(false);
-  const [shareAuth, setShareAuth] = React18.useState(true);
-  const [caps, setCaps] = React18.useState(initialCaps ? { target: "", ...initialCaps } : null);
-  const [capsError, setCapsError] = React18.useState(null);
-  const [dirtyCaps, setDirtyCaps] = React18.useState({ skills: false, toolsets: false, mcp: false });
-  const [busy, setBusy] = React18.useState(false);
-  const [error, setError] = React18.useState(null);
-  React18.useEffect(() => {
+  const [name, setName] = React19.useState("");
+  const [title, setTitle] = React19.useState("");
+  const [description, setDescription] = React19.useState("");
+  const [look, setLook] = React19.useState({ shape: blobatarMarkup("x", 8) !== null ? "blobatar" : "circle", color: null, image: null });
+  const [tab, setTab] = React19.useState(initialTab);
+  const [target, setTarget] = React19.useState("");
+  const [connections, setConnections] = React19.useState([]);
+  const [cloneFrom, setCloneFrom] = React19.useState("default");
+  const [model, setModel] = React19.useState({ provider: "", model: "" });
+  const [soul, setSoul] = React19.useState("");
+  const [noSkills, setNoSkills] = React19.useState(false);
+  const [shareAuth, setShareAuth] = React19.useState(true);
+  const [caps, setCaps] = React19.useState(initialCaps ? { target: "", ...initialCaps } : null);
+  const [capsError, setCapsError] = React19.useState(null);
+  const [dirtyCaps, setDirtyCaps] = React19.useState({ skills: false, toolsets: false, mcp: false });
+  const [busy, setBusy] = React19.useState(false);
+  const [error, setError] = React19.useState(null);
+  React19.useEffect(() => {
     void listConnections().then(setConnections);
   }, []);
   const active = String(activeConnection() || "");
@@ -58777,7 +59397,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
   const remote = Boolean(target);
   const taken = slugTaken(rows, slug, target);
   const capSource = cloneFrom === "__none__" || remote ? "default" : cloneFrom;
-  React18.useEffect(() => {
+  React19.useEffect(() => {
     if (tab !== "capabilities" || caps && caps.source === capSource && caps.target === target) return;
     let live = true;
     setCapsError(null);
@@ -58820,7 +59440,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
     }
   };
   const otherConnections = connections.filter((c2) => c2?.id && c2.id !== "local" && c2.id !== active);
-  return /* @__PURE__ */ jsxs18(
+  return /* @__PURE__ */ jsxs19(
     Dialog,
     {
       open: true,
@@ -58829,13 +59449,13 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
       onClose,
       title: "New bot",
       description: "A named agent with its own memory, skills and Bot Chat.",
-      footer: /* @__PURE__ */ jsxs18(Fragment13, { children: [
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
-        /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !valid || taken, onClick: () => void submit(), children: busy ? "Creating…" : "Create bot" })
+      footer: /* @__PURE__ */ jsxs19(Fragment13, { children: [
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: onClose, children: "Cancel" }),
+        /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || !valid || taken, onClick: () => void submit(), children: busy ? "Creating…" : "Create bot" })
       ] }),
       children: [
-        /* @__PURE__ */ jsx19("div", { className: "gbo-avatar-hero", children: /* @__PURE__ */ jsx19(BotAvatar, { look: "hermes", name: slug || "agent", meta: { ...look, custom: true, color: look.color || botColor(slug || "agent", null) }, size: 56 }) }),
-        /* @__PURE__ */ jsx19(
+        /* @__PURE__ */ jsx20("div", { className: "gbo-avatar-hero", children: /* @__PURE__ */ jsx20(BotAvatar, { look: "hermes", name: slug || "agent", meta: { ...look, custom: true, color: look.color || botColor(slug || "agent", null) }, size: 56 }) }),
+        /* @__PURE__ */ jsx20(
           Tabs,
           {
             value: tab,
@@ -58847,14 +59467,14 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
             ]
           }
         ),
-        tab === "general" ? /* @__PURE__ */ jsxs18(Fragment13, { children: [
-          /* @__PURE__ */ jsx19(AvatarPicker, { name: slug, title: botTitle, description, look, setLook }),
-          /* @__PURE__ */ jsxs18("div", { className: "gbo-row2", children: [
-            /* @__PURE__ */ jsx19(Field, { label: "Name", hint: name && !valid ? "Letters, digits, - and _ only" : taken ? "A bot with this name already exists there" : slug && slug !== name.trim() ? `Profile id: ${slug}` : void 0, children: /* @__PURE__ */ jsx19("input", { className: "gbo-input", autoFocus: true, value: name, placeholder: "scout", onChange: (e2) => setName(e2.target.value) }) }),
-            /* @__PURE__ */ jsx19(Field, { label: "Title (optional)", children: /* @__PURE__ */ jsx19("input", { className: "gbo-input", value: title, placeholder: "Research scout", onChange: (e2) => setTitle(e2.target.value) }) })
+        tab === "general" ? /* @__PURE__ */ jsxs19(Fragment13, { children: [
+          /* @__PURE__ */ jsx20(AvatarPicker, { name: slug, title: botTitle, description, look, setLook }),
+          /* @__PURE__ */ jsxs19("div", { className: "gbo-row2", children: [
+            /* @__PURE__ */ jsx20(Field, { label: "Name", hint: name && !valid ? "Letters, digits, - and _ only" : taken ? "A bot with this name already exists there" : slug && slug !== name.trim() ? `Profile id: ${slug}` : void 0, children: /* @__PURE__ */ jsx20("input", { className: "gbo-input", autoFocus: true, value: name, placeholder: "scout", onChange: (e2) => setName(e2.target.value) }) }),
+            /* @__PURE__ */ jsx20(Field, { label: "Title (optional)", children: /* @__PURE__ */ jsx20("input", { className: "gbo-input", value: title, placeholder: "Research scout", onChange: (e2) => setTitle(e2.target.value) }) })
           ] }),
-          /* @__PURE__ */ jsx19(Field, { label: "What is it for?", children: /* @__PURE__ */ jsx19("textarea", { className: "gbo-textarea", value: description, placeholder: "Finds and summarises what matters.", onChange: (e2) => setDescription(e2.target.value) }) }),
-          otherConnections.length ? /* @__PURE__ */ jsx19(Field, { label: "Create on", children: /* @__PURE__ */ jsx19(
+          /* @__PURE__ */ jsx20(Field, { label: "What is it for?", children: /* @__PURE__ */ jsx20("textarea", { className: "gbo-textarea", value: description, placeholder: "Finds and summarises what matters.", onChange: (e2) => setDescription(e2.target.value) }) }),
+          otherConnections.length ? /* @__PURE__ */ jsx20(Field, { label: "Create on", children: /* @__PURE__ */ jsx20(
             Select,
             {
               label: "Create on",
@@ -58864,27 +59484,27 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
             }
           ) }) : null
         ] }) : null,
-        tab === "model" ? /* @__PURE__ */ jsxs18(Fragment13, { children: [
-          remote ? null : /* @__PURE__ */ jsx19(Field, { label: "Start from", hint: "Copies config, skills and SOUL from that profile.", children: /* @__PURE__ */ jsx19(Select, { label: "Start from", value: cloneFrom, onChange: setCloneFrom, options: [["default", "Hermes (default profile)"], ...localBots.filter((b2) => b2.name !== "default").map((b2) => [b2.name, displayName(b2, metaFor(b2))]), ["__none__", "A fresh profile"]] }) }),
-          /* @__PURE__ */ jsx19(ModelPicker, { bot: remote ? { name: "default", connectionId: target, remoteSource: true, sourceScoped: true, route: { connectionId: target, mode: "remote", profile: "default", targetProfile: "default" } } : null, value: model, onChange: (patch) => setModel((m) => ({ ...m, ...patch })) }),
-          /* @__PURE__ */ jsx19(Field, { label: "SOUL (optional)", hint: "Leave empty for an identity built from the name and description.", children: /* @__PURE__ */ jsx19("textarea", { className: "gbo-textarea is-mono", value: soul, onChange: (e2) => setSoul(e2.target.value) }) }),
-          /* @__PURE__ */ jsx19(Check, { checked: shareAuth, onChange: setShareAuth, children: "Share sign-ins with the main profile" }),
-          /* @__PURE__ */ jsx19(Check, { checked: noSkills, onChange: setNoSkills, children: "Start with no skills" })
+        tab === "model" ? /* @__PURE__ */ jsxs19(Fragment13, { children: [
+          remote ? null : /* @__PURE__ */ jsx20(Field, { label: "Start from", hint: "Copies config, skills and SOUL from that profile.", children: /* @__PURE__ */ jsx20(Select, { label: "Start from", value: cloneFrom, onChange: setCloneFrom, options: [["default", "Hermes (default profile)"], ...localBots.filter((b2) => b2.name !== "default").map((b2) => [b2.name, displayName(b2, metaFor(b2))]), ["__none__", "A fresh profile"]] }) }),
+          /* @__PURE__ */ jsx20(ModelPicker, { bot: remote ? { name: "default", connectionId: target, remoteSource: true, sourceScoped: true, route: { connectionId: target, mode: "remote", profile: "default", targetProfile: "default" } } : null, value: model, onChange: (patch) => setModel((m) => ({ ...m, ...patch })) }),
+          /* @__PURE__ */ jsx20(Field, { label: "SOUL (optional)", hint: "Leave empty for an identity built from the name and description.", children: /* @__PURE__ */ jsx20("textarea", { className: "gbo-textarea is-mono", value: soul, onChange: (e2) => setSoul(e2.target.value) }) }),
+          /* @__PURE__ */ jsx20(Check, { checked: shareAuth, onChange: setShareAuth, children: "Share sign-ins with the main profile" }),
+          /* @__PURE__ */ jsx20(Check, { checked: noSkills, onChange: setNoSkills, children: "Start with no skills" })
         ] }) : null,
-        tab === "capabilities" ? capsError ? /* @__PURE__ */ jsxs18("div", { className: "gbo-form-note", children: [
+        tab === "capabilities" ? capsError ? /* @__PURE__ */ jsxs19("div", { className: "gbo-form-note", children: [
           "Could not read the starting profile’s capabilities (",
           capsError,
           "). You can change them after creating the bot."
-        ] }) : !caps ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-note", children: "Loading…" }) : /* @__PURE__ */ jsx19(Fragment13, { children: ["skills", "toolsets", "mcp"].map((kind) => /* @__PURE__ */ jsx19(Field, { label: kind === "mcp" ? "MCP servers" : kind === "skills" ? "Skills" : "Toolsets", children: /* @__PURE__ */ jsx19("div", { className: `gbo-check-list${kind === "mcp" ? " is-one" : ""}`, children: (caps[kind] || []).map((x) => /* @__PURE__ */ jsx19(Check, { title: x.description || x.name, checked: Boolean(x.enabled), onChange: (v) => toggleCap(kind, x.name, v), children: x.name }, x.name)) }) }, kind)) }) : null,
-        error ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: error }) : null
+        ] }) : !caps ? /* @__PURE__ */ jsx20("div", { className: "gbo-form-note", children: "Loading…" }) : /* @__PURE__ */ jsx20(Fragment13, { children: ["skills", "toolsets", "mcp"].map((kind) => /* @__PURE__ */ jsx20(Field, { label: kind === "mcp" ? "MCP servers" : kind === "skills" ? "Skills" : "Toolsets", children: /* @__PURE__ */ jsx20("div", { className: `gbo-check-list${kind === "mcp" ? " is-one" : ""}`, children: (caps[kind] || []).map((x) => /* @__PURE__ */ jsx20(Check, { title: x.description || x.name, checked: Boolean(x.enabled), onChange: (v) => toggleCap(kind, x.name, v), children: x.name }, x.name)) }) }, kind)) }) : null,
+        error ? /* @__PURE__ */ jsx20("div", { className: "gbo-form-error", children: error }) : null
       ]
     }
   );
 }
 
 // src/ui/Rooms.tsx
-import * as React19 from "react";
-import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
+import * as React20 from "react";
+import { jsx as jsx21, jsxs as jsxs20 } from "react/jsx-runtime";
 function botFor(profile, route) {
   return app.roster.get().rows.find(
     (bot) => String(bot?.route?.targetProfile || bot?.name) === profile && String(bot?.route?.connectionId || bot?.connectionId || "local") === String(route?.connectionId || "local")
@@ -58892,16 +59512,16 @@ function botFor(profile, route) {
 }
 function Face({ profile, route, size = 28, working = false }) {
   const bot = botFor(profile, route);
-  return /* @__PURE__ */ jsx20(BotAvatar, { shapeKey: bot ? rowKey(bot) : profile, name: profile, meta: bot ? metaFor(bot) : null, size, working });
+  return /* @__PURE__ */ jsx21(BotAvatar, { shapeKey: bot ? rowKey(bot) : profile, name: profile, meta: bot ? metaFor(bot) : null, size, working });
 }
 function NewGroup({ route, onDone }) {
   const roster = useStore(app.roster);
-  const [name, setName] = React19.useState("");
-  const [picked, setPicked] = React19.useState([]);
-  const [error, setError] = React19.useState("");
-  const [busy, setBusy] = React19.useState(false);
+  const [name, setName] = React20.useState("");
+  const [picked, setPicked] = React20.useState([]);
+  const [error, setError] = React20.useState("");
+  const [busy, setBusy] = React20.useState(false);
   const eligible = roster.rows.filter((bot) => String(bot?.route?.connectionId || bot?.connectionId || "local") === String(route?.connectionId || "local") && !metaFor(bot)?.hidden);
-  return /* @__PURE__ */ jsxs19(
+  return /* @__PURE__ */ jsxs20(
     "form",
     {
       className: "gbo-new-group",
@@ -58919,20 +59539,20 @@ function NewGroup({ route, onDone }) {
         }
       },
       children: [
-        /* @__PURE__ */ jsx20("input", { className: "gbo-input", placeholder: "Group name", "aria-label": "Group name", value: name, onChange: (event) => setName(event.target.value) }),
-        /* @__PURE__ */ jsx20("div", { className: "gbo-pick", role: "group", "aria-label": "Members", children: eligible.map((bot) => {
+        /* @__PURE__ */ jsx21("input", { className: "gbo-input", placeholder: "Group name", "aria-label": "Group name", value: name, onChange: (event) => setName(event.target.value) }),
+        /* @__PURE__ */ jsx21("div", { className: "gbo-pick", role: "group", "aria-label": "Members", children: eligible.map((bot) => {
           const key = rowKey(bot);
           const on = picked.includes(key);
-          return /* @__PURE__ */ jsxs19("label", { className: `gbo-pick-row${on ? " is-on" : ""}`, children: [
-            /* @__PURE__ */ jsx20("input", { type: "checkbox", checked: on, onChange: () => setPicked((list) => on ? list.filter((k) => k !== key) : [...list, key]) }),
-            /* @__PURE__ */ jsx20(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 22 }),
+          return /* @__PURE__ */ jsxs20("label", { className: `gbo-pick-row${on ? " is-on" : ""}`, children: [
+            /* @__PURE__ */ jsx21("input", { type: "checkbox", checked: on, onChange: () => setPicked((list) => on ? list.filter((k) => k !== key) : [...list, key]) }),
+            /* @__PURE__ */ jsx21(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 22 }),
             displayName(bot, metaFor(bot))
           ] }, key);
         }) }),
-        error ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-error", children: error }) : null,
-        /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-          /* @__PURE__ */ jsx20("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy || !name.trim() || picked.length < 2 || picked.length > 6, children: busy ? "Creating…" : "Create group" }),
-          /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn", onClick: onDone, children: "Cancel" })
+        error ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-error", children: error }) : null,
+        /* @__PURE__ */ jsxs20("div", { className: "gbo-card-actions", children: [
+          /* @__PURE__ */ jsx21("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy || !name.trim() || picked.length < 2 || picked.length > 6, children: busy ? "Creating…" : "Create group" }),
+          /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", onClick: onDone, children: "Cancel" })
         ] })
       ]
     }
@@ -58950,94 +59570,94 @@ function RoomsSection({ query = "" }) {
   if (!state.loaded || !state.route) return null;
   const q = String(query || "").trim().toLowerCase();
   const rooms = q ? state.rooms.filter((room) => String(room?.name || "").toLowerCase().includes(q)) : state.rooms;
-  return /* @__PURE__ */ jsxs19("div", { role: "group", "aria-label": "Group chats", className: "gbo-rooms", children: [
-    /* @__PURE__ */ jsxs19("div", { className: "gbo-section-head is-rooms", children: [
-      /* @__PURE__ */ jsxs19("button", { type: "button", className: "gbo-section-toggle", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: [
-        /* @__PURE__ */ jsx20(IconChevronDown, {}),
+  return /* @__PURE__ */ jsxs20("div", { role: "group", "aria-label": "Group chats", className: "gbo-rooms", children: [
+    /* @__PURE__ */ jsxs20("div", { className: "gbo-section-head is-rooms", children: [
+      /* @__PURE__ */ jsxs20("button", { type: "button", className: "gbo-section-toggle", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: [
+        /* @__PURE__ */ jsx21(IconChevronDown, {}),
         "Group chats",
-        /* @__PURE__ */ jsx20("span", { className: "gbo-count", children: rooms.length })
+        /* @__PURE__ */ jsx21("span", { className: "gbo-count", children: rooms.length })
       ] }),
-      /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--plain", title: "New group chat", "aria-label": "New group chat", onClick: () => setCreating((v) => !v), children: /* @__PURE__ */ jsx20(IconPlus, {}) })
+      /* @__PURE__ */ jsx21("button", { type: "button", className: "icon-btn icon-btn--plain", title: "New group chat", "aria-label": "New group chat", onClick: () => setCreating((v) => !v), children: /* @__PURE__ */ jsx21(IconPlus, {}) })
     ] }),
-    creating ? /* @__PURE__ */ jsx20(NewGroup, { route: state.route, onDone: () => setCreating(false) }) : null,
-    open ? rooms.map((room) => /* @__PURE__ */ jsxs19("button", { type: "button", className: "bot-row gbo-row gbo-room-row", title: room.name, onClick: () => openRoom(state.route, room), children: [
-      /* @__PURE__ */ jsx20("span", { className: "bot-row__avatar gbo-room-faces", "aria-hidden": true, children: (room.members || []).slice(0, 3).map((m) => /* @__PURE__ */ jsx20(Face, { profile: String(m.profile || m.member_id), route: state.route, size: 20 }, m.member_id)) }),
-      /* @__PURE__ */ jsxs19("span", { className: "bot-row__text gbo-row-main", children: [
-        /* @__PURE__ */ jsx20("span", { className: "gbo-row-line", children: /* @__PURE__ */ jsx20("span", { className: "bot-row__name gbo-row-name", children: room.name }) }),
-        /* @__PURE__ */ jsx20("span", { className: "bot-row__preview gbo-row-preview", children: (room.members || []).map((m) => m.display_name || m.handle || m.member_id).join(", ") })
+    creating ? /* @__PURE__ */ jsx21(NewGroup, { route: state.route, onDone: () => setCreating(false) }) : null,
+    open ? rooms.map((room) => /* @__PURE__ */ jsxs20("button", { type: "button", className: "bot-row gbo-row gbo-room-row", title: room.name, onClick: () => openRoom(state.route, room), children: [
+      /* @__PURE__ */ jsx21("span", { className: "bot-row__avatar gbo-room-faces", "aria-hidden": true, children: (room.members || []).slice(0, 3).map((m) => /* @__PURE__ */ jsx21(Face, { profile: String(m.profile || m.member_id), route: state.route, size: 20 }, m.member_id)) }),
+      /* @__PURE__ */ jsxs20("span", { className: "bot-row__text gbo-row-main", children: [
+        /* @__PURE__ */ jsx21("span", { className: "gbo-row-line", children: /* @__PURE__ */ jsx21("span", { className: "bot-row__name gbo-row-name", children: room.name }) }),
+        /* @__PURE__ */ jsx21("span", { className: "bot-row__preview gbo-row-preview", children: (room.members || []).map((m) => m.display_name || m.handle || m.member_id).join(", ") })
       ] })
     ] }, room.room_id)) : null,
-    state.error ? /* @__PURE__ */ jsxs19("div", { className: "gbo-roster-empty", children: [
+    state.error ? /* @__PURE__ */ jsxs20("div", { className: "gbo-roster-empty", children: [
       "Could not load group chats: ",
       state.error
     ] }) : null
   ] });
 }
 function PendingAction({ action, controller: controller2, members, route, acting }) {
-  const [error, setError] = React19.useState("");
+  const [error, setError] = React20.useState("");
   const member = members.find((m) => m.member_id === action.member_id);
   const who = member?.display_name || member?.handle || action.member_id;
   const run = (choice) => controller2.act(action, choice).catch((err2) => setError(String(err2?.message || err2)));
   if (action.kind === "approval") {
     const preview = approvalPreview(action);
     const choices = Array.isArray(action.approval?.choices) ? action.approval.choices : [];
-    return /* @__PURE__ */ jsxs19("div", { className: "gbo-card", role: "group", "aria-label": "Approval needed", children: [
-      /* @__PURE__ */ jsxs19("div", { className: "gbo-card-title", children: [
-        /* @__PURE__ */ jsx20(Face, { profile: String(member?.profile || action.member_id), route, size: 20 }),
+    return /* @__PURE__ */ jsxs20("div", { className: "gbo-card", role: "group", "aria-label": "Approval needed", children: [
+      /* @__PURE__ */ jsxs20("div", { className: "gbo-card-title", children: [
+        /* @__PURE__ */ jsx21(Face, { profile: String(member?.profile || action.member_id), route, size: 20 }),
         " ",
         who,
         " asks: may I run this?"
       ] }),
-      preview.description ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-desc", children: preview.description }) : null,
-      preview.actualCommand ? /* @__PURE__ */ jsx20("code", { children: preview.actualCommand }) : null,
-      /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-        choices.includes("once") && preview.reviewable ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: acting, onClick: () => void run("once"), children: "Allow once" }) : null,
-        choices.includes("deny") ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn", disabled: acting, onClick: () => void run("deny"), children: "Deny" }) : null
+      preview.description ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: preview.description }) : null,
+      preview.actualCommand ? /* @__PURE__ */ jsx21("code", { children: preview.actualCommand }) : null,
+      /* @__PURE__ */ jsxs20("div", { className: "gbo-card-actions", children: [
+        choices.includes("once") && preview.reviewable ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: acting, onClick: () => void run("once"), children: "Allow once" }) : null,
+        choices.includes("deny") ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", disabled: acting, onClick: () => void run("deny"), children: "Deny" }) : null
       ] }),
-      error ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-error", children: error }) : null
+      error ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-error", children: error }) : null
     ] });
   }
-  return /* @__PURE__ */ jsxs19("div", { className: "gbo-card", role: "group", "aria-label": `${who} needs a decision`, children: [
-    /* @__PURE__ */ jsxs19("div", { className: "gbo-card-title", children: [
+  return /* @__PURE__ */ jsxs20("div", { className: "gbo-card", role: "group", "aria-label": `${who} needs a decision`, children: [
+    /* @__PURE__ */ jsxs20("div", { className: "gbo-card-title", children: [
       who,
       "’s turn ",
       action.kind === "retry" ? "failed" : "is waiting"
     ] }),
-    /* @__PURE__ */ jsx20("div", { className: "gbo-card-actions", children: /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: acting, onClick: () => void run(), children: action.kind === "retry" ? "Retry" : "Discard" }) }),
-    error ? /* @__PURE__ */ jsx20("div", { className: "gbo-card-error", children: error }) : null
+    /* @__PURE__ */ jsx21("div", { className: "gbo-card-actions", children: /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: acting, onClick: () => void run(), children: action.kind === "retry" ? "Retry" : "Discard" }) }),
+    error ? /* @__PURE__ */ jsx21("div", { className: "gbo-card-error", children: error }) : null
   ] });
 }
 function RoomItem({ item, route, onContinue, onStop }) {
   switch (item.kind) {
     case "divider":
-      return /* @__PURE__ */ jsx20("div", { className: "divider gbo-divider", children: item.label });
+      return /* @__PURE__ */ jsx21("div", { className: "divider gbo-divider", children: item.label });
     case "room-user":
-      return /* @__PURE__ */ jsxs19("div", { className: "gbo-msg is-user", children: [
-        item.author !== "You" ? /* @__PURE__ */ jsxs19("div", { className: "gbo-room-author is-user", children: [
+      return /* @__PURE__ */ jsxs20("div", { className: "gbo-msg is-user", children: [
+        item.author !== "You" ? /* @__PURE__ */ jsxs20("div", { className: "gbo-room-author is-user", children: [
           item.author,
           item.scheduled ? " · scheduled" : ""
         ] }) : null,
-        item.text ? /* @__PURE__ */ jsx20("div", { className: "bubble is-user", children: /* @__PURE__ */ jsx20("div", { className: "bubble__plain", children: item.text }) }) : null,
-        item.attachments?.length ? /* @__PURE__ */ jsx20("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx20("span", { className: "gbo-chip", children: a2.name }, i)) }) : null
+        item.text ? /* @__PURE__ */ jsx21("div", { className: "bubble is-user", children: /* @__PURE__ */ jsx21("div", { className: "bubble__plain", children: item.text }) }) : null,
+        item.attachments?.length ? /* @__PURE__ */ jsx21("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx21("span", { className: "gbo-chip", children: a2.name }, i)) }) : null
       ] });
     case "room-member":
-      return /* @__PURE__ */ jsxs19("div", { className: "gbo-msg is-bot gbo-room-msg", children: [
-        /* @__PURE__ */ jsx20(Face, { profile: item.profile, route, size: 26 }),
-        /* @__PURE__ */ jsxs19("div", { className: "gbo-room-body", children: [
-          /* @__PURE__ */ jsx20("div", { className: "gbo-room-author", children: item.author }),
-          item.text ? /* @__PURE__ */ jsx20("div", { className: "bubble is-agent", children: /* @__PURE__ */ jsx20("div", { className: "md", children: /* @__PURE__ */ jsx20(Markdown, { text: item.text }) }) }) : null
+      return /* @__PURE__ */ jsxs20("div", { className: "gbo-msg is-bot gbo-room-msg", children: [
+        /* @__PURE__ */ jsx21(Face, { profile: item.profile, route, size: 26 }),
+        /* @__PURE__ */ jsxs20("div", { className: "gbo-room-body", children: [
+          /* @__PURE__ */ jsx21("div", { className: "gbo-room-author", children: item.author }),
+          item.text ? /* @__PURE__ */ jsx21("div", { className: "bubble is-agent", children: /* @__PURE__ */ jsx21("div", { className: "md", children: /* @__PURE__ */ jsx21(Markdown, { text: item.text }) }) }) : null
         ] })
       ] });
     case "room-paused":
-      return /* @__PURE__ */ jsxs19("div", { className: "gbo-card", role: "group", "aria-label": "Paused", children: [
-        /* @__PURE__ */ jsx20("div", { className: "gbo-card-desc", children: item.text }),
-        /* @__PURE__ */ jsxs19("div", { className: "gbo-card-actions", children: [
-          item.discussionEventId ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => onContinue(item.discussionEventId), children: "Continue" }) : null,
-          /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn", onClick: onStop, children: "Stop" })
+      return /* @__PURE__ */ jsxs20("div", { className: "gbo-card", role: "group", "aria-label": "Paused", children: [
+        /* @__PURE__ */ jsx21("div", { className: "gbo-card-desc", children: item.text }),
+        /* @__PURE__ */ jsxs20("div", { className: "gbo-card-actions", children: [
+          item.discussionEventId ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => onContinue(item.discussionEventId), children: "Continue" }) : null,
+          /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", onClick: onStop, children: "Stop" })
         ] })
       ] });
     case "notice":
-      return /* @__PURE__ */ jsx20("div", { className: "system-event gbo-notice", children: item.text });
+      return /* @__PURE__ */ jsx21("div", { className: "system-event gbo-notice", children: item.text });
     default:
       return null;
   }
@@ -59046,18 +59666,18 @@ function RoomWorkspace({ slot }) {
   const state = useStore(slot.chat);
   const controller2 = slot.controller();
   const route = slot.route;
-  const [draft, setDraft] = React19.useState("");
-  const [note, setNote] = React19.useState("");
-  const [renaming, setRenaming] = React19.useState(false);
-  const [newName, setNewName] = React19.useState("");
-  const [confirmDisband, setConfirmDisband] = React19.useState(false);
-  const scroller = React19.useRef(null);
+  const [draft, setDraft] = React20.useState("");
+  const [note, setNote] = React20.useState("");
+  const [renaming, setRenaming] = React20.useState(false);
+  const [newName, setNewName] = React20.useState("");
+  const [confirmDisband, setConfirmDisband] = React20.useState(false);
+  const scroller = React20.useRef(null);
   const room = state.room || slot.room;
   const members = room?.members || [];
   const driver = state.driver;
   const working = new Set((driver?.member_activity || []).filter((a2) => a2.status === "working" || a2.status === "running").map((a2) => a2.member_id));
-  const items = React19.useMemo(() => withDividers(state.items || []), [state.items]);
-  React19.useLayoutEffect(() => {
+  const items = React20.useMemo(() => withDividers(state.items || []), [state.items]);
+  React20.useLayoutEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length, state.posts?.length]);
@@ -59072,22 +59692,22 @@ function RoomWorkspace({ slot }) {
       setNote(`Not posted: ${res.error || "refused"}. Your message is back in the composer.`);
     }
   };
-  return /* @__PURE__ */ jsx20("div", { "data-gbo-root": "", className: "gbo-ws", children: /* @__PURE__ */ jsxs19("main", { className: "chat gbo-chat", children: [
-    /* @__PURE__ */ jsxs19("header", { className: "chat__header gbo-head", children: [
-      /* @__PURE__ */ jsxs19("div", { className: "chat__pill gbo-head-pill gbo-room-head", children: [
-        /* @__PURE__ */ jsx20("span", { className: "gbo-room-faces", "aria-hidden": true, children: members.slice(0, 4).map((m) => /* @__PURE__ */ jsx20(Face, { profile: String(m.profile || m.member_id), route, size: 22, working: working.has(m.member_id) }, m.member_id)) }),
-        /* @__PURE__ */ jsx20("span", { className: "chat__pill-name", children: room?.name || "Group" })
+  return /* @__PURE__ */ jsx21("div", { "data-gbo-root": "", className: "gbo-ws", children: /* @__PURE__ */ jsxs20("main", { className: "chat gbo-chat", children: [
+    /* @__PURE__ */ jsxs20("header", { className: "chat__header gbo-head", children: [
+      /* @__PURE__ */ jsxs20("div", { className: "chat__pill gbo-head-pill gbo-room-head", children: [
+        /* @__PURE__ */ jsx21("span", { className: "gbo-room-faces", "aria-hidden": true, children: members.slice(0, 4).map((m) => /* @__PURE__ */ jsx21(Face, { profile: String(m.profile || m.member_id), route, size: 22, working: working.has(m.member_id) }, m.member_id)) }),
+        /* @__PURE__ */ jsx21("span", { className: "chat__pill-name", children: room?.name || "Group" })
       ] }),
-      /* @__PURE__ */ jsxs19("div", { className: "chat__header-right gbo-head-right", children: [
-        driver?.working || driver?.running ? /* @__PURE__ */ jsx20("button", { type: "button", className: "share-btn", onClick: () => void controller2.stop(), children: "Stop" }) : null,
-        /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--bordered", title: "Rename group", "aria-label": "Rename group", onClick: () => {
+      /* @__PURE__ */ jsxs20("div", { className: "chat__header-right gbo-head-right", children: [
+        driver?.working || driver?.running ? /* @__PURE__ */ jsx21("button", { type: "button", className: "share-btn", onClick: () => void controller2.stop(), children: "Stop" }) : null,
+        /* @__PURE__ */ jsx21("button", { type: "button", className: "icon-btn icon-btn--bordered", title: "Rename group", "aria-label": "Rename group", onClick: () => {
           setNewName(room?.name || "");
           setRenaming((v) => !v);
         }, children: "✎" }),
-        /* @__PURE__ */ jsx20("button", { type: "button", className: "icon-btn icon-btn--bordered", title: "Disband group", "aria-label": "Disband group", onClick: () => setConfirmDisband(true), children: "×" })
+        /* @__PURE__ */ jsx21("button", { type: "button", className: "icon-btn icon-btn--bordered", title: "Disband group", "aria-label": "Disband group", onClick: () => setConfirmDisband(true), children: "×" })
       ] })
     ] }),
-    renaming ? /* @__PURE__ */ jsxs19(
+    renaming ? /* @__PURE__ */ jsxs20(
       "form",
       {
         className: "gbo-confirm gbo-room-bar",
@@ -59097,31 +59717,31 @@ function RoomWorkspace({ slot }) {
           setRenaming(false);
         },
         children: [
-          /* @__PURE__ */ jsx20("input", { className: "gbo-input", "aria-label": "Group name", value: newName, onChange: (event) => setNewName(event.target.value) }),
-          /* @__PURE__ */ jsx20("button", { type: "submit", className: "gbo-pill-btn is-primary", children: "Rename" })
+          /* @__PURE__ */ jsx21("input", { className: "gbo-input", "aria-label": "Group name", value: newName, onChange: (event) => setNewName(event.target.value) }),
+          /* @__PURE__ */ jsx21("button", { type: "submit", className: "gbo-pill-btn is-primary", children: "Rename" })
         ]
       }
     ) : null,
-    confirmDisband ? /* @__PURE__ */ jsxs19("div", { className: "gbo-confirm gbo-room-bar", role: "alertdialog", "aria-label": "Disband", children: [
-      /* @__PURE__ */ jsxs19("span", { children: [
+    confirmDisband ? /* @__PURE__ */ jsxs20("div", { className: "gbo-confirm gbo-room-bar", role: "alertdialog", "aria-label": "Disband", children: [
+      /* @__PURE__ */ jsxs20("span", { children: [
         "Disband ",
         room?.name,
         "? The members stop and the group is closed for everyone."
       ] }),
-      /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => void disbandGroupChat(slot.id).catch((err2) => setNote(String(err2?.message || err2))), children: "Disband" }),
-      /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn", onClick: () => setConfirmDisband(false), children: "Cancel" })
+      /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => void disbandGroupChat(slot.id).catch((err2) => setNote(String(err2?.message || err2))), children: "Disband" }),
+      /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", onClick: () => setConfirmDisband(false), children: "Cancel" })
     ] }) : null,
-    /* @__PURE__ */ jsx20("div", { className: "transcript gbo-transcript gbo-room-transcript", ref: scroller, children: /* @__PURE__ */ jsxs19("div", { className: "transcript__col gbo-column", children: [
-      state.phase === "loading" ? /* @__PURE__ */ jsxs19("div", { className: "gbo-center", children: [
+    /* @__PURE__ */ jsx21("div", { className: "transcript gbo-transcript gbo-room-transcript", ref: scroller, children: /* @__PURE__ */ jsxs20("div", { className: "transcript__col gbo-column", children: [
+      state.phase === "loading" ? /* @__PURE__ */ jsxs20("div", { className: "gbo-center", children: [
         "Opening ",
         room?.name,
         "…"
       ] }) : null,
-      state.phase === "error" ? /* @__PURE__ */ jsxs19("div", { className: "gbo-error", children: [
+      state.phase === "error" ? /* @__PURE__ */ jsxs20("div", { className: "gbo-error", children: [
         "Could not open this group: ",
         state.error
       ] }) : null,
-      items.map((item) => /* @__PURE__ */ jsx20(
+      items.map((item) => /* @__PURE__ */ jsx21(
         RoomItem,
         {
           item,
@@ -59131,14 +59751,14 @@ function RoomWorkspace({ slot }) {
         },
         item.id
       )),
-      (state.posts || []).map((p) => /* @__PURE__ */ jsxs19("div", { className: "gbo-msg is-user", children: [
-        /* @__PURE__ */ jsx20("div", { className: "bubble is-user", children: /* @__PURE__ */ jsx20("div", { className: "bubble__plain", children: p.text }) }),
-        /* @__PURE__ */ jsxs19("div", { className: `gbo-msg-meta${p.status === "unknown" ? " gbo-msg-failed" : ""}`, children: [
+      (state.posts || []).map((p) => /* @__PURE__ */ jsxs20("div", { className: "gbo-msg is-user", children: [
+        /* @__PURE__ */ jsx21("div", { className: "bubble is-user", children: /* @__PURE__ */ jsx21("div", { className: "bubble__plain", children: p.text }) }),
+        /* @__PURE__ */ jsxs20("div", { className: `gbo-msg-meta${p.status === "unknown" ? " gbo-msg-failed" : ""}`, children: [
           p.status === "sending" ? "Posting…" : p.status === "sent" ? "Posted" : "Not confirmed. Retrying is safe: the group recognises this message and never posts it twice.",
-          p.status === "unknown" ? /* @__PURE__ */ jsx20("button", { type: "button", className: "gbo-pill-btn", onClick: () => void controller2.retryPost(p.eventId), children: "Retry" }) : null
+          p.status === "unknown" ? /* @__PURE__ */ jsx21("button", { type: "button", className: "gbo-pill-btn", onClick: () => void controller2.retryPost(p.eventId), children: "Retry" }) : null
         ] })
       ] }, p.eventId)),
-      (driver?.pending_actions || []).map((action) => /* @__PURE__ */ jsx20(
+      (driver?.pending_actions || []).map((action) => /* @__PURE__ */ jsx21(
         PendingAction,
         {
           action,
@@ -59149,17 +59769,17 @@ function RoomWorkspace({ slot }) {
         },
         `${action.member_id}:${action.task_id}:${action.request_id || ""}`
       )),
-      working.size ? /* @__PURE__ */ jsx20("div", { className: "activity-line gbo-activity", children: /* @__PURE__ */ jsxs19("span", { className: "activity-line__text shimmer", children: [
+      working.size ? /* @__PURE__ */ jsx21("div", { className: "activity-line gbo-activity", children: /* @__PURE__ */ jsxs20("span", { className: "activity-line__text shimmer", children: [
         members.filter((m) => working.has(m.member_id)).map((m) => m.display_name || m.handle || m.member_id).join(", "),
         " ",
         working.size === 1 ? "is" : "are",
         " working…"
       ] }) }) : null,
-      driver?.last_error ? /* @__PURE__ */ jsx20("div", { className: "gbo-error", children: driver.last_error }) : null
+      driver?.last_error ? /* @__PURE__ */ jsx21("div", { className: "gbo-error", children: driver.last_error }) : null
     ] }) }),
-    /* @__PURE__ */ jsxs19("div", { className: "composer-area gbo-composer-wrap", children: [
-      /* @__PURE__ */ jsxs19("div", { className: "composer gbo-composer", children: [
-        /* @__PURE__ */ jsx20("div", { className: "composer__left", children: /* @__PURE__ */ jsx20(
+    /* @__PURE__ */ jsxs20("div", { className: "composer-area gbo-composer-wrap", children: [
+      /* @__PURE__ */ jsxs20("div", { className: "composer gbo-composer", children: [
+        /* @__PURE__ */ jsx21("div", { className: "composer__left", children: /* @__PURE__ */ jsx21(
           "textarea",
           {
             className: "composer__input",
@@ -59177,15 +59797,15 @@ function RoomWorkspace({ slot }) {
             }
           }
         ) }),
-        /* @__PURE__ */ jsx20("div", { className: "composer__right gbo-composer-actions", children: /* @__PURE__ */ jsx20("button", { type: "button", className: "composer__cta gbo-round is-send", title: "Send", "aria-label": "Send", disabled: !draft.trim() || state.phase !== "ready", onClick: () => void send(), children: /* @__PURE__ */ jsx20(IconArrowUp, {}) }) })
+        /* @__PURE__ */ jsx21("div", { className: "composer__right gbo-composer-actions", children: /* @__PURE__ */ jsx21("button", { type: "button", className: "composer__cta gbo-round is-send", title: "Send", "aria-label": "Send", disabled: !draft.trim() || state.phase !== "ready", onClick: () => void send(), children: /* @__PURE__ */ jsx21(IconArrowUp, {}) }) })
       ] }),
-      note ? /* @__PURE__ */ jsx20("div", { className: "gbo-composer-note", children: /* @__PURE__ */ jsx20("span", { children: note }) }) : null
+      note ? /* @__PURE__ */ jsx21("div", { className: "gbo-composer-note", children: /* @__PURE__ */ jsx21("span", { children: note }) }) : null
     ] })
   ] }) });
 }
 
 // src/ui/Screen.tsx
-import * as React20 from "react";
+import * as React21 from "react";
 
 // src/core/screen.js
 var CLOSE_CONTROL_TAKEN = 4e3;
@@ -59309,7 +59929,7 @@ function handBackParams(viewer, force = false) {
 }
 
 // src/ui/RosterMenus.tsx
-import { jsx as jsx21 } from "react/jsx-runtime";
+import { jsx as jsx22 } from "react/jsx-runtime";
 var newGroupOpener = null;
 function setNewGroupOpener(fn) {
   newGroupOpener = fn;
@@ -59324,23 +59944,23 @@ function botMenuEntries(bot) {
   const top = isPinnedTop(bot);
   const full = !top && !canPinMore();
   const entries = [
-    { label: "Open Bot Chat", icon: /* @__PURE__ */ jsx21(IconChatPlus, {}), onSelect: () => selectBot(bot) },
-    { label: "Open in new tab", icon: /* @__PURE__ */ jsx21(IconTab, {}), onSelect: () => void openInNewTab(bot) },
-    ...screenOpener ? [{ label: "Bot’s computer", icon: /* @__PURE__ */ jsx21(IconScreen, {}), onSelect: () => screenOpener?.(bot) }] : [],
+    { label: "Open Bot Chat", icon: /* @__PURE__ */ jsx22(IconChatPlus, {}), onSelect: () => selectBot(bot) },
+    { label: "Open in new tab", icon: /* @__PURE__ */ jsx22(IconTab, {}), onSelect: () => void openInNewTab(bot) },
+    ...screenOpener ? [{ label: "Bot’s computer", icon: /* @__PURE__ */ jsx22(IconScreen, {}), onSelect: () => screenOpener?.(bot) }] : [],
     "sep",
-    { label: top ? "Unpin" : "Pin to top", icon: /* @__PURE__ */ jsx21(IconPin, {}), disabled: full, meta: full ? "4 max" : void 0, onSelect: () => void toggleTopPin(bot) },
-    { label: meta?.pinned ? "Unpin from section" : "Pin first in section", icon: /* @__PURE__ */ jsx21(IconPin, {}), onSelect: () => void togglePinned(bot) },
-    { label: meta?.hidden ? "Unhide" : "Hide", icon: meta?.hidden ? /* @__PURE__ */ jsx21(IconEye, {}) : /* @__PURE__ */ jsx21(IconEyeOff, {}), onSelect: () => void toggleHidden(bot) },
-    { label: "Move to section", icon: /* @__PURE__ */ jsx21(IconFolder, {}), sub: moveToSectionEntries(bot) },
+    { label: top ? "Unpin" : "Pin to top", icon: /* @__PURE__ */ jsx22(IconPin, {}), disabled: full, meta: full ? "4 max" : void 0, onSelect: () => void toggleTopPin(bot) },
+    { label: meta?.pinned ? "Unpin from section" : "Pin first in section", icon: /* @__PURE__ */ jsx22(IconPin, {}), onSelect: () => void togglePinned(bot) },
+    { label: meta?.hidden ? "Unhide" : "Hide", icon: meta?.hidden ? /* @__PURE__ */ jsx22(IconEye, {}) : /* @__PURE__ */ jsx22(IconEyeOff, {}), onSelect: () => void toggleHidden(bot) },
+    { label: "Move to section", icon: /* @__PURE__ */ jsx22(IconFolder, {}), sub: moveToSectionEntries(bot) },
     "sep",
-    { label: "Edit profile…", icon: /* @__PURE__ */ jsx21(IconEdit, {}), onSelect: () => openDialog({ kind: "edit", bot }) },
-    { label: "Skills, tools and model…", icon: /* @__PURE__ */ jsx21(IconSettings, {}), onSelect: () => openDialog({ kind: "config", bot }) },
-    { label: groups.length ? `Groups: ${groups.join(", ")}` : "Manage groups…", icon: /* @__PURE__ */ jsx21(IconUsers, {}), onSelect: () => openDialog({ kind: "groups", bot }) },
-    { label: "Duplicate", icon: /* @__PURE__ */ jsx21(IconDuplicate, {}), onSelect: () => void duplicateBot(bot) },
+    { label: "Edit profile…", icon: /* @__PURE__ */ jsx22(IconEdit, {}), onSelect: () => openDialog({ kind: "edit", bot }) },
+    { label: "Skills, tools and model…", icon: /* @__PURE__ */ jsx22(IconSettings, {}), onSelect: () => openDialog({ kind: "config", bot }) },
+    { label: groups.length ? `Groups: ${groups.join(", ")}` : "Manage groups…", icon: /* @__PURE__ */ jsx22(IconUsers, {}), onSelect: () => openDialog({ kind: "groups", bot }) },
+    { label: "Duplicate", icon: /* @__PURE__ */ jsx22(IconDuplicate, {}), onSelect: () => void duplicateBot(bot) },
     "sep",
-    { label: "New chat with this agent", icon: /* @__PURE__ */ jsx21(IconChatPlus, {}), onSelect: () => newChatWith(bot) }
+    { label: "New chat with this agent", icon: /* @__PURE__ */ jsx22(IconChatPlus, {}), onSelect: () => newChatWith(bot) }
   ];
-  if (!isDefaultBot(bot)) entries.push("sep", { label: "Delete…", icon: /* @__PURE__ */ jsx21(IconTrash, {}), destructive: true, onSelect: () => openDialog({ kind: "delete", bot }) });
+  if (!isDefaultBot(bot)) entries.push("sep", { label: "Delete…", icon: /* @__PURE__ */ jsx22(IconTrash, {}), destructive: true, onSelect: () => openDialog({ kind: "delete", bot }) });
   return entries;
 }
 function moveToSectionEntries(bot) {
@@ -59368,16 +59988,16 @@ function requestDeleteSection(id) {
 function sectionMenuEntries(section) {
   const list = app.sections.get().sections;
   const index = section.own ? list.findIndex((entry) => entry.id === section.id) : -1;
-  if (index < 0) return [{ label: "New section…", icon: /* @__PURE__ */ jsx21(IconFolder, {}), onSelect: () => startNewSection() }];
+  if (index < 0) return [{ label: "New section…", icon: /* @__PURE__ */ jsx22(IconFolder, {}), onSelect: () => startNewSection() }];
   const id = list[index].id;
   return [
-    { label: "Rename…", icon: /* @__PURE__ */ jsx21(IconEdit, {}), onSelect: () => roster2.sectionEdit.set({ kind: "rename", id }) },
+    { label: "Rename…", icon: /* @__PURE__ */ jsx22(IconEdit, {}), onSelect: () => roster2.sectionEdit.set({ kind: "rename", id }) },
     { label: "Move up", disabled: index === 0, onSelect: () => moveOwnSection(id, -1) },
     { label: "Move down", disabled: index === list.length - 1, onSelect: () => moveOwnSection(id, 1) },
     "sep",
-    { label: "New section…", icon: /* @__PURE__ */ jsx21(IconFolder, {}), onSelect: () => startNewSection() },
+    { label: "New section…", icon: /* @__PURE__ */ jsx22(IconFolder, {}), onSelect: () => startNewSection() },
     "sep",
-    { label: "Delete section…", icon: /* @__PURE__ */ jsx21(IconTrash, {}), destructive: true, onSelect: () => requestDeleteSection(id) }
+    { label: "Delete section…", icon: /* @__PURE__ */ jsx22(IconTrash, {}), destructive: true, onSelect: () => requestDeleteSection(id) }
   ];
 }
 function filterMenuEntries(view, groupCount = 0) {
@@ -59416,7 +60036,7 @@ function newMenuEntries() {
 }
 
 // src/ui/Screen.tsx
-import { Fragment as Fragment14, jsx as jsx22, jsxs as jsxs20 } from "react/jsx-runtime";
+import { Fragment as Fragment14, jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
 var stores = /* @__PURE__ */ new Map();
 function screenStore(bot) {
   const key = rowKey(bot);
@@ -59425,7 +60045,7 @@ function screenStore(bot) {
   return store;
 }
 function useScreenState(store) {
-  return React20.useSyncExternalStore(store.subscribe, store.get, store.get);
+  return React21.useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 async function loadRfb() {
   const mod = await init_novnc_rfb().then(() => novnc_rfb_exports);
@@ -59445,26 +60065,26 @@ function BotScreen({ bot }) {
   const lease = state.lease ?? status?.lease ?? null;
   const viewer = state.viewer;
   const iHold = leaseHeldBy(lease, viewer);
-  const canvasHost = React20.useRef(null);
-  const rfb = React20.useRef(null);
-  const socket = React20.useRef(null);
-  const retention = React20.useRef(null);
-  const installRetention = React20.useRef(null);
-  const unmounted = React20.useRef(false);
-  const releaseInstall = React20.useCallback(() => {
+  const canvasHost = React21.useRef(null);
+  const rfb = React21.useRef(null);
+  const socket = React21.useRef(null);
+  const retention = React21.useRef(null);
+  const installRetention = React21.useRef(null);
+  const unmounted = React21.useRef(false);
+  const releaseInstall = React21.useCallback(() => {
     installRetention.current?.();
     installRetention.current = null;
   }, []);
-  const pasteCleanup = React20.useRef(null);
-  const generation2 = React20.useRef(0);
-  const dialedAt = React20.useRef(0);
-  const evictions = React20.useRef(0);
-  const [conn, setConn] = React20.useState("idle");
-  const [error, setError] = React20.useState(null);
-  const [busy, setBusy] = React20.useState(false);
-  const [evicted, setEvicted] = React20.useState(false);
-  const [installLog, setInstallLog] = React20.useState([]);
-  const refresh = React20.useCallback(async () => {
+  const pasteCleanup = React21.useRef(null);
+  const generation2 = React21.useRef(0);
+  const dialedAt = React21.useRef(0);
+  const evictions = React21.useRef(0);
+  const [conn, setConn] = React21.useState("idle");
+  const [error, setError] = React21.useState(null);
+  const [busy, setBusy] = React21.useState(false);
+  const [evicted, setEvicted] = React21.useState(false);
+  const [installLog, setInstallLog] = React21.useState([]);
+  const refresh = React21.useCallback(async () => {
     const request2 = store.beginRequest();
     try {
       store.setStatus(await displayRequest(host2, bot, "display.status"), request2);
@@ -59474,7 +60094,7 @@ function BotScreen({ bot }) {
       setError(errText(err2));
     }
   }, [rowKey(bot)]);
-  React20.useEffect(() => {
+  React21.useEffect(() => {
     void refresh();
     const key = () => store.get().status?.profile_key;
     const offLease = onDisplayEvent("display.lease", (event) => {
@@ -59499,7 +60119,7 @@ function BotScreen({ bot }) {
       offDone?.();
     };
   }, [refresh, releaseInstall]);
-  const detach = React20.useCallback((handBack2 = false) => {
+  const detach = React21.useCallback((handBack2 = false) => {
     generation2.current += 1;
     if (handBack2) socket.current?.close(1e3);
     try {
@@ -59514,7 +60134,7 @@ function BotScreen({ bot }) {
     pasteCleanup.current?.();
     pasteCleanup.current = null;
   }, []);
-  const attach = React20.useCallback(
+  const attach = React21.useCallback(
     async (auto = false) => {
       if (!canvasHost.current) return;
       if (!auto) evictions.current = 0;
@@ -59603,7 +60223,7 @@ function BotScreen({ bot }) {
     },
     [rowKey(bot), detach, refresh]
   );
-  React20.useEffect(() => {
+  React21.useEffect(() => {
     unmounted.current = false;
     return () => {
       unmounted.current = true;
@@ -59611,10 +60231,10 @@ function BotScreen({ bot }) {
       detach(true);
     };
   }, [detach, releaseInstall]);
-  React20.useEffect(() => {
+  React21.useEffect(() => {
     if (status?.running && conn === "idle") void attach(true);
   }, [status?.running, conn, attach]);
-  React20.useEffect(() => {
+  React21.useEffect(() => {
     if (rfb.current) {
       rfb.current.viewOnly = !iHold;
       if (iHold) rfb.current.focus?.();
@@ -59660,11 +60280,11 @@ function BotScreen({ bot }) {
   });
   const phase = screenPhase(state);
   const who = displayName(bot, metaFor(bot));
-  const center = (title, body, actions) => /* @__PURE__ */ jsxs20("div", { className: "gbo-center", children: [
-    /* @__PURE__ */ jsx22("h2", { children: title }),
-    /* @__PURE__ */ jsx22("p", { children: body }),
+  const center = (title, body, actions) => /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
+    /* @__PURE__ */ jsx23("h2", { children: title }),
+    /* @__PURE__ */ jsx23("p", { children: body }),
     actions,
-    error ? /* @__PURE__ */ jsx22("div", { className: "gbo-card-error", children: error }) : null
+    error ? /* @__PURE__ */ jsx23("div", { className: "gbo-card-error", children: error }) : null
   ] });
   let content;
   if (phase === "unavailable") {
@@ -59674,69 +60294,69 @@ function BotScreen({ bot }) {
   } else if (phase === "unsupported") {
     content = center("No screen for this bot", "Its machine cannot run a headless desktop.");
   } else if (phase === "not-installed") {
-    content = /* @__PURE__ */ jsxs20("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsx22("h2", { children: "The screen is not installed" }),
-      /* @__PURE__ */ jsx22("p", { children: status?.missing?.length ? `Missing: ${status.missing.join(", ")}.` : "A few desktop packages are needed on the bot’s machine." }),
-      status?.install_command ? /* @__PURE__ */ jsx22("code", { className: "gbo-pre", children: status.install_command }) : null,
-      /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void install(), children: busy ? "Installing…" : "Install" }),
-      /* @__PURE__ */ jsx22("span", { className: "gbo-field-hint", children: "If the install needs a password, Hermes asks for it in its own prompt." }),
-      installLog.length ? /* @__PURE__ */ jsx22("pre", { className: "gbo-log", children: installLog.join("\n") }) : null,
-      error ? /* @__PURE__ */ jsx22("div", { className: "gbo-card-error", children: error }) : null
+    content = /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsx23("h2", { children: "The screen is not installed" }),
+      /* @__PURE__ */ jsx23("p", { children: status?.missing?.length ? `Missing: ${status.missing.join(", ")}.` : "A few desktop packages are needed on the bot’s machine." }),
+      status?.install_command ? /* @__PURE__ */ jsx23("code", { className: "gbo-pre", children: status.install_command }) : null,
+      /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void install(), children: busy ? "Installing…" : "Install" }),
+      /* @__PURE__ */ jsx23("span", { className: "gbo-field-hint", children: "If the install needs a password, Hermes asks for it in its own prompt." }),
+      installLog.length ? /* @__PURE__ */ jsx23("pre", { className: "gbo-log", children: installLog.join("\n") }) : null,
+      error ? /* @__PURE__ */ jsx23("div", { className: "gbo-card-error", children: error }) : null
     ] });
   } else if (phase === "image-switch") {
     const sw = status.image_switch;
     content = center(
       "A newer sandbox image is available",
       `Switch from ${sw.current_image} to ${sw.target_image}? ${sw.containers} container(s) are recreated on next use.`,
-      /* @__PURE__ */ jsxs20("div", { className: "gbo-card-actions", children: [
-        /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void decideImage(true), children: "Switch" }),
-        /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: () => void decideImage(false), children: "Keep the current one" })
+      /* @__PURE__ */ jsxs21("div", { className: "gbo-card-actions", children: [
+        /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-primary", disabled: busy, onClick: () => void decideImage(true), children: "Switch" }),
+        /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: () => void decideImage(false), children: "Keep the current one" })
       ] })
     );
   } else if (phase === "stopped") {
     content = center(
       `${who}’s computer is asleep`,
       status?.blocker ?? "Start it to watch the bot work, or to take over.",
-      /* @__PURE__ */ jsxs20("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || Boolean(status?.blocker), onClick: () => void start2(), children: [
-        /* @__PURE__ */ jsx22(IconPlay, {}),
+      /* @__PURE__ */ jsxs21("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || Boolean(status?.blocker), onClick: () => void start2(), children: [
+        /* @__PURE__ */ jsx23(IconPlay, {}),
         busy ? "Starting…" : "Start"
       ] })
     );
   } else {
     const humanOther = lease?.holder === "human" && !iHold;
-    content = /* @__PURE__ */ jsxs20(Fragment14, { children: [
-      /* @__PURE__ */ jsxs20("div", { className: "gbo-screen-bar", children: [
-        /* @__PURE__ */ jsxs20("strong", { children: [
+    content = /* @__PURE__ */ jsxs21(Fragment14, { children: [
+      /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-bar", children: [
+        /* @__PURE__ */ jsxs21("strong", { children: [
           who,
           "’s computer"
         ] }),
-        status?.display ? /* @__PURE__ */ jsxs20("span", { className: "gbo-field-hint", children: [
+        status?.display ? /* @__PURE__ */ jsxs21("span", { className: "gbo-field-hint", children: [
           status.display,
           " · ",
           status.geometry
         ] }) : null,
-        String(status?.placement || "").startsWith("terminal:") ? /* @__PURE__ */ jsxs20("span", { className: "gbo-screen-tag", children: [
+        String(status?.placement || "").startsWith("terminal:") ? /* @__PURE__ */ jsxs21("span", { className: "gbo-screen-tag", children: [
           "in sandbox ",
           String(status.placement).slice(9)
         ] }) : null,
-        /* @__PURE__ */ jsx22("span", { className: "gbo-spacer" }),
-        lease?.holder === "human" && lease.reason ? /* @__PURE__ */ jsx22("span", { className: "gbo-screen-tag is-reason", title: lease.reason, children: lease.reason }) : null,
-        /* @__PURE__ */ jsx22("span", { className: `gbo-screen-tag${iHold ? " is-you" : ""}`, children: iHold ? "You have control" : humanOther ? "Someone else has control" : "The bot has control" }),
-        iHold ? /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-btn is-small", disabled: busy, onClick: () => void handBack(), children: "Hand back" }) : /* @__PURE__ */ jsxs20(Fragment14, { children: [
-          humanOther ? /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-btn is-small", disabled: busy, title: "Take control back from a viewer that is gone", onClick: () => void handBack(true), children: "Force hand back" }) : null,
-          /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-btn is-small is-primary", disabled: busy || conn === "attaching" || !viewer, onClick: () => void takeOver(), children: "Take over" })
+        /* @__PURE__ */ jsx23("span", { className: "gbo-spacer" }),
+        lease?.holder === "human" && lease.reason ? /* @__PURE__ */ jsx23("span", { className: "gbo-screen-tag is-reason", title: lease.reason, children: lease.reason }) : null,
+        /* @__PURE__ */ jsx23("span", { className: `gbo-screen-tag${iHold ? " is-you" : ""}`, children: iHold ? "You have control" : humanOther ? "Someone else has control" : "The bot has control" }),
+        iHold ? /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-small", disabled: busy, onClick: () => void handBack(), children: "Hand back" }) : /* @__PURE__ */ jsxs21(Fragment14, { children: [
+          humanOther ? /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-small", disabled: busy, title: "Take control back from a viewer that is gone", onClick: () => void handBack(true), children: "Force hand back" }) : null,
+          /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-small is-primary", disabled: busy || conn === "attaching" || !viewer, onClick: () => void takeOver(), children: "Take over" })
         ] }),
-        /* @__PURE__ */ jsx22("button", { type: "button", className: "gbo-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: conn === "attaching", onClick: () => void attach(), children: /* @__PURE__ */ jsx22(IconRefresh, {}) })
+        /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: conn === "attaching", onClick: () => void attach(), children: /* @__PURE__ */ jsx23(IconRefresh, {}) })
       ] }),
-      /* @__PURE__ */ jsxs20("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}`, children: [
-        /* @__PURE__ */ jsx22("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
-        conn === "attaching" ? /* @__PURE__ */ jsx22("div", { className: "gbo-screen-overlay", children: "Connecting…" }) : null,
-        evicted ? /* @__PURE__ */ jsx22("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
-        conn === "error" && error ? /* @__PURE__ */ jsx22("div", { className: "gbo-screen-banner is-bottom", children: error }) : null
+      /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}`, children: [
+        /* @__PURE__ */ jsx23("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
+        conn === "attaching" ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-overlay", children: "Connecting…" }) : null,
+        evicted ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
+        conn === "error" && error ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-banner is-bottom", children: error }) : null
       ] })
     ] });
   }
-  return /* @__PURE__ */ jsx22("div", { "data-gbo-root": "", className: "gbo-screen", children: content });
+  return /* @__PURE__ */ jsx23("div", { "data-gbo-root": "", className: "gbo-screen", children: content });
 }
 var openScreens = /* @__PURE__ */ new Map();
 function screenWorkspaceId(bot) {
@@ -59759,7 +60379,7 @@ function openBotScreen(bot) {
     title: `${displayName(bot, metaFor(bot))} · Computer`,
     minWidth: "24rem",
     dock: { pane: "workspace", pos: "center" },
-    render: () => /* @__PURE__ */ jsx22(OverrideBoundary, { area: "screen", children: /* @__PURE__ */ jsx22(BotScreen, { bot }) }),
+    render: () => /* @__PURE__ */ jsx23(OverrideBoundary, { area: "screen", children: /* @__PURE__ */ jsx23(BotScreen, { bot }) }),
     onClose: () => openScreens.delete(id)
   });
   openScreens.set(id, typeof close === "function" ? close : () => void 0);
@@ -59777,8 +60397,8 @@ setScreenOpener(openBotScreen);
 onRosterParityStop(closeAllScreens);
 
 // src/ui/OverlayScroll.tsx
-import * as React21 from "react";
-import { jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
+import * as React22 from "react";
+import { jsx as jsx24, jsxs as jsxs22 } from "react/jsx-runtime";
 var MIN_THUMB_PX = 28;
 function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
   if (!(clientHeight > 0) || scrollHeight <= clientHeight + 1) return null;
@@ -59789,12 +60409,12 @@ function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
   return { size, offset, travel, range };
 }
 function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, onReaderInput, children, ...rest }) {
-  const scroller = React21.useRef(null);
-  const thumb = React21.useRef(null);
-  const [dragging, setDragging] = React21.useState(false);
-  const resized = React21.useRef(onContentResize);
+  const scroller = React22.useRef(null);
+  const thumb = React22.useRef(null);
+  const [dragging, setDragging] = React22.useState(false);
+  const resized = React22.useRef(onContentResize);
   resized.current = onContentResize;
-  const update = React21.useCallback(() => {
+  const update = React22.useCallback(() => {
     const el = scroller.current;
     const bar = thumb.current;
     if (!el || !bar) return;
@@ -59807,7 +60427,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     bar.style.height = `${geo.size}px`;
     bar.style.transform = `translateY(${el.offsetTop + geo.offset}px)`;
   }, []);
-  React21.useLayoutEffect(() => {
+  React22.useLayoutEffect(() => {
     update();
     const el = scroller.current;
     const RO = globalThis.ResizeObserver;
@@ -59871,8 +60491,8 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     target.addEventListener("pointerup", end);
     target.addEventListener("pointercancel", end);
   };
-  return /* @__PURE__ */ jsxs21("div", { className: `gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ""}${dragging ? " is-dragging" : ""}`, children: [
-    React21.createElement(
+  return /* @__PURE__ */ jsxs22("div", { className: `gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ""}${dragging ? " is-dragging" : ""}`, children: [
+    React22.createElement(
       as,
       {
         ...rest,
@@ -59885,13 +60505,13 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
       },
       children
     ),
-    /* @__PURE__ */ jsx23("div", { className: "gbo-oscroll-thumb", ref: thumb, "data-scrollable": "false", "aria-hidden": "true", onPointerDown: startDrag }),
+    /* @__PURE__ */ jsx24("div", { className: "gbo-oscroll-thumb", ref: thumb, "data-scrollable": "false", "aria-hidden": "true", onPointerDown: startDrag }),
     overlay
   ] });
 }
 
 // src/ui/Profile.tsx
-import { jsx as jsx24, jsxs as jsxs22 } from "react/jsx-runtime";
+import { jsx as jsx25, jsxs as jsxs23 } from "react/jsx-runtime";
 function jobWhen(job) {
   const schedule = String(job?.schedule || "").trim();
   const paused = job?.enabled === false || job?.state === "paused";
@@ -59908,17 +60528,17 @@ function jobWhen(job) {
 function ModelCard({ bot }) {
   const key = rowKey(bot);
   const current = useStore(roster2.models)[key];
-  React22.useEffect(() => {
+  React23.useEffect(() => {
     void loadBotModel(bot);
     void loadBotModelSettings(bot);
   }, [key]);
   const value = current?.loaded ? current.model || "Default" : current?.error ? "Unavailable" : "…";
   const title = current?.loaded ? `Model: ${current.model ? [current.provider, current.model].filter(Boolean).join(" · ") : "the profile’s default"}` : current?.error ? `Model: could not read it (${current.error})` : "Model";
-  return /* @__PURE__ */ jsx24("section", { className: "gbo-panel-section gbo-model-section", children: /* @__PURE__ */ jsx24("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs22("button", { type: "button", className: "panel-row panel-row--setting gbo-model-row", title, "aria-label": `Model: ${value}. Change the model`, onClick: () => openDialog({ kind: "model", bot }), children: [
-    /* @__PURE__ */ jsx24("span", { className: "panel-row__title", children: "Model" }),
-    /* @__PURE__ */ jsxs22("span", { className: "gbo-model-value", children: [
-      /* @__PURE__ */ jsx24("span", { className: "gbo-model-name", children: value }),
-      /* @__PURE__ */ jsx24(IconChevronDown, {})
+  return /* @__PURE__ */ jsx25("section", { className: "gbo-panel-section gbo-model-section", children: /* @__PURE__ */ jsx25("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--setting gbo-model-row", title, "aria-label": `Model: ${value}. Change the model`, onClick: () => openDialog({ kind: "model", bot }), children: [
+    /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: "Model" }),
+    /* @__PURE__ */ jsxs23("span", { className: "gbo-model-value", children: [
+      /* @__PURE__ */ jsx25("span", { className: "gbo-model-name", children: value }),
+      /* @__PURE__ */ jsx25(IconChevronDown, {})
     ] })
   ] }) }) });
 }
@@ -59946,49 +60566,49 @@ function ProfilePanel({ bot, onClose }) {
   const cronError = mine ? cron.error : null;
   const status = screen.key === rowKey(bot) ? screen.status : null;
   const computerText = `Bot’s computer · ${status == null ? "…" : status.error || status.supported === false ? "Unavailable" : status.running ? "Running" : "Asleep"}`;
-  return /* @__PURE__ */ jsxs22(OverlayScroll, { as: "aside", wrapClassName: "details__scroll gbo-panel-scroll", className: "details__body gbo-panel", "aria-label": `${name} profile`, children: [
-    /* @__PURE__ */ jsx24("div", { className: "details__top", children: onClose ? /* @__PURE__ */ jsx24("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx24(IconX, {}) }) : null }),
-    /* @__PURE__ */ jsxs22("div", { className: "details__identity gbo-panel-hero", children: [
-      /* @__PURE__ */ jsx24(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 71 }),
-      /* @__PURE__ */ jsx24("div", { className: "details__name gbo-panel-name", title: name, children: name }),
-      subtitle ? /* @__PURE__ */ jsx24("div", { className: "gbo-panel-sub", children: subtitle }) : null,
-      description ? /* @__PURE__ */ jsx24("div", { className: "gbo-panel-sub", children: description }) : null
+  return /* @__PURE__ */ jsxs23(OverlayScroll, { as: "aside", wrapClassName: "details__scroll gbo-panel-scroll", className: "details__body gbo-panel", "aria-label": `${name} profile`, children: [
+    /* @__PURE__ */ jsx25("div", { className: "details__top", children: onClose ? /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx25(IconX, {}) }) : null }),
+    /* @__PURE__ */ jsxs23("div", { className: "details__identity gbo-panel-hero", children: [
+      /* @__PURE__ */ jsx25(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 71 }),
+      /* @__PURE__ */ jsx25("div", { className: "details__name gbo-panel-name", title: name, children: name }),
+      subtitle ? /* @__PURE__ */ jsx25("div", { className: "gbo-panel-sub", children: subtitle }) : null,
+      description ? /* @__PURE__ */ jsx25("div", { className: "gbo-panel-sub", children: description }) : null
     ] }),
-    /* @__PURE__ */ jsxs22("div", { className: "details__sections", children: [
-      /* @__PURE__ */ jsxs22("section", { className: "gbo-panel-section", children: [
-        /* @__PURE__ */ jsxs22("div", { className: "section-label section-label--row gbo-panel-label", children: [
-          /* @__PURE__ */ jsx24("span", { children: "Scheduled" }),
-          /* @__PURE__ */ jsxs22("span", { className: "gbo-label-actions", children: [
-            /* @__PURE__ */ jsx24("button", { type: "button", className: "icon-btn icon-btn--plain", title: "New scheduled job", "aria-label": "New scheduled job", onClick: () => openDialog({ kind: "cron-edit", bot, job: null }), children: /* @__PURE__ */ jsx24(IconPlus, {}) }),
-            /* @__PURE__ */ jsx24("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Reload", "aria-label": "Reload scheduled jobs", onClick: () => void loadCron(bot), children: /* @__PURE__ */ jsx24(IconRefresh, {}) })
+    /* @__PURE__ */ jsxs23("div", { className: "details__sections", children: [
+      /* @__PURE__ */ jsxs23("section", { className: "gbo-panel-section", children: [
+        /* @__PURE__ */ jsxs23("div", { className: "section-label section-label--row gbo-panel-label", children: [
+          /* @__PURE__ */ jsx25("span", { children: "Scheduled" }),
+          /* @__PURE__ */ jsxs23("span", { className: "gbo-label-actions", children: [
+            /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn icon-btn--plain", title: "New scheduled job", "aria-label": "New scheduled job", onClick: () => openDialog({ kind: "cron-edit", bot, job: null }), children: /* @__PURE__ */ jsx25(IconPlus, {}) }),
+            /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Reload", "aria-label": "Reload scheduled jobs", onClick: () => void loadCron(bot), children: /* @__PURE__ */ jsx25(IconRefresh, {}) })
           ] })
         ] }),
-        /* @__PURE__ */ jsxs22("div", { className: "panel-card gbo-panel-box", children: [
-          loading && !jobs.length ? /* @__PURE__ */ jsx24("div", { className: "panel-empty gbo-panel-empty", children: "Loading…" }) : null,
-          cronError ? /* @__PURE__ */ jsxs22("div", { className: "panel-empty gbo-panel-empty", children: [
+        /* @__PURE__ */ jsxs23("div", { className: "panel-card gbo-panel-box", children: [
+          loading && !jobs.length ? /* @__PURE__ */ jsx25("div", { className: "panel-empty gbo-panel-empty", children: "Loading…" }) : null,
+          cronError ? /* @__PURE__ */ jsxs23("div", { className: "panel-empty gbo-panel-empty", children: [
             "Could not load jobs: ",
             cronError
           ] }) : null,
-          !loading && !cronError && !jobs.length ? /* @__PURE__ */ jsx24("div", { className: "panel-empty gbo-panel-empty", children: "No scheduled jobs yet." }) : null,
+          !loading && !cronError && !jobs.length ? /* @__PURE__ */ jsx25("div", { className: "panel-empty gbo-panel-empty", children: "No scheduled jobs yet." }) : null,
           jobs.map((job) => {
             const id = String(job.job_id);
             const legacy = isLegacyDelegatedRoutine(job);
             const on = !legacy && job.enabled !== false && job.state !== "paused";
             const error = job.last_error || job.last_fire_error || job.last_delivery_error;
             const title = routineTitle(job);
-            return /* @__PURE__ */ jsxs22("div", { className: "panel-row panel-row--routine gbo-job", children: [
-              /* @__PURE__ */ jsx24("span", { className: "panel-row__icon", children: /* @__PURE__ */ jsx24(IconClock, {}) }),
-              /* @__PURE__ */ jsxs22("button", { type: "button", className: "panel-row__text gbo-job-open gbo-job-main", title: job.prompt_preview || title, onClick: () => openDialog({ kind: "cron-detail", bot, job }), children: [
-                /* @__PURE__ */ jsx24("span", { className: "panel-row__title gbo-job-name", children: title }),
-                /* @__PURE__ */ jsx24("span", { className: "panel-row__sub gbo-job-when", children: running[id] ? "Running now…" : jobWhen(job) }),
-                legacy ? /* @__PURE__ */ jsx24("span", { className: "panel-row__sub gbo-job-error", children: "Old delegated job: recreate it to switch it on" }) : error ? /* @__PURE__ */ jsx24("span", { className: "panel-row__sub gbo-job-error", title: String(error), children: "Last run failed" }) : null
+            return /* @__PURE__ */ jsxs23("div", { className: "panel-row panel-row--routine gbo-job", children: [
+              /* @__PURE__ */ jsx25("span", { className: "panel-row__icon", children: /* @__PURE__ */ jsx25(IconClock, {}) }),
+              /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row__text gbo-job-open gbo-job-main", title: job.prompt_preview || title, onClick: () => openDialog({ kind: "cron-detail", bot, job }), children: [
+                /* @__PURE__ */ jsx25("span", { className: "panel-row__title gbo-job-name", children: title }),
+                /* @__PURE__ */ jsx25("span", { className: "panel-row__sub gbo-job-when", children: running[id] ? "Running now…" : jobWhen(job) }),
+                legacy ? /* @__PURE__ */ jsx25("span", { className: "panel-row__sub gbo-job-error", children: "Old delegated job: recreate it to switch it on" }) : error ? /* @__PURE__ */ jsx25("span", { className: "panel-row__sub gbo-job-error", title: String(error), children: "Last run failed" }) : null
               ] }),
-              /* @__PURE__ */ jsxs22("span", { className: "gbo-job-actions", children: [
-                /* @__PURE__ */ jsx24("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Run now", "aria-label": `Run ${title} now`, disabled: Boolean(running[id]), onClick: () => void runJob(bot, job), children: /* @__PURE__ */ jsx24(IconPlay, {}) }),
-                /* @__PURE__ */ jsx24("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Edit", "aria-label": `Edit ${title}`, onClick: () => openDialog({ kind: "cron-edit", bot, job }), children: /* @__PURE__ */ jsx24(IconEdit, {}) }),
-                /* @__PURE__ */ jsx24("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Delete", "aria-label": `Delete ${title}`, onClick: () => openDialog({ kind: "cron-remove", bot, job }), children: /* @__PURE__ */ jsx24(IconTrash, {}) })
+              /* @__PURE__ */ jsxs23("span", { className: "gbo-job-actions", children: [
+                /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Run now", "aria-label": `Run ${title} now`, disabled: Boolean(running[id]), onClick: () => void runJob(bot, job), children: /* @__PURE__ */ jsx25(IconPlay, {}) }),
+                /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Edit", "aria-label": `Edit ${title}`, onClick: () => openDialog({ kind: "cron-edit", bot, job }), children: /* @__PURE__ */ jsx25(IconEdit, {}) }),
+                /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Delete", "aria-label": `Delete ${title}`, onClick: () => openDialog({ kind: "cron-remove", bot, job }), children: /* @__PURE__ */ jsx25(IconTrash, {}) })
               ] }),
-              /* @__PURE__ */ jsx24(
+              /* @__PURE__ */ jsx25(
                 "button",
                 {
                   type: "button",
@@ -59998,54 +60618,54 @@ function ProfilePanel({ bot, onClose }) {
                   "aria-label": `${on ? "Pause" : "Resume"} ${title}`,
                   disabled: Boolean(cron.busy?.[id]) || legacy,
                   onClick: () => void toggleCron(bot, job),
-                  children: /* @__PURE__ */ jsx24("span", { className: "toggle__knob" })
+                  children: /* @__PURE__ */ jsx25("span", { className: "toggle__knob" })
                 }
               )
             ] }, id);
           })
         ] })
       ] }),
-      /* @__PURE__ */ jsx24(SuggestedSlack, { bot }),
-      /* @__PURE__ */ jsx24(SlackStatusCard, { bot }),
-      /* @__PURE__ */ jsxs22("section", { className: "gbo-panel-section", children: [
-        /* @__PURE__ */ jsx24("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx24("span", { children: "Computer" }) }),
-        /* @__PURE__ */ jsxs22("div", { className: "panel-card gbo-panel-box", children: [
-          /* @__PURE__ */ jsxs22("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: computerText, onClick: () => openBotScreen(bot), children: [
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx24(IconScreen, {}) }),
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__title", children: computerText }),
-            /* @__PURE__ */ jsx24("span", { className: `gbo-status-dot${status?.running ? " is-on" : ""}` })
+      /* @__PURE__ */ jsx25(SuggestedSlack, { bot }),
+      /* @__PURE__ */ jsx25(SlackStatusCard, { bot }),
+      /* @__PURE__ */ jsxs23("section", { className: "gbo-panel-section", children: [
+        /* @__PURE__ */ jsx25("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx25("span", { children: "Computer" }) }),
+        /* @__PURE__ */ jsxs23("div", { className: "panel-card gbo-panel-box", children: [
+          /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: computerText, onClick: () => openBotScreen(bot), children: [
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconScreen, {}) }),
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: computerText }),
+            /* @__PURE__ */ jsx25("span", { className: `gbo-status-dot${status?.running ? " is-on" : ""}` })
           ] }),
-          cv.present ? /* @__PURE__ */ jsxs22("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Computer viewer · ${cv.visible ? "Showing" : "Hidden"}`, onClick: openComputerViewer, children: [
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx24(IconScreen, {}) }),
-            /* @__PURE__ */ jsxs22("span", { className: "panel-row__title", children: [
+          cv.present ? /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Computer viewer · ${cv.visible ? "Showing" : "Hidden"}`, onClick: openComputerViewer, children: [
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconScreen, {}) }),
+            /* @__PURE__ */ jsxs23("span", { className: "panel-row__title", children: [
               "Computer viewer · ",
               cv.visible ? "Showing" : "Hidden"
             ] }),
-            /* @__PURE__ */ jsx24("span", { className: `gbo-status-dot${cv.visible ? " is-on" : ""}` })
+            /* @__PURE__ */ jsx25("span", { className: `gbo-status-dot${cv.visible ? " is-on" : ""}` })
           ] }) : null
         ] })
       ] }),
-      /* @__PURE__ */ jsx24(ModelCard, { bot }),
-      /* @__PURE__ */ jsxs22("section", { className: "gbo-panel-section", children: [
-        /* @__PURE__ */ jsx24("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx24("span", { children: "Profile" }) }),
-        /* @__PURE__ */ jsxs22("div", { className: "panel-card gbo-panel-box", children: [
-          /* @__PURE__ */ jsxs22("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Edit profile and avatar", onClick: () => openDialog({ kind: "edit", bot }), children: [
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx24(IconEdit, {}) }),
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__title", children: "Edit profile and avatar" })
+      /* @__PURE__ */ jsx25(ModelCard, { bot }),
+      /* @__PURE__ */ jsxs23("section", { className: "gbo-panel-section", children: [
+        /* @__PURE__ */ jsx25("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx25("span", { children: "Profile" }) }),
+        /* @__PURE__ */ jsxs23("div", { className: "panel-card gbo-panel-box", children: [
+          /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Edit profile and avatar", onClick: () => openDialog({ kind: "edit", bot }), children: [
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconEdit, {}) }),
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: "Edit profile and avatar" })
           ] }),
-          /* @__PURE__ */ jsxs22("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Skills, tools, MCP and model", onClick: () => openDialog({ kind: "config", bot }), children: [
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx24(IconSettings, {}) }),
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__title", children: "Skills, tools, MCP and model" })
+          /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Skills, tools, MCP and model", onClick: () => openDialog({ kind: "config", bot }), children: [
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconSettings, {}) }),
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: "Skills, tools, MCP and model" })
           ] }),
-          /* @__PURE__ */ jsxs22("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Groups", onClick: () => openDialog({ kind: "groups", bot }), children: [
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx24(IconUsers, {}) }),
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__title", children: "Groups" })
+          /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: "Groups", onClick: () => openDialog({ kind: "groups", bot }), children: [
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconUsers, {}) }),
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: "Groups" })
           ] }),
-          botRooms.map((room) => /* @__PURE__ */ jsxs22("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Open the group chat ${room.name}`, onClick: () => openRoom(rooms.route, room), children: [
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx24(IconUsers, {}) }),
-            /* @__PURE__ */ jsx24("span", { className: "panel-row__title", children: room.name })
+          botRooms.map((room) => /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Open the group chat ${room.name}`, onClick: () => openRoom(rooms.route, room), children: [
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconUsers, {}) }),
+            /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: room.name })
           ] }, room.room_id)),
-          rooms.loaded && rooms.route ? /* @__PURE__ */ jsxs22(
+          rooms.loaded && rooms.route ? /* @__PURE__ */ jsxs23(
             "button",
             {
               type: "button",
@@ -60056,21 +60676,21 @@ function ProfilePanel({ bot, onClose }) {
                 backToOverride();
               },
               children: [
-                /* @__PURE__ */ jsx24("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx24(IconPlus, {}) }),
-                /* @__PURE__ */ jsx24("span", { className: "panel-row__title", children: "New group chat…" })
+                /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconPlus, {}) }),
+                /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: "New group chat…" })
               ]
             }
           ) : null
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsx24(RosterDialogs, {})
+    /* @__PURE__ */ jsx25(RosterDialogs, {})
   ] });
 }
 
 // src/ui/Prompts.tsx
-import * as React23 from "react";
-import { Fragment as Fragment15, jsx as jsx25, jsxs as jsxs23 } from "react/jsx-runtime";
+import * as React24 from "react";
+import { Fragment as Fragment15, jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
 var TITLES = {
   sudo: "needs your administrator password",
   secret: "needs a secret value",
@@ -60081,9 +60701,9 @@ var TITLES = {
 };
 function Footer({ waiting, bot }) {
   if (!waiting.error) return null;
-  return /* @__PURE__ */ jsxs23("div", { className: "gbo-card-error", role: "alert", children: [
+  return /* @__PURE__ */ jsxs24("div", { className: "gbo-card-error", role: "alert", children: [
     waiting.error,
-    waiting.unsupported ? /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-link-btn", onClick: () => void openInBotMode(bot, "Answer the question in the Hermes Bot Chat."), children: "Answer in Hermes Bot Mode" }) : null
+    waiting.unsupported ? /* @__PURE__ */ jsx26("button", { type: "button", className: "gbo-link-btn", onClick: () => void openInBotMode(bot, "Answer the question in the Hermes Bot Chat."), children: "Answer in Hermes Bot Mode" }) : null
   ] });
 }
 var SETTLED_NOTE = {
@@ -60119,7 +60739,7 @@ function ChoiceCard({
     if (qid && qid in overrides) return onPick?.(qid, overrides[qid], nextPage);
     onPage?.(nextPage);
   };
-  const baseId = React23.useId();
+  const baseId = React24.useId();
   const shown = paged ? [current, ...questions.map((_, i) => i).filter((i) => i !== current)] : questions.map((_, i) => i);
   const block = (qi) => {
     const q = questions[qi];
@@ -60129,18 +60749,18 @@ function ChoiceCard({
     const labels = (q.choices || []).map((choice) => bareChoice(choice));
     const typed = chosen.filter((v) => !labels.includes(v));
     const titleId = `${baseId}-q${qi}`;
-    return /* @__PURE__ */ jsxs23(
+    return /* @__PURE__ */ jsxs24(
       "div",
       {
         className: `gbo-ask-q${ghost ? " is-ghost" : ""}`,
         "aria-hidden": ghost || void 0,
         inert: ghost || void 0,
         children: [
-          /* @__PURE__ */ jsx25("div", { className: "gbo-ask-title", id: ghost ? void 0 : titleId, children: q.question }),
-          q.choices ? /* @__PURE__ */ jsx25("div", { className: "gbo-ask-rows", role: q.multiSelect ? "group" : "radiogroup", "aria-labelledby": ghost ? void 0 : titleId, children: q.choices.map((choice, i) => {
+          /* @__PURE__ */ jsx26("div", { className: "gbo-ask-title", id: ghost ? void 0 : titleId, children: q.question }),
+          q.choices ? /* @__PURE__ */ jsx26("div", { className: "gbo-ask-rows", role: q.multiSelect ? "group" : "radiogroup", "aria-labelledby": ghost ? void 0 : titleId, children: q.choices.map((choice, i) => {
             const label = labels[i];
             const on = chosen.includes(label);
-            return /* @__PURE__ */ jsxs23(
+            return /* @__PURE__ */ jsxs24(
               "button",
               {
                 type: "button",
@@ -60155,27 +60775,27 @@ function ChoiceCard({
                   onPick?.(q.qid, on ? chosen.filter((v) => v !== label) : [...chosen, label]);
                 },
                 children: [
-                  /* @__PURE__ */ jsx25("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
-                  /* @__PURE__ */ jsx25("span", { className: "gbo-ask-label", children: label }),
-                  choice !== label ? /* @__PURE__ */ jsx25("span", { className: "gbo-ask-tag", children: "Recommended" }) : null,
-                  on && !paged ? /* @__PURE__ */ jsx25("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx25(IconCheck, {}) }) : null
+                  /* @__PURE__ */ jsx26("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(i) }),
+                  /* @__PURE__ */ jsx26("span", { className: "gbo-ask-label", children: label }),
+                  choice !== label ? /* @__PURE__ */ jsx26("span", { className: "gbo-ask-tag", children: "Recommended" }) : null,
+                  on && !paged ? /* @__PURE__ */ jsx26("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx26(IconCheck, {}) }) : null
                 ]
               },
               choice
             );
           }) }) : null,
-          typed.map((text3, j) => /* @__PURE__ */ jsxs23("div", { className: "gbo-ask-row is-on is-typed", role: "note", "aria-label": `Your answer: ${text3}`, children: [
-            /* @__PURE__ */ jsx25("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(labels.length + j) }),
-            /* @__PURE__ */ jsx25("span", { className: "gbo-ask-label", children: text3 }),
-            !paged ? /* @__PURE__ */ jsx25("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx25(IconCheck, {}) }) : null
+          typed.map((text3, j) => /* @__PURE__ */ jsxs24("div", { className: "gbo-ask-row is-on is-typed", role: "note", "aria-label": `Your answer: ${text3}`, children: [
+            /* @__PURE__ */ jsx26("span", { className: "gbo-ask-key", "aria-hidden": "true", children: choiceLetter(labels.length + j) }),
+            /* @__PURE__ */ jsx26("span", { className: "gbo-ask-label", children: text3 }),
+            !paged ? /* @__PURE__ */ jsx26("span", { className: "gbo-ask-check", "aria-hidden": "true", children: /* @__PURE__ */ jsx26(IconCheck, {}) }) : null
           ] }, text3)),
-          live && !q.choices && !typed.length ? /* @__PURE__ */ jsx25("div", { className: "gbo-ask-hint", children: "Type your answer below." }) : null
+          live && !q.choices && !typed.length ? /* @__PURE__ */ jsx26("div", { className: "gbo-ask-hint", children: "Type your answer below." }) : null
         ]
       },
       q.qid
     );
   };
-  return /* @__PURE__ */ jsxs23(
+  return /* @__PURE__ */ jsxs24(
     "div",
     {
       className: `gbo-ask${live ? "" : " is-settled"}${busy ? " is-busy" : ""}${paged ? " is-paged" : ""}`,
@@ -60183,11 +60803,11 @@ function ChoiceCard({
       "aria-label": name ? `Question from ${name}` : "Question",
       "aria-busy": busy || void 0,
       children: [
-        paged ? /* @__PURE__ */ jsx25("div", { className: "gbo-ask-pages", children: shown.map(block) }) : shown.map(block),
-        paged ? /* @__PURE__ */ jsxs23("div", { className: "gbo-ask-actions is-paged", children: [
-          /* @__PURE__ */ jsx25("div", { className: "gbo-ask-dots", role: "img", "aria-label": `Question ${step + 1} of ${open.length}`, children: open.map((i) => /* @__PURE__ */ jsx25("span", { className: `gbo-ask-dot${i === current ? " is-current" : ""}` }, i)) }),
-          prevPage !== void 0 ? /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-pill-btn", disabled: busy, title: busy ? "Sending your answers…" : void 0, onClick: () => onPage?.(prevPage), children: "Back" }) : null,
-          /* @__PURE__ */ jsx25(
+        paged ? /* @__PURE__ */ jsx26("div", { className: "gbo-ask-pages", children: shown.map(block) }) : shown.map(block),
+        paged ? /* @__PURE__ */ jsxs24("div", { className: "gbo-ask-actions is-paged", children: [
+          /* @__PURE__ */ jsx26("div", { className: "gbo-ask-dots", role: "img", "aria-label": `Question ${step + 1} of ${open.length}`, children: open.map((i) => /* @__PURE__ */ jsx26("span", { className: `gbo-ask-dot${i === current ? " is-current" : ""}` }, i)) }),
+          prevPage !== void 0 ? /* @__PURE__ */ jsx26("button", { type: "button", className: "gbo-pill-btn", disabled: busy, title: busy ? "Sending your answers…" : void 0, onClick: () => onPage?.(prevPage), children: "Back" }) : null,
+          /* @__PURE__ */ jsx26(
             "button",
             {
               type: "button",
@@ -60198,7 +60818,7 @@ function ChoiceCard({
               children: "Skip"
             }
           ),
-          /* @__PURE__ */ jsx25(
+          /* @__PURE__ */ jsx26(
             "button",
             {
               type: "button",
@@ -60209,8 +60829,8 @@ function ChoiceCard({
               children: busy ? "Sending…" : nextPage === void 0 ? "Done" : "Next"
             }
           )
-        ] }) : live ? /* @__PURE__ */ jsxs23("div", { className: "gbo-ask-actions", children: [
-          !single ? /* @__PURE__ */ jsx25(
+        ] }) : live ? /* @__PURE__ */ jsxs24("div", { className: "gbo-ask-actions", children: [
+          !single ? /* @__PURE__ */ jsx26(
             "button",
             {
               type: "button",
@@ -60221,7 +60841,7 @@ function ChoiceCard({
               children: busy ? "Sending…" : "Answer"
             }
           ) : null,
-          /* @__PURE__ */ jsx25(
+          /* @__PURE__ */ jsx26(
             "button",
             {
               type: "button",
@@ -60231,18 +60851,18 @@ function ChoiceCard({
               children: busy && single ? "Sending…" : "Skip"
             }
           )
-        ] }) : SETTLED_NOTE[settled.status] ? /* @__PURE__ */ jsx25("div", { className: "gbo-ask-note", children: SETTLED_NOTE[settled.status] }) : null,
+        ] }) : SETTLED_NOTE[settled.status] ? /* @__PURE__ */ jsx26("div", { className: "gbo-ask-note", children: SETTLED_NOTE[settled.status] }) : null,
         footer
       ]
     }
   );
 }
 function SettledChoiceCard({ item }) {
-  return /* @__PURE__ */ jsx25(ChoiceCard, { questions: item.questions || [], picks: item.answers || {}, settled: { status: item.status } });
+  return /* @__PURE__ */ jsx26(ChoiceCard, { questions: item.questions || [], picks: item.answers || {}, settled: { status: item.status } });
 }
 function ValueCard({ waiting, onAnswer }) {
-  const first = React23.useRef(null);
-  const second = React23.useRef(null);
+  const first = React24.useRef(null);
+  const second = React24.useRef(null);
   const busy = Boolean(waiting.answering);
   const login = waiting.kind === "vault-login";
   const secret = waiting.kind !== "vault-code";
@@ -60255,7 +60875,7 @@ function ValueCard({ waiting, onAnswer }) {
     onAnswer(answer);
   };
   const label = waiting.kind === "sudo" ? "Password" : waiting.kind === "secret" ? waiting.envVar || "Value" : waiting.kind === "vault-unlock" ? "Master password" : waiting.kind === "vault-code" ? "Code" : "Username or email";
-  return /* @__PURE__ */ jsxs23(
+  return /* @__PURE__ */ jsxs24(
     "form",
     {
       className: "gbo-q",
@@ -60265,10 +60885,10 @@ function ValueCard({ waiting, onAnswer }) {
         send();
       },
       children: [
-        waiting.kind === "sudo" && waiting.text ? /* @__PURE__ */ jsx25("code", { children: waiting.text }) : null,
-        waiting.kind === "secret" && waiting.text ? /* @__PURE__ */ jsx25("div", { className: "gbo-card-desc", children: waiting.text }) : null,
-        waiting.kind === "vault-code" && waiting.hint ? /* @__PURE__ */ jsx25("div", { className: "gbo-card-desc", children: waiting.hint }) : null,
-        /* @__PURE__ */ jsx25(
+        waiting.kind === "sudo" && waiting.text ? /* @__PURE__ */ jsx26("code", { children: waiting.text }) : null,
+        waiting.kind === "secret" && waiting.text ? /* @__PURE__ */ jsx26("div", { className: "gbo-card-desc", children: waiting.text }) : null,
+        waiting.kind === "vault-code" && waiting.hint ? /* @__PURE__ */ jsx26("div", { className: "gbo-card-desc", children: waiting.hint }) : null,
+        /* @__PURE__ */ jsx26(
           "input",
           {
             ref: first,
@@ -60281,10 +60901,10 @@ function ValueCard({ waiting, onAnswer }) {
             disabled: busy
           }
         ),
-        login ? /* @__PURE__ */ jsx25("input", { ref: second, className: "gbo-input", type: "password", "aria-label": "Password", placeholder: "Password", autoComplete: "off", disabled: busy }) : null,
-        /* @__PURE__ */ jsxs23("div", { className: "gbo-card-actions", children: [
-          /* @__PURE__ */ jsx25("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: busy ? "Sending…" : login ? "Save login" : "Send" }),
-          /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => send(true), children: waiting.kind === "secret" || login ? "Skip" : "Cancel" })
+        login ? /* @__PURE__ */ jsx26("input", { ref: second, className: "gbo-input", type: "password", "aria-label": "Password", placeholder: "Password", autoComplete: "off", disabled: busy }) : null,
+        /* @__PURE__ */ jsxs24("div", { className: "gbo-card-actions", children: [
+          /* @__PURE__ */ jsx26("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: busy ? "Sending…" : login ? "Save login" : "Send" }),
+          /* @__PURE__ */ jsx26("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => send(true), children: waiting.kind === "secret" || login ? "Skip" : "Cancel" })
         ] })
       ]
     }
@@ -60309,15 +60929,15 @@ function openExternal(url) {
 }
 function ConnectionCard({ waiting, onRespond }) {
   const busy = Boolean(waiting.answering);
-  const forms = React23.useRef({});
+  const forms = React24.useRef({});
   const targets = waiting.targets || [];
-  return /* @__PURE__ */ jsxs23(Fragment15, { children: [
-    targets.length === 0 ? /* @__PURE__ */ jsx25("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
+  return /* @__PURE__ */ jsxs24(Fragment15, { children: [
+    targets.length === 0 ? /* @__PURE__ */ jsx26("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
     targets.map((target) => {
       const name = String(target?.name || "");
       const env = Array.isArray(target?.required_env) ? target.required_env : [];
       const open = !target?.resolved && (target?.state === "pending" || target?.state === "initiated" || target?.state === "not_connected");
-      return /* @__PURE__ */ jsxs23(
+      return /* @__PURE__ */ jsxs24(
         "form",
         {
           className: "gbo-target",
@@ -60335,14 +60955,14 @@ function ConnectionCard({ waiting, onRespond }) {
             onRespond({ targets: [{ name, status: "approved", ...Object.keys(values).length ? { env: values } : {} }] });
           },
           children: [
-            /* @__PURE__ */ jsxs23("div", { className: "gbo-target-head", children: [
-              /* @__PURE__ */ jsx25("span", { className: "gbo-target-name", children: target?.display || name }),
-              /* @__PURE__ */ jsx25("span", { className: `gbo-target-state is-${target?.state || "pending"}`, children: TARGET_STATE[target?.state] || target?.state })
+            /* @__PURE__ */ jsxs24("div", { className: "gbo-target-head", children: [
+              /* @__PURE__ */ jsx26("span", { className: "gbo-target-name", children: target?.display || name }),
+              /* @__PURE__ */ jsx26("span", { className: `gbo-target-state is-${target?.state || "pending"}`, children: TARGET_STATE[target?.state] || target?.state })
             ] }),
-            target?.description || target?.detail ? /* @__PURE__ */ jsx25("div", { className: "gbo-card-desc", children: target.description || target.detail }) : null,
-            target?.instructions ? /* @__PURE__ */ jsx25("div", { className: "gbo-card-desc", children: target.instructions }) : null,
-            target?.launch?.target ? /* @__PURE__ */ jsx25("code", { children: target.launch.target }) : null,
-            open ? env.map((field) => /* @__PURE__ */ jsx25(
+            target?.description || target?.detail ? /* @__PURE__ */ jsx26("div", { className: "gbo-card-desc", children: target.description || target.detail }) : null,
+            target?.instructions ? /* @__PURE__ */ jsx26("div", { className: "gbo-card-desc", children: target.instructions }) : null,
+            target?.launch?.target ? /* @__PURE__ */ jsx26("code", { children: target.launch.target }) : null,
+            open ? env.map((field) => /* @__PURE__ */ jsx26(
               "input",
               {
                 name: field.name,
@@ -60357,26 +60977,26 @@ function ConnectionCard({ waiting, onRespond }) {
               },
               field.name
             )) : null,
-            open ? /* @__PURE__ */ jsxs23("div", { className: "gbo-card-actions", children: [
-              target?.connect_url && !isOpenableConnectUrl(String(target.connect_url)) ? /* @__PURE__ */ jsxs23("div", { className: "gbo-card-desc gbo-connect-url-blocked", children: [
+            open ? /* @__PURE__ */ jsxs24("div", { className: "gbo-card-actions", children: [
+              target?.connect_url && !isOpenableConnectUrl(String(target.connect_url)) ? /* @__PURE__ */ jsxs24("div", { className: "gbo-card-desc gbo-connect-url-blocked", children: [
                 "This sign-in link was not opened because it is not an https address: ",
-                /* @__PURE__ */ jsx25("code", { children: String(target.connect_url) })
-              ] }) : target?.connect_url ? /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => openExternal(String(target.connect_url)), children: "Sign in" }) : /* @__PURE__ */ jsx25("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: "Approve" }),
-              /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ targets: [{ name, status: "skipped" }] }), children: "Not now" })
+                /* @__PURE__ */ jsx26("code", { children: String(target.connect_url) })
+              ] }) : target?.connect_url ? /* @__PURE__ */ jsx26("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => openExternal(String(target.connect_url)), children: "Sign in" }) : /* @__PURE__ */ jsx26("button", { type: "submit", className: "gbo-pill-btn is-primary", disabled: busy, children: "Approve" }),
+              /* @__PURE__ */ jsx26("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ targets: [{ name, status: "skipped" }] }), children: "Not now" })
             ] }) : null
           ]
         },
         name
       );
     }),
-    /* @__PURE__ */ jsx25("div", { className: "gbo-card-actions", children: /* @__PURE__ */ jsx25("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ settled_by: "continue" }), children: "Continue" }) })
+    /* @__PURE__ */ jsx26("div", { className: "gbo-card-actions", children: /* @__PURE__ */ jsx26("button", { type: "button", className: "gbo-pill-btn", disabled: busy, onClick: () => onRespond({ settled_by: "continue" }), children: "Continue" }) })
   ] });
 }
 function WaitingCard({ waiting, bot, name, controller: controller2 }) {
   const answer = (value) => void controller2?.answerPrompt(value);
   const respond = (result) => void controller2?.respondConnection(result);
   if (waiting.kind === "clarify") {
-    return /* @__PURE__ */ jsx25(
+    return /* @__PURE__ */ jsx26(
       ChoiceCard,
       {
         questions: waiting.questions || [],
@@ -60388,86 +61008,86 @@ function WaitingCard({ waiting, bot, name, controller: controller2 }) {
         onPick: (qid, value, page) => void controller2?.pickClarify(qid, value, page),
         onPage: (page) => void controller2?.pageClarify(page),
         onAnswer: answer,
-        footer: /* @__PURE__ */ jsx25(Footer, { waiting, bot })
+        footer: /* @__PURE__ */ jsx26(Footer, { waiting, bot })
       },
       waiting.id
     );
   }
-  return /* @__PURE__ */ jsxs23("div", { className: "gbo-card is-question", role: "group", "aria-label": "Waiting for your answer", children: [
-    /* @__PURE__ */ jsx25("div", { className: "gbo-card-title", children: "Waiting for your answer" }),
-    /* @__PURE__ */ jsxs23("div", { className: "gbo-card-desc", children: [
+  return /* @__PURE__ */ jsxs24("div", { className: "gbo-card is-question", role: "group", "aria-label": "Waiting for your answer", children: [
+    /* @__PURE__ */ jsx26("div", { className: "gbo-card-title", children: "Waiting for your answer" }),
+    /* @__PURE__ */ jsxs24("div", { className: "gbo-card-desc", children: [
       name,
       " ",
       TITLES[waiting.kind] || "is waiting for you",
       waiting.kind !== "sudo" && waiting.kind !== "secret" && waiting.text ? `: ${waiting.text}` : "."
     ] }),
-    waiting.kind === "connection" ? /* @__PURE__ */ jsx25(ConnectionCard, { waiting, onRespond: respond }) : /* @__PURE__ */ jsx25(ValueCard, { waiting, onAnswer: answer }, waiting.id),
-    /* @__PURE__ */ jsx25(Footer, { waiting, bot })
+    waiting.kind === "connection" ? /* @__PURE__ */ jsx26(ConnectionCard, { waiting, onRespond: respond }) : /* @__PURE__ */ jsx26(ValueCard, { waiting, onAnswer: answer }, waiting.id),
+    /* @__PURE__ */ jsx26(Footer, { waiting, bot })
   ] });
 }
 
 // src/ui/Tools.tsx
-import * as React24 from "react";
-import { jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
+import * as React25 from "react";
+import { jsx as jsx27, jsxs as jsxs25 } from "react/jsx-runtime";
 var PREVIEW_CHARS = 4e3;
 function LongText({ text: text3, label }) {
-  const [all, setAll] = React24.useState(false);
+  const [all, setAll] = React25.useState(false);
   const long = text3.length > PREVIEW_CHARS;
-  return /* @__PURE__ */ jsxs24("div", { className: "gbo-tool-block", children: [
-    /* @__PURE__ */ jsx26("div", { className: "gbo-tool-block-label", children: label }),
-    /* @__PURE__ */ jsx26("pre", { children: all || !long ? text3 : `${text3.slice(0, PREVIEW_CHARS)}…` }),
-    long ? /* @__PURE__ */ jsx26("button", { type: "button", className: "gbo-link-btn", onClick: () => setAll((v) => !v), children: all ? "Show less" : "Show all" }) : null
+  return /* @__PURE__ */ jsxs25("div", { className: "gbo-tool-block", children: [
+    /* @__PURE__ */ jsx27("div", { className: "gbo-tool-block-label", children: label }),
+    /* @__PURE__ */ jsx27("pre", { children: all || !long ? text3 : `${text3.slice(0, PREVIEW_CHARS)}…` }),
+    long ? /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-link-btn", onClick: () => setAll((v) => !v), children: all ? "Show less" : "Show all" }) : null
   ] });
 }
 function Diff({ diff }) {
-  return /* @__PURE__ */ jsxs24("div", { className: "gbo-tool-block", children: [
-    /* @__PURE__ */ jsx26("div", { className: "gbo-tool-block-label", children: "Changes" }),
-    /* @__PURE__ */ jsx26("pre", { className: "gbo-diff", children: diffLines(diff).map((line, i) => /* @__PURE__ */ jsxs24("span", { className: `is-${line.kind}`, children: [
+  return /* @__PURE__ */ jsxs25("div", { className: "gbo-tool-block", children: [
+    /* @__PURE__ */ jsx27("div", { className: "gbo-tool-block-label", children: "Changes" }),
+    /* @__PURE__ */ jsx27("pre", { className: "gbo-diff", children: diffLines(diff).map((line, i) => /* @__PURE__ */ jsxs25("span", { className: `is-${line.kind}`, children: [
       line.text,
       "\n"
     ] }, i)) })
   ] });
 }
 function ToolRow({ tool, bot }) {
-  const mark = /* @__PURE__ */ jsx26("span", { className: "gbo-tool-mark", children: tool.status === "error" ? "!" : "✓" });
-  const dur = Number(tool.duration) >= 1 ? /* @__PURE__ */ jsxs24("span", { className: "gbo-tool-dur", children: [
+  const mark = /* @__PURE__ */ jsx27("span", { className: "gbo-tool-mark", children: tool.status === "error" ? "!" : "✓" });
+  const dur = Number(tool.duration) >= 1 ? /* @__PURE__ */ jsxs25("span", { className: "gbo-tool-dur", children: [
     Math.round(tool.duration),
     "s"
   ] }) : null;
   if (!hasDetail(tool)) {
-    return /* @__PURE__ */ jsxs24("li", { className: `is-${tool.status}`, children: [
+    return /* @__PURE__ */ jsxs25("li", { className: `is-${tool.status}`, children: [
       mark,
-      /* @__PURE__ */ jsx26("span", { className: "gbo-tool-label", title: tool.summary || tool.label, children: tool.label }),
+      /* @__PURE__ */ jsx27("span", { className: "gbo-tool-label", title: tool.summary || tool.label, children: tool.label }),
       dur
     ] });
   }
-  return /* @__PURE__ */ jsx26("li", { className: `is-${tool.status} has-detail`, children: /* @__PURE__ */ jsxs24("details", { className: "gbo-tool-detail", children: [
-    /* @__PURE__ */ jsxs24("summary", { children: [
+  return /* @__PURE__ */ jsx27("li", { className: `is-${tool.status} has-detail`, children: /* @__PURE__ */ jsxs25("details", { className: "gbo-tool-detail", children: [
+    /* @__PURE__ */ jsxs25("summary", { children: [
       mark,
-      /* @__PURE__ */ jsx26("span", { className: "gbo-tool-label", title: tool.summary || tool.label, children: tool.label }),
+      /* @__PURE__ */ jsx27("span", { className: "gbo-tool-label", title: tool.summary || tool.label, children: tool.label }),
       dur
     ] }),
-    tool.summary ? /* @__PURE__ */ jsx26("div", { className: "gbo-card-desc", children: tool.summary }) : null,
-    tool.diff ? /* @__PURE__ */ jsx26(Diff, { diff: tool.diff }) : null,
-    tool.image ? /* @__PURE__ */ jsx26("div", { className: "gbo-media", children: /* @__PURE__ */ jsx26(OwnerMedia, { bot, item: { path: tool.image, kind: mediaKind(tool.image), name: mediaName(tool.image) } }) }) : null,
-    tool.args ? /* @__PURE__ */ jsx26(LongText, { label: "Arguments", text: tool.args }) : null,
-    tool.result ? /* @__PURE__ */ jsx26(LongText, { label: "Result", text: tool.result }) : null
+    tool.summary ? /* @__PURE__ */ jsx27("div", { className: "gbo-card-desc", children: tool.summary }) : null,
+    tool.diff ? /* @__PURE__ */ jsx27(Diff, { diff: tool.diff }) : null,
+    tool.image ? /* @__PURE__ */ jsx27("div", { className: "gbo-media", children: /* @__PURE__ */ jsx27(OwnerMedia, { bot, item: { path: tool.image, kind: mediaKind(tool.image), name: mediaName(tool.image) } }) }) : null,
+    tool.args ? /* @__PURE__ */ jsx27(LongText, { label: "Arguments", text: tool.args }) : null,
+    tool.result ? /* @__PURE__ */ jsx27(LongText, { label: "Result", text: tool.result }) : null
   ] }) });
 }
 function ToolGroup({ item, bot }) {
   const running = item.tools.filter((tool) => tool.status === "running");
   const done = item.tools.length - running.length;
   const secs = item.tools.reduce((sum, tool) => sum + (Number(tool.duration) || 0), 0);
-  return /* @__PURE__ */ jsxs24("div", { className: "gbo-tools-wrap", children: [
-    done > 0 ? /* @__PURE__ */ jsxs24("details", { className: "gbo-tools", children: [
-      /* @__PURE__ */ jsxs24("summary", { children: [
-        /* @__PURE__ */ jsx26(IconChevron, {}),
+  return /* @__PURE__ */ jsxs25("div", { className: "gbo-tools-wrap", children: [
+    done > 0 ? /* @__PURE__ */ jsxs25("details", { className: "gbo-tools", children: [
+      /* @__PURE__ */ jsxs25("summary", { children: [
+        /* @__PURE__ */ jsx27(IconChevron, {}),
         done === 1 ? "1 tool" : `${done} tools`,
         secs >= 1 ? ` · ${Math.round(secs)}s` : ""
       ] }),
-      /* @__PURE__ */ jsx26("ul", { children: item.tools.filter((tool) => tool.status !== "running").map((tool) => /* @__PURE__ */ jsx26(ToolRow, { tool, bot }, tool.id)) })
+      /* @__PURE__ */ jsx27("ul", { children: item.tools.filter((tool) => tool.status !== "running").map((tool) => /* @__PURE__ */ jsx27(ToolRow, { tool, bot }, tool.id)) })
     ] }) : null,
-    running.map((tool) => /* @__PURE__ */ jsx26("div", { className: "gbo-activity", children: /* @__PURE__ */ jsxs24("span", { className: "gbo-shimmer", children: [
+    running.map((tool) => /* @__PURE__ */ jsx27("div", { className: "gbo-activity", children: /* @__PURE__ */ jsxs25("span", { className: "gbo-shimmer", children: [
       tool.label,
       "…"
     ] }) }, tool.id))
@@ -60475,14 +61095,14 @@ function ToolGroup({ item, bot }) {
 }
 
 // src/ui/Chat.tsx
-import { Fragment as Fragment16, jsx as jsx27, jsxs as jsxs25 } from "react/jsx-runtime";
+import { Fragment as Fragment16, jsx as jsx28, jsxs as jsxs26 } from "react/jsx-runtime";
 function Thinking({ text: text3 }) {
-  return /* @__PURE__ */ jsxs25("details", { className: "gbo-think", children: [
-    /* @__PURE__ */ jsxs25("summary", { children: [
-      /* @__PURE__ */ jsx27(IconChevron, {}),
+  return /* @__PURE__ */ jsxs26("details", { className: "gbo-think", children: [
+    /* @__PURE__ */ jsxs26("summary", { children: [
+      /* @__PURE__ */ jsx28(IconChevron, {}),
       "Thought"
     ] }),
-    /* @__PURE__ */ jsx27("div", { className: "gbo-think-body", children: text3 })
+    /* @__PURE__ */ jsx28("div", { className: "gbo-think-body", children: text3 })
   ] });
 }
 function ApprovalCard({ item, onAnswer }) {
@@ -60490,13 +61110,13 @@ function ApprovalCard({ item, onAnswer }) {
   const answering = item.status === "answering";
   const stateText = item.status === "answered" ? `${CHOICE_LABELS[item.answer] || item.answer}` : item.status === "resolved" ? "Answered in another window" : item.status === "expired" ? "No longer waiting, nothing was approved" : item.status === "cancelled" ? "No longer waiting" : answering ? "Sending…" : "";
   const ok = item.status === "answered" && item.answer !== "deny";
-  return /* @__PURE__ */ jsxs25("div", { className: `card${pending ? "" : " is-resolved"}`, role: "group", "aria-label": "Approval needed", children: [
-    /* @__PURE__ */ jsx27("div", { className: "card__head", children: /* @__PURE__ */ jsxs25("div", { className: "card__titles", children: [
-      /* @__PURE__ */ jsx27("div", { className: "card__title", children: "May I run this?" }),
-      item.description ? /* @__PURE__ */ jsx27("div", { className: "card__sub", children: item.description }) : null
+  return /* @__PURE__ */ jsxs26("div", { className: `card${pending ? "" : " is-resolved"}`, role: "group", "aria-label": "Approval needed", children: [
+    /* @__PURE__ */ jsx28("div", { className: "card__head", children: /* @__PURE__ */ jsxs26("div", { className: "card__titles", children: [
+      /* @__PURE__ */ jsx28("div", { className: "card__title", children: "May I run this?" }),
+      item.description ? /* @__PURE__ */ jsx28("div", { className: "card__sub", children: item.description }) : null
     ] }) }),
-    item.command ? /* @__PURE__ */ jsx27("div", { className: "card__body", children: /* @__PURE__ */ jsx27("code", { children: item.command }) }) : null,
-    pending ? /* @__PURE__ */ jsx27("div", { className: "card__actions", children: item.choices.map((choice) => /* @__PURE__ */ jsx27(
+    item.command ? /* @__PURE__ */ jsx28("div", { className: "card__body", children: /* @__PURE__ */ jsx28("code", { children: item.command }) }) : null,
+    pending ? /* @__PURE__ */ jsx28("div", { className: "card__actions", children: item.choices.map((choice) => /* @__PURE__ */ jsx28(
       "button",
       {
         type: "button",
@@ -60506,11 +61126,11 @@ function ApprovalCard({ item, onAnswer }) {
         children: CHOICE_LABELS[choice] || choice
       },
       choice
-    )) }) : /* @__PURE__ */ jsxs25("div", { className: `card__outcome${ok ? " is-ok" : ""}`, children: [
+    )) }) : /* @__PURE__ */ jsxs26("div", { className: `card__outcome${ok ? " is-ok" : ""}`, children: [
       ok ? "✓ " : "",
       stateText
     ] }),
-    item.error ? /* @__PURE__ */ jsx27("div", { className: "card__error gbo-card-error", children: item.error }) : null
+    item.error ? /* @__PURE__ */ jsx28("div", { className: "card__error gbo-card-error", children: item.error }) : null
   ] });
 }
 function UserMeta({
@@ -60523,45 +61143,45 @@ function UserMeta({
     if (item.delivery !== "not-sent") {
       const status = !item.checked ? "Delivery unknown: checking the chat history…" : item.checkFailed ? "Delivery unknown: the chat history could not be read." : "Delivery unknown: not in the chat history yet. It may still be queued.";
       if (item.idempotent) {
-        return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
-          /* @__PURE__ */ jsxs25("span", { children: [
+        return /* @__PURE__ */ jsxs26("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
+          /* @__PURE__ */ jsxs26("span", { children: [
             status,
             " Retrying is safe: Hermes recognises this message and never runs it twice."
           ] }),
-          /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRetry(item.id), children: "Retry" }),
-          item.checked ? /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRecheck(item.id), children: "Check again" }) : null
+          /* @__PURE__ */ jsx28("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRetry(item.id), children: "Retry" }),
+          item.checked ? /* @__PURE__ */ jsx28("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRecheck(item.id), children: "Check again" }) : null
         ] });
       }
-      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
-        /* @__PURE__ */ jsxs25("span", { children: [
+      return /* @__PURE__ */ jsxs26("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
+        /* @__PURE__ */ jsxs26("span", { children: [
           status,
           " It is not sent again from here, so it cannot run twice."
         ] }),
-        item.checked ? /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRecheck(item.id), children: "Check again" }) : null,
-        /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn", onClick: onOpen, children: "Open in Hermes Bot Mode" })
+        item.checked ? /* @__PURE__ */ jsx28("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRecheck(item.id), children: "Check again" }) : null,
+        /* @__PURE__ */ jsx28("button", { type: "button", className: "gbo-pill-btn", onClick: onOpen, children: "Open in Hermes Bot Mode" })
       ] });
     }
-    return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
+    return /* @__PURE__ */ jsxs26("div", { className: "gbo-msg-meta gbo-msg-failed", children: [
       "Not sent: ",
       item.failed,
-      /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRetry(item.id), children: "Retry" })
+      /* @__PURE__ */ jsx28("button", { type: "button", className: "gbo-pill-btn", onClick: () => onRetry(item.id), children: "Retry" })
     ] });
   }
   if (item.receipt === "unknown") {
-    return /* @__PURE__ */ jsx27("div", { className: "gbo-msg-meta gbo-msg-failed", children: "Hermes accepted this message but lost track of it, so it will not run." });
+    return /* @__PURE__ */ jsx28("div", { className: "gbo-msg-meta gbo-msg-failed", children: "Hermes accepted this message but lost track of it, so it will not run." });
   }
-  if (item.receipt === "terminal") return /* @__PURE__ */ jsx27("div", { className: "gbo-msg-meta", children: "Already delivered" });
+  if (item.receipt === "terminal") return /* @__PURE__ */ jsx28("div", { className: "gbo-msg-meta", children: "Already delivered" });
   if (item.pending || item.receipt === "queued" || item.receipt === "steered" || item.receipt === "redirected") {
-    return /* @__PURE__ */ jsx27("div", { className: "gbo-msg-meta", children: item.pending ? "Sending…" : item.receipt === "queued" ? "Queued after the current reply" : "Sent to the running reply" });
+    return /* @__PURE__ */ jsx28("div", { className: "gbo-msg-meta", children: item.pending ? "Sending…" : item.receipt === "queued" ? "Queued after the current reply" : "Sent to the running reply" });
   }
   return null;
 }
 var STREAM_RENDER_MS = 60;
 function useStreamText(text3, streaming) {
-  const [shown, setShown] = React25.useState(text3);
-  const latest = React25.useRef(text3);
+  const [shown, setShown] = React26.useState(text3);
+  const latest = React26.useRef(text3);
   latest.current = text3;
-  React25.useEffect(() => {
+  React26.useEffect(() => {
     if (!streaming) return void 0;
     setShown(latest.current);
     const id = setInterval(() => setShown((current) => current === latest.current ? current : latest.current), STREAM_RENDER_MS);
@@ -60570,23 +61190,23 @@ function useStreamText(text3, streaming) {
   return streaming ? shown : text3;
 }
 function DirectivePlaceholder({ pending }) {
-  return /* @__PURE__ */ jsx27("div", { className: "gbo-directive is-pending", "aria-hidden": "true", children: pending.name === "preview" ? /* @__PURE__ */ jsx27("div", { className: "gbo-preview is-loading is-pending", style: { height: previewStartHeight(pending.attrs?.height) } }) : /* @__PURE__ */ jsx27("div", { className: "gbo-dcard is-loading is-pending", children: /* @__PURE__ */ jsx27("span", { className: "gbo-dcard-skeleton" }) }) });
+  return /* @__PURE__ */ jsx28("div", { className: "gbo-directive is-pending", "aria-hidden": "true", children: pending.name === "preview" ? /* @__PURE__ */ jsx28("div", { className: "gbo-preview is-loading is-pending", style: { height: previewStartHeight(pending.attrs?.height) } }) : /* @__PURE__ */ jsx28("div", { className: "gbo-dcard is-loading is-pending", children: /* @__PURE__ */ jsx28("span", { className: "gbo-dcard-skeleton" }) }) });
 }
 function AssistantBody({ item, bot, pos }) {
   const streaming = Boolean(item.streaming);
   const shown = useStreamText(item.text, streaming);
-  const safe = React25.useMemo(() => streaming ? streamSafeParts(shown) : null, [streaming, shown]);
+  const safe = React26.useMemo(() => streaming ? streamSafeParts(shown) : null, [streaming, shown]);
   const text3 = safe ? safe.text : item.text;
   const { segments: found, scope } = useDirectiveSegments(text3);
-  const segments = React25.useMemo(() => found && scope ? found : [{ kind: "prose", text: text3 }], [found, scope, text3]);
-  const time = React25.useMemo(() => item.at ? /* @__PURE__ */ jsx27("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
+  const segments = React26.useMemo(() => found && scope ? found : [{ kind: "prose", text: text3 }], [found, scope, text3]);
+  const time = React26.useMemo(() => item.at ? /* @__PURE__ */ jsx28("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
   const poll = Boolean(scope?.recent.has(item.id));
-  const body = React25.useMemo(() => {
+  const body = React26.useMemo(() => {
     const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
     let prose = 0;
     let directives = 0;
     return segments.map(
-      (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx27(
+      (segment, index) => segment.kind === "prose" ? /* @__PURE__ */ jsx28(
         BotProse,
         {
           bot,
@@ -60596,20 +61216,20 @@ function AssistantBody({ item, bot, pos }) {
           streaming: streaming && index === lastProse
         },
         `p${prose++}`
-      ) : /* @__PURE__ */ jsx27(DirectiveBlock, { segment, poll, scope }, `d${directives++}`)
+      ) : /* @__PURE__ */ jsx28(DirectiveBlock, { segment, poll, scope }, `d${directives++}`)
     );
   }, [segments, bot, pos, time, streaming, poll, scope]);
-  const placeholder = React25.useMemo(() => safe?.pending && scope ? /* @__PURE__ */ jsx27(DirectivePlaceholder, { pending: safe.pending }) : null, [safe, scope]);
-  return /* @__PURE__ */ jsxs25(Fragment16, { children: [
+  const placeholder = React26.useMemo(() => safe?.pending && scope ? /* @__PURE__ */ jsx28(DirectivePlaceholder, { pending: safe.pending }) : null, [safe, scope]);
+  return /* @__PURE__ */ jsxs26(Fragment16, { children: [
     body,
     placeholder
   ] });
 }
 function TurnErrorCard({ item, bot, controller: controller2 }) {
-  const [open, setOpen] = React25.useState(false);
-  const [starting, setStarting] = React25.useState(false);
-  const pressed = React25.useRef(false);
-  React25.useEffect(() => {
+  const [open, setOpen] = React26.useState(false);
+  const [starting, setStarting] = React26.useState(false);
+  const pressed = React26.useRef(false);
+  React26.useEffect(() => {
     if (!item.retrying) pressed.current = false;
   }, [item.retrying, item.id]);
   const retry = () => {
@@ -60619,13 +61239,13 @@ function TurnErrorCard({ item, bot, controller: controller2 }) {
     void Promise.resolve(controller2.retryTurn(item.id, item.prompt)).finally(() => setStarting(false));
   };
   const busy = item.retrying || starting;
-  return /* @__PURE__ */ jsxs25("div", { className: "gbo-turn-error", role: "group", "aria-label": "Reply failed", children: [
-    /* @__PURE__ */ jsx27("div", { className: "gbo-turn-error-title", children: item.stillFailing ? `${STILL_FAILING_TITLE}.` : FAILED_TITLE }),
-    /* @__PURE__ */ jsxs25("div", { className: "gbo-turn-error-actions", children: [
-      item.stillFailing ? /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => newChatWith(bot), children: "Start a new chat" }) : /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !item.canRetry, "aria-busy": busy || void 0, onClick: retry, children: busy ? "Trying again…" : "Try again" }),
-      item.detail ? /* @__PURE__ */ jsx27("button", { type: "button", className: "gbo-link-btn gbo-turn-error-toggle", "aria-expanded": open, onClick: () => setOpen(!open), children: "Details" }) : null
+  return /* @__PURE__ */ jsxs26("div", { className: "gbo-turn-error", role: "group", "aria-label": "Reply failed", children: [
+    /* @__PURE__ */ jsx28("div", { className: "gbo-turn-error-title", children: item.stillFailing ? `${STILL_FAILING_TITLE}.` : FAILED_TITLE }),
+    /* @__PURE__ */ jsxs26("div", { className: "gbo-turn-error-actions", children: [
+      item.stillFailing ? /* @__PURE__ */ jsx28("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => newChatWith(bot), children: "Start a new chat" }) : /* @__PURE__ */ jsx28("button", { type: "button", className: "gbo-pill-btn is-primary", disabled: busy || !item.canRetry, "aria-busy": busy || void 0, onClick: retry, children: busy ? "Trying again…" : "Try again" }),
+      item.detail ? /* @__PURE__ */ jsx28("button", { type: "button", className: "gbo-link-btn gbo-turn-error-toggle", "aria-expanded": open, onClick: () => setOpen(!open), children: "Details" }) : null
     ] }),
-    item.detail ? /* @__PURE__ */ jsx27("div", { className: "gbo-turn-error-detail", hidden: !open, children: item.detail }) : null
+    item.detail ? /* @__PURE__ */ jsx28("div", { className: "gbo-turn-error-detail", hidden: !open, children: item.detail }) : null
   ] });
 }
 function Item({
@@ -60643,48 +61263,48 @@ function Item({
   const react = (emoji) => void controller2?.react(item.id, emoji);
   switch (item.kind) {
     case "divider":
-      return /* @__PURE__ */ jsx27("div", { className: "divider gbo-divider", children: item.label });
+      return /* @__PURE__ */ jsx28("div", { className: "divider gbo-divider", children: item.label });
     case "new":
-      return /* @__PURE__ */ jsx27(NewLine, {});
+      return /* @__PURE__ */ jsx28(NewLine, {});
     case "user":
-      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-user", ...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }, children: [
-        item.attachments?.length ? /* @__PURE__ */ jsx27("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx27("span", { className: "gbo-chip", children: a2.name || a2.kind }, i)) }) : null,
-        item.text ? /* @__PURE__ */ jsxs25("div", { className: "bubble-wrap is-right", children: [
-          /* @__PURE__ */ jsx27("div", { className: `bubble is-user${pos}`, children: /* @__PURE__ */ jsx27("div", { className: "bubble__plain", children: item.text }) }),
-          item.at ? /* @__PURE__ */ jsx27("span", { className: "bubble__time", children: clock(item.at) }) : null
+      return /* @__PURE__ */ jsxs26("div", { className: "gbo-msg is-user", ...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }, children: [
+        item.attachments?.length ? /* @__PURE__ */ jsx28("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx28("span", { className: "gbo-chip", children: a2.name || a2.kind }, i)) }) : null,
+        item.text ? /* @__PURE__ */ jsxs26("div", { className: "bubble-wrap is-right", children: [
+          /* @__PURE__ */ jsx28("div", { className: `bubble is-user${pos}`, children: /* @__PURE__ */ jsx28("div", { className: "bubble__plain", children: item.text }) }),
+          item.at ? /* @__PURE__ */ jsx28("span", { className: "bubble__time", children: clock(item.at) }) : null
         ] }) : null,
-        /* @__PURE__ */ jsx27(Reactions, { item, onReact: react }),
-        /* @__PURE__ */ jsx27(UserMeta, { item, onRetry, onRecheck, onOpen }),
-        /* @__PURE__ */ jsx27(UserActions, { item, controller: controller2, busy, onPrefill })
+        /* @__PURE__ */ jsx28(Reactions, { item, onReact: react }),
+        /* @__PURE__ */ jsx28(UserMeta, { item, onRetry, onRecheck, onOpen }),
+        /* @__PURE__ */ jsx28(UserActions, { item, controller: controller2, busy, onPrefill })
       ] });
     case "assistant":
-      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-bot", ...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }, children: [
-        item.reasoning ? /* @__PURE__ */ jsx27(Thinking, { text: item.reasoning }) : null,
-        item.text ? /* @__PURE__ */ jsx27(AssistantBody, { item, bot, pos }) : null,
-        /* @__PURE__ */ jsx27(Reactions, { item, onReact: react }),
-        item.text && !item.streaming ? /* @__PURE__ */ jsx27(AssistantActions, { item, controller: controller2, busy }) : null
+      return /* @__PURE__ */ jsxs26("div", { className: "gbo-msg is-bot", ...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }, children: [
+        item.reasoning ? /* @__PURE__ */ jsx28(Thinking, { text: item.reasoning }) : null,
+        item.text ? /* @__PURE__ */ jsx28(AssistantBody, { item, bot, pos }) : null,
+        /* @__PURE__ */ jsx28(Reactions, { item, onReact: react }),
+        item.text && !item.streaming ? /* @__PURE__ */ jsx28(AssistantActions, { item, controller: controller2, busy }) : null
       ] });
     case "tools":
-      return /* @__PURE__ */ jsx27(ToolGroup, { item, bot });
+      return /* @__PURE__ */ jsx28(ToolGroup, { item, bot });
     case "approval":
-      return /* @__PURE__ */ jsx27(ApprovalCard, { item, onAnswer });
+      return /* @__PURE__ */ jsx28(ApprovalCard, { item, onAnswer });
     case "email-draft":
-      return /* @__PURE__ */ jsx27(EmailDraftCard, { item, bot, controller: controller2 });
+      return /* @__PURE__ */ jsx28(EmailDraftCard, { item, bot, controller: controller2 });
     case "clarify":
-      return /* @__PURE__ */ jsx27(SettledChoiceCard, { item });
+      return /* @__PURE__ */ jsx28(SettledChoiceCard, { item });
     case "notice":
-      return /* @__PURE__ */ jsx27("div", { className: "system-event gbo-notice", title: item.title || void 0, children: item.text });
+      return /* @__PURE__ */ jsx28("div", { className: "system-event gbo-notice", title: item.title || void 0, children: item.text });
     case "command":
-      return /* @__PURE__ */ jsxs25("div", { className: `gbo-command${item.error ? " is-error" : ""}`, role: "status", children: [
-        /* @__PURE__ */ jsx27("div", { className: "gbo-command-head", children: item.command }),
-        item.running ? /* @__PURE__ */ jsx27("div", { className: "gbo-shimmer", children: "Running…" }) : item.output ? /* @__PURE__ */ jsx27("pre", { children: item.output }) : null
+      return /* @__PURE__ */ jsxs26("div", { className: `gbo-command${item.error ? " is-error" : ""}`, role: "status", children: [
+        /* @__PURE__ */ jsx28("div", { className: "gbo-command-head", children: item.command }),
+        item.running ? /* @__PURE__ */ jsx28("div", { className: "gbo-shimmer", children: "Running…" }) : item.output ? /* @__PURE__ */ jsx28("pre", { children: item.output }) : null
       ] });
     case "error":
-      return /* @__PURE__ */ jsx27("div", { className: "notice is-error gbo-error", children: item.text });
+      return /* @__PURE__ */ jsx28("div", { className: "notice is-error gbo-error", children: item.text });
     case "turn-error":
-      return /* @__PURE__ */ jsx27(TurnErrorCard, { item, bot, controller: controller2 });
+      return /* @__PURE__ */ jsx28(TurnErrorCard, { item, bot, controller: controller2 });
     case "undo-note":
-      return /* @__PURE__ */ jsx27("div", { className: "system-event gbo-notice gbo-undo-note", role: "status", children: item.text });
+      return /* @__PURE__ */ jsx28("div", { className: "system-event gbo-notice gbo-undo-note", role: "status", children: item.text });
     default:
       return null;
   }
@@ -60699,16 +61319,16 @@ function lookingAt(el) {
 }
 function useNewLine(key, items, ready, ref) {
   const line = useStore(roster2.newLine);
-  const latest = React25.useRef({ key, items, ready });
+  const latest = React26.useRef({ key, items, ready });
   latest.current = { key, items, ready };
-  const note = React25.useCallback(() => {
+  const note = React26.useCallback(() => {
     const { key: k, items: list, ready: ok } = latest.current;
     noteTranscript(k, list, ok, lookingAt(ref.current));
   }, [ref]);
-  React25.useEffect(() => {
+  React26.useEffect(() => {
     note();
   }, [key, items, ready, note]);
-  React25.useEffect(() => {
+  React26.useEffect(() => {
     const win = globalThis.window;
     const doc = globalThis.document;
     win?.addEventListener?.("focus", note);
@@ -60721,18 +61341,18 @@ function useNewLine(key, items, ready, ref) {
   return { id: line.markers[key] ?? null, note };
 }
 function NewLine() {
-  return /* @__PURE__ */ jsx27("div", { className: "gbo-new-line", role: "separator", "aria-label": "New messages", children: /* @__PURE__ */ jsx27("span", { children: "NEW" }) });
+  return /* @__PURE__ */ jsx28("div", { className: "gbo-new-line", role: "separator", "aria-label": "New messages", children: /* @__PURE__ */ jsx28("span", { children: "NEW" }) });
 }
-var SlotContext = React25.createContext(mainSlot);
-var useController = () => React25.useContext(SlotContext).controller();
+var SlotContext = React26.createContext(mainSlot);
+var useController = () => React26.useContext(SlotContext).controller();
 function Transcript({ state, bot, meta, onPrefill }) {
   const items = state.chat.items;
   const showWork = useStore(app.showWork);
-  const mine = React25.useMemo(() => {
+  const mine = React26.useMemo(() => {
     for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === "user") return String(items[i].renderKey ?? items[i].id);
     return "";
   }, [items]);
-  const latest = React25.useMemo(() => {
+  const latest = React26.useMemo(() => {
     for (let i = items.length - 1; i >= 0; i -= 1) {
       const kind = items[i]?.kind;
       if (kind === "user" || kind === "assistant") return String(items[i].renderKey ?? items[i].id);
@@ -60745,7 +61365,7 @@ function Transcript({ state, bot, meta, onPrefill }) {
     onStickScroll();
     newLine.note();
   };
-  const decorated = React25.useMemo(
+  const decorated = React26.useMemo(
     () => groupMessages(
       withNewMarker(withDividers(withTurnCards(visibleItems(withEmailDrafts(items), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
     ),
@@ -60758,8 +61378,8 @@ function Transcript({ state, bot, meta, onPrefill }) {
   const openStock = () => void openInBotMode(bot, "Check whether your message arrived before sending anything again.");
   const activity2 = state.chat.busy ? activityLabel(state.chat, showWork) : "";
   const recentKey = items.slice(-8).map((item) => item.id).join("|");
-  const outer = React25.useContext(DirectiveContext);
-  const directives = React25.useMemo(
+  const outer = React26.useContext(DirectiveContext);
+  const directives = React26.useMemo(
     () => !controller2 ? outer : state.storedId ? {
       bot,
       sessionId: String(state.storedId),
@@ -60768,10 +61388,10 @@ function Transcript({ state, bot, meta, onPrefill }) {
     } : null,
     [bot, state.storedId, controller2, recentKey, outer]
   );
-  React25.useEffect(() => {
+  React26.useEffect(() => {
     pin();
   }, [state.storedId]);
-  return /* @__PURE__ */ jsx27(DirectiveContext.Provider, { value: directives, children: /* @__PURE__ */ jsx27(
+  return /* @__PURE__ */ jsx28(DirectiveContext.Provider, { value: directives, children: /* @__PURE__ */ jsx28(
     OverlayScroll,
     {
       wrapClassName: "transcript-wrap gbo-transcript-scroll",
@@ -60780,52 +61400,52 @@ function Transcript({ state, bot, meta, onPrefill }) {
       onScroll,
       onContentResize,
       onReaderInput,
-      overlay: unseen ? /* @__PURE__ */ jsx27("button", { type: "button", className: "jump-btn gbo-jump", "aria-label": "Jump to latest", title: "Jump to latest", onClick: jump, children: /* @__PURE__ */ jsx27(IconChevronDown, {}) }) : null,
-      children: /* @__PURE__ */ jsxs25("div", { className: "transcript__col gbo-column", children: [
-        state.hasMore ? /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void keepPlace(() => controller2?.loadEarlier()), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
-        !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs25("div", { className: "empty-chat", children: [
-          /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
-          /* @__PURE__ */ jsx27("div", { className: "empty-chat__title", children: displayName(bot, meta) }),
-          /* @__PURE__ */ jsx27("div", { className: "empty-chat__sub", children: "Send a message to start the conversation" })
+      overlay: unseen ? /* @__PURE__ */ jsx28("button", { type: "button", className: "jump-btn gbo-jump", "aria-label": "Jump to latest", title: "Jump to latest", onClick: jump, children: /* @__PURE__ */ jsx28(IconChevronDown, {}) }) : null,
+      children: /* @__PURE__ */ jsxs26("div", { className: "transcript__col gbo-column", children: [
+        state.hasMore ? /* @__PURE__ */ jsx28("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void keepPlace(() => controller2?.loadEarlier()), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
+        !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs26("div", { className: "empty-chat", children: [
+          /* @__PURE__ */ jsx28(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
+          /* @__PURE__ */ jsx28("div", { className: "empty-chat__title", children: displayName(bot, meta) }),
+          /* @__PURE__ */ jsx28("div", { className: "empty-chat__sub", children: "Send a message to start the conversation" })
         ] }) : null,
         decorated.map((entry) => {
           const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
-          if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.renderKey ?? entry.id);
+          if (entry.kind !== "group") return /* @__PURE__ */ jsx28(Item, { item: entry, ...props }, entry.renderKey ?? entry.id);
           const bubbles = entry.items.filter((item) => item.text);
-          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.renderKey ?? item.id)) }, entry.id);
+          return /* @__PURE__ */ jsx28("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx28(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.renderKey ?? item.id)) }, entry.id);
         }),
-        state.chat.waiting ? /* @__PURE__ */ jsx27(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
-        activity2 ? /* @__PURE__ */ jsxs25("div", { className: "activity-line gbo-activity", role: "status", children: [
-          /* @__PURE__ */ jsx27("span", { className: "activity-line__mark", children: /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 22 }) }),
-          /* @__PURE__ */ jsxs25("span", { className: "activity-line__text shimmer", children: [
+        state.chat.waiting ? /* @__PURE__ */ jsx28(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
+        activity2 ? /* @__PURE__ */ jsxs26("div", { className: "activity-line gbo-activity", role: "status", children: [
+          /* @__PURE__ */ jsx28("span", { className: "activity-line__mark", children: /* @__PURE__ */ jsx28(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 22 }) }),
+          /* @__PURE__ */ jsxs26("span", { className: "activity-line__text shimmer", children: [
             activity2,
             "…"
           ] })
         ] }) : null,
-        state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx27("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
+        state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx28("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
       ] })
     }
   ) });
 }
 function Center({ state, bot }) {
   const controller2 = useController();
-  const slot = React25.useContext(SlotContext);
+  const slot = React26.useContext(SlotContext);
   const name = displayName(bot, metaFor(bot));
   if (state.phase === "no-chat") {
-    return /* @__PURE__ */ jsxs25("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 80 }),
-      /* @__PURE__ */ jsx27("h2", { children: "No Bot Chat yet" }),
-      /* @__PURE__ */ jsxs25("p", { children: [
+    return /* @__PURE__ */ jsxs26("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsx28(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 80 }),
+      /* @__PURE__ */ jsx28("h2", { children: "No Bot Chat yet" }),
+      /* @__PURE__ */ jsxs26("p", { children: [
         name,
         " has no Bot Chat yet. Start it here; it is the same one forever-chat Hermes Bot Mode opens."
       ] }),
-      /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--primary", onClick: () => void controller2?.create(), children: "Start Bot Chat" })
+      /* @__PURE__ */ jsx28("button", { type: "button", className: "btn btn--primary", onClick: () => void controller2?.create(), children: "Start Bot Chat" })
     ] });
   }
   if (state.phase === "creating") {
-    return /* @__PURE__ */ jsxs25("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 72, working: true }),
-      /* @__PURE__ */ jsxs25("p", { children: [
+    return /* @__PURE__ */ jsxs26("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsx28(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 72, working: true }),
+      /* @__PURE__ */ jsxs26("p", { children: [
         "Starting ",
         name,
         "’s Bot Chat…"
@@ -60836,25 +61456,25 @@ function Center({ state, bot }) {
     const fresh = freshBot(bot);
     const retry = () => fresh && fresh !== bot && !slot.extra ? selectBot(fresh) : void controller2?.open();
     const stockProblem = stockHandoffProblem(fresh || bot);
-    return /* @__PURE__ */ jsxs25("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsxs25("h2", { children: [
+    return /* @__PURE__ */ jsxs26("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsxs26("h2", { children: [
         "Could not open ",
         name
       ] }),
-      /* @__PURE__ */ jsx27("p", { children: state.error }),
-      stockProblem ? /* @__PURE__ */ jsxs25("p", { children: [
+      /* @__PURE__ */ jsx28("p", { children: state.error }),
+      stockProblem ? /* @__PURE__ */ jsxs26("p", { children: [
         stockProblem,
         ". Hermes Bot Mode is not offered until it is."
       ] }) : null,
-      /* @__PURE__ */ jsxs25("div", { className: "gbo-card-actions", children: [
-        /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--primary", onClick: retry, children: "Try again" }),
-        stockProblem ? null : /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--secondary", onClick: () => void openInBotMode(fresh || bot), children: "Open in Hermes Bot Mode" })
+      /* @__PURE__ */ jsxs26("div", { className: "gbo-card-actions", children: [
+        /* @__PURE__ */ jsx28("button", { type: "button", className: "btn btn--primary", onClick: retry, children: "Try again" }),
+        stockProblem ? null : /* @__PURE__ */ jsx28("button", { type: "button", className: "btn btn--secondary", onClick: () => void openInBotMode(fresh || bot), children: "Open in Hermes Bot Mode" })
       ] })
     ] });
   }
-  return /* @__PURE__ */ jsxs25("div", { className: "gbo-center", children: [
-    /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 72, working: true }),
-    /* @__PURE__ */ jsxs25("p", { children: [
+  return /* @__PURE__ */ jsxs26("div", { className: "gbo-center", children: [
+    /* @__PURE__ */ jsx28(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta: metaFor(bot), size: 72, working: true }),
+    /* @__PURE__ */ jsxs26("p", { children: [
       "Opening ",
       name,
       "’s chat…"
@@ -60863,7 +61483,7 @@ function Center({ state, bot }) {
 }
 var NARROW_PANE_PX = 900;
 function usePaneWidth(ref, enabled = true) {
-  React25.useLayoutEffect(() => {
+  React26.useLayoutEffect(() => {
     const el = ref.current;
     if (!enabled) return void 0;
     const RO = globalThis.ResizeObserver;
@@ -60902,7 +61522,7 @@ function PanelSash({ rootRef }) {
     target.addEventListener("pointerup", end);
     target.addEventListener("pointercancel", end);
   };
-  return /* @__PURE__ */ jsx27(
+  return /* @__PURE__ */ jsx28(
     "div",
     {
       className: "gbo-panel-sash",
@@ -60917,14 +61537,14 @@ function PanelSash({ rootRef }) {
   );
 }
 function ProfileDrawer({ bot, onClose, backgroundRef }) {
-  const ref = React25.useRef(null);
-  React25.useEffect(() => {
+  const ref = React26.useRef(null);
+  React26.useEffect(() => {
     if (!ref.current) return;
     return trapFocus(ref.current, { background: backgroundRef.current });
   }, [backgroundRef]);
-  return /* @__PURE__ */ jsxs25(Fragment16, { children: [
-    /* @__PURE__ */ jsx27("div", { className: "gbo-scrim", "aria-hidden": "true", onClick: onClose }),
-    /* @__PURE__ */ jsxs25(
+  return /* @__PURE__ */ jsxs26(Fragment16, { children: [
+    /* @__PURE__ */ jsx28("div", { className: "gbo-scrim", "aria-hidden": "true", onClick: onClose }),
+    /* @__PURE__ */ jsxs26(
       "div",
       {
         className: "gbo-drawer",
@@ -60935,8 +61555,8 @@ function ProfileDrawer({ bot, onClose, backgroundRef }) {
         ref,
         onKeyDown: (event) => drawerKeyDown(event, ref.current, onClose),
         children: [
-          /* @__PURE__ */ jsx27("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-drawer-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx27(IconX, {}) }),
-          /* @__PURE__ */ jsx27(ProfilePanel, { bot })
+          /* @__PURE__ */ jsx28("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-drawer-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx28(IconX, {}) }),
+          /* @__PURE__ */ jsx28(ProfilePanel, { bot })
         ]
       }
     )
@@ -60951,22 +61571,22 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const panelWidth = useStore(app.panelWidth);
   const roster = useStore(app.roster);
   const rosterShown = useStore(app.rosterShown);
-  const rootRef = React25.useRef(null);
-  const draftRef = React25.useRef(null);
-  const chatRef = React25.useRef(null);
+  const rootRef = React26.useRef(null);
+  const draftRef = React26.useRef(null);
+  const chatRef = React26.useRef(null);
   usePaneWidth(rootRef, !slot.extra);
-  const closeDrawer = React25.useCallback(() => app.drawerOpen.set(false), []);
+  const closeDrawer = React26.useCallback(() => app.drawerOpen.set(false), []);
   const bot = state?.bot ? findBot(rowKey(state.bot)) || state.bot : findBot(selectedKey);
   const pending = !state && bot && !slot.extra ? rowKey(bot) : "";
-  React25.useEffect(() => {
+  React26.useEffect(() => {
     if (!pending || app.chat.get()) return;
     const target = findBot(pending);
     if (target) selectBot(target, { openWorkspace: false });
   }, [pending]);
   if (!bot || !state) {
-    return /* @__PURE__ */ jsx27("div", { "data-gbo-root": "", className: "gbo-ws", ref: rootRef, children: /* @__PURE__ */ jsxs25("div", { className: "gbo-center", children: [
-      /* @__PURE__ */ jsx27("h2", { children: "Pick a bot" }),
-      /* @__PURE__ */ jsx27("p", { children: "Choose a bot in the Bots sidebar to open its Bot Chat." })
+    return /* @__PURE__ */ jsx28("div", { "data-gbo-root": "", className: "gbo-ws", ref: rootRef, children: /* @__PURE__ */ jsxs26("div", { className: "gbo-center", children: [
+      /* @__PURE__ */ jsx28("h2", { children: "Pick a bot" }),
+      /* @__PURE__ */ jsx28("p", { children: "Choose a bot in the Bots sidebar to open its Bot Chat." })
     ] }) });
   }
   const meta = metaFor(bot);
@@ -60978,29 +61598,29 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const shown = extra ? false : narrow ? drawerOpen : panelOpen;
   const togglePanel = () => extra ? selectBot(bot) : narrow ? app.drawerOpen.set(!drawerOpen) : setPanelOpen(!panelOpen);
   const completeSlash = (text3) => controller2?.completeSlash(text3) ?? Promise.resolve({ items: [], replaceFrom: 0 });
-  const view = /* @__PURE__ */ jsxs25("div", { "data-gbo-root": "", className: `gbo-ws${narrow && !extra ? " is-narrow" : ""}`, style, ref: rootRef, children: [
-    /* @__PURE__ */ jsxs25("main", { className: "chat gbo-chat", ref: chatRef, children: [
-      /* @__PURE__ */ jsxs25("header", { className: "chat__header gbo-head", children: [
-        !extra && !rosterShown && canToggleSidebar() ? /* @__PURE__ */ jsx27("div", { className: "gbo-head-left", children: /* @__PURE__ */ jsx27("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Show sidebar (⌘B)", "aria-label": "Show sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx27(IconSidebar, {}) }) }) : null,
-        /* @__PURE__ */ jsx27("span", { className: "chat__pill-anchor", children: /* @__PURE__ */ jsxs25("button", { type: "button", className: "chat__pill gbo-head-pill", title: `${name}: profile`, "aria-expanded": shown, onClick: togglePanel, children: [
-          /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 27, working: Boolean(state.chat.busy) }),
-          /* @__PURE__ */ jsx27("span", { className: "chat__pill-name", children: name })
+  const view = /* @__PURE__ */ jsxs26("div", { "data-gbo-root": "", className: `gbo-ws${narrow && !extra ? " is-narrow" : ""}`, style, ref: rootRef, children: [
+    /* @__PURE__ */ jsxs26("main", { className: "chat gbo-chat", ref: chatRef, children: [
+      /* @__PURE__ */ jsxs26("header", { className: "chat__header gbo-head", children: [
+        !extra && !rosterShown && canToggleSidebar() ? /* @__PURE__ */ jsx28("div", { className: "gbo-head-left", children: /* @__PURE__ */ jsx28("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Show sidebar (⌘B)", "aria-label": "Show sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx28(IconSidebar, {}) }) }) : null,
+        /* @__PURE__ */ jsx28("span", { className: "chat__pill-anchor", children: /* @__PURE__ */ jsxs26("button", { type: "button", className: "chat__pill gbo-head-pill", title: `${name}: profile`, "aria-expanded": shown, onClick: togglePanel, children: [
+          /* @__PURE__ */ jsx28(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 27, working: Boolean(state.chat.busy) }),
+          /* @__PURE__ */ jsx28("span", { className: "chat__pill-name", children: name })
         ] }) }),
-        /* @__PURE__ */ jsxs25("div", { className: "chat__header-right gbo-head-right", children: [
-          !extra && !shown ? /* @__PURE__ */ jsx27("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-toggle", title: "Show profile", "aria-label": "Show profile", "aria-expanded": false, onClick: togglePanel, children: /* @__PURE__ */ jsx27(IconPanel, {}) }) : null,
-          /* @__PURE__ */ jsx27(
+        /* @__PURE__ */ jsxs26("div", { className: "chat__header-right gbo-head-right", children: [
+          !extra && !shown ? /* @__PURE__ */ jsx28("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-toggle", title: "Show profile", "aria-label": "Show profile", "aria-expanded": false, onClick: togglePanel, children: /* @__PURE__ */ jsx28(IconPanel, {}) }) : null,
+          /* @__PURE__ */ jsx28(
             MenuButton,
             {
               label: "Share",
               className: "share-btn",
-              entries: [{ label: "Open another chat beside this one", icon: /* @__PURE__ */ jsx27(IconOpen, {}), onSelect: () => openBotInNewTab(bot) }],
+              entries: [{ label: "Open another chat beside this one", icon: /* @__PURE__ */ jsx28(IconOpen, {}), onSelect: () => openBotInNewTab(bot) }],
               children: "Share"
             }
           )
         ] })
       ] }),
-      ready ? /* @__PURE__ */ jsx27(Transcript, { state, bot, meta, onPrefill: (text3) => draftRef.current?.(text3, draftOwnerKey(bot)) }) : /* @__PURE__ */ jsx27(Center, { state, bot }),
-      /* @__PURE__ */ jsx27(
+      ready ? /* @__PURE__ */ jsx28(Transcript, { state, bot, meta, onPrefill: (text3) => draftRef.current?.(text3, draftOwnerKey(bot)) }) : /* @__PURE__ */ jsx28(Center, { state, bot }),
+      /* @__PURE__ */ jsx28(
         Composer,
         {
           bot,
@@ -61023,17 +61643,17 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
         rowKey(bot)
       )
     ] }),
-    extra ? null : narrow ? drawerOpen ? /* @__PURE__ */ jsx27(ProfileDrawer, { bot, onClose: closeDrawer, backgroundRef: chatRef }) : null : panelOpen ? /* @__PURE__ */ jsxs25("div", { className: "details gbo-panel-dock", style: { width: panelWidth }, children: [
-      /* @__PURE__ */ jsx27(PanelSash, { rootRef }),
-      /* @__PURE__ */ jsx27("div", { className: "gbo-drag-band", "aria-hidden": "true" }),
-      /* @__PURE__ */ jsx27(ProfilePanel, { bot, onClose: () => setPanelOpen(false) })
+    extra ? null : narrow ? drawerOpen ? /* @__PURE__ */ jsx28(ProfileDrawer, { bot, onClose: closeDrawer, backgroundRef: chatRef }) : null : panelOpen ? /* @__PURE__ */ jsxs26("div", { className: "details gbo-panel-dock", style: { width: panelWidth }, children: [
+      /* @__PURE__ */ jsx28(PanelSash, { rootRef }),
+      /* @__PURE__ */ jsx28("div", { className: "gbo-drag-band", "aria-hidden": "true" }),
+      /* @__PURE__ */ jsx28(ProfilePanel, { bot, onClose: () => setPanelOpen(false) })
     ] }) : null
   ] });
-  return /* @__PURE__ */ jsx27(SlotContext.Provider, { value: slot, children: view });
+  return /* @__PURE__ */ jsx28(SlotContext.Provider, { value: slot, children: view });
 }
 
 // src/ui/Roster.tsx
-import * as React27 from "react";
+import * as React28 from "react";
 
 // src/core/person.js
 function initialsOf(name) {
@@ -61050,20 +61670,20 @@ function footerPerson(name) {
 }
 
 // src/ui/Unread.tsx
-import * as React26 from "react";
-import { jsx as jsx28 } from "react/jsx-runtime";
+import * as React27 from "react";
+import { jsx as jsx29 } from "react/jsx-runtime";
 function UnreadDot({ bot }) {
   const Dot = sdk.SessionStatusDot;
   const id = botCanonicalSessionId(bot);
   if (!id || !(typeof Dot === "function" || Dot && typeof Dot === "object")) return null;
-  return /* @__PURE__ */ jsx28("span", { className: "gbo-row-dot", children: React26.createElement(Dot, { storedSessionId: id }) });
+  return /* @__PURE__ */ jsx29("span", { className: "gbo-row-dot", children: React27.createElement(Dot, { storedSessionId: id }) });
 }
 
 // src/ui/Roster.tsx
-import { Fragment as Fragment18, jsx as jsx29, jsxs as jsxs26 } from "react/jsx-runtime";
+import { Fragment as Fragment18, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
-  const [now, setNow] = React27.useState(() => Date.now());
-  React27.useEffect(() => {
+  const [now, setNow] = React28.useState(() => Date.now());
+  React28.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(id);
   }, [ms]);
@@ -61078,8 +61698,8 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
   const age = at ? shortAge(at, now) : "";
   const attention = attentionFor(bot);
   const entries = botMenuEntries(bot);
-  return /* @__PURE__ */ jsxs26("div", { className: "gbo-row-wrap", children: [
-    /* @__PURE__ */ jsx29(ContextMenuFor, { entries, children: /* @__PURE__ */ jsxs26(
+  return /* @__PURE__ */ jsxs27("div", { className: "gbo-row-wrap", children: [
+    /* @__PURE__ */ jsx30(ContextMenuFor, { entries, children: /* @__PURE__ */ jsxs27(
       "button",
       {
         type: "button",
@@ -61089,31 +61709,31 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
         onClick: () => selectBot(bot),
         onPointerEnter: () => warmBot(bot),
         children: [
-          /* @__PURE__ */ jsxs26("span", { className: "bot-row__avatar gbo-row-face", children: [
-            /* @__PURE__ */ jsx29(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 40, working }),
-            /* @__PURE__ */ jsx29(UnreadDot, { bot })
+          /* @__PURE__ */ jsxs27("span", { className: "bot-row__avatar gbo-row-face", children: [
+            /* @__PURE__ */ jsx30(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 40, working }),
+            /* @__PURE__ */ jsx30(UnreadDot, { bot })
           ] }),
-          /* @__PURE__ */ jsxs26("span", { className: "bot-row__text gbo-row-main", children: [
-            /* @__PURE__ */ jsxs26("span", { className: "gbo-row-line", children: [
-              /* @__PURE__ */ jsx29("span", { className: "bot-row__name gbo-row-name", children: name }),
-              meta?.pinned ? /* @__PURE__ */ jsx29(IconPin, {}) : null,
-              hidden ? /* @__PURE__ */ jsx29("span", { className: "gbo-row-flag", title: "Hidden from the roster", children: /* @__PURE__ */ jsx29(IconEyeOff, {}) }) : null,
-              attention ? /* @__PURE__ */ jsx29("span", { className: "gbo-attn", role: "img", "aria-label": "needs attention", title: botAttentionHint(attention.reason), children: /* @__PURE__ */ jsx29(IconWarn, {}) }) : null
+          /* @__PURE__ */ jsxs27("span", { className: "bot-row__text gbo-row-main", children: [
+            /* @__PURE__ */ jsxs27("span", { className: "gbo-row-line", children: [
+              /* @__PURE__ */ jsx30("span", { className: "bot-row__name gbo-row-name", children: name }),
+              meta?.pinned ? /* @__PURE__ */ jsx30(IconPin, {}) : null,
+              hidden ? /* @__PURE__ */ jsx30("span", { className: "gbo-row-flag", title: "Hidden from the roster", children: /* @__PURE__ */ jsx30(IconEyeOff, {}) }) : null,
+              attention ? /* @__PURE__ */ jsx30("span", { className: "gbo-attn", role: "img", "aria-label": "needs attention", title: botAttentionHint(attention.reason), children: /* @__PURE__ */ jsx30(IconWarn, {}) }) : null
             ] }),
-            /* @__PURE__ */ jsx29("span", { className: `bot-row__preview gbo-row-preview${working ? " is-working" : ""}`, children: line })
+            /* @__PURE__ */ jsx30("span", { className: `bot-row__preview gbo-row-preview${working ? " is-working" : ""}`, children: line })
           ] })
         ]
       }
     ) }),
-    /* @__PURE__ */ jsx29(MenuButton, { entries, label: `Actions for ${name}`, className: "icon-btn gbo-row-more" })
+    /* @__PURE__ */ jsx30(MenuButton, { entries, label: `Actions for ${name}`, className: "icon-btn gbo-row-more" })
   ] });
 }
 function SectionNameField({ initial = "", label, onCommit, onCancel }) {
-  const [value, setValue] = React27.useState(initial);
-  const ref = React27.useRef(null);
-  const done = React27.useRef(false);
-  const mountedAt = React27.useRef(Date.now());
-  React27.useEffect(() => {
+  const [value, setValue] = React28.useState(initial);
+  const ref = React28.useRef(null);
+  const done = React28.useRef(false);
+  const mountedAt = React28.useRef(Date.now());
+  React28.useEffect(() => {
     const focus = () => {
       if (done.current) return;
       ref.current?.focus();
@@ -61130,7 +61750,7 @@ function SectionNameField({ initial = "", label, onCommit, onCancel }) {
     if (save && name) onCommit(name);
     else onCancel();
   };
-  return /* @__PURE__ */ jsx29("div", { className: "gbo-section-edit", children: /* @__PURE__ */ jsx29(
+  return /* @__PURE__ */ jsx30("div", { className: "gbo-section-edit", children: /* @__PURE__ */ jsx30(
     "input",
     {
       ref,
@@ -61164,7 +61784,7 @@ function PinnedBot({ bot, size, selected, working }) {
   const meta = metaFor(bot);
   const name = displayName(bot, meta);
   const dim = sourceUnreachable(bot);
-  return /* @__PURE__ */ jsx29("div", { className: "gbo-pin-wrap", children: /* @__PURE__ */ jsx29(ContextMenuFor, { entries: botMenuEntries(bot), children: /* @__PURE__ */ jsxs26(
+  return /* @__PURE__ */ jsx30("div", { className: "gbo-pin-wrap", children: /* @__PURE__ */ jsx30(ContextMenuFor, { entries: botMenuEntries(bot), children: /* @__PURE__ */ jsxs27(
     "button",
     {
       type: "button",
@@ -61174,17 +61794,17 @@ function PinnedBot({ bot, size, selected, working }) {
       onClick: () => selectBot(bot),
       onPointerEnter: () => warmBot(bot),
       children: [
-        /* @__PURE__ */ jsxs26("span", { className: "pinned__avatar gbo-row-face gbo-pin-face", children: [
-          /* @__PURE__ */ jsx29(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size, working }),
-          /* @__PURE__ */ jsx29(UnreadDot, { bot })
+        /* @__PURE__ */ jsxs27("span", { className: "pinned__avatar gbo-row-face gbo-pin-face", children: [
+          /* @__PURE__ */ jsx30(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size, working }),
+          /* @__PURE__ */ jsx30(UnreadDot, { bot })
         ] }),
-        /* @__PURE__ */ jsx29("span", { className: "pinned__label gbo-pin-name", children: name })
+        /* @__PURE__ */ jsx30("span", { className: "pinned__label gbo-pin-name", children: name })
       ]
     }
   ) }) });
 }
 function useRosterShown(ref) {
-  React27.useEffect(() => {
+  React28.useEffect(() => {
     app.rosterShown.set(true);
     const el = ref.current;
     const RO = globalThis.ResizeObserver;
@@ -61201,7 +61821,7 @@ function useRosterShown(ref) {
 }
 var NAV_KEYS = /* @__PURE__ */ new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
 function usePointerMode(ref) {
-  React27.useEffect(() => {
+  React28.useEffect(() => {
     const el = ref.current;
     const doc = el?.ownerDocument;
     if (!el || !doc) return;
@@ -61233,10 +61853,10 @@ function RosterPane() {
   const sectionEdit = useStore(roster2.sectionEdit);
   const sectionDelete = useStore(roster2.sectionDelete);
   const person = footerPerson(useStore(app.userName));
-  React27.useEffect(() => loadUserName(), []);
-  const [searching, setSearching] = React27.useState(false);
+  React28.useEffect(() => loadUserName(), []);
+  const [searching, setSearching] = React28.useState(false);
   const now = useNow();
-  const rootRef = React27.useRef(null);
+  const rootRef = React28.useRef(null);
   useRosterShown(rootRef);
   usePointerMode(rootRef);
   const roster = app.roster.get();
@@ -61250,7 +61870,7 @@ function RosterPane() {
   const hiddenListed = pinned ? withoutPinned(view.hidden, pinned, rowKey) : view.hidden;
   const list = buildSections(listed, { metaFor, sections: ownSections, query: "", keepEmpty: !view.hasConstraint });
   const ownCount = list.filter((section) => section.own).length;
-  const newSectionField = sectionEdit?.kind === "new" ? /* @__PURE__ */ jsx29(
+  const newSectionField = sectionEdit?.kind === "new" ? /* @__PURE__ */ jsx30(
     SectionNameField,
     {
       label: "New section name",
@@ -61275,7 +61895,7 @@ function RosterPane() {
   const chatKey = chat ? rowKey(chat.bot) : "";
   const row = (bot, hidden = false) => {
     const key = rowKey(bot);
-    return /* @__PURE__ */ jsx29(
+    return /* @__PURE__ */ jsx30(
       BotRow,
       {
         bot,
@@ -61289,12 +61909,12 @@ function RosterPane() {
     );
   };
   const showSearchBox = searching || Boolean(query) || Boolean(view.showFilters && view.activeFilterCount);
-  return /* @__PURE__ */ jsxs26("div", { "data-gbo-root": "", className: "sidebar gbo-roster", ref: rootRef, children: [
-    /* @__PURE__ */ jsxs26("div", { className: "sidebar__titlebar gbo-roster-top", children: [
-      /* @__PURE__ */ jsx29("h2", { className: "gbo-roster-title", children: "Bots" }),
-      /* @__PURE__ */ jsxs26("div", { className: "sidebar__controls", children: [
-        canToggleSidebar() ? /* @__PURE__ */ jsx29("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Hide sidebar (⌘B)", "aria-label": "Hide sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx29(IconSidebar, {}) }) : null,
-        /* @__PURE__ */ jsx29(
+  return /* @__PURE__ */ jsxs27("div", { "data-gbo-root": "", className: "sidebar gbo-roster", ref: rootRef, children: [
+    /* @__PURE__ */ jsxs27("div", { className: "sidebar__titlebar gbo-roster-top", children: [
+      /* @__PURE__ */ jsx30("h2", { className: "gbo-roster-title", children: "Bots" }),
+      /* @__PURE__ */ jsxs27("div", { className: "sidebar__controls", children: [
+        canToggleSidebar() ? /* @__PURE__ */ jsx30("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Hide sidebar (⌘B)", "aria-label": "Hide sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx30(IconSidebar, {}) }) : null,
+        /* @__PURE__ */ jsx30(
           "button",
           {
             type: "button",
@@ -61306,15 +61926,15 @@ function RosterPane() {
               setSearching((v) => !v);
               if (showSearchBox) app.query.set("");
             },
-            children: /* @__PURE__ */ jsx29(IconSearch, {})
+            children: /* @__PURE__ */ jsx30(IconSearch, {})
           }
         ),
-        /* @__PURE__ */ jsx29(MenuButton, { entries: newMenuEntries(), label: "New bot or group", className: "icon-btn", children: /* @__PURE__ */ jsx29(IconPlus, {}) })
+        /* @__PURE__ */ jsx30(MenuButton, { entries: newMenuEntries(), label: "New bot or group", className: "icon-btn", children: /* @__PURE__ */ jsx30(IconPlus, {}) })
       ] })
     ] }),
-    showSearchBox ? /* @__PURE__ */ jsx29("div", { className: "gbo-search-row", children: /* @__PURE__ */ jsxs26("label", { className: "text-input gbo-search", children: [
-      /* @__PURE__ */ jsx29(IconSearch, {}),
-      /* @__PURE__ */ jsx29(
+    showSearchBox ? /* @__PURE__ */ jsx30("div", { className: "gbo-search-row", children: /* @__PURE__ */ jsxs27("label", { className: "text-input gbo-search", children: [
+      /* @__PURE__ */ jsx30(IconSearch, {}),
+      /* @__PURE__ */ jsx30(
         "input",
         {
           autoFocus: searching,
@@ -61329,48 +61949,48 @@ function RosterPane() {
           }
         }
       ),
-      view.showFilters ? /* @__PURE__ */ jsxs26("span", { className: "gbo-search-filter", children: [
-        /* @__PURE__ */ jsx29(
+      view.showFilters ? /* @__PURE__ */ jsxs27("span", { className: "gbo-search-filter", children: [
+        /* @__PURE__ */ jsx30(
           MenuButton,
           {
             entries: filterMenuEntries(view, groupCount),
             label: view.activeFilterCount ? `Filter roster, ${view.activeFilterCount} active` : "Filter roster",
             className: `icon-btn icon-btn--plain${view.activeFilterCount ? " has-filters" : ""}`,
-            children: /* @__PURE__ */ jsx29(IconFilter, {})
+            children: /* @__PURE__ */ jsx30(IconFilter, {})
           }
         ),
-        view.activeFilterCount ? /* @__PURE__ */ jsx29("span", { className: "gbo-filter-count", children: view.activeFilterCount }) : null
+        view.activeFilterCount ? /* @__PURE__ */ jsx30("span", { className: "gbo-filter-count", children: view.activeFilterCount }) : null
       ] }) : null
     ] }) }) : null,
-    unreachable2.length ? /* @__PURE__ */ jsxs26("div", { className: "gbo-source-retry", role: "status", children: [
-      /* @__PURE__ */ jsx29(IconWarn, {}),
-      /* @__PURE__ */ jsx29("span", { children: unreachable2.length === 1 ? `${unreachable2[0].label || unreachable2[0].connectionId} is not reachable` : `${unreachable2.length} connections are not reachable` }),
-      /* @__PURE__ */ jsx29("button", { type: "button", className: "gbo-link-btn", disabled: retrying, onClick: () => void retrySources(), children: retrying ? "Retrying…" : "Retry" })
+    unreachable2.length ? /* @__PURE__ */ jsxs27("div", { className: "gbo-source-retry", role: "status", children: [
+      /* @__PURE__ */ jsx30(IconWarn, {}),
+      /* @__PURE__ */ jsx30("span", { children: unreachable2.length === 1 ? `${unreachable2[0].label || unreachable2[0].connectionId} is not reachable` : `${unreachable2.length} connections are not reachable` }),
+      /* @__PURE__ */ jsx30("button", { type: "button", className: "gbo-link-btn", disabled: retrying, onClick: () => void retrySources(), children: retrying ? "Retrying…" : "Retry" })
     ] }) : null,
-    /* @__PURE__ */ jsxs26(OverlayScroll, { wrapClassName: "gbo-roster-scroll", className: "sidebar__scroll gbo-roster-list", role: "list", children: [
-      pinned?.shown.length ? /* @__PURE__ */ jsx29("div", { className: `pinned gbo-pins is-${pinned.shown.length}`, role: "group", "aria-label": "Pinned bots", children: pinned.shown.map((bot) => {
+    /* @__PURE__ */ jsxs27(OverlayScroll, { wrapClassName: "gbo-roster-scroll", className: "sidebar__scroll gbo-roster-list", role: "list", children: [
+      pinned?.shown.length ? /* @__PURE__ */ jsx30("div", { className: `pinned gbo-pins is-${pinned.shown.length}`, role: "group", "aria-label": "Pinned bots", children: pinned.shown.map((bot) => {
         const key = rowKey(bot);
-        return /* @__PURE__ */ jsx29(PinnedBot, { bot, size: PIN_AVATAR[pinned.shown.length - 1], selected: key === selectedKey, working: key === workingKey }, key);
+        return /* @__PURE__ */ jsx30(PinnedBot, { bot, size: PIN_AVATAR[pinned.shown.length - 1], selected: key === selectedKey, working: key === workingKey }, key);
       }) }) : null,
-      roster.rows.length === 0 ? /* @__PURE__ */ jsx29("div", { className: "gbo-roster-empty", children: roster.origin === "none" && !roster.error ? "Loading bots…" : roster.error ? /* @__PURE__ */ jsxs26("div", { className: "gbo-empty-card", children: [
-        /* @__PURE__ */ jsxs26("span", { children: [
+      roster.rows.length === 0 ? /* @__PURE__ */ jsx30("div", { className: "gbo-roster-empty", children: roster.origin === "none" && !roster.error ? "Loading bots…" : roster.error ? /* @__PURE__ */ jsxs27("div", { className: "gbo-empty-card", children: [
+        /* @__PURE__ */ jsxs27("span", { children: [
           "Could not load bots: ",
           roster.error
         ] }),
-        /* @__PURE__ */ jsxs26("button", { type: "button", className: "gbo-btn is-small", disabled: retrying, onClick: () => void retrySources(), children: [
-          /* @__PURE__ */ jsx29(IconRefresh, {}),
+        /* @__PURE__ */ jsxs27("button", { type: "button", className: "gbo-btn is-small", disabled: retrying, onClick: () => void retrySources(), children: [
+          /* @__PURE__ */ jsx30(IconRefresh, {}),
           retrying ? "Retrying…" : "Retry now"
         ] })
-      ] }) : "No bots yet." }) : view.allHidden && !hiddenExpanded ? /* @__PURE__ */ jsxs26("div", { className: "gbo-empty-card", children: [
-        /* @__PURE__ */ jsx29("strong", { children: "All bots are hidden" }),
-        /* @__PURE__ */ jsx29("span", { children: "Hidden bots keep working; they are just not listed." }),
-        /* @__PURE__ */ jsx29("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
-      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx29("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs26(Fragment18, { children: [
+      ] }) : "No bots yet." }) : view.allHidden && !hiddenExpanded ? /* @__PURE__ */ jsxs27("div", { className: "gbo-empty-card", children: [
+        /* @__PURE__ */ jsx30("strong", { children: "All bots are hidden" }),
+        /* @__PURE__ */ jsx30("span", { children: "Hidden bots keep working; they are just not listed." }),
+        /* @__PURE__ */ jsx30("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
+      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx30("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs27(Fragment18, { children: [
         ownCount === 0 ? newSectionField : null,
         list.map((section, index) => {
           const isCollapsed = section.own ? section.collapsed : collapsed.includes(section.name);
           const renaming = section.own && sectionEdit?.kind === "rename" && sectionEdit.id === section.id;
-          const head = renaming ? /* @__PURE__ */ jsx29(
+          const head = renaming ? /* @__PURE__ */ jsx30(
             SectionNameField,
             {
               initial: section.name,
@@ -61381,7 +62001,7 @@ function RosterPane() {
               },
               onCancel: () => roster2.sectionEdit.set(null)
             }
-          ) : section.own || list.length > 1 || section.name !== "Unassigned" ? /* @__PURE__ */ jsx29(ContextMenuFor, { entries: sectionMenuEntries(section), children: /* @__PURE__ */ jsxs26(
+          ) : section.own || list.length > 1 || section.name !== "Unassigned" ? /* @__PURE__ */ jsx30(ContextMenuFor, { entries: sectionMenuEntries(section), children: /* @__PURE__ */ jsxs27(
             "button",
             {
               type: "button",
@@ -61389,22 +62009,22 @@ function RosterPane() {
               "aria-expanded": !isCollapsed,
               onClick: () => section.own ? toggleOwnSection(section.id) : toggleSection(section.name),
               children: [
-                /* @__PURE__ */ jsx29(IconChevronDown, {}),
+                /* @__PURE__ */ jsx30(IconChevronDown, {}),
                 section.name,
-                /* @__PURE__ */ jsx29("span", { className: "gbo-count", children: section.bots.length })
+                /* @__PURE__ */ jsx30("span", { className: "gbo-count", children: section.bots.length })
               ]
             }
           ) }) : null;
-          return /* @__PURE__ */ jsxs26(React27.Fragment, { children: [
-            /* @__PURE__ */ jsxs26("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
+          return /* @__PURE__ */ jsxs27(React28.Fragment, { children: [
+            /* @__PURE__ */ jsxs27("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
               head,
               isCollapsed ? null : section.bots.map((bot) => row(bot))
             ] }),
             section.own && index === ownCount - 1 ? newSectionField : null
           ] }, section.own ? `own:${section.id}` : `default:${section.name}`);
         }),
-        view.showHiddenSection ? /* @__PURE__ */ jsxs26("div", { role: "group", "aria-label": "Hidden", className: "bot-list gbo-hidden-head", children: [
-          /* @__PURE__ */ jsxs26(
+        view.showHiddenSection ? /* @__PURE__ */ jsxs27("div", { role: "group", "aria-label": "Hidden", className: "bot-list gbo-hidden-head", children: [
+          /* @__PURE__ */ jsxs27(
             "button",
             {
               type: "button",
@@ -61413,27 +62033,27 @@ function RosterPane() {
               disabled: view.hasConstraint,
               onClick: () => roster2.hiddenExpanded.set(!hiddenExpanded),
               children: [
-                /* @__PURE__ */ jsx29(IconChevronDown, {}),
+                /* @__PURE__ */ jsx30(IconChevronDown, {}),
                 "Hidden",
-                /* @__PURE__ */ jsx29("span", { className: "gbo-count", children: view.hasConstraint ? view.hidden.length : view.hiddenCount })
+                /* @__PURE__ */ jsx30("span", { className: "gbo-count", children: view.hasConstraint ? view.hidden.length : view.hiddenCount })
               ]
             }
           ),
-          view.showHiddenRows ? hiddenListed.length ? hiddenListed.map((bot) => row(bot, true)) : /* @__PURE__ */ jsx29("div", { className: "gbo-roster-empty", children: "No hidden bot matches." }) : null
+          view.showHiddenRows ? hiddenListed.length ? hiddenListed.map((bot) => row(bot, true)) : /* @__PURE__ */ jsx30("div", { className: "gbo-roster-empty", children: "No hidden bot matches." }) : null
         ] }) : null
       ] }),
-      showGroups ? /* @__PURE__ */ jsx29(RoomsSection, { query }) : null
+      showGroups ? /* @__PURE__ */ jsx30(RoomsSection, { query }) : null
     ] }),
-    /* @__PURE__ */ jsxs26("div", { className: "sidebar__footer gbo-roster-foot", title: roster.rows.length ? `${roster.rows.length} bots` : void 0, children: [
-      /* @__PURE__ */ jsx29("div", { className: "sidebar__fade" }),
-      /* @__PURE__ */ jsx29("div", { className: "account", children: /* @__PURE__ */ jsxs26("span", { className: "account__btn", children: [
-        /* @__PURE__ */ jsx29("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: person.initials }),
-        person.known ? /* @__PURE__ */ jsx29("span", { className: "account__name gbo-user-name", children: person.name }) : null
+    /* @__PURE__ */ jsxs27("div", { className: "sidebar__footer gbo-roster-foot", title: roster.rows.length ? `${roster.rows.length} bots` : void 0, children: [
+      /* @__PURE__ */ jsx30("div", { className: "sidebar__fade" }),
+      /* @__PURE__ */ jsx30("div", { className: "account", children: /* @__PURE__ */ jsxs27("span", { className: "account__btn", children: [
+        /* @__PURE__ */ jsx30("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: person.initials }),
+        person.known ? /* @__PURE__ */ jsx30("span", { className: "account__name gbo-user-name", children: person.name }) : null
       ] }) }),
-      canOpenSettings() ? /* @__PURE__ */ jsx29("button", { type: "button", className: "icon-btn gbo-foot-btn", title: "Hermes settings", "aria-label": "Open Hermes settings", onClick: () => void openSettings(), children: /* @__PURE__ */ jsx29(IconSettings, {}) }) : null
+      canOpenSettings() ? /* @__PURE__ */ jsx30("button", { type: "button", className: "icon-btn gbo-foot-btn", title: "Hermes settings", "aria-label": "Open Hermes settings", onClick: () => void openSettings(), children: /* @__PURE__ */ jsx30(IconSettings, {}) }) : null
     ] }),
-    /* @__PURE__ */ jsx29(RosterDialogs, {}),
-    /* @__PURE__ */ jsx29(
+    /* @__PURE__ */ jsx30(RosterDialogs, {}),
+    /* @__PURE__ */ jsx30(
       Confirm,
       {
         open: Boolean(sectionDelete),
@@ -61515,6 +62135,7 @@ var CONTRACT = Object.freeze([
   { id: "bridge.api", kind: "bridge", target: "api", used: "app.ts/rosterActions.ts/cronOps.js: core REST (history paging, media and workspace reads, transcription, cron)", required: true },
   { id: "bridge.readFileDataUrl", kind: "bridge", target: "readFileDataUrl", used: "app.ts: local media reads (falls back to api)", required: false },
   { id: "bridge.getMachineProfile", kind: "bridge", target: "getMachineProfile", used: "app.ts: the user's name for the roster", required: false },
+  { id: "bridge.openExternal", kind: "bridge", target: "openExternal", used: "slackActions.ts openExternalLink: Add to Slack, and a source link the SDK's ctx.os.openExternal refused (SourceLink.tsx; falls back to window.open)", required: false },
   { id: "bridge.requestMicrophoneAccess", kind: "bridge", target: "requestMicrophoneAccess", used: "Voice.tsx: the microphone prompt", required: false },
   // Gateway events.
   ...CONTRACT_EVENTS.map((name) => ({ id: `event.${name}`, kind: "event", target: name, used: "session.js / reducer.js / rosterActions.ts / Screen.tsx event tap", required: false })),
@@ -61589,10 +62210,10 @@ function contractNotice(result) {
 }
 
 // src/ui/UsageMeter.tsx
-import { jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
+import { jsx as jsx31, jsxs as jsxs28 } from "react/jsx-runtime";
 function Bar({ percent }) {
   if (percent === null) return null;
-  return /* @__PURE__ */ jsx30("span", { className: `gbo-meter-bar${percent >= 80 ? " is-high" : ""}`, role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-label": "Context used", children: /* @__PURE__ */ jsx30("span", { style: { width: `${percent}%` } }) });
+  return /* @__PURE__ */ jsx31("span", { className: `gbo-meter-bar${percent >= 80 ? " is-high" : ""}`, role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-label": "Context used", children: /* @__PURE__ */ jsx31("span", { style: { width: `${percent}%` } }) });
 }
 function UsageStatusChip() {
   const u = useStore(roster2.usage);
@@ -61600,10 +62221,10 @@ function UsageStatusChip() {
   const label = usageContextLabel(u.usage);
   if (!enabled || !u.runtimeId || !label) return null;
   const cost = costLabel(u.usage);
-  return /* @__PURE__ */ jsxs27("span", { "data-gbo-root": "", className: "gbo-status-meter", style: { height: "auto", width: "auto" }, title: "Open Bot Chat: context used", children: [
-    /* @__PURE__ */ jsx30(Bar, { percent: contextPercent(u.usage) }),
-    /* @__PURE__ */ jsx30("span", { children: label }),
-    cost ? /* @__PURE__ */ jsxs27("span", { children: [
+  return /* @__PURE__ */ jsxs28("span", { "data-gbo-root": "", className: "gbo-status-meter", style: { height: "auto", width: "auto" }, title: "Open Bot Chat: context used", children: [
+    /* @__PURE__ */ jsx31(Bar, { percent: contextPercent(u.usage) }),
+    /* @__PURE__ */ jsx31("span", { children: label }),
+    cost ? /* @__PURE__ */ jsxs28("span", { children: [
       "· ",
       cost
     ] }) : null
@@ -61673,7 +62294,7 @@ function unwireParity() {
 }
 
 // src/index.tsx
-import { jsx as jsx31 } from "react/jsx-runtime";
+import { jsx as jsx32 } from "react/jsx-runtime";
 var contractEvents = createEventLog();
 var NOTICE_FLAG = "__grokbotOverrideContractNoticed";
 var CONTRACT_PROBE_MS = 8e3;
@@ -61759,13 +62380,13 @@ var index_default = {
   description: 'A chat-app Bot Mode screen (roster, Bot Chat, profile panel) on the same chats and gateway as Hermes Bot Mode. Palette: "Grokbot Override: toggle" switches back to stock Bot Mode instantly.',
   register(ctx) {
     setRenderers({
-      roster: () => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "roster", children: /* @__PURE__ */ jsx31(RosterPane, {}) }),
-      workspace: () => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx31(ChatWorkspace, {}) }),
+      roster: () => /* @__PURE__ */ jsx32(OverrideBoundary, { area: "roster", children: /* @__PURE__ */ jsx32(RosterPane, {}) }),
+      workspace: () => /* @__PURE__ */ jsx32(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx32(ChatWorkspace, {}) }),
       tab: (slot) => {
         trackChatSlot(slot);
-        return /* @__PURE__ */ jsx31(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx31(ChatWorkspace, { slot }) });
+        return /* @__PURE__ */ jsx32(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx32(ChatWorkspace, { slot }) });
       },
-      room: (slot) => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "room", children: /* @__PURE__ */ jsx31(RoomWorkspace, { slot }) })
+      room: (slot) => /* @__PURE__ */ jsx32(OverrideBoundary, { area: "room", children: /* @__PURE__ */ jsx32(RoomWorkspace, { slot }) })
     });
     ctx.registerMany([
       {
@@ -61858,7 +62479,7 @@ var index_default = {
         id: "usage-meter",
         area: sdk.STATUSBAR_AREAS?.right ?? "statusBar.right",
         order: 90,
-        render: () => /* @__PURE__ */ jsx31(OverrideBoundary, { area: "usage", compact: true, children: /* @__PURE__ */ jsx31(UsageStatusChip, {}) })
+        render: () => /* @__PURE__ */ jsx32(OverrideBoundary, { area: "usage", compact: true, children: /* @__PURE__ */ jsx32(UsageStatusChip, {}) })
       },
       {
         id: "palette-self-check",

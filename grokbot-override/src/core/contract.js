@@ -99,6 +99,7 @@ export const CONTRACT = Object.freeze([
   { id: 'bridge.api', kind: 'bridge', target: 'api', used: 'app.ts/rosterActions.ts/cronOps.js: core REST (history paging, media and workspace reads, transcription, cron)', required: true },
   { id: 'bridge.readFileDataUrl', kind: 'bridge', target: 'readFileDataUrl', used: 'app.ts: local media reads (falls back to api)', required: false },
   { id: 'bridge.getMachineProfile', kind: 'bridge', target: 'getMachineProfile', used: 'app.ts: the user\'s name for the roster', required: false },
+  { id: 'bridge.openExternal', kind: 'bridge', target: 'openExternal', used: 'slackActions.ts openExternalLink: Add to Slack, and a source link the SDK\'s ctx.os.openExternal refused (SourceLink.tsx; falls back to window.open)', required: false },
   { id: 'bridge.requestMicrophoneAccess', kind: 'bridge', target: 'requestMicrophoneAccess', used: 'Voice.tsx: the microphone prompt', required: false },
   // Gateway events.
   ...CONTRACT_EVENTS.map(name => ({ id: `event.${name}`, kind: 'event', target: name, used: 'session.js / reducer.js / rosterActions.ts / Screen.tsx event tap', required: false })),

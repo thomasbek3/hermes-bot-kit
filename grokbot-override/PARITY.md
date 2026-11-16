@@ -148,6 +148,20 @@ work rows hidden), read and written through the bot's own gateway and route (`pl
 the plugin's `/email-drafts` command through `slash.exec`), sent once on **Send**. `src/core/emailDrafts.js`,
 `src/ui/EmailDraft.tsx`; tests `test/email-drafts*.test.mjs`.
 
+Beyond stock: **source links**. A link in bot prose (streaming or finished) whose host is a known service
+(Slack, Gmail, Google Docs/Sheets/Slides/Drive/Calendar/Meet, GitHub, Notion, Linear, Figma, Zoom,
+Outlook/Office 365, Dropbox, Zoho, Stripe, HubSpot, Airtable, Trello, Asana, Calendly, Loom, YouTube, X,
+LinkedIn) draws as a bundled logo plus its text; other public hosts get a neutral globe; a bare URL gets a
+short label. It hooks the SDK renderer's `decorateText` prop, so the renderer's own safe-link rules still
+apply (no chip for `javascript:`, `data:`, `mailto:`, private hosts or code). Links in headings and table
+headers (which the host renders without `decorateText`) are enhanced in place, after each render and on
+every deferred host commit (a MutationObserver), with the same logo, title, bare-URL short label and click
+path. A valid `slack://` app link (inline, titled, `<angle>`, any case, or a reference definition; never in
+code or escaped text) is carried past the host's sanitizer as an https stand-in and tried as the exact deep
+link first (see Known limits). Clicks go through `ctx.os.openExternal`. `src/core/sourceLinks.js`,
+`src/ui/SourceLink.tsx`, `src/ui/brandMarks.ts`; tests `test/source-links-24.test.mjs`,
+`test/source-links-r1.test.mjs`, `test/source-links-r2.test.mjs`.
+
 ## Right panel (profile)
 
 | # | Bot Mode capability | Source | Status | Notes |
@@ -215,6 +229,18 @@ Nothing hands off to stock Bot Mode in normal use; none of the rows is live-qual
   asks to attach them again), and only the 20 most recently written bots keep a draft.
 - **Contract probes (T10)** show that a private selector, key or bridge call is still present, not that it still
   means the same thing after a Hermes update. The sidebar seam colours stay fixed light/dark values.
+
+## Known limits (source links)
+
+- **`slack://` source links open the channel, not the message.** Hermes Desktop's external opener admits
+  only `http:`, `https:` and `mailto:` (`apps/shared/src/external-url.ts`), so `ctx.os.openExternal` refuses
+  a `slack://channel?team=…&id=…&message=…` deep link and the click falls back to
+  `https://app.slack.com/client/<team>/<channel>`, which hands off to the Slack app at the channel. No
+  documented https URL addresses a message from a team id, channel id and ts alone, and the plugin does not
+  guess a workspace or bypass the opener. Slack **https permalinks**
+  (`https://<workspace>.slack.com/archives/<channel>/p<ts without the dot>`) open the exact message, and the
+  agent-cards skill tells bots to use them. If a future Hermes opener admits `slack:`, the deep link is
+  already tried first.
 
 ## Architecture notes
 

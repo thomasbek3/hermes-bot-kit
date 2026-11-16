@@ -178,6 +178,26 @@ Use the file's absolute path. In the bubble, write one short sentence about what
 paste the text into the reply as a giant code block: the Desktop chat shows the file as a card the user
 can open, copy all of, or download.
 
+## Link your sources
+
+When a line of your reply is about a specific message, email, doc, ticket, PR or event you read, end
+that line with `[short label](permalink)`: two or three words, such as "Her message", "The email",
+"The PR". One link per item. Never paste raw URLs. The Desktop chat draws the link as the service's
+logo plus your label, and a click opens that exact item.
+
+```
+- She wants your ok on the new prices. [Her message](https://example.slack.com/archives/C0123ABCD/p1762560000123456)
+```
+
+Getting the permalink:
+
+- Slack: always the https permalink `https://<workspace>.slack.com/archives/<channel_id>/p<ts without the dot>`
+  (ts `1762560000.123456` becomes `p1762560000123456`). For a reply in a thread, append
+  `?thread_ts=<parent ts>&cid=<channel_id>`. Or call `chat.getPermalink`. This opens the exact message.
+  Never a `slack://` link: the Desktop chat can only open it at the channel, not the message.
+- Gmail: `https://mail.google.com/mail/u/0/#all/<message id>`, or the thread link the tool returns.
+- Anything else: the URL the tool returned. Plain and short; never invent one.
+
 ## Other channels
 
 On Slack, Telegram, the CLI or any channel that is not the Desktop chat, never write a `::card` line:

@@ -43,14 +43,34 @@ export const MARKDOWN_CLASSES = [
 ].join(' ')
 const PARAGRAPH_CLASSES = 'wrap-anywhere leading-(--dt-line-height)'
 
-/** `code`, **bold** and [label](url) only: enough to preview their look in
- *  a bubble. */
+/** `code`, **bold**, [label](url) and bare https URLs only: enough to
+ *  preview their look in a bubble. Links follow the real renderer's
+ *  preview-only rule (markdown-text.tsx PreviewOnlyMarkdownLink): only an
+ *  http(s) URL becomes an anchor; anything else is a plain span. */
+function PreviewLink({ href, children }: { href: string; children?: any }) {
+  const safe = /^https?:\/\//i.test(String(href).trim())
+  return safe ? React.createElement('a', { href: String(href).trim(), className: 'ref wrap-anywhere' }, children) : React.createElement('span', null, children)
+}
+/** Like the real renderer's `a` component element: the raw href as a prop
+ *  (a `decorateText` hook sees it, safe or not). */
+function link(key: number, href: string, label: any) {
+  // Streamdown's sanitizer (rehype-harden) runs before any component or the
+  // decorate hook: a link that is not http(s), mailto, tel or relative draws
+  // as "<label> [blocked]" with no href at all.
+  const raw = href.trim()
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(raw)?.[1]?.toLowerCase()
+  if (scheme && !['http', 'https', 'mailto', 'tel'].includes(scheme)) {
+    return React.createElement('span', { key, title: 'Blocked URL', className: 'text-gray-500' }, label, ' [blocked]')
+  }
+  return React.createElement(PreviewLink, { key, href }, label)
+}
 function inline(text: string): any[] {
-  return text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/).map((part, i) => {
+  return text.split(/(`[^`]+`|\*\*(?:[^*]|\*(?!\*))+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/).map((part, i) => {
     if (/^`[^`]+`$/.test(part)) return React.createElement('code', { key: i }, part.slice(1, -1))
-    if (/^\*\*[^*]+\*\*$/.test(part)) return React.createElement('strong', { key: i }, part.slice(2, -2))
-    const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
-    if (link) return React.createElement('a', { key: i, href: link[2], className: 'wrap-anywhere' }, link[1])
+    if (/^\*\*[\s\S]+\*\*$/.test(part)) return React.createElement('strong', { key: i }, inline(part.slice(2, -2)))
+    const md = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+    if (md) return link(i, md[2], md[1])
+    if (/^https?:\/\/\S+$/.test(part)) return link(i, part, part)
     return part
   })
 }
@@ -58,9 +78,17 @@ function inline(text: string): any[] {
 /** How many times the markdown renderer ran (live-format render-count tests). */
 export const markdownRenders = { count: 0 }
 
-export function MessageTextContent({ text, media, previewOnly }: { text: string; media?: boolean; previewOnly?: boolean }) {
+/** Test switch: model the host's deferred text commits. */
+export const FAKE_RENDER = { defer: false }
+
+export function MessageTextContent({ text, media, previewOnly, decorateText }: { text: string; media?: boolean; previewOnly?: boolean; decorateText?: (children: any) => any }) {
   markdownRenders.count += 1
-  const blocks = String(text).split(/\n{2,}/)
+  const deco = (children: any) => (decorateText ? decorateText(children) : children)
+  // Hermes's surface defers its text (StreamdownTextPrimitive `defer`): with
+  // FAKE_RENDER.defer on, an update commits here AFTER the parent's commit,
+  // without re-rendering the parent, as in the app.
+  const deferred = React.useDeferredValue(text)
+  const blocks = String(FAKE_RENDER.defer ? deferred : text).split(/\n{2,}/)
   return React.createElement(
     'div',
     { className: MARKDOWN_CLASSES, 'data-media': String(media !== false), 'data-preview-only': String(Boolean(previewOnly)) },
@@ -68,10 +96,17 @@ export function MessageTextContent({ text, media, previewOnly }: { text: string;
       const lines = block.split('\n')
       const heading = block.match(/^(#{1,4}) (.*)$/)
       if (heading) return React.createElement(`h${heading[1].length}`, { key: i }, inline(heading[2]))
-      if (lines.every(line => /^[-*] /.test(line))) {
-        return React.createElement('ul', { key: i, className: 'my-1 gap-0' }, lines.map((line, j) => React.createElement('li', { key: j, className: 'leading-(--dt-line-height)' }, inline(line.slice(2)))))
+      if (lines.length >= 2 && lines.every(line => /^\|/.test(line)) && /^\|[\s|:-]+\|?$/.test(lines[1])) {
+        // A table: header cells are not decorated (the host calls decorateText on td only).
+        const cells = (line: string) => line.replace(/^\||\|$/g, '').split('|').map(cell => cell.trim())
+        const head = React.createElement('thead', null, React.createElement('tr', null, cells(lines[0]).map((cell, j) => React.createElement('th', { key: j }, inline(cell)))))
+        const body = React.createElement('tbody', null, lines.slice(2).map((line, r) => React.createElement('tr', { key: r }, cells(line).map((cell, j) => React.createElement('td', { key: j }, deco(inline(cell)))))))
+        return React.createElement('table', { key: i }, head, body)
       }
-      return React.createElement('p', { key: i, className: PARAGRAPH_CLASSES }, inline(block))
+      if (lines.every(line => /^[-*] /.test(line))) {
+        return React.createElement('ul', { key: i, className: 'my-1 gap-0' }, lines.map((line, j) => React.createElement('li', { key: j, className: 'leading-(--dt-line-height)' }, deco(inline(line.slice(2))))))
+      }
+      return React.createElement('p', { key: i, className: PARAGRAPH_CLASSES }, deco(inline(block)))
     })
   )
 }

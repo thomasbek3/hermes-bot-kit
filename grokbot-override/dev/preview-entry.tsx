@@ -274,6 +274,8 @@ export { ProfilePanel } from '../src/ui/Profile'
 export { AssistantBody, STICK_PX, STREAM_RENDER_MS, UserMeta, useStreamText } from '../src/ui/Chat'
 export { DirectiveBlock, DirectiveContext } from '../src/ui/Directives'
 export { markdownRenders } from '@hermes/plugin-sdk'
+export { BotProse, BotText } from '../src/ui/Media'
+export * as sourceLinkUi from '../src/ui/SourceLink'
 export * as newMarkerApi from '../src/core/newMarker.js'
 export * as personApi from '../src/core/person.js'
 export function renderElement(component: any, props: any) {

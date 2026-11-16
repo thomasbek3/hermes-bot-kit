@@ -51,10 +51,12 @@ export function blobatarMarkup(seed: string, size: number, trait?: number): null
  *  is drawn by ui/Media.tsx from the bot's own backend (PARITY C15). */
 export const MARKDOWN_SAFE_PROPS = Object.freeze({ media: false, previewOnly: true })
 
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, decorateText }: { text: string; decorateText?: (children: React.ReactNode) => React.ReactNode }) {
   const Component = (sdk as any).MessageTextContent
   if (typeof Component === 'function' || (Component && typeof Component === 'object')) {
-    return React.createElement(Component, { text, ...MARKDOWN_SAFE_PROPS })
+    // `decorateText` (paragraph / list item / cell children) is how bot prose
+    // draws source links (ui/SourceLink.tsx); an older shell ignores it.
+    return React.createElement(Component, decorateText ? { text, decorateText, ...MARKDOWN_SAFE_PROPS } : { text, ...MARKDOWN_SAFE_PROPS })
   }
   return React.createElement('div', { className: 'gbo-plain' }, text)
 }

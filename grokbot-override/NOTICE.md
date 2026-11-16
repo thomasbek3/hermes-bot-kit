@@ -81,6 +81,18 @@ file's header). Nothing else from that project is used.
 
 The avatar silhouettes in `src/ui/avatarShapes.ts` are original to this kit (MIT, the kit's `LICENSE`).
 
+## Simple Icons (CC0 1.0)
+
+`src/ui/brandMarks.ts` holds SVG paths and brand colours from Simple Icons 15.22.0
+(https://simpleicons.org, https://github.com/simple-icons/simple-icons), dedicated to the public domain under
+CC0 1.0 Universal: Slack, Gmail, Google Docs, Google Sheets, Google Slides, Google Drive, Google Calendar,
+Google Meet, GitHub, Notion, Linear, Figma, Zoom, Dropbox, Zoho, Stripe, HubSpot, Airtable, Trello, Asana,
+Calendly, Loom, YouTube and X. The Slack and Gmail marks are those paths split into their pieces and filled
+with each brand's own colours. Outlook, Office 365 and LinkedIn are not in Simple Icons; their marks are
+plain drawings original to this kit (a coloured tile with a simple glyph). The neutral globe is original too.
+Brand names and logos are trademarks of their owners; they appear only to identify the service a link opens,
+and no endorsement is implied. CC0 grants no trademark rights.
+
 ## The built file
 
 `plugin.js` is installed and shared as a single file, so `build.mjs` copies the full text of the kit's MIT

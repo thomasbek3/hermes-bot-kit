@@ -28,6 +28,7 @@ const ADAPT_SRC = /* css */ `
   --color-sheet-focus: #2F7BF6;
 }
 :root[data-theme='dark'] {
+  --color-src-dark-ink: var(--color-text-primary);
   --color-bubble-agent-flat: #242424;
   --color-row-selected: #FFFFFF12;
   --color-row-hover: #FFFFFF0A;
@@ -244,6 +245,27 @@ const ADAPT_SRC = /* css */ `
 .md .aui-md li::marker { color: var(--color-text-tertiary); }
 .md .aui-md a { color: var(--color-text-primary); font-weight: inherit; text-decoration: underline; text-decoration-color: var(--color-border-primary); text-underline-offset: 2px; }
 .md .aui-md a:hover { text-decoration-color: currentColor; }
+/* Source links (ui/SourceLink.tsx): the service's logo in a fixed 14px box,
+   then the underlined text; the logo is never underlined (the anchor has no
+   decoration, only the text span) and the box never shifts the line. In
+   dark, a mark too dark for the bubble (GitHub, X, Notion …) takes the text
+   colour. */
+.md .aui-md a.gbo-src, .md a.gbo-src { color: var(--color-text-primary); text-decoration: none; white-space: nowrap; border-radius: 4px; }
+.gbo-src-icon {
+  display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px;
+  line-height: 0; color: var(--gbo-src-color, var(--color-text-secondary));
+}
+.gbo-src-icon svg { width: 14px; height: 14px; display: block; }
+.gbo-src-icon.is-web { color: var(--color-text-secondary); }
+.gbo-src-icon.is-light-on-dark { color: var(--color-src-dark-ink, var(--gbo-src-color)); }
+.gbo-src-text { white-space: normal; text-decoration: underline; text-decoration-color: var(--color-border-primary); text-underline-offset: 2px; }
+.gbo-src:hover .gbo-src-text { text-decoration-color: currentColor; }
+.gbo-src:focus-visible, a.gbo-src-host:focus-visible { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+/* A bare URL in a heading or table header (SourceLink.tsx enhanceSourceLinks):
+   React's URL text stays in the anchor at size 0; the short label shows at
+   the anchor's measured size. */
+a.gbo-src-host.is-bare { font-size: 0; }
+a.gbo-src-host.is-bare .gbo-src-label { font-size: var(--gbo-src-label-size, 15px); }
 .md .aui-md :is(strong, b) { font-weight: 600; color: inherit; }
 .md .aui-md :is(h1, h2, h3, h4, h5, h6) { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: inherit; color: inherit; }
 .md .aui-md h1 { font-size: 17px; line-height: 24px; }
