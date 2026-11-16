@@ -1105,12 +1105,12 @@ function fakeRemoteCua({ lease = AGENT_LEASE, status = STATUS_READY, configured 
   // server.hold(route): the next request to that route is committed on the
   // server now, and its answer is held until .deliver() (or .fail(error)).
   server.held = new Map()
-  server.hold = route => {
+  server.hold = (route, { beforeCommit = false } = {}) => {
     let open
     const gate = new Promise(resolve => {
       open = resolve
     })
-    const entry = { gate, error: null, deliver: () => open(), fail: error => { entry.error = error; open() } }
+    const entry = { gate, beforeCommit, error: null, deliver: () => open(), fail: error => { entry.error = error; open() } }
     server.held.set(route, entry)
     return entry
   }
@@ -1118,13 +1118,18 @@ function fakeRemoteCua({ lease = AGENT_LEASE, status = STATUS_READY, configured 
     const route = request.path.replace('/api/plugins/remote-cua/', '').replace(/\?.*$/, '')
     const entry = server.held.get(route)
     if (entry) server.held.delete(route)
+    // beforeCommit: the request has not reached the server yet.
+    if (entry && entry.beforeCommit) {
+      await entry.gate
+      if (entry.error) throw entry.error
+    }
     let outcome
     try {
       outcome = { value: answer(request) }
     } catch (error) {
       outcome = { error }
     }
-    if (entry) {
+    if (entry && !entry.beforeCommit) {
       await entry.gate
       if (entry.error) throw entry.error
     }
@@ -1571,11 +1576,11 @@ const TWO_AVAS = [
   { profile: 'ava', targetProfile: 'ava', connectionId: 'conn-b', mode: 'remote', primary: true }
 ]
 
-test('R1-05: two gateways with the same bot name: the focused connection decides, never list order', async () => {
+test('R1-05: two gateways with the same bot name: the focused chat\'s owner decides, never list order', async () => {
   const server = fakeRemoteCua()
   const setup = boundSetup({ remoteCua: true, api: server.api, routes: TWO_AVAS })
-  setup.context.__host.state.connectionId = atom('conn-b')
-  setup.t.syncControlTarget()
+  setup.context.__host.state.focusedSessionOwner = atom({ connectionId: 'conn-b', profile: 'ava' })
+  await setup.t.resolveControlOwner()
   await settle()
   await setup.t.takeOver()
   assert.ok(server.calls.length > 0)
@@ -1620,6 +1625,10 @@ test('R1-05: the same bot name moving to another gateway hands the old lease bac
   const server = fakeRemoteCua()
   const { t, context } = await heldByMe(server)
   context.__host.profileRoutes = () => [{ profile: 'ava', targetProfile: 'ava', connectionId: 'conn-other', mode: 'remote' }]
+  // The other gateway has its own lease file: nobody holds it.
+  const minis = context.hermesDesktop.api
+  context.hermesDesktop.api = async request =>
+    request.connectionId === 'conn-other' ? { ok: true, lease: AGENT_LEASE, configured: true, machine: MACHINE } : minis(request)
   await t.resolveControlOwner()
   await settle()
   const release = server.releases()[0]
@@ -1674,4 +1683,210 @@ test('R1-06: an ordinary (not bot-driven) embedded page keeps its input', () => 
   setup.t.syncSurfacePointer()
   assert.notEqual(frame.inert, true)
   assert.equal(frame.style.pointerEvents, 'auto')
+})
+
+// ---------------------------------------------------------------------------
+// Review round 2 regressions (each fails on 8187d82). The invariant checked
+// throughout: this window sends input only while the SERVER's lease names it.
+// ---------------------------------------------------------------------------
+
+function assertInputMatchesServer(t, server, instances, label) {
+  const serverSaysMe = server.lease.holder === 'human' && server.lease.viewer === t.control.viewerId
+  // The pane's control state agrees with the server, and the real RFB never
+  // takes input the server has not granted (collapsed panes stay view-only).
+  assert.equal(t.controlView(t.$control.get(), t.control.viewerId).inputEnabled, serverSaysMe, `${label}: control state`)
+  if (!serverSaysMe) assert.equal(lastRfb(instances).viewOnly, true, `${label}: input on only while the server lease is ours`)
+}
+
+test('R2-01: a close-release that commits late cannot undo the next Take over', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await heldByMe(server)
+  t.showPane()
+  const slow = server.hold('release', { beforeCommit: true })
+  t.hidePane()
+  await settle()
+  t.showPane()
+  const taking = t.takeOver()
+  await settle()
+  assert.equal(lastRfb(instances).viewOnly, true, 'no input while the old release is outstanding')
+  slow.deliver()
+  await taking
+  await settle()
+  assert.equal(server.lease.holder, 'human')
+  assert.equal(server.lease.viewer, t.control.viewerId)
+  assertInputMatchesServer(t, server, instances, 'after the retake')
+  assert.equal(lastRfb(instances).viewOnly, false, 'the retake does drive the machine')
+  const calls = server.calls.filter(c => c.method === 'POST').map(c => c.path.split('/').pop())
+  assert.deepEqual(calls.slice(-2), ['release', 'take'], 'the release reached the server before the new take')
+})
+
+test('R2-01: an abandoned-take cleanup that commits late cannot undo the next Take over', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await remoteSetup(server)
+  t.showPane()
+  const held = server.hold('take')
+  const first = t.takeOver()
+  await settle()
+  const slow = server.hold('release', { beforeCommit: true })
+  t.hidePane()
+  held.deliver()
+  await first
+  await settle()
+  t.showPane()
+  const second = t.takeOver()
+  await settle()
+  slow.deliver()
+  await second
+  await settle()
+  assertInputMatchesServer(t, server, instances, 'after the second take')
+  assert.equal(server.lease.holder, 'human')
+})
+
+test('R2-02: the focused chat\'s owner picks the gateway, not the active socket', async () => {
+  const server = fakeRemoteCua()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes: TWO_AVAS })
+  setup.context.__host.state.connectionId = atom('conn-a')
+  setup.context.__host.state.focusedSessionOwner = atom({ connectionId: 'conn-b', profile: 'ava' })
+  await setup.t.resolveControlOwner()
+  await setup.t.takeOver()
+  assert.ok(server.takes().length === 1)
+  for (const call of server.calls) assert.equal(call.connectionId, 'conn-b')
+  // A tool call on the socket's gateway is another bot: no wake.
+  assert.equal(setup.t.handleToolStart(toolStart('computer_use', { connectionId: 'conn-a' }), 9_000_000), false)
+  assert.equal(setup.t.handleToolStart(toolStart('computer_use', { connectionId: 'conn-b' }), 9_000_000), true)
+})
+
+test('R2-02: with no provable focused owner, two same-name gateways fail closed even if the socket says one', async () => {
+  const server = fakeRemoteCua()
+  const setup = boundSetup({ remoteCua: true, api: server.api, routes: TWO_AVAS })
+  setup.context.__host.state.connectionId = atom('conn-a')
+  setup.context.__host.state.focusedSessionOwner = atom(null)
+  await setup.t.resolveControlOwner()
+  await setup.t.takeOver()
+  assert.equal(server.calls.length, 0)
+  assert.match(setup.t.$control.get().ownerError, /More than one gateway/)
+})
+
+test('R2-02: focus moving to the same bot name on another gateway during a Take over releases on the first', async () => {
+  const server = fakeRemoteCua()
+  const owner = atom({ connectionId: 'conn-b', profile: 'ava' })
+  // conn-a has its own lease file, which nobody holds.
+  const api = async request =>
+    request.connectionId === 'conn-a' && request.path.endsWith('/lease')
+      ? { ok: true, lease: AGENT_LEASE, configured: true, machine: MACHINE }
+      : server.api(request)
+  const setup = boundSetup({ remoteCua: true, api, routes: TWO_AVAS })
+  setup.context.__host.state.focusedSessionOwner = owner
+  await setup.t.resolveControlOwner()
+  const held = server.hold('take')
+  const taking = setup.t.takeOver()
+  await settle()
+  owner.set({ connectionId: 'conn-a', profile: 'ava' })
+  await setup.t.resolveControlOwner()
+  held.deliver()
+  await taking
+  await settle()
+  const releases = server.releases()
+  assert.equal(releases.length, 1)
+  assert.equal(releases[0].connectionId, 'conn-b')
+  assert.equal(setup.t.$control.get().owner.connectionId, 'conn-a')
+  assert.equal(setup.t.controlLocked(), true)
+})
+
+test('R2-03: a Take over whose answer was lost is handed back when the pane closes', async () => {
+  const server = fakeRemoteCua()
+  const { t } = await remoteSetup(server)
+  t.showPane()
+  const lost = server.hold('take')
+  const taking = t.takeOver()
+  await settle()
+  lost.fail(new Error('connection lost after take committed'))
+  await taking
+  assert.equal(server.lease.holder, 'human', 'the take committed')
+  t.hidePane()
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+  assert.equal(server.releases().length, 1)
+})
+
+test('R2-03: the same, closed with Disconnect, and reconciled first', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await remoteSetup(server)
+  const lost = server.hold('take')
+  const taking = t.takeOver()
+  await settle()
+  lost.fail(new Error('connection lost after take committed'))
+  await taking
+  await settle()
+  // The reconciling read found the grant: shown as ours, input matches the server.
+  assertInputMatchesServer(t, server, instances, 'after reconciling')
+  t.userDisconnect()
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+})
+
+test('R2-03: a definitive refusal is not treated as a possible hold', async () => {
+  const server = fakeRemoteCua({ lease: { holder: 'human', viewer: 'cv-other', since: 1, epoch: 4 } })
+  const { t } = await remoteSetup(server)
+  await t.takeOver()
+  t.hidePane()
+  await settle()
+  assert.equal(server.releases().length, 0, 'a 409 proved nothing was taken')
+})
+
+test('R2-04: removing the binding of a held computer that stays the global default hands it back', async () => {
+  const server = fakeRemoteCua()
+  const { t, ep } = await heldByMe(server)
+  const settings = t.$settings.get()
+  assert.equal(settings.globalEndpointId, ep.id)
+  t.$settings.set({ ...settings, perBotEndpoint: {} })
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+  assert.equal(t.$control.get().bound, false)
+  t.hidePane()
+  await settle()
+  assert.equal(server.releases().length, 1)
+})
+
+test('R2-04: unbinding during a pending Take over hands the late grant back', async () => {
+  const server = fakeRemoteCua()
+  const { t } = await remoteSetup(server)
+  const held = server.hold('take')
+  const taking = t.takeOver()
+  await settle()
+  t.$settings.set({ ...t.$settings.get(), perBotEndpoint: {} })
+  held.deliver()
+  await taking
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+})
+
+test('R2-04: a held computer turning watch-only (embedded page) is handed back', async () => {
+  const server = fakeRemoteCua()
+  const { t, ep } = await heldByMe(server)
+  const page = t.normalizeEndpoint({ ...ep, mode: 'iframe', iframeUrl: 'http://127.0.0.1:6080/vnc.html' })
+  t.$settings.set({ ...t.$settings.get(), endpoints: [page] })
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+  assert.equal(t.controlLocked(), true)
+})
+
+test('R2: a cleanup whose answer is lost is retried until the server says it is not ours', async () => {
+  const server = fakeRemoteCua()
+  const { t, ctx } = await heldByMe(server)
+  const timers = []
+  ctx.setTimeout = (fn, ms) => {
+    timers.push({ fn, ms })
+    return () => {}
+  }
+  const first = server.hold('release', { beforeCommit: true })
+  t.hidePane()
+  await settle()
+  first.fail(new Error('connection lost before POST'))
+  await settle()
+  assert.equal(server.lease.holder, 'human')
+  assert.equal(timers.length, 1, 'a retry is scheduled')
+  timers[0].fn()
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
 })

@@ -25,6 +25,11 @@
   fails closed when that is ambiguous or unknown; tool calls from another gateway no longer wake it; a bot-driven
   computer shown as an embedded page is `inert` and watch-only. `remove-orgo-computer.sh` now refuses (exit 3, no
   changes for that profile) any config form it cannot rewrite safely, and validates its edit before replacing.
+- **computer-viewer: control fixes from review round 2 (2026-11-15)**: lease changes per gateway are serialized
+  (a late close-release can no longer undo the next Take over); every lease this window may hold, including a take
+  whose answer was lost, is handed back (with retries) whenever the pane stops controlling that machine, including
+  removing the binding; the gateway is picked by the focused chat's `focusedSessionOwner`, never the active socket,
+  and fails closed when unprovable.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

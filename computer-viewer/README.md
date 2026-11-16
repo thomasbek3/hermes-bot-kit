@@ -221,14 +221,22 @@ input):
 - An answer to a request sent before a Take over, Hand back, close or bot
   switch is ignored, and a lease older (by `epoch`) than the one shown can
   never turn input back on.
-- Closing the pane, Disconnect or switching bots while a Take over is in
-  flight hands the late grant straight back, on the gateway it was taken on,
-  without reopening the pane.
+- Lease changes for one bot's gateway (take, hand back, cleanup) are sent one
+  at a time, so a hand back from a closed pane can never land after the next
+  Take over.
+- The pane remembers every lease it *may* hold (a take was sent and no answer
+  has proved otherwise, including a take whose answer was lost). Whenever it
+  stops being in control of that machine (close, Disconnect, unload,
+  removing the binding, switching bot or gateway, becoming watch-only) it
+  hands those back, retrying a lost hand back, until the gateway answers that
+  the lease is not this window's. A refused take (409) is not a possible hold.
 - The lease is asked of the bot's own gateway: the `(connectionId, profile)`
-  route Hermes lists for it. If two gateways have a bot with that name, the
-  focused chat's connection decides; if it cannot, or the route list is not
-  available, the pane stays view-only and says why. Tool calls from another
-  gateway with the same bot name do not open the pane.
+  route Hermes lists for it. The focused chat's connection-qualified owner
+  (`host.state.focusedSessionOwner`) picks it; the active gateway socket is
+  never used for that, since tile focus moves without moving the socket. With
+  no provable owner, a bot name on more than one gateway, or no route list,
+  the pane stays view-only and says why. Tool calls from another gateway with
+  the same bot name do not open the pane.
 - A bot-driven computer added as an embedded viewer page (or one whose
   address fell back to the page) is watch-only: the page is made `inert` (no
   focus, no keys, no clicks) and Take over needs its VNC (WebSocket) address.

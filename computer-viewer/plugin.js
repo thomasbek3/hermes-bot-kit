@@ -2177,9 +2177,15 @@ function eventFromBotSource(event, profile, endpoint) {
     if (state.profile !== profile || !state.owner) return false
     return sameSource(source, state.owner.connectionId)
   }
-  const active = activeConnection()
-  if (source == null || active == null) return true
-  return sameSource(source, active)
+  if (source == null) return true // local/legacy events carry no source tag
+  const focused = focusedOwner()
+  if (focused && focused.profile === profile) return sameSource(source, focused.connectionId)
+  if (focused === undefined) {
+    // Older build without the focused owner: the active gateway, if known.
+    const active = activeConnection()
+    return active == null || sameSource(source, active)
+  }
+  return false // Hermes can't tell which bot the focused chat is: don't guess
 }
 
 function sameSource(a, b) {
@@ -2402,13 +2408,33 @@ function statusWords(status) {
   return { tone: status.ok ? 'good' : failed || status.error ? 'bad' : 'muted', line }
 }
 
+/** The focused chat's connection-qualified owner ({ connectionId, profile }),
+ *  null when Hermes cannot tell (ambiguous or unresolved), undefined on builds
+ *  without it. Tile/tab focus moves without moving the gateway socket, so the
+ *  socket's connection is never used to pick a bot. */
+function focusedOwner() {
+  try {
+    const atomLike = host.state && host.state.focusedSessionOwner
+    if (!atomLike || typeof atomLike.get !== 'function') return undefined
+    const value = atomLike.get()
+    if (!value || typeof value !== 'object' || !value.profile) return null
+    return { connectionId: value.connectionId == null ? null : String(value.connectionId), profile: String(value.profile) }
+  } catch {
+    return undefined
+  }
+}
+
 /** The bot's gateway route: the (connectionId, profile) pair Hermes's registry
- *  names it by. Never picked by list order: one match, or the focused chat's
- *  connection among several, else no owner and no control (fail closed). */
+ *  names it by. The focused chat's owner picks it; otherwise only a single
+ *  route with that name will do. Never list order, never the active socket:
+ *  anything else fails closed. */
 async function resolveOwner(profile) {
+  const focused = focusedOwner()
+  const pinned = focused && focused.profile === profile ? focused : null
   if (typeof host.profileRoutes !== 'function') {
     // Older desktop, one local gateway: the profile name is the whole scope.
-    return { owner: { connectionId: null, profile, key: `\u0000${profile}` } }
+    const connectionId = pinned ? pinned.connectionId : null
+    return { owner: { connectionId, profile, key: `${connectionId || ''}\u0000${profile}` } }
   }
   let routes
   try {
@@ -2417,21 +2443,17 @@ async function resolveOwner(profile) {
     return { error: "Couldn't list the gateways, so this bot's computer can't be controlled right now." }
   }
   const matches = (Array.isArray(routes) ? routes : []).filter(item => item && item.profile === profile)
-  let route = null
-  if (matches.length === 1) {
-    route = matches[0]
-  } else if (matches.length > 1) {
-    const active = activeConnection()
-    const same = active == null ? [] : matches.filter(item => sameSource(item.connectionId, active))
-    if (same.length !== 1) {
-      return {
-        error: `More than one gateway has a bot named ${profile}. Open a chat with the one this computer belongs to, so the pane knows which to control.`
-      }
+  let candidates = matches
+  if (pinned) candidates = matches.filter(item => sameSource(item.connectionId, pinned.connectionId))
+  if (candidates.length > 1) {
+    return {
+      error: `More than one gateway has a bot named ${profile}. Open a chat with the one this computer belongs to, so the pane knows which to control.`
     }
-    route = same[0]
-  } else {
+  }
+  if (candidates.length === 0) {
     return { error: `Couldn't find ${profile}'s gateway, so its computer can't be controlled.` }
   }
+  const route = candidates[0]
   const connectionId = route.connectionId ? String(route.connectionId) : null
   return {
     owner: {
@@ -2596,13 +2618,124 @@ function applyLease(key, gen, raw, { read = false } = {}) {
   return true
 }
 
+// ---------------------------------------------------------------------------
+// Two rules keep the lease safe whatever order requests land in:
+//
+// 1. Every lease change for one owner (take, hand back, cleanup release)
+//    goes through that owner's queue, one at a time, so a cleanup release can
+//    never commit after a later Take over. Reads are not queued (a hung read
+//    must not delay a hand back); a read is only sent while no change is in
+//    flight for that owner, and its answer is dropped if anything changed
+//    since it was sent.
+// 2. `possiblyHeld` remembers every owner this window may hold a lease on:
+//    set when a take is sent, cleared only by an answer that shows the lease
+//    is not ours. Whenever the pane stops being in control of that owner
+//    (close, Disconnect, unload, unbinding, switching bot or gateway,
+//    becoming watch-only) the owner is "retired": a release is queued, and
+//    retried until an answer says the lease is not ours.
+// ---------------------------------------------------------------------------
+
+const ownerQueues = new Map()
+const ownerInFlight = new Map()
+const possiblyHeld = new Map()
+const RETIRE_RETRY_MS = [2000, 5000, 15000, 30000]
+
+function queued(owner, run) {
+  const key = owner.key
+  const prev = ownerQueues.get(key) || Promise.resolve()
+  ownerInFlight.set(key, (ownerInFlight.get(key) || 0) + 1)
+  const settle = () => {
+    const left = (ownerInFlight.get(key) || 1) - 1
+    if (left > 0) ownerInFlight.set(key, left)
+    else ownerInFlight.delete(key)
+  }
+  const step = async () => {
+    try {
+      return await run()
+    } finally {
+      settle()
+    }
+  }
+  const next = prev.then(step, step)
+  const tail = next.then(
+    () => undefined,
+    () => undefined
+  )
+  ownerQueues.set(key, tail)
+  tail.then(() => {
+    if (ownerQueues.get(key) === tail) ownerQueues.delete(key)
+  })
+  return next
+}
+
+/** Track what an answer says about this window's hold on `owner`. */
+function noteHold(owner, raw) {
+  if (!owner || !raw || typeof raw !== 'object' || !raw.lease) return
+  if (leaseHeldBy(normalizeLease(raw), control.viewerId)) possiblyHeld.set(owner.key, owner)
+  else possiblyHeld.delete(owner.key)
+}
+
+function scheduleLater(fn, ms) {
+  const ctx = pluginCtx
+  if (ctx && typeof ctx.setTimeout === 'function') return ctx.setTimeout(fn, ms)
+  if (typeof setTimeout === 'function') {
+    const id = setTimeout(fn, ms)
+    return () => clearTimeout(id)
+  }
+  return null
+}
+
+/** Release whatever this window may hold on `owner`, until an answer proves it is not ours. */
+const retiring = new Map()
+function retire(owner, attempt = 0) {
+  if (!owner || !control.client || !possiblyHeld.has(owner.key)) return Promise.resolve()
+  // One cleanup per owner at a time; a take queued after it re-arms it.
+  if (retiring.has(owner.key)) return retiring.get(owner.key)
+  const done = queued(owner, () => {
+    retiring.delete(owner.key)
+    if (!possiblyHeld.has(owner.key)) return null
+    return control.client.release(owner, control.viewerId, false)
+  })
+  retiring.set(owner.key, done)
+  return done.then(
+    raw => {
+      if (raw) noteHold(owner, raw)
+    },
+    error => {
+      if (error && error.body && error.body.lease) {
+        noteHold(owner, error.body)
+        return
+      }
+      // Outcome unknown: try again later, unless a new Take over claimed it.
+      if (attempt < RETIRE_RETRY_MS.length) {
+        scheduleLater(() => {
+          const state = $control.get()
+          if (state.owner && state.owner.key === owner.key && controlView(state, control.viewerId).iHold) return
+          void retire(owner, attempt + 1)
+        }, RETIRE_RETRY_MS[attempt])
+      }
+    }
+  )
+}
+
+/** Retire every owner this window may hold, except `keepKey` (still in control). */
+function retireAll(keepKey = '') {
+  for (const owner of [...possiblyHeld.values()]) {
+    if (owner.key !== keepKey) void retire(owner)
+  }
+}
+
 async function refreshLease() {
   const state = $control.get()
   if (!state.key || !state.bound || !state.owner || state.pending || !control.client) return
   const { key, owner } = state
+  // A change is in flight for this owner; its answer will do.
+  if (ownerInFlight.has(owner.key)) return
   const gen = control.gen
   try {
     const raw = await control.client.lease(owner)
+    if (control.gen !== gen || ownerInFlight.has(owner.key)) return
+    noteHold(owner, raw)
     if (!applyLease(key, gen, raw, { read: true })) return
     // GET lease answers 200 for a profile without a remote_cua block, with the reason.
     if (raw && raw.configured === false) {
@@ -2628,6 +2761,12 @@ async function refreshStatus(fresh = false) {
   }
 }
 
+/** Still the same attachment: same machine, same owner, nothing reset since `gen`. */
+function sameAttachment(key, owner, gen) {
+  const state = $control.get()
+  return state.key === key && state.owner === owner && control.gen === gen
+}
+
 async function takeOver() {
   const state = $control.get()
   if (!controlView(state, control.viewerId).canTakeOver || !control.client) return
@@ -2636,24 +2775,35 @@ async function takeOver() {
   patchControl({ pending: 'take', error: '', evicted: false })
   let raw
   try {
-    raw = await control.client.take(owner, control.viewerId)
+    raw = await queued(owner, () => {
+      possiblyHeld.set(owner.key, owner)
+      return control.client.take(owner, control.viewerId)
+    })
   } catch (error) {
-    if ($control.get().key !== key || control.gen !== gen) {
-      // Abandoned (closed or switched) and the outcome is unknown: make sure
-      // nothing is left held on the machine this window no longer shows.
-      releaseQuietly(owner)
+    const definitive = Boolean(error && error.body && error.body.lease)
+    if (definitive) noteHold(owner, error.body)
+    if (!sameAttachment(key, owner, gen)) {
+      // Abandoned while in flight: whatever it did, give it back.
+      void retire(owner)
       return
     }
     patchControl({ pending: null })
-    // A refused take (409) carries the current lease: show who holds it.
-    if (error && error.body && error.body.lease) applyLease(key, gen, error.body)
+    if (definitive) {
+      // A refused take (409) carries the current lease: show who holds it.
+      applyLease(key, gen, error.body)
+      patchControl({ error: controlErrorText(error) })
+      return
+    }
+    // The take may have committed: keep the possible hold on record and ask.
     patchControl({ error: controlErrorText(error) })
+    void refreshLease()
     return
   }
-  if ($control.get().key !== key || control.gen !== gen) {
+  noteHold(owner, raw)
+  if (!sameAttachment(key, owner, gen)) {
     // The pane closed, disconnected or moved on while the take was in flight:
     // hand it straight back on the gateway it was taken on, and stay closed.
-    if (leaseHeldBy(normalizeLease(raw), control.viewerId)) releaseQuietly(owner)
+    void retire(owner)
     return
   }
   patchControl({ pending: null })
@@ -2662,13 +2812,6 @@ async function takeOver() {
     setUi({ viewOnly: false })
     setExpanded(true)
   }
-}
-
-function releaseQuietly(owner) {
-  if (!owner || !control.client) return
-  Promise.resolve()
-    .then(() => control.client.release(owner, control.viewerId, false))
-    .catch(() => {})
 }
 
 /** Hand control back. `force` clears a lease this window does not hold.
@@ -2690,9 +2833,10 @@ async function handBack(force = false) {
   refreshInputGate()
   let raw
   try {
-    raw = await control.client.release(owner, control.viewerId, force)
+    raw = await queued(owner, () => control.client.release(owner, control.viewerId, force))
   } catch (error) {
-    if ($control.get().key !== key || control.gen !== gen) return
+    if (error && error.body && error.body.lease) noteHold(owner, error.body)
+    if (!sameAttachment(key, owner, gen)) return
     patchControl({ pending: null })
     if (error && error.body && error.body.lease) {
       applyLease(key, gen, error.body)
@@ -2705,42 +2849,51 @@ async function handBack(force = false) {
     void refreshLease()
     return
   }
-  if ($control.get().key !== key || control.gen !== gen) return
+  noteHold(owner, raw)
+  if (!sameAttachment(key, owner, gen)) return
   patchControl({ pending: null, evicted: false })
   applyLease(key, gen, raw)
 }
 
-/** Closing the pane (or Disconnect) hands back. A dropped connection does not.
- *  A take still in flight is abandoned and handed back when it lands. */
+/** Closing the pane (or Disconnect, or unload) hands back everything this
+ *  window may hold. A dropped connection does not come through here. */
 function handBackOnClose() {
   const state = $control.get()
-  if (!state.key) return
   control.gen += 1
-  const held = leaseHeldBy(state.lease, control.viewerId) && !state.fence
-  patchControl({
-    pending: null,
-    fence: held || state.fence,
-    minGrantEpoch: held ? Math.max(state.minGrantEpoch, (state.lease.epoch || 0) + 1) : state.minGrantEpoch
-  })
-  if (held) releaseQuietly(state.owner)
+  if (state.key) {
+    const held = leaseHeldBy(state.lease, control.viewerId) && !state.fence
+    patchControl({
+      pending: null,
+      fence: held || state.fence,
+      minGrantEpoch: held ? Math.max(state.minGrantEpoch, (state.lease.epoch || 0) + 1) : state.minGrantEpoch
+    })
+  }
+  retireAll()
   refreshInputGate()
 }
 
-/** Follow the pane to the machine it shows; a machine left behind is handed back. */
+/** Replace the control state. Anything held under the old state is retired
+ *  first: a reset never forgets a lease it might own. */
+function resetControl(next) {
+  control.gen += 1
+  retireAll()
+  $control.set(next)
+  syncLeasePoll()
+  refreshInputGate()
+}
+
+/** Follow the pane to the machine it shows. Any change of machine, bot,
+ *  binding or watch-only state starts a new attachment. */
 function syncControlTarget() {
   const target = controlTarget()
   const state = $control.get()
   const key = target ? target.key : ''
   if (state.key === key && (!target || (state.bound === target.bound && state.iframe === target.iframe))) return
-  if (state.key && state.key !== key) handBackOnClose()
-  control.gen += 1
   if (!target) {
-    $control.set({ ...IDLE_CONTROL })
-    syncLeasePoll()
-    refreshInputGate()
+    resetControl({ ...IDLE_CONTROL })
     return
   }
-  $control.set({
+  resetControl({
     ...IDLE_CONTROL,
     key,
     profile: target.profile,
@@ -2748,13 +2901,11 @@ function syncControlTarget() {
     bound: target.bound,
     iframe: target.iframe
   })
-  syncLeasePoll()
-  refreshInputGate()
   if (target.bound) void resolveControlOwner()
 }
 
-/** (Re)resolve the bot's gateway, then read the lease. A changed gateway for
- *  the same bot name is a different machine owner: hand the old one back. */
+/** (Re)resolve the bot's gateway, then read the lease. A different owner for
+ *  the same bot name is a different machine owner: a new attachment. */
 async function resolveControlOwner() {
   const { key, profile } = $control.get()
   if (!key) return
@@ -2762,20 +2913,24 @@ async function resolveControlOwner() {
   const state = $control.get()
   if (state.key !== key) return
   if (result.error) {
-    if (state.owner) handBackOnClose()
-    patchControl({ owner: null, ownerError: result.error, lease: null, fence: false, status: null })
-    refreshInputGate()
+    if (state.owner || state.ownerError !== result.error) {
+      resetControl({ ...state, owner: null, ownerError: result.error, lease: null, fence: false, pending: null, status: null })
+    }
     return
   }
-  const changed = !state.owner || state.owner.key !== result.owner.key
-  if (changed && state.owner) {
-    handBackOnClose()
-    patchControl({ lease: null, fence: false, status: null, evicted: false, error: '' })
-  }
-  if (changed) {
-    control.gen += 1
-    patchControl({ owner: result.owner, ownerError: '' })
-    refreshInputGate()
+  if (!state.owner || state.owner.key !== result.owner.key) {
+    resetControl({
+      ...state,
+      owner: result.owner,
+      ownerError: '',
+      lease: null,
+      fence: false,
+      pending: null,
+      status: null,
+      evicted: false,
+      error: '',
+      minGrantEpoch: 0
+    })
     void refreshStatus()
   }
   await refreshLease()
@@ -2823,6 +2978,15 @@ function attachEngine(ctx) {
   const follow = () => {
     syncConnection()
     syncControlTarget()
+  }
+  if (host.state.focusedSessionOwner && typeof host.state.focusedSessionOwner.listen === 'function') {
+    // Tile focus can move to the same bot name on another gateway: re-resolve.
+    unsubs.push(
+      host.state.focusedSessionOwner.listen(() => {
+        follow()
+        if ($control.get().bound) void resolveControlOwner()
+      })
+    )
   }
   if (host.state.focusedSessionProfile && typeof host.state.focusedSessionProfile.listen === 'function') {
     unsubs.push(host.state.focusedSessionProfile.listen(follow))
