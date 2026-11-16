@@ -51908,38 +51908,23 @@ function withDividers(items, nowMs = Date.now(), locale) {
 }
 
 // src/core/streamSafe.js
-var BLOCK_START = /^ {0,3}(?:[-*+] |\d{1,9}[.)] |#{1,6} |> ?|\|)/;
-var LIST_MARK = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/;
-var CONTAINER_FENCE = /^((?: {0,3}>[ ]?)*)( {0,3}(?:[-*+]|\d{1,9}[.)])[ ]+)?([ ]*)(`{3,}|~{3,})(.*)$/;
-var QUOTES = /^(?: {0,3}>[ ]?)*/;
 var HOLD_MAX = 500;
 var DIRECTIVE_BODY_MAX = 2048;
+var RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+var LIST_RE = /^( {0,3})([-*+]|\d{1,9}[.)])( +|$)/;
+var FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+var ATX = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+var DEF = /^ {0,3}\[((?:[^\]\\\n]|\\.){1,999})\]:/;
+var MEDIA_WHOLE = /^[\t ]*[`"']?(?:M|ME|MED|MEDI|MEDIA|MEDIA:.*)$/;
+var MEDIA_TOKEN = /^[`"']?MEDIA:\s*(?:`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|[^\s`"]+)[`"']?/;
+var DIRECTIVE_TOKEN = /^::(?:card|preview)\{[^{}\n]*\}/;
+var AUTOLINK = /^<(?:[a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>]+)(>?)/;
 var isSpace = (ch) => ch === void 0 || /\s/.test(ch);
 var isWord = (ch) => ch !== void 0 && /[\p{L}\p{N}]/u.test(ch);
 var oddBackticks = (s) => (s.match(/`/g) || []).length % 2 === 1;
-function fenceOpen(line, inList) {
-  const m = CONTAINER_FENCE.exec(line.replace(/\r$/, ""));
-  if (!m) return null;
-  const [, quotes, marker = "", indent, mark, info] = m;
-  if (!quotes && !marker && indent.length > 3 && !inList) return null;
-  if (mark[0] === "`" && info.includes("`")) return null;
-  return {
-    char: mark[0],
-    len: mark.length,
-    // The prefix a temporary closing line takes: the same quotes, the list
-    // marker as spaces, the same indentation.
-    prefix: quotes + " ".repeat(marker.length + indent.length)
-  };
-}
-var fenceBody = (line) => line.replace(/\r$/, "").replace(QUOTES, "").replace(/^[ \t]*/, "");
-function fenceCloses(line, fence) {
-  const body = fenceBody(line);
-  let n = 0;
-  while (body[n] === fence.char) n += 1;
-  return n >= fence.len && !body.slice(n).trim();
-}
+var spaces = (s) => /^ */.exec(s)[0].length;
+var normLabel = (s) => s.trim().replace(/\s+/g, " ").toLowerCase();
 var hasPipe = (line) => /(^|[^\\])\|/.test(line);
-var leadingPipe = (line) => /^ {0,3}\|/.test(line);
 function cells(line) {
   let s = line.trim();
   if (s.startsWith("|")) s = s.slice(1);
@@ -51951,6 +51936,159 @@ function isSeparator(line, cols) {
   if (!separatorish(line) || !line.includes("|") && cols > 1) return false;
   const parts = cells(line);
   return parts.length === cols && parts.every((cell) => /^\s*:?-+:?\s*$/.test(cell));
+}
+var interrupts = (rest) => /^ {0,3}(?:>|`{3}|~{3}|#{1,6}(?:[ \t]|$)|[-*+][ \t]+\S|1[.)][ \t]+\S)/.test(rest) || RULE.test(rest);
+function closesFence(rest, fence) {
+  const m = /^ {0,3}(`+|~+)[ \t]*$/.exec(rest);
+  return Boolean(m && m[1][0] === fence.char && m[1].length >= fence.len);
+}
+function cloneState(st) {
+  return {
+    source: st.source,
+    defs: st.defs,
+    containers: [...st.containers],
+    leaf: st.leaf && st.leaf.ranges ? { ...st.leaf, ranges: [...st.leaf.ranges] } : st.leaf
+  };
+}
+function scanLine(st, raw, offset) {
+  const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+  const { containers } = st;
+  let leaf = st.leaf;
+  if (leaf && (leaf.type === "heading" || leaf.type === "def")) st.leaf = leaf = null;
+  let pos = 0;
+  let matched = 0;
+  for (const c2 of containers) {
+    const rest2 = line.slice(pos);
+    if (c2.type === "quote") {
+      const m = /^ {0,3}>/.exec(rest2);
+      if (!m) break;
+      pos += m[0].length;
+      if (line[pos] === " ") pos += 1;
+    } else if (rest2.trim()) {
+      if (spaces(rest2) < c2.indent) break;
+      pos += c2.indent;
+    }
+    matched += 1;
+  }
+  const info = { pos, matched, opened: 0, rest: line.slice(pos), leaf: null, lineStart: offset };
+  if (leaf && leaf.type === "fence") {
+    if (matched === containers.length) {
+      if (closesFence(info.rest, leaf)) {
+        st.leaf = null;
+        info.closedFence = true;
+      } else info.inFence = leaf;
+      return info;
+    }
+    st.leaf = leaf = null;
+  }
+  let rest = line.slice(pos);
+  if (!rest.trim()) {
+    containers.length = matched;
+    st.leaf = null;
+    info.blank = true;
+    return info;
+  }
+  if (matched < containers.length && leaf && leaf.type === "para" && !interrupts(rest)) {
+    leaf.ranges.push([offset + pos, offset + line.length, offset]);
+    info.leaf = leaf;
+    return info;
+  }
+  if (matched < containers.length) {
+    containers.length = matched;
+    st.leaf = leaf = null;
+  }
+  for (; ; ) {
+    if (spaces(rest) >= 4) break;
+    const q = /^ {0,3}> ?/.exec(rest);
+    if (q) {
+      containers.push({ type: "quote" });
+      pos += q[0].length;
+      rest = line.slice(pos);
+      info.opened += 1;
+      st.leaf = leaf = null;
+      continue;
+    }
+    if (RULE.test(rest)) break;
+    const l = LIST_RE.exec(rest);
+    if (l) {
+      const after = rest.slice(l[0].length);
+      const blankItem = !after.trim();
+      if (leaf && leaf.type === "para" && (blankItem || /\d/.test(l[2][0]) && !/^1[.)]$/.test(l[2]))) break;
+      let n = l[3].length;
+      if (blankItem || n >= 5) n = 1;
+      containers.push({ type: "list", indent: l[1].length + l[2].length + n });
+      pos += Math.min(l[0].length, l[1].length + l[2].length + n);
+      rest = line.slice(pos);
+      info.opened += 1;
+      st.leaf = leaf = null;
+      if (blankItem) break;
+      continue;
+    }
+    break;
+  }
+  info.pos = pos;
+  info.rest = rest;
+  if (!rest.trim()) {
+    st.leaf = null;
+    info.blank = true;
+    return info;
+  }
+  const range = [offset + pos, offset + line.length, offset];
+  if (spaces(rest) >= 4) {
+    if (leaf && leaf.type === "para") {
+      leaf.ranges.push(range);
+      info.leaf = leaf;
+    } else info.leaf = st.leaf = { type: "indented" };
+    return info;
+  }
+  const f2 = FENCE_OPEN.exec(rest);
+  if (f2 && !(f2[2][0] === "`" && f2[3].includes("`"))) {
+    const prefix = containers.map((c2) => c2.type === "quote" ? "> " : " ".repeat(c2.indent)).join("") + f2[1];
+    info.leaf = st.leaf = { type: "fence", char: f2[2][0], len: f2[2].length, prefix };
+    info.openedFence = true;
+    return info;
+  }
+  if (ATX.test(rest)) {
+    info.leaf = st.leaf = { type: "heading", ranges: [range] };
+    return info;
+  }
+  if (leaf && leaf.type === "table") {
+    leaf.ranges = [range];
+    info.leaf = leaf;
+    return info;
+  }
+  if (leaf && leaf.type === "para") {
+    const head = leaf.ranges[leaf.ranges.length - 1];
+    const header = st.source.slice(head[0], head[1]).replace(/\r$/, "");
+    if (hasPipe(header) && isSeparator(rest, cells(header).length)) {
+      info.leaf = st.leaf = { type: "table", cols: cells(header).length, ranges: [] };
+      info.separator = true;
+      return info;
+    }
+  }
+  if (RULE.test(rest) || leaf && leaf.type === "para" && /^ {0,3}(?:=+|-+)[ \t]*$/.test(rest)) {
+    st.leaf = null;
+    info.rule = true;
+    return info;
+  }
+  const def = DEF.exec(rest);
+  if (def && !(leaf && leaf.type === "para")) {
+    const label = normLabel(def[1]);
+    const hasDest = /^\s*\S/.test(rest.slice(def[0].length));
+    if (label.startsWith("^")) {
+      st.defs.add(label);
+      info.leaf = st.leaf = { type: "para", ranges: [range] };
+      return info;
+    }
+    if (hasDest) st.defs.add(label);
+    info.leaf = st.leaf = { type: "def" };
+    info.defComplete = hasDest;
+    return info;
+  }
+  if (leaf && leaf.type === "para") leaf.ranges.push(range);
+  else st.leaf = { type: "para", ranges: [range] };
+  info.leaf = st.leaf;
+  return info;
 }
 function openMediaTag(line) {
   for (const match of line.matchAll(/[`"']?MEDIA:/g)) {
@@ -51966,26 +52104,21 @@ function openMediaTag(line) {
   }
   return -1;
 }
-function settledAttrs(body) {
-  const done = /["'\s]$/.test(body) ? body : body.replace(/\S*$/, "");
+function typedAttrs(body) {
+  let text3 = body;
+  if ((text3.match(/"/g) || []).length % 2) text3 += '"';
+  else if ((text3.match(/'/g) || []).length % 2) text3 += "'";
   const attrs = {};
-  for (const pair of done.matchAll(/([a-z][\w-]{0,63})=(?:"([^"]*)"|'([^']*)'|([^\s"'{}]+))/gi)) {
+  for (const pair of text3.matchAll(/([a-z][\w-]{0,63})=(?:"([^"]*)"|'([^']*)'|([^\s"'{}]+))/gi)) {
     attrs[pair[1].toLowerCase()] = pair[2] ?? pair[3] ?? pair[4] ?? "";
   }
   return attrs;
 }
-function holdLastLine(line) {
-  if (!line) return { at: -1, pending: null };
-  const stripped = fenceBody(line).replace(/^(?:[-*+]|\d{1,9}[.)])[ ]+/, "");
-  if (/^(?:`{1,3}|~{1,3})/.test(stripped) && !/^`{1,2}[^`]/.test(stripped)) return { at: 0, pending: null };
-  if (/^[\t ]*[`"']?(?:M|ME|MED|MEDI|MEDIA|MEDIA:.*)$/.test(line)) return { at: 0, pending: null };
-  if (/^ {0,3}#{1,6}\s*$/.test(line)) return { at: 0, pending: null };
-  if (/^\s*(?:[-*+]|\d{1,9}[.)]?)\s*$/.test(line)) return { at: 0, pending: null };
-  if (/^ {0,3}([-=*_])(?:\s*\1)*\s*$/.test(line)) return { at: 0, pending: null };
+function holdTokens(line) {
   const dir = new RegExp(String.raw`(^|\s)::(card|preview)\{([^{}\n]{0,${DIRECTIVE_BODY_MAX}})$`).exec(line);
   if (dir) {
     const at2 = dir.index + dir[1].length;
-    if (!oddBackticks(line.slice(0, at2))) return { at: at2, pending: { name: dir[2], attrs: settledAttrs(dir[3]) } };
+    if (!oddBackticks(line.slice(0, at2))) return { at: at2, pending: { name: dir[2], attrs: typedAttrs(dir[3]) } };
   }
   const head = /(^|\s)(::?[a-z]{0,7})$/.exec(line);
   if (head) {
@@ -51995,70 +52128,211 @@ function holdLastLine(line) {
       return { at: at2, pending: null };
     }
   }
-  let at = -1;
-  const pick = (index) => {
-    if (index >= 0 && (at < 0 || index < at)) at = index;
-  };
-  pick(openMediaTag(line));
+  let at = openMediaTag(line);
   const tagHead = /(^|\W)[`"']?(?:M|ME|MED|MEDI|MEDIA)$/.exec(line);
-  if (tagHead) pick(tagHead.index + tagHead[1].length);
-  const link = new RegExp(String.raw`!?\[[^\[\]\n]{0,${HOLD_MAX}}(?:\](?:\([^)\n]{0,${HOLD_MAX}})?)?$`).exec(line);
-  if (link && !oddBackticks(line.slice(0, link.index))) pick(link.index);
+  if (tagHead) {
+    const start2 = tagHead.index + tagHead[1].length;
+    if (at < 0 || start2 < at) at = start2;
+  }
   return { at, pending: null };
 }
-function inlineTail(tail) {
+function linkTail(t, k) {
+  const n = t.length;
+  while (k < n && (t[k] === " " || t[k] === "	" || t[k] === "\n")) k += 1;
+  if (k >= n) return "open";
+  if (t[k] === "<") {
+    k += 1;
+    while (k < n && t[k] !== ">" && t[k] !== "\n" && t[k] !== "<") k += t[k] === "\\" ? 2 : 1;
+    if (k >= n) return "open";
+    if (t[k] !== ">") return -1;
+    k += 1;
+  } else {
+    let depth = 0;
+    while (k < n) {
+      const c2 = t[k];
+      if (c2 === "\\") {
+        k += 2;
+        continue;
+      }
+      if (c2 === "(") depth += 1;
+      else if (c2 === ")") {
+        if (depth === 0) break;
+        depth -= 1;
+      } else if (/\s/.test(c2)) break;
+      k += 1;
+    }
+    if (k >= n) return "open";
+  }
+  while (k < n && /\s/.test(t[k])) k += 1;
+  if (k >= n) return "open";
+  if (t[k] === '"' || t[k] === "'" || t[k] === "(") {
+    const close = t[k] === "(" ? ")" : t[k];
+    k += 1;
+    while (k < n && t[k] !== close) k += t[k] === "\\" ? 2 : 1;
+    if (k >= n) return "open";
+    k += 1;
+    while (k < n && /\s/.test(t[k])) k += 1;
+    if (k >= n) return "open";
+  }
+  return t[k] === ")" ? k + 1 : -1;
+}
+function inlineScan(t, defs) {
   const stack = [];
+  const brackets = [];
   let code = null;
   let cut2 = -1;
   let i = 0;
-  let lineStart = true;
-  while (i < tail.length) {
-    const ch = tail[i];
-    if (lineStart) {
-      lineStart = false;
-      if (BLOCK_START.test(tail.slice(i, i + 16))) {
-        stack.length = 0;
-        code = null;
+  const n = t.length;
+  const hold = (at) => {
+    if (n - at <= HOLD_MAX) cut2 = at;
+    return n - at <= HOLD_MAX;
+  };
+  scan: while (i < n) {
+    const ch = t[i];
+    if (code) {
+      if (ch !== "`") {
+        i += 1;
+        continue;
       }
-    }
-    if (ch === "\n") {
-      lineStart = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "\\" && !code) {
-      i += 2;
-      continue;
-    }
-    if (ch === "`") {
-      let j = i;
-      while (tail[j] === "`") j += 1;
-      const len = j - i;
-      if (!code) {
-        if (j >= tail.length) {
+    } else {
+      if (ch === "\\") {
+        if (i + 1 >= n) {
           cut2 = i;
           break;
         }
-        code = { len, at: i };
+        i += 2;
+        continue;
+      }
+      if (ch === "!" && i + 1 >= n) {
+        cut2 = i;
+        break;
+      }
+      const tail = t.slice(i, i + 4096);
+      if (ch === "<" && /^<\/?[A-Za-z0-9+.@-]*$/.test(tail) && n - i <= 40) {
+        cut2 = i;
+        break;
+      }
+      if (ch === "&" && /^&#?[A-Za-z0-9]{0,32}$/.test(tail)) {
+        cut2 = i;
+        break;
+      }
+      if (ch === "M" || (ch === "`" || ch === '"' || ch === "'") && t.startsWith("MEDIA:", i + 1)) {
+        const m = MEDIA_TOKEN.exec(tail);
+        if (m && (ch !== "M" || i === 0 || !isWord(t[i - 1]))) {
+          i += m[0].length;
+          continue;
+        }
+      }
+      if (ch === ":" && t[i + 1] === ":") {
+        const m = DIRECTIVE_TOKEN.exec(tail);
+        if (m) {
+          i += m[0].length;
+          continue;
+        }
+      }
+      if (ch === "<") {
+        const m = AUTOLINK.exec(tail);
+        if (m) {
+          if (m[1]) {
+            i += m[0].length;
+            continue;
+          }
+          if (i + m[0].length >= n && hold(i)) break;
+        }
+      }
+      if ((ch === "h" || ch === "w") && (i === 0 || /[\s*_~(]/.test(t[i - 1])) && /^(?:https?:\/\/|www\.)/.test(tail)) {
+        let j = i;
+        while (j < n && !/[\s<]/.test(t[j])) j += 1;
+        if (j >= n) {
+          let k = j;
+          while (k > i && "?!.,:*_~".includes(t[k - 1])) k -= 1;
+          if (k < j) {
+            cut2 = k;
+            break;
+          }
+        }
+        i = j;
+        continue;
+      }
+    }
+    if (ch === "`") {
+      let j = i;
+      while (t[j] === "`") j += 1;
+      const len = j - i;
+      if (!code) {
+        if (j >= n) {
+          cut2 = i;
+          break;
+        }
+        code = { len, at: i, content: j };
       } else if (len === code.len) code = null;
-      else if (j >= tail.length) {
+      else if (j >= n) {
         cut2 = i;
         break;
       }
       i = j;
       continue;
     }
-    if (code) {
+    if (ch === "[" || ch === "!" && t[i + 1] === "[") {
+      brackets.push({ at: i, depth: stack.length });
+      i += ch === "!" ? 2 : 1;
+      continue;
+    }
+    if (ch === "]" && brackets.length) {
+      const b2 = brackets.pop();
+      const label = t.slice(t[b2.at] === "!" ? b2.at + 2 : b2.at + 1, i);
+      const next = t[i + 1];
+      const confine = () => {
+        if (stack.length > b2.depth) stack.length = b2.depth;
+      };
+      if (next === "(") {
+        const end = linkTail(t, i + 2);
+        if (end === "open") {
+          if (hold(b2.at)) break scan;
+          i += 1;
+          continue;
+        }
+        if (end > 0) {
+          confine();
+          i = end;
+          continue;
+        }
+        i += 1;
+        continue;
+      }
+      if (next === "[") {
+        let j = i + 2;
+        while (j < n && t[j] !== "]" && t[j] !== "[") j += t[j] === "\\" ? 2 : 1;
+        if (j >= n) {
+          if (hold(b2.at)) break scan;
+          i += 1;
+          continue;
+        }
+        if (t[j] === "]") {
+          const ref = t.slice(i + 2, j);
+          if (defs.has(normLabel(ref || label))) {
+            confine();
+            i = j + 1;
+            continue;
+          }
+        }
+        i += 1;
+        continue;
+      }
+      if (next === void 0 && !defs.has(normLabel(label))) {
+        if (hold(b2.at)) break;
+      }
+      if (defs.has(normLabel(label))) confine();
       i += 1;
       continue;
     }
-    if (ch === "*" || ch === "_") {
+    if (ch === "*" || ch === "_" || ch === "~") {
       let j = i;
-      while (tail[j] === ch) j += 1;
+      while (t[j] === ch) j += 1;
       const len = j - i;
-      const prev = tail[i - 1];
-      const next = tail[j];
-      if (ch === "_" && isWord(prev) && isWord(next)) {
+      const prev = t[i - 1];
+      const next = t[j];
+      if (ch === "_" && isWord(prev) && isWord(next) || ch === "~" && len > 2) {
         i = j;
         continue;
       }
@@ -52083,100 +52357,147 @@ function inlineTail(tail) {
         if (rest > 0) cut2 = j - rest;
         break;
       }
-      if (rest > 0 && !isSpace(next)) stack.push({ ch, len: Math.min(rest, 3) });
+      if (rest > 0 && !isSpace(next)) stack.push({ ch, len: Math.min(rest, ch === "~" ? 2 : 3) });
       i = j;
       continue;
     }
     i += 1;
   }
+  for (const b2 of brackets) {
+    if (n - b2.at <= HOLD_MAX) {
+      if (cut2 < 0 || b2.at < cut2) cut2 = b2.at;
+      break;
+    }
+  }
+  if (cut2 < 0 && code && !t.slice(code.content).trim()) cut2 = code.at;
+  if (cut2 >= 0) return { cut: cut2, closers: "", code: false };
   let closers = "";
-  if (code && cut2 < 0) closers += "`".repeat(code.len);
+  if (code) closers += "`".repeat(code.len);
   for (let k = stack.length - 1; k >= 0; k -= 1) closers += stack[k].ch.repeat(stack[k].len);
-  return { cut: cut2, closers, code: Boolean(code && cut2 < 0) };
+  return { cut: -1, closers, code: Boolean(code) };
+}
+function leafText(source, ranges, limit) {
+  const parts = [];
+  let text3 = "";
+  for (const [s, e0] of ranges) {
+    if (s >= limit) break;
+    const e2 = Math.min(e0, limit);
+    if (parts.length) text3 += "\n";
+    parts.push({ s, e: e2, v: text3.length });
+    text3 += source.slice(s, e2);
+  }
+  const toSource = (v) => {
+    for (let k = parts.length - 1; k >= 0; k -= 1) {
+      if (v >= parts[k].v) return Math.min(parts[k].s + (v - parts[k].v), parts[k].e);
+    }
+    return parts.length ? parts[0].s : limit;
+  };
+  return { text: text3, toSource };
 }
 function streamSafeParts(input) {
-  const source = String(input ?? "");
-  if (!source) return { text: "", held: "", directive: false, pending: null };
+  const raw = String(input ?? "");
+  const lead = /^\s*/.exec(raw)[0];
+  if (!lead) return safeParts(raw);
+  const parts = safeParts(raw.slice(lead.length));
+  return { ...parts, text: parts.text ? lead + parts.text : "", held: parts.text ? parts.held : raw };
+}
+function safeParts(input) {
+  const source = input;
+  const none = { text: "", held: source, directive: false, pending: null };
+  if (!source) return { ...none, held: "" };
   const lastStart = source.lastIndexOf("\n") + 1;
-  let fence = null;
-  let blockStart = 0;
-  let inList = false;
-  let prevBlank = true;
-  let prev = null;
-  let table = null;
+  const st = { source, defs: /* @__PURE__ */ new Set(), containers: [], leaf: null };
   let offset = 0;
   while (offset < lastStart) {
     const end = source.indexOf("\n", offset);
-    const line = source.slice(offset, end);
-    if (fence) {
-      if (fenceCloses(line, fence)) {
-        fence = null;
-        blockStart = end + 1;
-      }
-      offset = end + 1;
-      continue;
-    }
-    const opened = fenceOpen(line, inList);
-    if (opened) {
-      fence = opened;
-      table = null;
-      prev = null;
-      prevBlank = false;
-    } else if (!line.trim()) {
-      blockStart = end + 1;
-      table = null;
-      prev = null;
-      prevBlank = true;
-    } else {
-      if (LIST_MARK.test(line)) inList = true;
-      else if (prevBlank && !/^\s/.test(line)) inList = false;
-      if (table && !hasPipe(line)) table = null;
-      if (!table && prev && hasPipe(prev.line) && isSeparator(line, cells(prev.line).length)) table = { cols: cells(prev.line).length };
-      prev = { line, offset };
-      prevBlank = false;
-    }
+    scanLine(st, source.slice(offset, end), offset);
     offset = end + 1;
   }
-  const lastLine = source.slice(lastStart);
-  if (fence) {
-    let cut3 = source.length;
-    const body = fenceBody(lastLine);
-    const partialClose = new RegExp(`^\\${fence.char}+\\s*$`).test(body);
-    if (lastLine && (partialClose || /^[\t ]*[`"']?(?:M|ME|MED|MEDI|MEDIA|MEDIA:.*)$/.test(body))) cut3 = lastStart;
-    else {
-      const tag = openMediaTag(lastLine);
-      if (tag >= 0) cut3 = lastStart + tag;
-    }
-    const safe2 = source.slice(0, cut3);
-    const text3 = `${safe2}${safe2.endsWith("\n") ? "" : "\n"}${fence.prefix}${fence.char.repeat(fence.len)}`;
-    return { text: text3, held: source.slice(cut3), directive: false, pending: null };
-  }
+  const lastRaw = source.slice(lastStart);
+  const before = st.leaf;
   let cut2 = source.length;
-  const hold = holdLastLine(lastLine);
-  if (hold.at >= 0) cut2 = lastStart + hold.at;
-  if (table) {
-    if (lastLine && hasPipe(lastLine) && cells(lastLine).length < table.cols) cut2 = Math.min(cut2, lastStart);
-  } else if (!lastLine) {
-    if (prev && leadingPipe(prev.line)) cut2 = Math.min(cut2, prev.offset);
-  } else if (prev && hasPipe(prev.line) && separatorish(lastLine)) {
-    if (!isSeparator(lastLine, cells(prev.line).length)) cut2 = Math.min(cut2, leadingPipe(prev.line) ? prev.offset : lastStart);
-    else if (cut2 === lastStart && hold.at === 0) cut2 = source.length;
-  } else if (leadingPipe(lastLine)) {
-    cut2 = Math.min(cut2, lastStart);
-  }
-  const pending = hold.pending && cut2 === lastStart + hold.at ? hold.pending : null;
-  let safe = source.slice(0, cut2);
-  let closers = "";
-  const tailHead = source.slice(blockStart, source.indexOf("\n", blockStart) < 0 ? source.length : source.indexOf("\n", blockStart));
-  const indentedCode = /^(?: {4}|\t)/.test(tailHead) && !inList;
-  for (let pass = 0; pass < 8 && !indentedCode && blockStart < safe.length; pass += 1) {
-    const inline = inlineTail(safe.slice(blockStart));
-    if (inline.cut < 0) {
-      closers = inline.closers;
-      if (closers && !inline.code) safe = safe.replace(/\s+$/, "");
-      break;
+  let closeFence = null;
+  let region = null;
+  let pending = null;
+  if (!lastRaw.trim()) {
+    cut2 = lastStart;
+    if (before && before.type === "fence") closeFence = before;
+    else if (before && before.ranges) region = before;
+    if (before && before.type === "para" && !lastRaw) {
+      const head = before.ranges[before.ranges.length - 1];
+      if (hasPipe(source.slice(head[0], head[1]))) cut2 = head[2];
     }
-    safe = safe.slice(0, blockStart + inline.cut);
+  } else {
+    const after = cloneState(st);
+    const info = scanLine(after, lastRaw, lastStart);
+    const rest = info.rest.replace(/\r$/, "");
+    if (info.inFence) {
+      closeFence = info.inFence;
+      const partial = new RegExp(`^ {0,3}\\${info.inFence.char}+[ \\t]*$`);
+      if (!rest.trim() || partial.test(rest) || MEDIA_WHOLE.test(rest)) cut2 = lastStart;
+      else {
+        const tag = openMediaTag(lastRaw);
+        if (tag >= 0) cut2 = lastStart + tag;
+      }
+    } else if (info.closedFence) {
+    } else if (info.openedFence || info.blank || /^ {0,3}#{1,6}[ \t]*$/.test(rest) || /^\d{1,9}[.)]?$/.test(rest.trim()) || /^ {0,3}(?:`{1,2}|~{1,2})$/.test(rest) || info.rule || // A reference definition is invisible once it has a destination
+    // (it only resolves links); before that it would show as text.
+    info.leaf && info.leaf.type === "def" && !info.defComplete || MEDIA_WHOLE.test(rest) || MEDIA_WHOLE.test(lastRaw)) {
+      cut2 = lastStart;
+      if (before && before.ranges) region = before;
+    } else if (!info.separator && before && before.type === "para" && info.leaf && info.leaf.type === "para" && separatorish(rest) && hasPipe(source.slice(before.ranges[before.ranges.length - 1][0], before.ranges[before.ranges.length - 1][1]))) {
+      cut2 = before.ranges[before.ranges.length - 1][2];
+      region = before;
+    } else if (info.leaf && info.leaf.type === "para" && hasPipe(rest)) {
+      cut2 = lastStart;
+      region = before && before.type === "para" ? before : null;
+    } else {
+      if (info.leaf && info.leaf.ranges) region = info.leaf;
+      const tokens = holdTokens(lastRaw);
+      if (tokens.at >= 0) {
+        cut2 = lastStart + tokens.at;
+        pending = tokens.pending;
+      }
+    }
+  }
+  if (cut2 === lastStart && before && before.type === "para") {
+    const head = before.ranges[before.ranges.length - 1];
+    if (hasPipe(source.slice(head[0], head[1]))) cut2 = head[2];
+  }
+  let safe = source.slice(0, cut2);
+  if (closeFence) {
+    const text3 = `${safe}${safe.endsWith("\n") ? "" : "\n"}${closeFence.prefix}${closeFence.char.repeat(closeFence.len)}`;
+    return { text: text3, held: source.slice(cut2), directive: false, pending: null };
+  }
+  let closers = "";
+  if (region && region.type !== "indented" && region.ranges.length) {
+    for (let pass = 0; pass < 8; pass += 1) {
+      const { text: text3, toSource } = leafText(source, region.ranges, safe.length);
+      if (!text3) break;
+      if (/^\[[ xX]?\]?[ \t]*$/.test(text3) && region.ranges[0][0] > region.ranges[0][2]) {
+        safe = safe.slice(0, region.ranges[0][2]);
+        pending = null;
+        break;
+      }
+      let from = 0;
+      if (region.type === "table") {
+        const pipe = /(?:^|[^\\])\|(?!.*(?:^|[^\\])\|)/.exec(text3);
+        if (pipe) from = pipe.index + pipe[0].length;
+      }
+      const inline = inlineScan(text3.slice(from), st.defs);
+      if (inline.cut >= 0) inline.cut += from;
+      if (inline.cut < 0) {
+        closers = inline.closers;
+        if (closers && !inline.code) safe = safe.replace(/\s+$/, "");
+        break;
+      }
+      let at = toSource(inline.cut);
+      if (at >= safe.length) break;
+      const line = region.ranges.find((r) => at >= r[2] && at <= r[0]);
+      if (line) at = line[2];
+      safe = safe.slice(0, at);
+      pending = null;
+    }
   }
   return { text: safe + closers, held: source.slice(safe.length), directive: Boolean(pending), pending };
 }

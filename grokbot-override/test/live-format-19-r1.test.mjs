@@ -96,9 +96,9 @@ test('LF-R1-005: a table ending in a complete row or separator shows whole while
   for (const table of ['| A | B |\n|---|---|\n| 1 | 2 |', '| A | B |\n|---|---|', 'A | B\n--|--\n1 | 2', '| A | B |\n|:--|--:|\n| 1 | 2', 'x\n\n| A |\n|---|\n| 1 |']) {
     assert.equal(streamSafe(table), table, JSON.stringify(table))
   }
-  assert.equal(streamSafe('| A | B |\n|---|---|\n| 1 |'), '| A | B |\n|---|---|\n', 'a row short of columns waits')
+  assert.equal(streamSafe('| A | B |\n|---|---|\n| 1 |'), '| A | B |\n|---|---|\n| 1 |', 'a short row is valid GFM (review round 2, LF-R2-004)')
   assert.equal(streamSafe('| A | B |\n|---|'), '', 'a separator short of columns waits with its header')
-  assert.equal(streamSafe('A | B\n--|'), 'A | B\n', 'a header without a leading pipe stays text; its half separator waits')
+  assert.equal(streamSafe('A | B\n--|'), '', 'a header without a leading pipe waits with its half separator (no raw pipes flash)')
 })
 
 // ---- mounted harness ----

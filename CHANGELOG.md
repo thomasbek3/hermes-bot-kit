@@ -18,6 +18,12 @@
   inline-code closer never merges with a literal backtick; a table ending in a complete row or separator shows
   whole; a card completing never remounts the prose before it; markdown re-renders only on throttled ticks; a
   streaming preview reserves its own height; StrictMode effect replay no longer freezes the stream.
+  Review round 2: the streaming text is now read as CommonMark blocks (quote and list-item containers at any
+  nesting, fenced and indented code, tables, reference definitions, lazy continuation), so a fence closes only
+  under its own containers and code is never changed; an inline tokenizer skips link destinations, autolinks,
+  bare URLs, MEDIA tags and directives, waits for unfinished links (nested parentheses, titles) and shows
+  defined reference links at once; GFM short table rows show while streaming; a bare `height=360` sizes the
+  preview placeholder. A local, out-of-repo check compared every prefix of 790 documents with a CommonMark/GFM parser.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

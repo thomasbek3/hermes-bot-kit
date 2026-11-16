@@ -78,7 +78,7 @@ test('streamSafe: links, images, MEDIA lines and directives on their way are hel
   }
   assert.equal(streamSafe('look MEDIA:/tmp/a.pn'), 'look ', 'an inline tag')
   assert.equal(streamSafe('ok\nMEDIA: /tmp/a.png\nmore'), 'ok\nMEDIA: /tmp/a.png\nmore', 'a complete line passes (extractMedia lifts it)')
-  assert.deepEqual(streamSafeParts('See ::card{id="c-1" file="cards/c'), { text: 'See ', held: '::card{id="c-1" file="cards/c', directive: true, pending: { name: 'card', attrs: { id: 'c-1' } } })
+  assert.deepEqual(streamSafeParts('See ::card{id="c-1" file="cards/c'), { text: 'See ', held: '::card{id="c-1" file="cards/c', directive: true, pending: { name: 'card', attrs: { id: 'c-1', file: 'cards/c' } } })
   assert.deepEqual(streamSafeParts('See ::prev'), { text: 'See ', held: '::prev', directive: false, pending: null })
   assert.equal(streamSafe('See ::card{id="c-1"} done'), 'See ::card{id="c-1"} done')
   assert.equal(streamSafe('time 10:'), 'time 10:', 'a colon after a word is text')
@@ -99,7 +99,7 @@ test('streamSafe: fences close temporarily and grow; half block markers and tabl
   assert.equal(streamSafe('a\n---'), 'a\n', 'a rule or setext underline is held')
   assert.equal(streamSafe('| a | b |'), '')
   assert.equal(streamSafe('| a | b |\n|--'), '', 'the header waits for its separator')
-  assert.equal(streamSafe('| a | b |\n|---|---|\n| 1 |'), '| a | b |\n|---|---|\n', 'a half row is held')
+  assert.equal(streamSafe('| a | b |\n|---|---|\n| 1 |'), '| a | b |\n|---|---|\n| 1 |', 'a short row is a valid GFM row (omitted cells are empty): shown')
   assert.equal(streamSafe('| a | b |\n|---|---|\n| 1 | 2 |\n'), '| a | b |\n|---|---|\n| 1 | 2 |\n')
 })
 
