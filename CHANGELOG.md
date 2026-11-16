@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **grokbot-override: images and recordings keep their size, and streaming no longer re-renders old messages
+  (2026-11-15)**: an image from the bot's machine is decoded before it shows and drawn with its width and height
+  (clamped to 360 px wide), instead of a fixed 160×110 box that then jumped to the image's size; the size and the
+  decoded image are remembered per bot and path, so switching bots and coming back draws it at once in its final
+  box. Audio and video load in a player-sized box instead of a file card that turned into a player. A bot's
+  finished messages are memoized (`BotProse`, `BotText`, the Markdown renderer), so each streamed delta re-renders
+  only the reply that is streaming, not every message above it; media effects key on the bot's route, not the
+  roster's row object.
+- **grokbot-override: a finished reply no longer flashes when its stored copy arrives (2026-11-15)**: a streamed
+  reply (`live:…`) and a sent bubble (`local:…`) were replaced by their stored rows on the next history read, which
+  gave them new React keys: the bubble and its group remounted, Markdown re-parsed, cards showed their loading box
+  again and images went back to the placeholder. The stored item now carries the old identity as `renderKey`
+  (`carryKeys` in `src/core/history.js`: a sent bubble goes to the exact stored row that confirmed it, a streamed reply to an assistant row of that same turn, same text first; rows another surface wrote never take them, and an ambiguous case keeps no key) and keeps
+  it across later refreshes; groups and the transcript key on it. The durable id stays the stored row's, so
+  reactions, edit and rewind address the same rows as before.
+- **grokbot-override: the transcript stays pinned through late growth (2026-11-15)**: the chat used to follow the
+  bottom only when its message list changed, so an image, card, preview or code block that finished sizing afterwards
+  left you short of the latest message. A pinned view now follows every content resize before paint
+  (`src/ui/stickToBottom.ts`, fed by OverlayScroll's existing ResizeObserver; its DOM-mutation thumb update is now
+  once per frame). A reader who scrolled up is never moved; a newer message then shows a round jump-to-latest button
+  that scrolls down smoothly (at once with reduced motion) and keeps following a reply that grows on the way (still moving after 1.2 s, it settles at the bottom and stays pinned); your own scrolling, including a drag of the scrollbar, cancels it. **Show earlier messages** keeps the message you were reading in place, even inside a tall group or bubble that is still streaming below you. A message that arrives while older messages load still brings up the jump button, and a message you send then is followed as usual. Known limits are listed in `grokbot-override/PARITY.md`. The
+  transcript uses the browser's scroll anchoring, so content changing above you no longer shifts what you read. The
+  narrow-pane drawer decision is measured before the first paint, so a docked panel no longer flips after one frame.
 - **grokbot-override: replies are formatted live while they stream (2026-11-15)**: a bot reply no longer
   types as plain text and then snaps into formatting when it finishes. It renders through the same markdown
   path as a finished reply from the first token: bold, lists, headings, links, inline code and code blocks

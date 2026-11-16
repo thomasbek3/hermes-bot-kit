@@ -17,7 +17,9 @@ bot's colour; the bot's bubbles are one flat grey. Thinking and tool rows, and "
 palette's **Grokbot Override: show work rows** turns them on (the same command hides them again; a background line never prints the command's path, which is in its tooltip). A thin red **NEW** line marks the first bot message you have not
 seen when you open a chat. The sidebar footer shows your initials and name (this computer's account name, the only
 one Hermes gives plugins; "You" without it) and a round button that opens Hermes Settings. The transcript stays put
-while you scroll past live cards, and message actions float beside the message on hover. Code blocks in a bot's reply show in full (a
+while you scroll past live cards, and message actions float beside the message on hover. At the bottom it stays at the
+bottom while images, cards and code blocks finish sizing; **Show earlier messages** keeps your place; scrolled up, a
+round jump-to-latest button appears when a newer message arrives. Code blocks in a bot's reply show in full (a
 long one folds behind **Show more**) with a **Copy** button. A file the bot sends (a `MEDIA:` line naming a
 document, not an image or a recording) is a card under its bubble: a tile by type (a green sheet for spreadsheets,
 PDF, image, document), the name, its size and a download button. Clicking the card opens a large viewer over the

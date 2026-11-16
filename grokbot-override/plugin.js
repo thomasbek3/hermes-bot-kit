@@ -17954,7 +17954,7 @@ var init_xlsx = __esm({
         }
         prep_blob(d2, 0);
         var ft = d2.read_shift(1);
-        var memo = !!(ft & 136);
+        var memo3 = !!(ft & 136);
         var vfp = false, l7 = false;
         switch (ft) {
           case 2:
@@ -17965,12 +17965,12 @@ var init_xlsx = __esm({
           // dBASE III
           case 48:
             vfp = true;
-            memo = true;
+            memo3 = true;
             break;
           // VFP
           case 49:
             vfp = true;
-            memo = true;
+            memo3 = true;
             break;
           // VFP with autoincrement
           // 0x43 dBASE IV SQL table files
@@ -18119,7 +18119,7 @@ var init_xlsx = __esm({
                 }
                 break;
               case "M":
-                if (!memo) throw new Error("DBF Unexpected MEMO for type " + ft.toString(16));
+                if (!memo3) throw new Error("DBF Unexpected MEMO for type " + ft.toString(16));
                 out[R][C] = "##MEMO##" + (l7 ? parseInt(s.trim(), 10) : dd.read_shift(4));
                 break;
               case "N":
@@ -41862,11 +41862,22 @@ function rowIdentity(row, index = 0) {
   if (durable !== void 0 && durable !== null && durable !== "") return `id:${durable}`;
   return `t:${row?.timestamp ?? ""}:${row?.role ?? ""}:${index}`;
 }
+var CONFIRMED_MAX = 256;
+var confirmedRows = /* @__PURE__ */ new Map();
+function rememberConfirmed(sendId, itemId) {
+  if (!sendId || !itemId) return;
+  confirmedRows.delete(sendId);
+  confirmedRows.set(sendId, itemId);
+  while (confirmedRows.size > CONFIRMED_MAX) confirmedRows.delete(confirmedRows.keys().next().value);
+}
+function confirmedRowOf(sendId) {
+  return confirmedRows.get(sendId);
+}
 function confirmedSends(sends, rows) {
   const users = [];
   (Array.isArray(rows) ? rows : []).forEach((row, index) => {
     if (row?.role !== "user" || row.display_kind === "hidden") return;
-    users.push({ key: rowIdentity(row, index), text: rowText(row).trim() });
+    users.push({ key: rowIdentity(row, index), itemId: rowId(row, index, PERSISTED_PREFIX), text: rowText(row).trim() });
   });
   const claimed = /* @__PURE__ */ new Set();
   const done = /* @__PURE__ */ new Set();
@@ -41874,6 +41885,7 @@ function confirmedSends(sends, rows) {
   const claim = (send, user) => {
     claimed.add(user.key);
     done.add(send.id);
+    rememberConfirmed(send.id, user.itemId);
   };
   const list = Array.isArray(sends) ? sends : [];
   for (const send of list) {
@@ -41910,6 +41922,77 @@ function isPersistedItem(item) {
 function rowsToItems(rows) {
   return historyToItems(rows, { idPrefix: PERSISTED_PREFIX });
 }
+var keyOf = (item) => item?.renderKey ?? item?.id;
+var sameText = (a2, b2) => String(a2 || "").trim() === String(b2 || "").trim();
+function carryKeys(current, next, confirmedOf = confirmedRowOf) {
+  const before = Array.isArray(current) ? current : [];
+  const list = Array.isArray(next) ? next : [];
+  if (!before.length || !list.length) return list;
+  const shown = new Map(before.map((item) => [item.id, item]));
+  const at = new Map(list.map((item, index) => [item.id, index]));
+  const isFresh = (index) => {
+    const item = list[index];
+    return item && !shown.has(item.id) && isPersistedItem(item);
+  };
+  const keys2 = /* @__PURE__ */ new Map();
+  const gone = (item) => !at.has(item.id) && !isPersistedItem(item);
+  const userAt = /* @__PURE__ */ new Map();
+  for (const item of before) {
+    if (item.kind !== "user") continue;
+    if (at.has(item.id)) {
+      userAt.set(item.id, at.get(item.id));
+      continue;
+    }
+    if (!gone(item)) continue;
+    const target = confirmedOf(item.id);
+    const index = target !== void 0 ? at.get(target) : void 0;
+    if (index === void 0 || !isFresh(index) || keys2.has(index) || list[index].kind !== "user") continue;
+    keys2.set(index, keyOf(item));
+    userAt.set(item.id, index);
+  }
+  const turns = /* @__PURE__ */ new Map();
+  let anchor = null;
+  for (const item of before) {
+    if (item.kind === "user") anchor = item;
+    if (item.kind !== "assistant" || !gone(item) || !anchor) continue;
+    if (!turns.has(anchor.id)) turns.set(anchor.id, { confirmed: !isPersistedItem(anchor), items: [] });
+    turns.get(anchor.id).items.push(item);
+  }
+  for (const [userId, turn] of turns) {
+    const start2 = userAt.get(userId);
+    if (start2 === void 0) continue;
+    const candidates2 = [];
+    for (let i = start2 + 1; i < list.length && list[i].kind !== "user"; i += 1) {
+      if (list[i].kind === "assistant" && isFresh(i) && !keys2.has(i)) candidates2.push(i);
+    }
+    const left = [];
+    for (const item of turn.items) {
+      const hit = candidates2.find((i) => !keys2.has(i) && sameText(list[i].text, item.text));
+      if (hit !== void 0) keys2.set(hit, keyOf(item));
+      else left.push(item);
+    }
+    if (!turn.confirmed) continue;
+    const rest = candidates2.filter((i) => !keys2.has(i));
+    left.forEach((item, n) => {
+      if (rest[n] !== void 0) keys2.set(rest[n], keyOf(item));
+    });
+  }
+  let changed = false;
+  const out = list.map((item, index) => {
+    const prev = shown.get(item.id);
+    if (prev) {
+      if (prev.renderKey && item.renderKey !== prev.renderKey) {
+        changed = true;
+        return { ...item, renderKey: prev.renderKey };
+      }
+      return item;
+    }
+    if (!keys2.has(index)) return item;
+    changed = true;
+    return { ...item, renderKey: keys2.get(index) };
+  });
+  return changed ? out : list;
+}
 function rebuildItems(current, persisted, keep) {
   const kept = [];
   let anchor = null;
@@ -41917,7 +42000,7 @@ function rebuildItems(current, persisted, keep) {
     if (isPersistedItem(item)) anchor = item.id;
     else if (keep(item)) kept.push({ item, anchor });
   }
-  if (!kept.length) return persisted;
+  if (!kept.length) return carryKeys(current, persisted);
   const ids = new Set(persisted.map((item) => item.id));
   const after = /* @__PURE__ */ new Map();
   const tail = [];
@@ -41939,7 +42022,7 @@ function rebuildItems(current, persisted, keep) {
     out.push(item);
     if (after.has(item.id)) out.push(...after.get(item.id));
   }
-  return [...out, ...tail];
+  return carryKeys(current, [...out, ...tail]);
 }
 
 // src/core/sections.js
@@ -45753,10 +45836,10 @@ function pinsFrom(value) {
   }
   return out;
 }
-function pinState(pins, rows, keyOf) {
+function pinState(pins, rows, keyOf2) {
   const byKey = /* @__PURE__ */ new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
-    const key = keyOf(row);
+    const key = keyOf2(row);
     if (!byKey.has(key)) byKey.set(key, row);
   }
   const shown = [];
@@ -45765,18 +45848,18 @@ function pinState(pins, rows, keyOf) {
     const row = byKey.get(key);
     if (row) shown.push(row);
   }
-  return { shown, keys: new Set(shown.map((row) => keyOf(row))), canPin: shown.length < MAX_PINS };
+  return { shown, keys: new Set(shown.map((row) => keyOf2(row))), canPin: shown.length < MAX_PINS };
 }
-function togglePin(pins, key, rows, keyOf) {
+function togglePin(pins, key, rows, keyOf2) {
   const list = pinsFrom(pins);
-  const state = pinState(list, rows, keyOf);
+  const state = pinState(list, rows, keyOf2);
   if (state.keys.has(key)) return { pins: list.filter((entry) => entry !== key), changed: true, pinned: false };
   if (!state.canPin) return { pins: list, changed: false, pinned: false };
   return { pins: [...list.filter((entry) => entry !== key), key], changed: true, pinned: true };
 }
-function withoutPinned(rows, state, keyOf) {
+function withoutPinned(rows, state, keyOf2) {
   if (!state?.keys?.size) return rows;
-  return rows.filter((row) => !state.keys.has(keyOf(row)));
+  return rows.filter((row) => !state.keys.has(keyOf2(row)));
 }
 
 // src/core/workRows.js
@@ -47570,13 +47653,13 @@ function matchesQuery(bot, meta, q) {
   const needle = q.replace(/^@/, "");
   return [bot.name, displayName(bot, meta), handleOf(bot), meta?.title].some((v) => String(v || "").toLowerCase().includes(needle));
 }
-function deriveRosterView(rows, { metaFor: metaFor2, filters = DEFAULT_FILTERS, query = "", workingKey = "", keyOf, sources = [], hiddenExpanded = false, groupCount = 0, now = Date.now() } = {}) {
+function deriveRosterView(rows, { metaFor: metaFor2, filters = DEFAULT_FILTERS, query = "", workingKey = "", keyOf: keyOf2, sources = [], hiddenExpanded = false, groupCount = 0, now = Date.now() } = {}) {
   const f2 = { ...DEFAULT_FILTERS, ...filters || {} };
   const q = String(query || "").trim().toLowerCase();
   const all = (rows || []).filter((bot) => !bot?.ghost);
   const gatewayOptions = rosterGatewayOptions(sources, all);
   const gateway = f2.gateway === "all" || gatewayOptions.some((o) => o.connectionId === f2.gateway) ? f2.gateway : "all";
-  const activityRow = (bot) => ({ activity: activityOf(bot, metaFor2(bot)), active: botActiveNow(bot, { working: Boolean(keyOf && keyOf(bot) === workingKey && workingKey), now }) });
+  const activityRow = (bot) => ({ activity: activityOf(bot, metaFor2(bot)), active: botActiveNow(bot, { working: Boolean(keyOf2 && keyOf2(bot) === workingKey && workingKey), now }) });
   const keep = (bot) => matchesQuery(bot, metaFor2(bot), q) && rosterActivityMatches(activityRow(bot), f2.activity, now);
   const hiddenAll = all.filter((bot) => metaFor2(bot)?.hidden);
   const visibleAll = all.filter((bot) => !metaFor2(bot)?.hidden);
@@ -48602,7 +48685,7 @@ a { color: inherit; }
 
 /* ---------- transcript ---------- */
 .transcript-wrap { position: relative; flex: 1 1 0; min-height: 0; }
-.transcript { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 60px 16px 16px; overflow-anchor: none; }
+.transcript { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; padding: 60px 16px 16px; overflow-anchor: auto; }
 .transcript__col { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: 960px; margin: 0 auto; min-height: 100%; justify-content: flex-end; }
 .transcript__col > * { max-width: 100%; }
 
@@ -48724,6 +48807,7 @@ a { color: inherit; }
   animation: rise 160ms var(--ease-out);
 }
 .jump-btn:hover { background: var(--color-bg-elevated-hover); }
+.jump-btn svg { width: 16px; height: 16px; color: var(--color-text-secondary); }
 
 /* ---------- empty chat ---------- */
 .empty-chat { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: auto; padding: 40px 24px; text-align: center; align-self: center; }
@@ -49755,8 +49839,10 @@ var CHAT_CSS = (
 .gbo-media-image { display: block; max-width: min(100%, 360px); border-radius: 12px; overflow: hidden; border: 1px solid var(--gbo-border); }
 .gbo-media-image img { display: block; max-width: 100%; height: auto; }
 .gbo-media-image.is-loading { width: 160px; height: 110px; background: var(--gbo-accent); }
-.gbo-media-audio { width: min(100%, 320px); }
+.gbo-media-audio { display: block; width: min(100%, 320px); height: 40px; }
+.gbo-media-audio.is-loading { border-radius: 999px; background: var(--gbo-accent); }
 .gbo-media-video { max-width: min(100%, 420px); border-radius: 12px; }
+.gbo-media-video.is-loading { display: block; width: min(100%, 320px); aspect-ratio: 16 / 9; background: var(--gbo-accent); }
 .gbo-media-file {
   display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px;
   border: 1px solid var(--gbo-border); background: var(--gbo-bg); font: var(--gbo-text-body-sm); cursor: pointer;
@@ -51667,7 +51753,7 @@ var OverrideBoundary = class extends React3.Component {
 };
 
 // src/ui/Chat.tsx
-import * as React24 from "react";
+import * as React25 from "react";
 
 // src/core/colors.js
 function expandHex(hex) {
@@ -51852,7 +51938,7 @@ function groupMessages(items) {
     const at = Number(item?.at || 0);
     const close = !prevAt || !at || Math.abs(at - prevAt) < GROUP_GAP_MS;
     if (prev && last.side === side && close) last.items.push(item);
-    else out.push({ kind: "group", id: `group:${item.id}`, side, items: [item] });
+    else out.push({ kind: "group", id: `group:${item.renderKey ?? item.id}`, side, items: [item] });
   }
   return out;
 }
@@ -55015,28 +55101,79 @@ function saveDataUrl(dataUrl, name) {
   } catch {
   }
 }
+var MEDIA_IMAGE_MAX_PX = 360;
+var READY_MAX = 60;
+var readyMedia = /* @__PURE__ */ new Map();
+function rememberMedia(key, value) {
+  readyMedia.delete(key);
+  readyMedia.set(key, value);
+  while (readyMedia.size > READY_MAX) readyMedia.delete(readyMedia.keys().next().value);
+}
+function mediaBox(width, height) {
+  if (!(Number(width) > 0) || !(Number(height) > 0)) return null;
+  const w = Math.min(Number(width), MEDIA_IMAGE_MAX_PX);
+  return { width: Math.round(w), height: Math.round(w * Number(height) / Number(width)) };
+}
+function decodeSize(src) {
+  const Img = globalThis.window?.Image ?? globalThis.Image;
+  if (typeof Img !== "function") return Promise.resolve({});
+  let img;
+  try {
+    img = new Img();
+  } catch {
+    return Promise.resolve({});
+  }
+  if (typeof img.decode !== "function") return Promise.resolve({});
+  img.src = src;
+  const read = () => img.naturalWidth > 0 && img.naturalHeight > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : {};
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({}), 1500);
+    img.decode().then(
+      () => {
+        clearTimeout(timer);
+        resolve(read());
+      },
+      () => {
+        clearTimeout(timer);
+        resolve({});
+      }
+    );
+  });
+}
 function OwnerMedia({ bot, item }) {
-  const [src, setSrc] = React11.useState("");
+  const route = rowKey(bot);
+  const cacheKey = `${route}|${item.path}`;
+  const cached2 = !item.remote ? readyMedia.get(cacheKey) : void 0;
+  const [ready, setReady] = React11.useState(cached2 || null);
   const [error, setError] = React11.useState("");
+  const botRef = React11.useRef(bot);
+  botRef.current = bot;
   const wantsRead = !item.remote && item.kind !== "file";
   React11.useEffect(() => {
     if (!wantsRead) return void 0;
+    const hit = readyMedia.get(cacheKey);
+    if (hit) {
+      setReady((current) => current?.src === hit.src ? current : hit);
+      return void 0;
+    }
     let live = true;
-    readBotMedia(bot, item.path).then(
-      (url) => {
-        if (live) setSrc(url);
-      },
-      (err2) => {
-        if (live) setError(String(err2?.message || err2));
-      }
-    );
+    readBotMedia(botRef.current, item.path).then(async (url) => {
+      const size = item.kind === "image" && url ? await decodeSize(url) : {};
+      if (!live) return;
+      const value = { src: url, ...size };
+      if (url) rememberMedia(cacheKey, value);
+      setReady(value);
+    }).catch((err2) => {
+      if (live) setError(String(err2?.message || err2));
+    });
     return () => {
       live = false;
     };
-  }, [bot, item.path, wantsRead]);
+  }, [cacheKey, item.path, item.kind, wantsRead]);
+  const src = ready?.src || "";
   if (item.kind === "image" && item.remote && !src) {
     const host3 = remoteImageHost(item.path);
-    return /* @__PURE__ */ jsxs12("button", { type: "button", className: "gbo-media-remote", title: item.path, onClick: () => setSrc(item.path), children: [
+    return /* @__PURE__ */ jsxs12("button", { type: "button", className: "gbo-media-remote", title: item.path, onClick: () => setReady({ src: item.path }), children: [
       /* @__PURE__ */ jsxs12("span", { className: "gbo-media-remote-host", children: [
         "Image from ",
         host3
@@ -55050,10 +55187,22 @@ function OwnerMedia({ bot, item }) {
       item.name,
       ": not available"
     ] });
-    return src ? /* @__PURE__ */ jsx13("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx13("img", { alt: item.name, src, loading: "lazy" }) }) : /* @__PURE__ */ jsx13("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
+    const box = mediaBox(ready?.width, ready?.height);
+    return src ? /* @__PURE__ */ jsx13("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx13(
+      "img",
+      {
+        alt: item.name,
+        src,
+        loading: "lazy",
+        ...box ? { width: box.width, height: box.height, style: { aspectRatio: `${box.width} / ${box.height}` } } : {}
+      }
+    ) }) : /* @__PURE__ */ jsx13("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
   }
-  if ((item.kind === "audio" || item.kind === "video") && src) {
-    return item.kind === "audio" ? /* @__PURE__ */ jsx13("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx13("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
+  if (item.kind === "audio" || item.kind === "video") {
+    if (src) {
+      return item.kind === "audio" ? /* @__PURE__ */ jsx13("audio", { className: "gbo-media-audio", controls: true, src, preload: "metadata" }) : /* @__PURE__ */ jsx13("video", { className: "gbo-media-video", controls: true, src, preload: "metadata" });
+    }
+    if (!error) return /* @__PURE__ */ jsx13("span", { className: `gbo-media-${item.kind} is-loading`, role: "img", "aria-label": `Loading ${item.name}` });
   }
   return /* @__PURE__ */ jsx13(FileCard, { bot, item });
 }
@@ -55159,23 +55308,39 @@ function MediaStrip({ bot, media }) {
   if (!shown.length) return null;
   return /* @__PURE__ */ jsx13("div", { className: "gbo-media", children: shown.map((item) => /* @__PURE__ */ jsx13(OwnerMedia, { bot, item }, item.path)) });
 }
-function BotText({ bot, text: text3 }) {
-  const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
-  const parts = React11.useMemo(() => clean ? splitFences(clean) : [], [clean]);
-  return /* @__PURE__ */ jsxs12(Fragment8, { children: [
-    parts.map(
-      (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx13(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx13(Markdown, { text: part.text }, index)
-    ),
-    /* @__PURE__ */ jsx13(MediaStrip, { bot, media })
-  ] });
+function memo2(component, equal) {
+  return typeof React11.memo === "function" ? React11.memo(component, equal) : component;
 }
-function BotProse({
-  bot,
-  text: text3,
-  pos,
-  time,
-  streaming = false
-}) {
+var MemoMarkdown = memo2(Markdown);
+var sameBot = (a2, b2) => a2 === b2 || rowKey(a2) === rowKey(b2);
+var BotText = memo2(
+  function BotText2({ bot, text: text3 }) {
+    const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
+    const parts = React11.useMemo(() => clean ? splitFences(clean) : [], [clean]);
+    return /* @__PURE__ */ jsxs12(Fragment8, { children: [
+      parts.map(
+        (part, index) => part.kind === "code" ? /* @__PURE__ */ jsx13(CodeBlock, { code: part.code, lang: part.lang }, index) : /* @__PURE__ */ jsx13(MemoMarkdown, { text: part.text }, index)
+      ),
+      /* @__PURE__ */ jsx13(MediaStrip, { bot, media })
+    ] });
+  },
+  (a2, b2) => a2.text === b2.text && sameBot(a2.bot, b2.bot)
+);
+function sameNode(a2, b2) {
+  if (a2 === b2) return true;
+  if (!React11.isValidElement(a2) || !React11.isValidElement(b2)) return false;
+  if (a2.type !== b2.type || a2.key !== b2.key) return false;
+  const pa = a2.props || {};
+  const pb = b2.props || {};
+  const keys2 = Object.keys(pa);
+  if (keys2.length !== Object.keys(pb).length) return false;
+  return keys2.every((key) => {
+    const x = pa[key];
+    const y = pb[key];
+    return x === y || (typeof x !== "object" || x === null) && (typeof y !== "object" || y === null) && Object.is(x, y) || key === "children" && sameNode(x, y);
+  });
+}
+function BotProseView({ bot, text: text3, pos, time, streaming = false }) {
   const { text: clean, media } = React11.useMemo(() => extractMedia(text3), [text3]);
   const files = media.filter((item) => item.kind === "file");
   const bubble = Boolean(clean) || media.length > files.length;
@@ -55187,6 +55352,10 @@ function BotProse({
     /* @__PURE__ */ jsx13(FileCards, { bot, files })
   ] });
 }
+var BotProse = memo2(
+  BotProseView,
+  (a2, b2) => a2.text === b2.text && a2.pos === b2.pos && Boolean(a2.streaming) === Boolean(b2.streaming) && sameBot(a2.bot, b2.bot) && sameNode(a2.time, b2.time)
+);
 
 // src/ui/EmailDraft.tsx
 import { jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
@@ -55415,14 +55584,238 @@ function EmailDraftCard({ item, bot, controller: controller2 }) {
   ] });
 }
 
+// src/ui/stickToBottom.ts
+import * as React13 from "react";
+var STICK_PX = 16;
+var JUMP_MAX_MS = 1200;
+var ANCHOR_ATTR = "data-gbo-key";
+var fromBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight;
+function reducedMotion() {
+  try {
+    const mm = globalThis.window?.matchMedia ?? globalThis.matchMedia;
+    return typeof mm === "function" && Boolean(mm("(prefers-reduced-motion: reduce)")?.matches);
+  } catch {
+    return false;
+  }
+}
+function unitsOf(scroller) {
+  const column = scroller.firstElementChild;
+  if (!column) return [];
+  const out = [];
+  for (const row of Array.from(column.children)) {
+    if (row.classList.contains("gbo-more")) continue;
+    const messages = row.classList.contains("group") ? Array.from(row.children) : [];
+    if (messages.length) out.push(...messages);
+    else out.push(row);
+  }
+  return out;
+}
+function captureAnchor(scroller) {
+  const top = scroller.getBoundingClientRect().top;
+  const view = scroller.clientHeight;
+  const marks = [];
+  for (const unit of unitsOf(scroller)) {
+    const rect = unit.getBoundingClientRect();
+    if (rect.bottom - top <= 0) continue;
+    if (view > 0 && rect.top - top >= view) break;
+    marks.push({ el: unit, key: unit.getAttribute(ANCHOR_ATTR), top: rect.top - top });
+  }
+  if (!marks.length) return null;
+  return [...marks.filter((m) => m.key), ...marks.filter((m) => !m.key)];
+}
+function locate(scroller, anchor) {
+  const origin = scroller.getBoundingClientRect().top;
+  let units = null;
+  for (const mark of anchor) {
+    let unit = mark.el.isConnected && scroller.contains(mark.el) ? mark.el : null;
+    if (!unit && mark.key) {
+      units = units || unitsOf(scroller);
+      unit = units.find((u) => u.getAttribute(ANCHOR_ATTR) === mark.key) || null;
+    }
+    if (unit) return { mark, now: unit.getBoundingClientRect().top - origin };
+  }
+  return null;
+}
+function useStickToBottom(dep, mine, latest = "") {
+  const ref = React13.useRef(null);
+  const stick = React13.useRef(true);
+  const lastMine = React13.useRef(mine);
+  const lastLatest = React13.useRef(latest);
+  const keep = React13.useRef(null);
+  const keepGen = React13.useRef(0);
+  const wrote = React13.useRef(null);
+  const jumping = React13.useRef(null);
+  const [unseen, setUnseen] = React13.useState(false);
+  const setTop = (el, top) => {
+    el.scrollTop = top;
+    wrote.current = el.scrollTop;
+  };
+  const restore = () => {
+    const el = ref.current;
+    const anchor = keep.current;
+    if (!el || !anchor) return;
+    const hit = locate(el, anchor);
+    if (!hit) return;
+    const shift = hit.now - hit.mark.top;
+    if (Math.abs(shift) >= 0.5) setTop(el, el.scrollTop + shift);
+  };
+  const dropKeep = () => {
+    if (!keep.current) return;
+    keep.current = null;
+    keepGen.current += 1;
+  };
+  const scrollToBottom = (el, smooth) => {
+    const top = el.scrollHeight;
+    if (smooth && typeof el.scrollTo === "function") {
+      try {
+        el.scrollTo({ top, behavior: "smooth" });
+        return;
+      } catch {
+      }
+    }
+    setTop(el, top);
+  };
+  const finishJump = () => {
+    const run = jumping.current;
+    if (!run) return;
+    jumping.current = null;
+    clearTimeout(run.timer);
+    stick.current = true;
+    setUnseen(false);
+    const el = ref.current;
+    if (el) setTop(el, el.scrollHeight);
+  };
+  const endJump = () => {
+    const run = jumping.current;
+    if (!run) return;
+    jumping.current = null;
+    clearTimeout(run.timer);
+    const el = ref.current;
+    if (!el) return;
+    stick.current = fromBottom(el) < STICK_PX;
+    setUnseen(!stick.current && Boolean(lastLatest.current));
+  };
+  React13.useLayoutEffect(() => {
+    const el = ref.current;
+    if (mine !== lastMine.current) {
+      lastMine.current = mine;
+      if (mine) {
+        stick.current = true;
+        dropKeep();
+      }
+    }
+    const newer = latest !== lastLatest.current;
+    lastLatest.current = latest;
+    if (!el) return;
+    if (keep.current) {
+      restore();
+      if (newer && latest && !stick.current) setUnseen(true);
+      return;
+    }
+    if (jumping.current) scrollToBottom(el, !reducedMotion());
+    else if (stick.current) setTop(el, el.scrollHeight);
+    else if (newer && latest) setUnseen(true);
+  }, [dep, mine, latest]);
+  React13.useLayoutEffect(() => {
+    if (stick.current && unseen && !jumping.current) setUnseen(false);
+  });
+  React13.useEffect(() => {
+    const el = ref.current;
+    if (!el) return void 0;
+    const cancel = () => {
+      if (!jumping.current) return;
+      endJump();
+    };
+    const onKey = (event) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event?.key)) cancel();
+    };
+    el.addEventListener("wheel", cancel, { passive: true });
+    el.addEventListener("touchstart", cancel, { passive: true });
+    el.addEventListener("pointerdown", cancel);
+    el.addEventListener("keydown", onKey);
+    return () => {
+      el.removeEventListener("wheel", cancel);
+      el.removeEventListener("touchstart", cancel);
+      el.removeEventListener("pointerdown", cancel);
+      el.removeEventListener("keydown", onKey);
+      if (jumping.current) clearTimeout(jumping.current.timer);
+    };
+  }, []);
+  const onScroll = () => {
+    const el = ref.current;
+    if (!el) return;
+    const ours = wrote.current !== null && Math.abs(el.scrollTop - wrote.current) < 1;
+    wrote.current = null;
+    if (jumping.current) {
+      if (fromBottom(el) < STICK_PX) endJump();
+      return;
+    }
+    if (keep.current && !ours) {
+      keep.current = captureAnchor(el) || keep.current;
+    }
+    stick.current = fromBottom(el) < STICK_PX;
+    if (stick.current) setUnseen(false);
+  };
+  const onContentResize = React13.useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (keep.current) restore();
+    else if (jumping.current) scrollToBottom(el, !reducedMotion());
+    else if (stick.current) setTop(el, el.scrollHeight);
+  }, []);
+  const pin = () => {
+    stick.current = true;
+    dropKeep();
+  };
+  const onReaderInput = () => {
+    if (jumping.current) endJump();
+  };
+  const keepPlace = async (load) => {
+    const el = ref.current;
+    const gen = keepGen.current += 1;
+    keep.current = el ? captureAnchor(el) : null;
+    const mineNow = () => keepGen.current === gen && keep.current !== null;
+    try {
+      await load();
+    } finally {
+      if (mineNow()) restore();
+      const done = () => {
+        if (!mineNow()) return;
+        restore();
+        keep.current = null;
+        const target = ref.current;
+        if (target) {
+          stick.current = fromBottom(target) < STICK_PX;
+          if (stick.current) setUnseen(false);
+        }
+      };
+      const raf2 = globalThis.requestAnimationFrame;
+      if (typeof raf2 === "function") raf2(() => done());
+      else setTimeout(done, 16);
+    }
+  };
+  const jump = () => {
+    const el = ref.current;
+    stick.current = true;
+    setUnseen(false);
+    dropKeep();
+    if (!el) return;
+    const smooth = !reducedMotion() && typeof el.scrollTo === "function";
+    if (jumping.current) clearTimeout(jumping.current.timer);
+    jumping.current = smooth ? { timer: setTimeout(finishJump, JUMP_MAX_MS) } : null;
+    scrollToBottom(el, smooth);
+  };
+  return { ref, onScroll, onContentResize, onReaderInput, pin, stick, keepPlace, jump, unseen };
+}
+
 // src/ui/Profile.tsx
-import * as React21 from "react";
+import * as React22 from "react";
 
 // src/ui/BotDialogs.tsx
-import * as React17 from "react";
+import * as React18 from "react";
 
 // src/ui/CronDialogs.tsx
-import * as React13 from "react";
+import * as React14 from "react";
 import { Fragment as Fragment9, jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
 var digits = (v, n) => v.replace(/[^0-9]/g, "").slice(0, n);
 function timeLabel(id) {
@@ -55468,18 +55861,18 @@ function SchedulePicker({ state, setState }) {
 }
 function JobDialog({ bot, job, onClose }) {
   const editing = Boolean(job);
-  const [title, setTitle] = React13.useState(() => job ? routineTitle(job) : "");
-  const [stored, setStored] = React13.useState(() => ({ status: editing ? "loading" : "ready" }));
-  const [instruction, setInstruction] = React13.useState("");
-  const [sched, setSched] = React13.useState(() => job ? { ...scheduleStateFrom(job.schedule), repeatN: void 0 } : defaultScheduleState());
-  const [initialSchedule] = React13.useState(() => job ? composeSchedule({ ...scheduleStateFrom(job.schedule), repeatN: void 0 }).trim() : void 0);
-  const [continuity, setContinuity] = React13.useState(false);
-  const [target, setTarget] = React13.useState(() => job?.deliver === "bot-chat" ? "bot-chat" : "history");
-  const [busy, setBusy] = React13.useState(false);
-  const [error, setError] = React13.useState(null);
+  const [title, setTitle] = React14.useState(() => job ? routineTitle(job) : "");
+  const [stored, setStored] = React14.useState(() => ({ status: editing ? "loading" : "ready" }));
+  const [instruction, setInstruction] = React14.useState("");
+  const [sched, setSched] = React14.useState(() => job ? { ...scheduleStateFrom(job.schedule), repeatN: void 0 } : defaultScheduleState());
+  const [initialSchedule] = React14.useState(() => job ? composeSchedule({ ...scheduleStateFrom(job.schedule), repeatN: void 0 }).trim() : void 0);
+  const [continuity, setContinuity] = React14.useState(false);
+  const [target, setTarget] = React14.useState(() => job?.deliver === "bot-chat" ? "bot-chat" : "history");
+  const [busy, setBusy] = React14.useState(false);
+  const [error, setError] = React14.useState(null);
   const who = displayName(bot, metaFor(bot));
   const schedule = composeSchedule(sched).trim();
-  React13.useEffect(() => {
+  React14.useEffect(() => {
     if (!editing) return;
     let live = true;
     loadJob(bot, job).then(
@@ -55620,7 +56013,7 @@ function JobRemoveDialog({ bot, job, onClose }) {
 }
 
 // src/ui/ProfileConfig.tsx
-import * as React14 from "react";
+import * as React15 from "react";
 import { Fragment as Fragment10, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
 var modelCatalogue = createCatalogue();
 function modelKey(bot) {
@@ -55641,8 +56034,8 @@ function useModelOptions(bot, { foreground = false } = {}) {
     const data = modelCatalogue.peek(key);
     return data ? { loading: false, error: null, data } : null;
   };
-  const [state, setState] = React14.useState(() => read() || { loading: true, error: null, data: null });
-  React14.useEffect(() => {
+  const [state, setState] = React15.useState(() => read() || { loading: true, error: null, data: null });
+  React15.useEffect(() => {
     let live = true;
     const now = read();
     if (now) setState(now);
@@ -55668,7 +56061,7 @@ function ModelPicker({
   children
 }) {
   const { loading, error, data } = useModelOptions(bot, { foreground });
-  const [manual, setManual] = React14.useState(null);
+  const [manual, setManual] = React15.useState(null);
   const providers = usableProviders(data);
   const known = !value.provider || providers.some((p) => providerMatches(p, value.provider));
   const freeText = loading ? false : manual ?? !known;
@@ -55735,10 +56128,10 @@ function ModelExtraFields({
   ] });
 }
 function SkillsHub({ bot, onInstalled }) {
-  const [query, setQuery] = React14.useState("");
-  const [results, setResults] = React14.useState(null);
-  const [busy, setBusy] = React14.useState(null);
-  const [error, setError] = React14.useState(null);
+  const [query, setQuery] = React15.useState("");
+  const [results, setResults] = React15.useState(null);
+  const [busy, setBusy] = React15.useState(null);
+  const [error, setError] = React15.useState(null);
   return /* @__PURE__ */ jsxs15("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
     /* @__PURE__ */ jsxs15(
       "form",
@@ -55797,11 +56190,11 @@ function backendScope(bot) {
   return route ? { connectionId: route.connectionId, profile: route.targetProfile || route.profile } : bot.name;
 }
 function McpSetup({ bot, entry, onDone }) {
-  const [phase, setPhase] = React14.useState("idle");
-  const [message, setMessage] = React14.useState("");
-  const fields = React14.useRef({});
-  const epoch = React14.useRef(0);
-  const pending = React14.useRef(null);
+  const [phase, setPhase] = React15.useState("idle");
+  const [message, setMessage] = React15.useState("");
+  const fields = React15.useRef({});
+  const epoch = React15.useRef(0);
+  const pending = React15.useRef(null);
   const wipePending = () => {
     const held = pending.current;
     pending.current = null;
@@ -55815,7 +56208,7 @@ function McpSetup({ bot, entry, onDone }) {
   const clearFields = () => {
     for (const input of Object.values(fields.current)) if (input) input.value = "";
   };
-  React14.useEffect(
+  React15.useEffect(
     () => () => {
       epoch.current += 1;
       clearFields();
@@ -55920,12 +56313,12 @@ function McpSetup({ bot, entry, onDone }) {
   ] });
 }
 function AdvancedConfig({ bot, state, setState }) {
-  const [unsupported, setUnsupported] = React14.useState(null);
-  const [filter, setFilter] = React14.useState("");
-  const [toolsetOpen, setToolsetOpen] = React14.useState("");
+  const [unsupported, setUnsupported] = React15.useState(null);
+  const [filter, setFilter] = React15.useState("");
+  const [toolsetOpen, setToolsetOpen] = React15.useState("");
   const ToolsetPanel = sdk.ToolsetConfigPanel;
   const loadKey = `${bot?.connectionId || ""}::${bot?.name}`;
-  React14.useEffect(() => {
+  React15.useEffect(() => {
     if (state.loaded) return;
     let live = true;
     loadProfileConfig(bot).then((next) => live && setState(() => next)).catch((error) => live && setUnsupported(String(error?.message || error)));
@@ -55989,7 +56382,7 @@ function AdvancedConfig({ bot, state, setState }) {
 }
 
 // src/ui/SlackSetup.tsx
-import * as React16 from "react";
+import * as React17 from "react";
 
 // src/core/slack.js
 var SLACK_PLATFORM = "slack";
@@ -56633,29 +57026,29 @@ function enableSlackProvisioning(bot) {
 }
 
 // src/ui/SlackConnect.tsx
-import * as React15 from "react";
+import * as React16 from "react";
 import { Fragment as Fragment11, jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
 function SlackConnect({ bot, name, initial, onClose }) {
-  const [workspaces, setWorkspaces] = React15.useState(initial.workspaces);
-  const [selected, setSelected] = React15.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
-  const [phase, setPhase] = React15.useState(initial.status?.phase || "none");
-  const [teamName, setTeamName] = React15.useState(initial.status?.team_name || "");
-  const [adding, setAdding] = React15.useState(needsWorkspace(initial.workspaces));
-  const [refresh, setRefresh] = React15.useState("");
-  const [authorize, setAuthorize] = React15.useState("");
-  const [busy, setBusy] = React15.useState(false);
-  const [confirm, setConfirm] = React15.useState(false);
-  const [error, setError] = React15.useState("");
-  const [timedOut, setTimedOut] = React15.useState(false);
-  const [testResult, setTestResult] = React15.useState("");
-  const [needsBootstrap, setNeedsBootstrap] = React15.useState(Boolean(initial.bootstrap));
-  const phaseRef = React15.useRef(phase);
-  const alive = React15.useRef(true);
+  const [workspaces, setWorkspaces] = React16.useState(initial.workspaces);
+  const [selected, setSelected] = React16.useState((initial.workspaces.find((w) => w?.ok !== false) || initial.workspaces[0])?.team_id || "");
+  const [phase, setPhase] = React16.useState(initial.status?.phase || "none");
+  const [teamName, setTeamName] = React16.useState(initial.status?.team_name || "");
+  const [adding, setAdding] = React16.useState(needsWorkspace(initial.workspaces));
+  const [refresh, setRefresh] = React16.useState("");
+  const [authorize, setAuthorize] = React16.useState("");
+  const [busy, setBusy] = React16.useState(false);
+  const [confirm, setConfirm] = React16.useState(false);
+  const [error, setError] = React16.useState("");
+  const [timedOut, setTimedOut] = React16.useState(false);
+  const [testResult, setTestResult] = React16.useState("");
+  const [needsBootstrap, setNeedsBootstrap] = React16.useState(Boolean(initial.bootstrap));
+  const phaseRef = React16.useRef(phase);
+  const alive = React16.useRef(true);
   phaseRef.current = phase;
-  React15.useEffect(() => () => {
+  React16.useEffect(() => () => {
     alive.current = false;
   }, []);
-  React15.useEffect(() => {
+  React16.useEffect(() => {
     if (phase !== "created" && phase !== "installed") return;
     let stopped = false;
     const started = Date.now();
@@ -56882,10 +57275,10 @@ function SuggestedSlack({ bot }) {
   const state = useStore(slack.state);
   const hidden = useStore(slack.hidden);
   const key = rowKey(bot);
-  React16.useEffect(() => {
+  React17.useEffect(() => {
     loadSlackHidden();
   }, []);
-  React16.useEffect(() => {
+  React17.useEffect(() => {
     void loadSlackState(bot);
   }, [key]);
   if (state.key === key && ["created", "installed", "connected", "denied", "error"].includes(state.connectStatus?.phase)) return null;
@@ -56925,10 +57318,10 @@ function LegacySlackStatusDialog({ bot, onClose }) {
   const entry = state.key === key ? state.platform : null;
   const served = state.key === key && Boolean(state.served);
   const name = displayName(bot, metaFor(bot));
-  const [testing, setTesting] = React16.useState(false);
-  const [result, setResult] = React16.useState(null);
-  const alive = React16.useRef(true);
-  React16.useEffect(() => {
+  const [testing, setTesting] = React17.useState(false);
+  const [result, setResult] = React17.useState(null);
+  const alive = React17.useRef(true);
+  React17.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
@@ -56999,18 +57392,18 @@ function sleep(ms, cancelled) {
 var STEP_NAMES = ["Create the Slack app", "Paste two tokens", "Connect", "Approve your first DM"];
 function LegacySlackDialog({ bot, initial, onClose }) {
   const name = displayName(bot, metaFor(bot));
-  const [stage, setStage] = React16.useState(initial?.stage || "create");
-  const [appToken, setAppToken] = React16.useState("");
-  const [botToken, setBotToken] = React16.useState("");
-  const [busy, setBusy] = React16.useState(false);
-  const [error, setError] = React16.useState(initial?.error ?? null);
-  const [note, setNote] = React16.useState(initial?.note ?? null);
-  const [pending, setPending] = React16.useState(initial?.pending || []);
-  const [approving, setApproving] = React16.useState("");
-  const [approved, setApproved] = React16.useState([]);
-  const [polling, setPolling] = React16.useState(false);
-  const alive = React16.useRef(true);
-  React16.useEffect(() => {
+  const [stage, setStage] = React17.useState(initial?.stage || "create");
+  const [appToken, setAppToken] = React17.useState("");
+  const [botToken, setBotToken] = React17.useState("");
+  const [busy, setBusy] = React17.useState(false);
+  const [error, setError] = React17.useState(initial?.error ?? null);
+  const [note, setNote] = React17.useState(initial?.note ?? null);
+  const [pending, setPending] = React17.useState(initial?.pending || []);
+  const [approving, setApproving] = React17.useState("");
+  const [approved, setApproved] = React17.useState([]);
+  const [polling, setPolling] = React17.useState(false);
+  const alive = React17.useRef(true);
+  React17.useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
@@ -57022,7 +57415,7 @@ function LegacySlackDialog({ bot, initial, onClose }) {
     setBotToken("");
     onClose();
   };
-  React16.useEffect(() => {
+  React17.useEffect(() => {
     if (stage !== "connected" || initial?.pending) return;
     let stopped = false;
     const done = () => stopped || gone();
@@ -57253,8 +57646,8 @@ function LegacySlackDialog({ bot, initial, onClose }) {
   ] });
 }
 function SlackConnectRouter({ bot, initial, onClose, status }) {
-  const [result, setResult] = React16.useState(initial ? { kind: "missing" } : null);
-  React16.useEffect(() => {
+  const [result, setResult] = React17.useState(initial ? { kind: "missing" } : null);
+  React17.useEffect(() => {
     if (initial) return;
     let cancelled = false;
     setResult(null);
@@ -57287,9 +57680,9 @@ var hostSeq = 0;
 var hosts = [];
 var hostChange = /* @__PURE__ */ new Set();
 function useIsDialogHost() {
-  const [id] = React17.useState(() => ++hostSeq);
-  const [, force] = React17.useReducer((n) => n + 1, 0);
-  React17.useEffect(() => {
+  const [id] = React18.useState(() => ++hostSeq);
+  const [, force] = React18.useReducer((n) => n + 1, 0);
+  React18.useEffect(() => {
     hosts.push(id);
     hostChange.forEach((fn) => fn());
     hostChange.add(force);
@@ -57305,14 +57698,14 @@ function useIsDialogHost() {
 function RosterDialogs() {
   const isHost = useIsDialogHost();
   const dialog = useStore(roster2.dialog);
-  const [confirm, setConfirm] = React17.useState(null);
-  React17.useEffect(() => {
+  const [confirm, setConfirm] = React18.useState(null);
+  React18.useEffect(() => {
     if (!isHost) return;
     setConfirm(null);
     setConfirmAsker((message) => new Promise((resolve) => setConfirm({ message, resolve })));
     return () => setConfirmAsker(null);
   }, [isHost]);
-  const close = React17.useCallback(() => closeDialogIf(dialog), [dialog]);
+  const close = React18.useCallback(() => closeDialogIf(dialog), [dialog]);
   if (!isHost) return null;
   return /* @__PURE__ */ jsxs18(OverrideBoundary, { area: "dialog", onReset: close, children: [
     dialog?.kind === "edit" ? /* @__PURE__ */ jsx19(EditProfileDialog, { bot: dialog.bot, onClose: close }) : null,
@@ -57396,11 +57789,11 @@ function normalizeImage(dataUrl, edge = 256) {
   });
 }
 function AvatarPicker({ name, title, description, look, setLook }) {
-  const [tab, setTab] = React17.useState("face");
-  const [gen, setGen] = React17.useState({ available: null, busy: false, error: null });
+  const [tab, setTab] = React18.useState("face");
+  const [gen, setGen] = React18.useState({ available: null, busy: false, error: null });
   const seedName = name || "agent";
   const { seedPart, kind } = parseBlob(look.shape);
-  React17.useEffect(() => {
+  React18.useEffect(() => {
     if (tab === "generate" && gen.available !== true) void probeImageGeneration().then((available) => setGen((g) => ({ ...g, available })));
   }, [tab]);
   return /* @__PURE__ */ jsxs18("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [
@@ -57490,21 +57883,21 @@ function lookOf(bot, meta) {
   return { shape: meta?.shape || "blobatar", color: meta?.color ?? null, image: meta?.image ?? null, title: meta?.title || bot?.title || "" };
 }
 function EditProfileDialog({ bot: row, onClose }) {
-  const [bot, setBot] = React17.useState(row);
+  const [bot, setBot] = React18.useState(row);
   const meta = metaFor(row);
-  const [opened] = React17.useState(() => lookOf(row, meta));
-  const [look, setLook] = React17.useState(() => lookOf(row, meta));
-  const [description, setDescriptionState] = React17.useState(String(row.description || ""));
-  const descriptionTouched = React17.useRef(false);
+  const [opened] = React18.useState(() => lookOf(row, meta));
+  const [look, setLook] = React18.useState(() => lookOf(row, meta));
+  const [description, setDescriptionState] = React18.useState(String(row.description || ""));
+  const descriptionTouched = React18.useRef(false);
   const setDescription = (value) => {
     descriptionTouched.current = true;
     setDescriptionState(value);
   };
-  const [advancedOpen, setAdvancedOpen] = React17.useState(false);
-  const [adv, setAdv] = React17.useState(emptyAdvancedState());
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(null);
-  React17.useEffect(() => {
+  const [advancedOpen, setAdvancedOpen] = React18.useState(false);
+  const [adv, setAdv] = React18.useState(emptyAdvancedState());
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(null);
+  React18.useEffect(() => {
     let live = true;
     void ensureBotProfile(row).then((next) => {
       if (!live) return;
@@ -57557,9 +57950,9 @@ function EditProfileDialog({ bot: row, onClose }) {
   );
 }
 function ConfigDialog({ bot, initial, onClose }) {
-  const [adv, setAdv] = React17.useState(() => initial?.loaded ? initial : emptyAdvancedState());
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(null);
+  const [adv, setAdv] = React18.useState(() => initial?.loaded ? initial : emptyAdvancedState());
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(null);
   const dirty = adv.dirtyModel || adv.dirtySoul || adv.dirtySkills || adv.dirtyToolsets || adv.dirtyMcp;
   return /* @__PURE__ */ jsxs18(
     Dialog,
@@ -57607,10 +58000,10 @@ function ModelDialog({ bot, onClose }) {
   const key = rowKey(bot);
   const current = useStore(roster2.models)[key];
   const settings = useStore(roster2.modelSettings)[key];
-  const [edits, setEdits] = React17.useState({});
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(null);
-  React17.useEffect(() => {
+  const [edits, setEdits] = React18.useState({});
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(null);
+  React18.useEffect(() => {
     void loadBotModel(bot, { foreground: true });
     void loadBotModelSettings(bot, { foreground: true });
   }, [key]);
@@ -57693,9 +58086,9 @@ function ModelDialog({ bot, onClose }) {
 function GroupsDialog({ bot, onClose }) {
   useStore(roster2.metaWrites);
   useStore(app.roster);
-  const [name, setName] = React17.useState("");
-  const [error, setError] = React17.useState(null);
-  const [busy, setBusy] = React17.useState(false);
+  const [name, setName] = React18.useState("");
+  const [error, setError] = React18.useState(null);
+  const [busy, setBusy] = React18.useState(false);
   const meta = metaFor(bot);
   const current = botGroups(meta);
   const groups = knownGroups(app.roster.get().rows.map((r) => metaFor(r)));
@@ -57780,24 +58173,24 @@ function GroupsDialog({ bot, onClose }) {
 }
 function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }) {
   useStore(app.roster);
-  const [name, setName] = React17.useState("");
-  const [title, setTitle] = React17.useState("");
-  const [description, setDescription] = React17.useState("");
-  const [look, setLook] = React17.useState({ shape: blobatarMarkup("x", 8) !== null ? "blobatar" : "circle", color: null, image: null });
-  const [tab, setTab] = React17.useState(initialTab);
-  const [target, setTarget] = React17.useState("");
-  const [connections, setConnections] = React17.useState([]);
-  const [cloneFrom, setCloneFrom] = React17.useState("default");
-  const [model, setModel] = React17.useState({ provider: "", model: "" });
-  const [soul, setSoul] = React17.useState("");
-  const [noSkills, setNoSkills] = React17.useState(false);
-  const [shareAuth, setShareAuth] = React17.useState(true);
-  const [caps, setCaps] = React17.useState(initialCaps ? { target: "", ...initialCaps } : null);
-  const [capsError, setCapsError] = React17.useState(null);
-  const [dirtyCaps, setDirtyCaps] = React17.useState({ skills: false, toolsets: false, mcp: false });
-  const [busy, setBusy] = React17.useState(false);
-  const [error, setError] = React17.useState(null);
-  React17.useEffect(() => {
+  const [name, setName] = React18.useState("");
+  const [title, setTitle] = React18.useState("");
+  const [description, setDescription] = React18.useState("");
+  const [look, setLook] = React18.useState({ shape: blobatarMarkup("x", 8) !== null ? "blobatar" : "circle", color: null, image: null });
+  const [tab, setTab] = React18.useState(initialTab);
+  const [target, setTarget] = React18.useState("");
+  const [connections, setConnections] = React18.useState([]);
+  const [cloneFrom, setCloneFrom] = React18.useState("default");
+  const [model, setModel] = React18.useState({ provider: "", model: "" });
+  const [soul, setSoul] = React18.useState("");
+  const [noSkills, setNoSkills] = React18.useState(false);
+  const [shareAuth, setShareAuth] = React18.useState(true);
+  const [caps, setCaps] = React18.useState(initialCaps ? { target: "", ...initialCaps } : null);
+  const [capsError, setCapsError] = React18.useState(null);
+  const [dirtyCaps, setDirtyCaps] = React18.useState({ skills: false, toolsets: false, mcp: false });
+  const [busy, setBusy] = React18.useState(false);
+  const [error, setError] = React18.useState(null);
+  React18.useEffect(() => {
     void listConnections().then(setConnections);
   }, []);
   const active = String(activeConnection() || "");
@@ -57807,7 +58200,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
   const remote = Boolean(target);
   const taken = slugTaken(rows, slug, target);
   const capSource = cloneFrom === "__none__" || remote ? "default" : cloneFrom;
-  React17.useEffect(() => {
+  React18.useEffect(() => {
     if (tab !== "capabilities" || caps && caps.source === capSource && caps.target === target) return;
     let live = true;
     setCapsError(null);
@@ -57913,7 +58306,7 @@ function CreateBotDialog({ onClose, initialTab = "general", initialCaps = null }
 }
 
 // src/ui/Rooms.tsx
-import * as React18 from "react";
+import * as React19 from "react";
 import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
 function botFor(profile, route) {
   return app.roster.get().rows.find(
@@ -57926,10 +58319,10 @@ function Face({ profile, route, size = 28, working = false }) {
 }
 function NewGroup({ route, onDone }) {
   const roster = useStore(app.roster);
-  const [name, setName] = React18.useState("");
-  const [picked, setPicked] = React18.useState([]);
-  const [error, setError] = React18.useState("");
-  const [busy, setBusy] = React18.useState(false);
+  const [name, setName] = React19.useState("");
+  const [picked, setPicked] = React19.useState([]);
+  const [error, setError] = React19.useState("");
+  const [busy, setBusy] = React19.useState(false);
   const eligible = roster.rows.filter((bot) => String(bot?.route?.connectionId || bot?.connectionId || "local") === String(route?.connectionId || "local") && !metaFor(bot)?.hidden);
   return /* @__PURE__ */ jsxs19(
     "form",
@@ -58004,7 +58397,7 @@ function RoomsSection({ query = "" }) {
   ] });
 }
 function PendingAction({ action, controller: controller2, members, route, acting }) {
-  const [error, setError] = React18.useState("");
+  const [error, setError] = React19.useState("");
   const member = members.find((m) => m.member_id === action.member_id);
   const who = member?.display_name || member?.handle || action.member_id;
   const run = (choice) => controller2.act(action, choice).catch((err2) => setError(String(err2?.message || err2)));
@@ -58076,18 +58469,18 @@ function RoomWorkspace({ slot }) {
   const state = useStore(slot.chat);
   const controller2 = slot.controller();
   const route = slot.route;
-  const [draft, setDraft] = React18.useState("");
-  const [note, setNote] = React18.useState("");
-  const [renaming, setRenaming] = React18.useState(false);
-  const [newName, setNewName] = React18.useState("");
-  const [confirmDisband, setConfirmDisband] = React18.useState(false);
-  const scroller = React18.useRef(null);
+  const [draft, setDraft] = React19.useState("");
+  const [note, setNote] = React19.useState("");
+  const [renaming, setRenaming] = React19.useState(false);
+  const [newName, setNewName] = React19.useState("");
+  const [confirmDisband, setConfirmDisband] = React19.useState(false);
+  const scroller = React19.useRef(null);
   const room = state.room || slot.room;
   const members = room?.members || [];
   const driver = state.driver;
   const working = new Set((driver?.member_activity || []).filter((a2) => a2.status === "working" || a2.status === "running").map((a2) => a2.member_id));
-  const items = React18.useMemo(() => withDividers(state.items || []), [state.items]);
-  React18.useLayoutEffect(() => {
+  const items = React19.useMemo(() => withDividers(state.items || []), [state.items]);
+  React19.useLayoutEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length, state.posts?.length]);
@@ -58215,7 +58608,7 @@ function RoomWorkspace({ slot }) {
 }
 
 // src/ui/Screen.tsx
-import * as React19 from "react";
+import * as React20 from "react";
 
 // src/core/screen.js
 var CLOSE_CONTROL_TAKEN = 4e3;
@@ -58455,7 +58848,7 @@ function screenStore(bot) {
   return store;
 }
 function useScreenState(store) {
-  return React19.useSyncExternalStore(store.subscribe, store.get, store.get);
+  return React20.useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 async function loadRfb() {
   const mod = await init_novnc_rfb().then(() => novnc_rfb_exports);
@@ -58475,26 +58868,26 @@ function BotScreen({ bot }) {
   const lease = state.lease ?? status?.lease ?? null;
   const viewer = state.viewer;
   const iHold = leaseHeldBy(lease, viewer);
-  const canvasHost = React19.useRef(null);
-  const rfb = React19.useRef(null);
-  const socket = React19.useRef(null);
-  const retention = React19.useRef(null);
-  const installRetention = React19.useRef(null);
-  const unmounted = React19.useRef(false);
-  const releaseInstall = React19.useCallback(() => {
+  const canvasHost = React20.useRef(null);
+  const rfb = React20.useRef(null);
+  const socket = React20.useRef(null);
+  const retention = React20.useRef(null);
+  const installRetention = React20.useRef(null);
+  const unmounted = React20.useRef(false);
+  const releaseInstall = React20.useCallback(() => {
     installRetention.current?.();
     installRetention.current = null;
   }, []);
-  const pasteCleanup = React19.useRef(null);
-  const generation2 = React19.useRef(0);
-  const dialedAt = React19.useRef(0);
-  const evictions = React19.useRef(0);
-  const [conn, setConn] = React19.useState("idle");
-  const [error, setError] = React19.useState(null);
-  const [busy, setBusy] = React19.useState(false);
-  const [evicted, setEvicted] = React19.useState(false);
-  const [installLog, setInstallLog] = React19.useState([]);
-  const refresh = React19.useCallback(async () => {
+  const pasteCleanup = React20.useRef(null);
+  const generation2 = React20.useRef(0);
+  const dialedAt = React20.useRef(0);
+  const evictions = React20.useRef(0);
+  const [conn, setConn] = React20.useState("idle");
+  const [error, setError] = React20.useState(null);
+  const [busy, setBusy] = React20.useState(false);
+  const [evicted, setEvicted] = React20.useState(false);
+  const [installLog, setInstallLog] = React20.useState([]);
+  const refresh = React20.useCallback(async () => {
     const request2 = store.beginRequest();
     try {
       store.setStatus(await displayRequest(host2, bot, "display.status"), request2);
@@ -58504,7 +58897,7 @@ function BotScreen({ bot }) {
       setError(errText(err2));
     }
   }, [rowKey(bot)]);
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     void refresh();
     const key = () => store.get().status?.profile_key;
     const offLease = onDisplayEvent("display.lease", (event) => {
@@ -58529,7 +58922,7 @@ function BotScreen({ bot }) {
       offDone?.();
     };
   }, [refresh, releaseInstall]);
-  const detach = React19.useCallback((handBack2 = false) => {
+  const detach = React20.useCallback((handBack2 = false) => {
     generation2.current += 1;
     if (handBack2) socket.current?.close(1e3);
     try {
@@ -58544,7 +58937,7 @@ function BotScreen({ bot }) {
     pasteCleanup.current?.();
     pasteCleanup.current = null;
   }, []);
-  const attach = React19.useCallback(
+  const attach = React20.useCallback(
     async (auto = false) => {
       if (!canvasHost.current) return;
       if (!auto) evictions.current = 0;
@@ -58633,7 +59026,7 @@ function BotScreen({ bot }) {
     },
     [rowKey(bot), detach, refresh]
   );
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     unmounted.current = false;
     return () => {
       unmounted.current = true;
@@ -58641,10 +59034,10 @@ function BotScreen({ bot }) {
       detach(true);
     };
   }, [detach, releaseInstall]);
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     if (status?.running && conn === "idle") void attach(true);
   }, [status?.running, conn, attach]);
-  React19.useEffect(() => {
+  React20.useEffect(() => {
     if (rfb.current) {
       rfb.current.viewOnly = !iHold;
       if (iHold) rfb.current.focus?.();
@@ -58807,7 +59200,7 @@ setScreenOpener(openBotScreen);
 onRosterParityStop(closeAllScreens);
 
 // src/ui/OverlayScroll.tsx
-import * as React20 from "react";
+import * as React21 from "react";
 import { jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
 var MIN_THUMB_PX = 28;
 function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
@@ -58818,11 +59211,13 @@ function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
   const offset = range > 0 ? Math.round(Math.min(Math.max(scrollTop, 0), range) / range * travel) : 0;
   return { size, offset, travel, range };
 }
-function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, children, ...rest }) {
-  const scroller = React20.useRef(null);
-  const thumb = React20.useRef(null);
-  const [dragging, setDragging] = React20.useState(false);
-  const update = React20.useCallback(() => {
+function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, onReaderInput, children, ...rest }) {
+  const scroller = React21.useRef(null);
+  const thumb = React21.useRef(null);
+  const [dragging, setDragging] = React21.useState(false);
+  const resized = React21.useRef(onContentResize);
+  resized.current = onContentResize;
+  const update = React21.useCallback(() => {
     const el = scroller.current;
     const bar = thumb.current;
     if (!el || !bar) return;
@@ -58835,19 +59230,34 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     bar.style.height = `${geo.size}px`;
     bar.style.transform = `translateY(${el.offsetTop + geo.offset}px)`;
   }, []);
-  React20.useLayoutEffect(() => {
+  React21.useLayoutEffect(() => {
     update();
     const el = scroller.current;
     const RO = globalThis.ResizeObserver;
     if (!el || typeof RO !== "function") return void 0;
-    const observer2 = new RO(update);
+    const observer2 = new RO(() => {
+      resized.current?.();
+      update();
+    });
     observer2.observe(el);
     for (const child of Array.from(el.children)) observer2.observe(child);
-    const mo = typeof MutationObserver === "function" ? new MutationObserver(update) : null;
+    const raf2 = globalThis.requestAnimationFrame;
+    const caf = globalThis.cancelAnimationFrame;
+    let frame = null;
+    const queue = () => {
+      if (frame !== null) return;
+      if (typeof raf2 !== "function") return update();
+      frame = raf2(() => {
+        frame = null;
+        update();
+      });
+    };
+    const mo = typeof MutationObserver === "function" ? new MutationObserver(queue) : null;
     mo?.observe(el, { childList: true, subtree: true });
     return () => {
       observer2.disconnect();
       mo?.disconnect();
+      if (frame !== null && typeof caf === "function") caf(frame);
     };
   }, [update]);
   const setScroller = (el) => {
@@ -58861,6 +59271,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     if (!geo || geo.travel <= 0) return;
     event.preventDefault();
     event.stopPropagation();
+    onReaderInput?.();
     const target = event.currentTarget;
     const startY = event.clientY;
     const startTop = el.scrollTop;
@@ -58884,7 +59295,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     target.addEventListener("pointercancel", end);
   };
   return /* @__PURE__ */ jsxs21("div", { className: `gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ""}${dragging ? " is-dragging" : ""}`, children: [
-    React20.createElement(
+    React21.createElement(
       as,
       {
         ...rest,
@@ -58897,7 +59308,8 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
       },
       children
     ),
-    /* @__PURE__ */ jsx23("div", { className: "gbo-oscroll-thumb", ref: thumb, "data-scrollable": "false", "aria-hidden": "true", onPointerDown: startDrag })
+    /* @__PURE__ */ jsx23("div", { className: "gbo-oscroll-thumb", ref: thumb, "data-scrollable": "false", "aria-hidden": "true", onPointerDown: startDrag }),
+    overlay
   ] });
 }
 
@@ -58919,7 +59331,7 @@ function jobWhen(job) {
 function ModelCard({ bot }) {
   const key = rowKey(bot);
   const current = useStore(roster2.models)[key];
-  React21.useEffect(() => {
+  React22.useEffect(() => {
     void loadBotModel(bot);
     void loadBotModelSettings(bot);
   }, [key]);
@@ -59080,7 +59492,7 @@ function ProfilePanel({ bot, onClose }) {
 }
 
 // src/ui/Prompts.tsx
-import * as React22 from "react";
+import * as React23 from "react";
 import { Fragment as Fragment15, jsx as jsx25, jsxs as jsxs23 } from "react/jsx-runtime";
 var TITLES = {
   sudo: "needs your administrator password",
@@ -59130,7 +59542,7 @@ function ChoiceCard({
     if (qid && qid in overrides) return onPick?.(qid, overrides[qid], nextPage);
     onPage?.(nextPage);
   };
-  const baseId = React22.useId();
+  const baseId = React23.useId();
   const shown = paged ? [current, ...questions.map((_, i) => i).filter((i) => i !== current)] : questions.map((_, i) => i);
   const block = (qi) => {
     const q = questions[qi];
@@ -59252,8 +59664,8 @@ function SettledChoiceCard({ item }) {
   return /* @__PURE__ */ jsx25(ChoiceCard, { questions: item.questions || [], picks: item.answers || {}, settled: { status: item.status } });
 }
 function ValueCard({ waiting, onAnswer }) {
-  const first = React22.useRef(null);
-  const second = React22.useRef(null);
+  const first = React23.useRef(null);
+  const second = React23.useRef(null);
   const busy = Boolean(waiting.answering);
   const login = waiting.kind === "vault-login";
   const secret = waiting.kind !== "vault-code";
@@ -59320,7 +59732,7 @@ function openExternal(url) {
 }
 function ConnectionCard({ waiting, onRespond }) {
   const busy = Boolean(waiting.answering);
-  const forms = React22.useRef({});
+  const forms = React23.useRef({});
   const targets = waiting.targets || [];
   return /* @__PURE__ */ jsxs23(Fragment15, { children: [
     targets.length === 0 ? /* @__PURE__ */ jsx25("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
@@ -59418,11 +59830,11 @@ function WaitingCard({ waiting, bot, name, controller: controller2 }) {
 }
 
 // src/ui/Tools.tsx
-import * as React23 from "react";
+import * as React24 from "react";
 import { jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
 var PREVIEW_CHARS = 4e3;
 function LongText({ text: text3, label }) {
-  const [all, setAll] = React23.useState(false);
+  const [all, setAll] = React24.useState(false);
   const long = text3.length > PREVIEW_CHARS;
   return /* @__PURE__ */ jsxs24("div", { className: "gbo-tool-block", children: [
     /* @__PURE__ */ jsx26("div", { className: "gbo-tool-block-label", children: label }),
@@ -59569,10 +59981,10 @@ function UserMeta({
 }
 var STREAM_RENDER_MS = 60;
 function useStreamText(text3, streaming) {
-  const [shown, setShown] = React24.useState(text3);
-  const latest = React24.useRef(text3);
+  const [shown, setShown] = React25.useState(text3);
+  const latest = React25.useRef(text3);
   latest.current = text3;
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     if (!streaming) return void 0;
     setShown(latest.current);
     const id = setInterval(() => setShown((current) => current === latest.current ? current : latest.current), STREAM_RENDER_MS);
@@ -59586,13 +59998,13 @@ function DirectivePlaceholder({ pending }) {
 function AssistantBody({ item, bot, pos }) {
   const streaming = Boolean(item.streaming);
   const shown = useStreamText(item.text, streaming);
-  const safe = React24.useMemo(() => streaming ? streamSafeParts(shown) : null, [streaming, shown]);
+  const safe = React25.useMemo(() => streaming ? streamSafeParts(shown) : null, [streaming, shown]);
   const text3 = safe ? safe.text : item.text;
   const { segments: found, scope } = useDirectiveSegments(text3);
-  const segments = React24.useMemo(() => found && scope ? found : [{ kind: "prose", text: text3 }], [found, scope, text3]);
-  const time = React24.useMemo(() => item.at ? /* @__PURE__ */ jsx27("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
+  const segments = React25.useMemo(() => found && scope ? found : [{ kind: "prose", text: text3 }], [found, scope, text3]);
+  const time = React25.useMemo(() => item.at ? /* @__PURE__ */ jsx27("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
   const poll = Boolean(scope?.recent.has(item.id));
-  const body = React24.useMemo(() => {
+  const body = React25.useMemo(() => {
     const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
     let prose = 0;
     let directives = 0;
@@ -59610,17 +60022,17 @@ function AssistantBody({ item, bot, pos }) {
       ) : /* @__PURE__ */ jsx27(DirectiveBlock, { segment, poll, scope }, `d${directives++}`)
     );
   }, [segments, bot, pos, time, streaming, poll, scope]);
-  const placeholder = React24.useMemo(() => safe?.pending && scope ? /* @__PURE__ */ jsx27(DirectivePlaceholder, { pending: safe.pending }) : null, [safe, scope]);
+  const placeholder = React25.useMemo(() => safe?.pending && scope ? /* @__PURE__ */ jsx27(DirectivePlaceholder, { pending: safe.pending }) : null, [safe, scope]);
   return /* @__PURE__ */ jsxs25(Fragment16, { children: [
     body,
     placeholder
   ] });
 }
 function TurnErrorCard({ item, bot, controller: controller2 }) {
-  const [open, setOpen] = React24.useState(false);
-  const [starting, setStarting] = React24.useState(false);
-  const pressed = React24.useRef(false);
-  React24.useEffect(() => {
+  const [open, setOpen] = React25.useState(false);
+  const [starting, setStarting] = React25.useState(false);
+  const pressed = React25.useRef(false);
+  React25.useEffect(() => {
     if (!item.retrying) pressed.current = false;
   }, [item.retrying, item.id]);
   const retry = () => {
@@ -59658,7 +60070,7 @@ function Item({
     case "new":
       return /* @__PURE__ */ jsx27(NewLine, {});
     case "user":
-      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-user", children: [
+      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-user", ...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }, children: [
         item.attachments?.length ? /* @__PURE__ */ jsx27("div", { className: "gbo-attach-chips", children: item.attachments.map((a2, i) => /* @__PURE__ */ jsx27("span", { className: "gbo-chip", children: a2.name || a2.kind }, i)) }) : null,
         item.text ? /* @__PURE__ */ jsxs25("div", { className: "bubble-wrap is-right", children: [
           /* @__PURE__ */ jsx27("div", { className: `bubble is-user${pos}`, children: /* @__PURE__ */ jsx27("div", { className: "bubble__plain", children: item.text }) }),
@@ -59669,7 +60081,7 @@ function Item({
         /* @__PURE__ */ jsx27(UserActions, { item, controller: controller2, busy, onPrefill })
       ] });
     case "assistant":
-      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-bot", children: [
+      return /* @__PURE__ */ jsxs25("div", { className: "gbo-msg is-bot", ...{ [ANCHOR_ATTR]: String(item.renderKey ?? item.id) }, children: [
         item.reasoning ? /* @__PURE__ */ jsx27(Thinking, { text: item.reasoning }) : null,
         item.text ? /* @__PURE__ */ jsx27(AssistantBody, { item, bot, pos }) : null,
         /* @__PURE__ */ jsx27(Reactions, { item, onReact: react }),
@@ -59700,28 +60112,6 @@ function Item({
       return null;
   }
 }
-var STICK_PX = 16;
-function useStickToBottom(dep, mine) {
-  const ref = React24.useRef(null);
-  const stick = React24.useRef(true);
-  const lastMine = React24.useRef(mine);
-  React24.useLayoutEffect(() => {
-    const el = ref.current;
-    if (mine !== lastMine.current) {
-      lastMine.current = mine;
-      if (mine) stick.current = true;
-    }
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [dep, mine]);
-  const onScroll = () => {
-    const el = ref.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
-  };
-  const pin = () => {
-    stick.current = true;
-  };
-  return { ref, onScroll, pin, stick };
-}
 function lookingAt(el) {
   const doc = el?.ownerDocument;
   if (!el || !doc || !el.isConnected) return false;
@@ -59732,16 +60122,16 @@ function lookingAt(el) {
 }
 function useNewLine(key, items, ready, ref) {
   const line = useStore(roster2.newLine);
-  const latest = React24.useRef({ key, items, ready });
+  const latest = React25.useRef({ key, items, ready });
   latest.current = { key, items, ready };
-  const note = React24.useCallback(() => {
+  const note = React25.useCallback(() => {
     const { key: k, items: list, ready: ok } = latest.current;
     noteTranscript(k, list, ok, lookingAt(ref.current));
   }, [ref]);
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     note();
   }, [key, items, ready, note]);
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     const win = globalThis.window;
     const doc = globalThis.document;
     win?.addEventListener?.("focus", note);
@@ -59756,22 +60146,29 @@ function useNewLine(key, items, ready, ref) {
 function NewLine() {
   return /* @__PURE__ */ jsx27("div", { className: "gbo-new-line", role: "separator", "aria-label": "New messages", children: /* @__PURE__ */ jsx27("span", { children: "NEW" }) });
 }
-var SlotContext = React24.createContext(mainSlot);
-var useController = () => React24.useContext(SlotContext).controller();
+var SlotContext = React25.createContext(mainSlot);
+var useController = () => React25.useContext(SlotContext).controller();
 function Transcript({ state, bot, meta, onPrefill }) {
   const items = state.chat.items;
   const showWork = useStore(app.showWork);
-  const mine = React24.useMemo(() => {
-    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === "user") return String(items[i].id);
+  const mine = React25.useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]?.kind === "user") return String(items[i].renderKey ?? items[i].id);
     return "";
   }, [items]);
-  const { ref, onScroll: onStickScroll, pin } = useStickToBottom(items, mine);
+  const latest = React25.useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const kind = items[i]?.kind;
+      if (kind === "user" || kind === "assistant") return String(items[i].renderKey ?? items[i].id);
+    }
+    return "";
+  }, [items]);
+  const { ref, onScroll: onStickScroll, onContentResize, onReaderInput, pin, keepPlace, jump, unseen } = useStickToBottom(items, mine, latest);
   const newLine = useNewLine(rowKey(bot), items, state.phase === "ready", ref);
   const onScroll = () => {
     onStickScroll();
     newLine.note();
   };
-  const decorated = React24.useMemo(
+  const decorated = React25.useMemo(
     () => groupMessages(
       withNewMarker(withDividers(withTurnCards(visibleItems(withEmailDrafts(items), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
     ),
@@ -59784,8 +60181,8 @@ function Transcript({ state, bot, meta, onPrefill }) {
   const openStock = () => void openInBotMode(bot, "Check whether your message arrived before sending anything again.");
   const activity2 = state.chat.busy ? activityLabel(state.chat, showWork) : "";
   const recentKey = items.slice(-8).map((item) => item.id).join("|");
-  const outer = React24.useContext(DirectiveContext);
-  const directives = React24.useMemo(
+  const outer = React25.useContext(DirectiveContext);
+  const directives = React25.useMemo(
     () => !controller2 ? outer : state.storedId ? {
       bot,
       sessionId: String(state.storedId),
@@ -59794,36 +60191,48 @@ function Transcript({ state, bot, meta, onPrefill }) {
     } : null,
     [bot, state.storedId, controller2, recentKey, outer]
   );
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     pin();
   }, [state.storedId]);
-  return /* @__PURE__ */ jsx27(DirectiveContext.Provider, { value: directives, children: /* @__PURE__ */ jsx27(OverlayScroll, { wrapClassName: "transcript-wrap gbo-transcript-scroll", className: "transcript gbo-transcript", scrollRef: ref, onScroll, children: /* @__PURE__ */ jsxs25("div", { className: "transcript__col gbo-column", children: [
-    state.hasMore ? /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void controller2?.loadEarlier(), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
-    !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs25("div", { className: "empty-chat", children: [
-      /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
-      /* @__PURE__ */ jsx27("div", { className: "empty-chat__title", children: displayName(bot, meta) }),
-      /* @__PURE__ */ jsx27("div", { className: "empty-chat__sub", children: "Send a message to start the conversation" })
-    ] }) : null,
-    decorated.map((entry) => {
-      const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
-      if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.id);
-      const bubbles = entry.items.filter((item) => item.text);
-      return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.id)) }, entry.id);
-    }),
-    state.chat.waiting ? /* @__PURE__ */ jsx27(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
-    activity2 ? /* @__PURE__ */ jsxs25("div", { className: "activity-line gbo-activity", role: "status", children: [
-      /* @__PURE__ */ jsx27("span", { className: "activity-line__mark", children: /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 22 }) }),
-      /* @__PURE__ */ jsxs25("span", { className: "activity-line__text shimmer", children: [
-        activity2,
-        "…"
+  return /* @__PURE__ */ jsx27(DirectiveContext.Provider, { value: directives, children: /* @__PURE__ */ jsx27(
+    OverlayScroll,
+    {
+      wrapClassName: "transcript-wrap gbo-transcript-scroll",
+      className: "transcript gbo-transcript",
+      scrollRef: ref,
+      onScroll,
+      onContentResize,
+      onReaderInput,
+      overlay: unseen ? /* @__PURE__ */ jsx27("button", { type: "button", className: "jump-btn gbo-jump", "aria-label": "Jump to latest", title: "Jump to latest", onClick: jump, children: /* @__PURE__ */ jsx27(IconChevronDown, {}) }) : null,
+      children: /* @__PURE__ */ jsxs25("div", { className: "transcript__col gbo-column", children: [
+        state.hasMore ? /* @__PURE__ */ jsx27("button", { type: "button", className: "btn btn--sm btn--secondary gbo-more", disabled: state.loadingMore, onClick: () => void keepPlace(() => controller2?.loadEarlier()), children: state.loadingMore ? "Loading…" : "Show earlier messages" }) : null,
+        !items.length && state.phase === "ready" ? /* @__PURE__ */ jsxs25("div", { className: "empty-chat", children: [
+          /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 80 }),
+          /* @__PURE__ */ jsx27("div", { className: "empty-chat__title", children: displayName(bot, meta) }),
+          /* @__PURE__ */ jsx27("div", { className: "empty-chat__sub", children: "Send a message to start the conversation" })
+        ] }) : null,
+        decorated.map((entry) => {
+          const props = { bot, controller: controller2, busy: Boolean(state.chat.busy), onPrefill, onAnswer: answer, onRetry: retry, onRecheck: recheck, onOpen: openStock };
+          if (entry.kind !== "group") return /* @__PURE__ */ jsx27(Item, { item: entry, ...props }, entry.renderKey ?? entry.id);
+          const bubbles = entry.items.filter((item) => item.text);
+          return /* @__PURE__ */ jsx27("div", { className: `group is-${entry.side}`, children: entry.items.map((item) => /* @__PURE__ */ jsx27(Item, { item, ...props, pos: item.text ? cornerClass(bubbles.indexOf(item), bubbles.length) : "" }, item.renderKey ?? item.id)) }, entry.id);
+        }),
+        state.chat.waiting ? /* @__PURE__ */ jsx27(WaitingCard, { waiting: state.chat.waiting, bot, name: displayName(bot, meta), controller: controller2 }) : null,
+        activity2 ? /* @__PURE__ */ jsxs25("div", { className: "activity-line gbo-activity", role: "status", children: [
+          /* @__PURE__ */ jsx27("span", { className: "activity-line__mark", children: /* @__PURE__ */ jsx27(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 22 }) }),
+          /* @__PURE__ */ jsxs25("span", { className: "activity-line__text shimmer", children: [
+            activity2,
+            "…"
+          ] })
+        ] }) : null,
+        state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx27("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
       ] })
-    ] }) : null,
-    state.reconnecting && !state.runtimeId && state.phase === "ready" ? /* @__PURE__ */ jsx27("div", { className: "notice gbo-notice gbo-reconnecting", role: "status", children: "Reconnecting…" }) : null
-  ] }) }) });
+    }
+  ) });
 }
 function Center({ state, bot }) {
   const controller2 = useController();
-  const slot = React24.useContext(SlotContext);
+  const slot = React25.useContext(SlotContext);
   const name = displayName(bot, metaFor(bot));
   if (state.phase === "no-chat") {
     return /* @__PURE__ */ jsxs25("div", { className: "gbo-center", children: [
@@ -59877,7 +60286,7 @@ function Center({ state, bot }) {
 }
 var NARROW_PANE_PX = 900;
 function usePaneWidth(ref, enabled = true) {
-  React24.useEffect(() => {
+  React25.useLayoutEffect(() => {
     const el = ref.current;
     if (!enabled) return void 0;
     const RO = globalThis.ResizeObserver;
@@ -59931,8 +60340,8 @@ function PanelSash({ rootRef }) {
   );
 }
 function ProfileDrawer({ bot, onClose, backgroundRef }) {
-  const ref = React24.useRef(null);
-  React24.useEffect(() => {
+  const ref = React25.useRef(null);
+  React25.useEffect(() => {
     if (!ref.current) return;
     return trapFocus(ref.current, { background: backgroundRef.current });
   }, [backgroundRef]);
@@ -59965,14 +60374,14 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const panelWidth = useStore(app.panelWidth);
   const roster = useStore(app.roster);
   const rosterShown = useStore(app.rosterShown);
-  const rootRef = React24.useRef(null);
-  const draftRef = React24.useRef(null);
-  const chatRef = React24.useRef(null);
+  const rootRef = React25.useRef(null);
+  const draftRef = React25.useRef(null);
+  const chatRef = React25.useRef(null);
   usePaneWidth(rootRef, !slot.extra);
-  const closeDrawer = React24.useCallback(() => app.drawerOpen.set(false), []);
+  const closeDrawer = React25.useCallback(() => app.drawerOpen.set(false), []);
   const bot = state?.bot ? findBot(rowKey(state.bot)) || state.bot : findBot(selectedKey);
   const pending = !state && bot && !slot.extra ? rowKey(bot) : "";
-  React24.useEffect(() => {
+  React25.useEffect(() => {
     if (!pending || app.chat.get()) return;
     const target = findBot(pending);
     if (target) selectBot(target, { openWorkspace: false });
@@ -60047,7 +60456,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
 }
 
 // src/ui/Roster.tsx
-import * as React26 from "react";
+import * as React27 from "react";
 
 // src/core/person.js
 function initialsOf(name) {
@@ -60064,20 +60473,20 @@ function footerPerson(name) {
 }
 
 // src/ui/Unread.tsx
-import * as React25 from "react";
+import * as React26 from "react";
 import { jsx as jsx28 } from "react/jsx-runtime";
 function UnreadDot({ bot }) {
   const Dot = sdk.SessionStatusDot;
   const id = botCanonicalSessionId(bot);
   if (!id || !(typeof Dot === "function" || Dot && typeof Dot === "object")) return null;
-  return /* @__PURE__ */ jsx28("span", { className: "gbo-row-dot", children: React25.createElement(Dot, { storedSessionId: id }) });
+  return /* @__PURE__ */ jsx28("span", { className: "gbo-row-dot", children: React26.createElement(Dot, { storedSessionId: id }) });
 }
 
 // src/ui/Roster.tsx
 import { Fragment as Fragment18, jsx as jsx29, jsxs as jsxs26 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
-  const [now, setNow] = React26.useState(() => Date.now());
-  React26.useEffect(() => {
+  const [now, setNow] = React27.useState(() => Date.now());
+  React27.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(id);
   }, [ms]);
@@ -60123,11 +60532,11 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
   ] });
 }
 function SectionNameField({ initial = "", label, onCommit, onCancel }) {
-  const [value, setValue] = React26.useState(initial);
-  const ref = React26.useRef(null);
-  const done = React26.useRef(false);
-  const mountedAt = React26.useRef(Date.now());
-  React26.useEffect(() => {
+  const [value, setValue] = React27.useState(initial);
+  const ref = React27.useRef(null);
+  const done = React27.useRef(false);
+  const mountedAt = React27.useRef(Date.now());
+  React27.useEffect(() => {
     const focus = () => {
       if (done.current) return;
       ref.current?.focus();
@@ -60198,7 +60607,7 @@ function PinnedBot({ bot, size, selected, working }) {
   ) }) });
 }
 function useRosterShown(ref) {
-  React26.useEffect(() => {
+  React27.useEffect(() => {
     app.rosterShown.set(true);
     const el = ref.current;
     const RO = globalThis.ResizeObserver;
@@ -60215,7 +60624,7 @@ function useRosterShown(ref) {
 }
 var NAV_KEYS = /* @__PURE__ */ new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
 function usePointerMode(ref) {
-  React26.useEffect(() => {
+  React27.useEffect(() => {
     const el = ref.current;
     const doc = el?.ownerDocument;
     if (!el || !doc) return;
@@ -60247,10 +60656,10 @@ function RosterPane() {
   const sectionEdit = useStore(roster2.sectionEdit);
   const sectionDelete = useStore(roster2.sectionDelete);
   const person = footerPerson(useStore(app.userName));
-  React26.useEffect(() => loadUserName(), []);
-  const [searching, setSearching] = React26.useState(false);
+  React27.useEffect(() => loadUserName(), []);
+  const [searching, setSearching] = React27.useState(false);
   const now = useNow();
-  const rootRef = React26.useRef(null);
+  const rootRef = React27.useRef(null);
   useRosterShown(rootRef);
   usePointerMode(rootRef);
   const roster = app.roster.get();
@@ -60409,7 +60818,7 @@ function RosterPane() {
               ]
             }
           ) }) : null;
-          return /* @__PURE__ */ jsxs26(React26.Fragment, { children: [
+          return /* @__PURE__ */ jsxs26(React27.Fragment, { children: [
             /* @__PURE__ */ jsxs26("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
               head,
               isCollapsed ? null : section.bots.map((bot) => row(bot))

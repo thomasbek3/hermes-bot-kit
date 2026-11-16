@@ -50,8 +50,10 @@ export const CHAT_CSS = /* css */ `
 .gbo-media-image { display: block; max-width: min(100%, 360px); border-radius: 12px; overflow: hidden; border: 1px solid var(--gbo-border); }
 .gbo-media-image img { display: block; max-width: 100%; height: auto; }
 .gbo-media-image.is-loading { width: 160px; height: 110px; background: var(--gbo-accent); }
-.gbo-media-audio { width: min(100%, 320px); }
+.gbo-media-audio { display: block; width: min(100%, 320px); height: 40px; }
+.gbo-media-audio.is-loading { border-radius: 999px; background: var(--gbo-accent); }
 .gbo-media-video { max-width: min(100%, 420px); border-radius: 12px; }
+.gbo-media-video.is-loading { display: block; width: min(100%, 320px); aspect-ratio: 16 / 9; background: var(--gbo-accent); }
 .gbo-media-file {
   display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px;
   border: 1px solid var(--gbo-border); background: var(--gbo-bg); font: var(--gbo-text-body-sm); cursor: pointer;
