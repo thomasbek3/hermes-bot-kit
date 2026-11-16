@@ -288,3 +288,30 @@ def test_r2_003_concurrent_forget_keeps_the_unrelated_entry(tmp_path, home):
     remote.record(home, "you@100.64.0.10", "/x/cua-driver", "/tmp/hc-rcold.sock")
     got = _race(tmp_path, home, [("forget", "/tmp/hc-rcold.sock"), ("record", "/tmp/hc-rcnew.sock")])
     assert got == {"/tmp/hc-rcnew.sock"}
+
+
+# --- RCUA-R3-001: a refusal at entry also disarms the old capture target ------------------------
+
+@needs_hermes
+def test_r3_001_entry_refusal_disarms_the_previous_target(home, tmp_path, monkeypatch):
+    """Armed target from a capture; the human takes over; the next capture is refused at entry; after
+    hand-back a coordinate click must not reuse the pre-takeover target (it needs a fresh capture)."""
+    b, _ = _backend(home, tmp_path, monkeypatch)
+    b.start()
+    try:
+        async def script(name, args, log):
+            return _result(json.dumps({"ok": True}))
+        log = _transport_log(b, home, script)
+        b._set_active_target({"pid": 9, "window_id": 7})
+        b._snapshot_tokens = {1: "tok-before-takeover"}
+        lease.take("pane-1", home)
+        with pytest.raises(_human_has_control()):
+            b.capture(mode="vision", pid=9, window_id=7)
+        assert b._active_pid is None and b._active_window_id is None and b._snapshot_tokens == {}
+        lease.release("pane-1", home)
+        out = b.click(x=1, y=1)
+        assert out.ok is False  # Hermes's own "capture first" refusal
+        assert [n for n, _ in log if n == "click"] == []
+    finally:
+        lease.release(None, home, force=True)
+        b.stop()

@@ -27,7 +27,8 @@
   reconnect and ended-session replays included, and an action whose lease moved raises Hermes's
   `HumanHasControl` instead of returning; a daemon counts as stopped only when its driver says "not
   running" (a missing driver or any other status failure keeps the record and socket); the daemon
-  record file is updated under an inter-process file lock.
+  record file is updated under an inter-process file lock. Review round 3: an action refused at its
+  start also forgets the last capture target, so a hand-back always needs a fresh capture.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

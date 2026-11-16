@@ -123,6 +123,13 @@ the viewer must also stop sending input while the bot holds control.
 
 ## Limits
 
+- Take-over is a tool-level fence, not an OS input lock: a driver call already sent before you took
+  over cannot be undone, and the viewer itself must keep you view-only while the bot holds control.
+  Any refused action (at its start or midway) forgets the bot's last capture target, so after a hand-back
+  the bot must capture again before it clicks or types; pre-takeover coordinates are never reused.
+- Supported gateways for this release are macOS and Linux: the lease and daemon-record files are
+  locked across processes with `flock`. A Windows gateway (no `fcntl`) only gets a per-process lock.
+
 - One bot per Mac at a time is the safe setup; two profiles pointing at one Mac each get their own
   daemon but share the screen.
 - The bot's **browser** tools still run where Hermes runs them (gateway or terminal sandbox), not on

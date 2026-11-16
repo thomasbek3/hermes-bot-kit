@@ -44,7 +44,10 @@ def _as_operation(fn: Any) -> Any:
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         session = self._session
         with session.operation():
-            session.require_admitted(lease.REFUSAL)
+            if not session.admitted():
+                # A refusal at entry disarms too: the pre-takeover target must not survive the hand-back.
+                self._clear_active_target()
+                raise session.human_has_control(lease.REFUSAL)
             try:
                 result = fn(self, *args, **kwargs)
             except Exception as exc:
@@ -132,10 +135,6 @@ def classes() -> tuple[type, type]:
         @staticmethod
         def human_has_control(message: str) -> Exception:
             return priv.HumanHasControl(message)
-
-        def require_admitted(self, message: str) -> None:
-            if not self.admitted():
-                raise priv.HumanHasControl(message)
 
         def _dispatch_refusal(self, name: str) -> Optional[dict[str, Any]]:
             """Checked immediately before EVERY send to the driver: Hermes's first send, its reconnect
