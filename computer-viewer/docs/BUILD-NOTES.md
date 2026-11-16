@@ -55,19 +55,12 @@ Live probe of jlesage/firefox (jlesage baseimage-gui nginx `websockify_pass` at 
 
 Websocket and session-json connect now track a per-endpoint remembered variant (`none` default vs `binary`) in a module-level `Map`, persisted as `ctx.storage` key `wsProtocolByEndpoint`. Attempt 1 uses the remembered variant (no `wsProtocols` unless `binary`). An unclean `disconnect` before the RFB `connect` event retries once inline with the other variant — same generation, no backoff tick, no user-visible error. A later `connect` records that variant. Mid-session unclean drops (after `connect`) still go through existing backoff unchanged. Both handshake variants failing falls through to backoff as before. Iframe mode, error copy, and settings UI are untouched. `node --check` pass; static imports still `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`.
 
-## Fix round 4
+## Fix rounds 4-6 (retired)
 
-session-json parse now accepts an Orgo computer document: no usable `websocketUrl` but a non-empty string `instance_id` builds `wss://{host}/desktops/{id}/ws/websockify?token=…` from `vnc_password ?? password` and host from `connection_url` → body `hostname` → session URL host (never hardcoded). Empty password omits `?token=`. Non-running `status` values fail as `session-failed` with `Computer status: {status}. Start it in Orgo first.` — only on this construction path; plain `{websocketUrl}` bodies are unchanged. README Rotating APIs has an Orgo subsection. `node --check` pass; static imports still `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`.
-
-## Fix round 5
-
-Session JSON endpoint editor now has in-app Orgo computer discovery: **Find my Orgo computer** (enabled when the draft bearer is non-empty) GETs `/api/workspaces`, then each workspace detail in parallel (`Promise.all`, cap 10). No list-computers call (`GET /api/computers?workspace_id=` is HTTP 405). Results render in a `Select`; picking fills `sessionUrl` (`{origin}/api/computers/{id}`, origin from the draft Session URL or `https://www.orgo.ai`) and a default-ish name (`Local box` / `Untitled` / empty). Errors stay inline (401/403, network/CORS, empty). Discovery state is component-only — nothing is fetched until click, nothing is persisted. Other modes and fields are unchanged. README Orgo subsection leads with this flow; manual Session URL remains the fallback. `node --check` pass; static imports still `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`.
-
-## Fix round 6
-
-Live Orgo shapes (captured with a real key) differ from the docs. Session-json construction now takes instance id from `instance_id` / `instanceId` / `fly_instance_id` / `flyInstanceId` (first non-empty string matching `/^[a-zA-Z0-9-]+$/`), else the last path segment of `connection_url`. Empty `vnc_password ?? password` falls back to `GET {origin}/api/computers/{id}/vnc-password` (same bearer; `password ?? vnc_password`, possibly `data`-wrapped); that call is non-fatal and omits `?token=` if it also fails. Status gate and host resolution are unchanged.
-
-The finder reads workspaces from `projects` / `workspaces` / `data` / `items` / `results` (or a bare array) and computers from `desktops` / `computers` / `data` / `items` / `results`. Embedded computers on the list response are used directly; `GET /api/workspaces/{id}` only runs for workspaces that omit that array (that route 404s on a desktop id). If the list yields zero computers and the draft Session URL contains a UUID, `GET /api/computers/{uuid}` is offered as a single pick (`project_name` as the workspace label). Empty copy distinguishes no workspaces vs workspaces-but-no-computers. Values-free `console.info('[computer-viewer] orgo discovery', …)` logs statuses, key names, and counts. README documents `fly_instance_id` vs documented `instance_id`. `node --check` pass; static imports still `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`.
+Rounds 4 to 6 added a cloud-provider session parser and an in-app computer
+finder for one provider. Both were removed on 2026-11-15 when the kit moved
+to Hermes's native `computer_use`; Session JSON is back to the generic
+`{ websocketUrl, password }` contract. The original notes are in git history.
 
 ## Fix round 7
 

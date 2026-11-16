@@ -143,7 +143,7 @@ const rfb = new RFB(targetEl, wsUrl, { shared: true, credentials: { password } }
 // key: 'endpoints' → Endpoint[]
 Endpoint = {
   id: string,              // crypto.randomUUID()
-  name: string,            // display name, e.g. "Local box", "Orgo VPS"
+  name: string,            // display name, e.g. "Local box", "Cloud VPS"
   mode: 'websocket' | 'iframe' | 'session-json',
   wsUrl: string,           // websocket mode: ws(s)://host:port/path  e.g. ws://localhost:6080/websockify
   iframeUrl: string,       // iframe mode: http(s) URL of a hosted noVNC page, e.g. http://127.0.0.1:6080/vnc.html
@@ -171,9 +171,9 @@ There is **no settings contribution point** in the SDK (Settings → Plugins is 
 - Password field: `Input` with `type: 'password'`. Show a permanent one-line caveat: *"Stored locally in plugin storage (plain text). Prefer token-in-URL or session endpoints for anything sensitive."* — `ctx.storage` has no secret facility; do not pretend otherwise, do not roll crypto. (README must repeat this limitation.)
 - Mixed-content preflight warning (non-blocking) shown next to `wsUrl` when the value starts with `ws://` and the host is not localhost/127.0.0.1/a `100.64.0.0/10` or `*.ts.net` address: *"Insecure ws:// to a public host will likely be blocked. Use wss://."* (Korgo enforces exactly this split: `wss://` public, plain `ws://` only for verified-private Tailscale hosts.)
 
-### 4.3 `session-json` mode (rotating endpoints, Orgo/Modal-style) — in scope, small
+### 4.3 `session-json` mode (rotating endpoints) — in scope, small
 
-Some backends don't have a stable URL: you `GET` an API and receive an ephemeral session. Korgo does this against Orgo: fetch `https://www.orgo.ai/api/computers/{id}` with `Authorization: Bearer <key>`, then build `wss://www.orgo.ai/desktops/{instanceId}/ws/websockify?token=<password>` and *also* pass the same password as RFB credentials.
+Some backends don't have a stable URL: you `GET` an API and receive an ephemeral session. Korgo does this against its cloud provider: fetch the computer record with `Authorization: Bearer <key>`, then build a `wss://…/websockify?token=<password>` URL and *also* pass the same password as RFB credentials.
 
 Genericized for us: `sessionUrl` returns JSON; the engine reads `websocketUrl` (required) and `password` (optional) from the response and then behaves exactly like websocket mode. **The session must be re-fetched on every (re)connect — never cache the URL** (tokens rotate; a cached URL is the #1 cause of mystery reconnect failures). `fetch()` from plugins is proven to work. Non-2xx or missing `websocketUrl` → error state `session-failed` with the HTTP status in the detail.
 
@@ -275,7 +275,7 @@ All errors render as `ErrorState` in the pane with a Reconnect button and a gear
 1. **Local VNC + websockify:** `websockify 6080 localhost:5900` → endpoint `ws://localhost:6080/websockify`, password = VNC password. (`/websockify` is noVNC's conventional default path.)
 2. **Grok-Bot-style local Docker box:** containers like grokbot-shim's expose a full noVNC page at `http://127.0.0.1:6080/vnc.html` — either use **iframe mode** with that URL (identical to Grok Bot's own webview approach), or websocket mode against the same origin's `/websockify`.
 3. **Remote VPS:** must be `wss://` behind nginx/caddy TLS (`wss://host/websockify`). Self-signed certs fail *silently* at the websocket layer — user must trust the cert by visiting the https origin once. Include an nginx `proxy_read_timeout`/upgrade snippet in the README.
-4. **Rotating APIs (Orgo etc.):** session-json mode; document the expected response shape `{ "websocketUrl": "wss://...", "password": "..." }` and note that the same rotating password often doubles as the websockify `?token=`.
+4. **Rotating APIs:** session-json mode; document the expected response shape `{ "websocketUrl": "wss://...", "password": "..." }` and note that the same rotating password often doubles as the websockify `?token=`.
 
 ---
 
@@ -308,7 +308,7 @@ Build is done when all of these pass:
 
 `references/korgo/` — fetched sources from `github.com/nickvasilescu/korgo-bot`, **for study only, do not copy code**:
 - `index.tsx` — the complete 670-line viewer pane (portal pattern, generation guard, MutationObserver geometry, panel-bar crop, event wiring). This is the primary implementation reference.
-- `orgo-desktop.ts` — rotating-session fetch + URL construction (session-json mode reference).
+- the provider desktop module — rotating-session fetch + URL construction (session-json mode reference).
 - `novnc.d.ts` — hand-rolled RFB typings (handy as an API crib sheet).
 - `rail.tsx` — resizable rail shell (not needed; Hermes panes handle sizing).
 - `desktop-package.json` — confirms `"@novnc/novnc": "1.7.0"`.

@@ -209,6 +209,16 @@ if ls -d "${retired_home}"/desktop-plugins-retired-* >/dev/null 2>&1; then
 fi
 echo "OK  retired plugins: note only"
 
+# The retired orgo-computer agent plugin: named, with the remover command, never touched.
+orgo_home=$(new_home)
+mkdir -p "${orgo_home}/profiles/helper/plugins/orgo-computer"
+echo "name: orgo-computer" > "${orgo_home}/profiles/helper/plugins/orgo-computer/plugin.yaml"
+out=$(HERMES_HOME="${orgo_home}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}")
+printf '%s\n' "${out}" | grep -q 'Retired agent plugin still installed: orgo-computer' || fail "no note for orgo-computer: ${out}"
+printf '%s\n' "${out}" | grep -q 'remove-orgo-computer.sh' || fail "the orgo note does not say how to remove it"
+[ -f "${orgo_home}/profiles/helper/plugins/orgo-computer/plugin.yaml" ] || fail "the installer touched orgo-computer"
+echo "OK  retired agent plugin: note only"
+
 # KIT_REMOVE_RETIRED=1 moves exactly the kit-marked folders, never deletes.
 HERMES_HOME="${retired_home}" KIT_SOURCE_DIR="${ROOT}" KIT_REMOVE_RETIRED=1 bash "${INSTALLER}" >/dev/null
 moved="${retired_home}/desktop-plugins-retired-$(date +%Y%m%d)"

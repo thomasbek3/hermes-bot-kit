@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **computer-viewer: native computer_use, Take over / Hand back, Orgo removed (2026-11-15)**: the pane now opens on
+  Hermes's own `computer_use` and `browser_*` tool calls (live `tool.start` only, never replayed, once per bot per
+  30 s, a manual close holds 30 s) for a bot with its own bound computer, instead of on Orgo tool rows. Computers the
+  bot drives through the kit's `remote-cua` plugin get Hermes's Bot Screen controls: "Bot is in control" /
+  "You are in control" chip, **Take over** (red border, input on), **Hand back**, closing the pane or Disconnect
+  hands back, a dropped connection keeps the lease, **Hand back (force)** after a reload; view-only while the bot
+  holds control; the plugin's status check in plain words. Removed: the `orgo-computer` agent plugin, `orgo-term`,
+  `orgo-hands`, Orgo API-key discovery and the Orgo session parser, `install-agent-plugin.sh`. New
+  `computer-viewer/remove-orgo-computer.sh` (dry run, `--yes`) removes an installed `orgo-computer` from profiles;
+  `install.sh` names it when it finds one.
 - **grokbot-override: a failed reply is a calm card with Try again (2026-11-11)**: a turn that ends in an error
   (a live `message.complete` with `status: "error"`, or the stored `failed_turn` boundary row with its error)
   now shows one card, "That reply didn’t go through.", instead of the raw red error and the grey "This turn did

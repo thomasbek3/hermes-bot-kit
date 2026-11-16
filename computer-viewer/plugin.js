@@ -305,11 +305,10 @@ function isInsecurePublicWs(wsUrl) {
 
 const DEFAULT_ENDPOINT_NAME = 'My computer'
 const ADDRESS_EMPTY_HELP =
-  "Works with a wss:// address, a noVNC web page, a cloud API key, or just host:port — paste it and I'll figure out which."
-const ADDRESS_INVALID_LINE = "Hmm — that doesn't look like an address or key."
+  "Works with a wss:// address, a noVNC web page, a session API address, or just host:port — paste it and I'll figure out which."
+const ADDRESS_INVALID_LINE = "Hmm — that doesn't look like an address."
 const HTTP_PUBLIC_ADDRESS_LINE =
   'Use https:// for internet addresses. http:// only works for localhost, LAN, .local and Tailscale hosts.'
-const SK_KEY_RE = /^sk[_-][A-Za-z0-9_-]{8,}$/
 
 function isDefaultishName(name) {
   const n = String(name || '').trim()
@@ -376,12 +375,6 @@ function probeUrlsFromHostPort(parsed) {
     wsUrl: `${priv ? 'ws' : 'wss'}://${host}:${parsed.port}/websockify`,
     iframeUrl: priv ? `http://${host}:${parsed.port}/vnc.html` : ''
   }
-}
-
-// An address is an API key only when it announces itself as one. The old
-// entropy heuristic swallowed ordinary hostnames (`windows-11-desktop`).
-function looksLikeApiKey(value) {
-  return SK_KEY_RE.test(String(value || '').trim())
 }
 
 function isNovncPageUrl(href) {
@@ -456,14 +449,6 @@ function classifyAddress(raw) {
       patch: { mode: 'session-json', sessionUrl: address, probe: false }
     }
   }
-  if (looksLikeApiKey(address)) {
-    return {
-      kind: 'api-key',
-      line: "✓ API key — I'll find your computers",
-      connectEnabled: true,
-      patch: { mode: 'session-json', sessionBearer: address, probe: false }
-    }
-  }
   const hostPort = parseHostPort(address)
   if (hostPort) {
     const urls = probeUrlsFromHostPort(hostPort)
@@ -526,7 +511,8 @@ function blankEndpoint() {
     hiperfUrl: '',
     hiperfToken: '',
     allowClipboard: false,
-    serverKeyFingerprint: ''
+    serverKeyFingerprint: '',
+    remoteCua: false
   }
 }
 
@@ -555,7 +541,8 @@ function normalizeEndpoint(raw) {
     hiperfUrl: String(raw.hiperfUrl || ''),
     hiperfToken: String(raw.hiperfToken || ''),
     allowClipboard: raw.allowClipboard === true,
-    serverKeyFingerprint: String(raw.serverKeyFingerprint || '')
+    serverKeyFingerprint: String(raw.serverKeyFingerprint || ''),
+    remoteCua: raw.remoteCua === true
   }
 }
 
@@ -588,28 +575,23 @@ function unwrapSessionBody(value) {
   return value
 }
 
-// Orgo has no list-computers endpoint (GET /api/computers?workspace_id= → HTTP 405).
-// Live list is { projects: [{ desktops: [...] }] }. Docs still describe { workspaces }
-// plus GET /api/workspaces/{id}; that detail route takes a project id and 404s on a desktop id.
-
-const ORGO_INSTANCE_ID_RE = /^[a-zA-Z0-9-]+$/
-const ORGO_WORKSPACE_KEYS = ['projects', 'workspaces', 'data', 'items', 'results']
-const ORGO_COMPUTER_KEYS = ['desktops', 'computers', 'data', 'items', 'results']
-
-function orgoApiOrigin(sessionUrl) {
+// The origin an API key may be sent to: the configured session address's own
+// origin, nothing else.
+function sessionOrigin(sessionUrl) {
   try {
     const parsed = new URL(String(sessionUrl || '').trim())
     if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.origin
   } catch {
     /* not an absolute URL */
   }
-  return 'https://www.orgo.ai'
+  return ''
 }
 
 function credentialTargetAllowed(url, sessionUrl) {
   try {
     const parsed = new URL(String(url || '').trim())
-    if (parsed.origin !== orgoApiOrigin(sessionUrl)) return false
+    const allowed = sessionOrigin(sessionUrl)
+    if (!allowed || parsed.origin !== allowed) return false
     if (parsed.protocol === 'https:') return true
     if (parsed.protocol === 'http:' && isPrivateWsHost(parsed.hostname)) return true
     return false
@@ -643,304 +625,8 @@ async function authFetch(url, { bearer, sessionUrl, signal, accept } = {}) {
   return response
 }
 
-function orgoShapeKeys(value) {
-  if (Array.isArray(value)) return ['<array>']
-  if (value && typeof value === 'object') return Object.keys(value)
-  return []
-}
-
-function firstNonEmptyString(values) {
-  for (const value of values) {
-    if (typeof value === 'string') {
-      const text = value.trim()
-      if (text) return text
-    }
-  }
-  return ''
-}
-
-function uuidFromText(value) {
-  const matches = String(value || '').match(
-    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
-  )
-  return matches && matches.length ? matches[matches.length - 1] : ''
-}
-
-function instanceIdFromConnectionUrl(value) {
-  if (value == null || value === '') return ''
-  let last = ''
-  try {
-    const parts = new URL(String(value)).pathname.split('/').filter(Boolean)
-    last = parts.length ? parts[parts.length - 1] : ''
-  } catch {
-    const parts = String(value).split('/').filter(Boolean)
-    last = parts.length ? parts[parts.length - 1] : ''
-  }
-  last = String(last).trim()
-  return ORGO_INSTANCE_ID_RE.test(last) ? last : ''
-}
-
-function orgoInstanceId(record, payload) {
-  const bags = []
-  if (record && typeof record === 'object') bags.push(record)
-  if (payload && typeof payload === 'object' && payload !== record) bags.push(payload)
-  for (const bag of bags) {
-    for (const key of ['instance_id', 'instanceId', 'fly_instance_id', 'flyInstanceId']) {
-      const candidate = typeof bag[key] === 'string' ? bag[key].trim() : ''
-      if (candidate && ORGO_INSTANCE_ID_RE.test(candidate)) return candidate
-    }
-  }
-  for (const bag of bags) {
-    const derived = instanceIdFromConnectionUrl(bag.connection_url)
-    if (derived) return derived
-  }
-  return ''
-}
-
-function unwrapNamedArray(value, keys) {
-  if (Array.isArray(value)) return value
-  if (!value || typeof value !== 'object') return []
-  for (const key of keys) {
-    if (Array.isArray(value[key])) return value[key]
-  }
-  for (const key of keys) {
-    const nested = value[key]
-    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-      for (const inner of keys) {
-        if (Array.isArray(nested[inner])) return nested[inner]
-      }
-    }
-  }
-  return []
-}
-
-function unwrapWorkspaceList(value) {
-  return unwrapNamedArray(value, ORGO_WORKSPACE_KEYS).filter(
-    item =>
-      item && typeof item === 'object' && !Array.isArray(item) && item.id != null && String(item.id).trim() !== ''
-  )
-}
-
-function computerArrayFrom(record) {
-  if (!record || typeof record !== 'object') return null
-  for (const key of ORGO_COMPUTER_KEYS) {
-    if (Array.isArray(record[key])) return record[key]
-  }
-  return null
-}
-
-function computerArrayKey(record) {
-  if (!record || typeof record !== 'object') return null
-  for (const key of ORGO_COMPUTER_KEYS) {
-    if (Array.isArray(record[key])) return key
-  }
-  return null
-}
-
-function computersFromArray(arr) {
-  if (!Array.isArray(arr)) return []
-  return arr.filter(
-    item =>
-      item && typeof item === 'object' && !Array.isArray(item) && typeof item.id === 'string' && item.id.trim() !== ''
-  )
-}
-
-function extractComputers(body) {
-  if (Array.isArray(body)) return computersFromArray(body)
-  if (!body || typeof body !== 'object') return []
-  const records = [body]
-  for (const key of ['data', 'workspace', 'project']) {
-    const nested = body[key]
-    if (nested && typeof nested === 'object' && !Array.isArray(nested)) records.push(nested)
-  }
-  for (const record of records) {
-    const arr = computerArrayFrom(record)
-    if (arr) return computersFromArray(arr)
-  }
-  return []
-}
-
-function mapOrgoPick(computer, workspaceName) {
-  const computerId = String(computer.id).trim()
-  return {
-    workspaceName: workspaceName || 'Workspace',
-    computerId,
-    computerName: String(computer.name || '').trim() || computerId,
-    status: String(computer.status || '').trim() || 'unknown'
-  }
-}
-
-function orgoDiscoverError(kind) {
-  const err = new Error(kind)
-  err.kind = kind
-  return err
-}
-
 function isCredentialError(error) {
   return Boolean(error && (error.status === 'unsafe-origin' || error.status === 'redirect'))
-}
-
-async function orgoFetchJson(url, { bearer, sessionUrl }) {
-  let response
-  try {
-    response = await authFetch(url, { bearer, sessionUrl })
-  } catch (error) {
-    if (isCredentialError(error)) throw error
-    throw orgoDiscoverError('network')
-  }
-  if (response.status === 401 || response.status === 403) throw orgoDiscoverError('auth')
-  if (!response.ok) throw orgoDiscoverError('network')
-  try {
-    return { status: response.status, body: await response.json() }
-  } catch {
-    throw orgoDiscoverError('network')
-  }
-}
-
-async function orgoFetchJsonOptional(url, { bearer, sessionUrl }) {
-  let response
-  try {
-    response = await authFetch(url, { bearer, sessionUrl })
-  } catch (error) {
-    if (isCredentialError(error)) throw error
-    return { ok: false, status: 'network', body: null }
-  }
-  let body = null
-  try {
-    body = await response.json()
-  } catch {
-    body = null
-  }
-  return { ok: response.ok, status: response.status, body }
-}
-
-function pushOrgoComputers(computers, list, workspaceName) {
-  for (const computer of computersFromArray(list)) {
-    computers.push(mapOrgoPick(computer, workspaceName))
-  }
-}
-
-async function discoverOrgoComputers(origin, bearer, sessionUrl) {
-  const listed = await orgoFetchJson(`${origin}/api/workspaces`, { bearer, sessionUrl })
-  const workspaces = unwrapWorkspaceList(listed.body)
-  const workspaceCount = workspaces.length
-  const computers = []
-  const needingDetail = []
-  const embedded = []
-
-  for (const ws of workspaces) {
-    const arr = computerArrayFrom(ws)
-    const key = computerArrayKey(ws)
-    if (arr) {
-      embedded.push({ key, count: arr.length })
-      const workspaceName =
-        String((ws && ws.name) || '').trim() || String((ws && ws.project_name) || '').trim() || 'Workspace'
-      pushOrgoComputers(computers, arr, workspaceName)
-    } else {
-      embedded.push({ key: null, count: 0 })
-      needingDetail.push(ws)
-    }
-  }
-
-  console.info('[computer-viewer] orgo discovery', {
-    stage: 'list',
-    status: listed.status,
-    keys: orgoShapeKeys(listed.body),
-    workspaceCount,
-    firstWorkspaceKeys: workspaces[0] ? orgoShapeKeys(workspaces[0]) : [],
-    embedded
-  })
-
-  const detailSlice = needingDetail.slice(0, 10)
-  const details = await Promise.all(
-    detailSlice.map(async ws => {
-      const id = String(ws.id).trim()
-      const result = await orgoFetchJsonOptional(`${origin}/api/workspaces/${encodeURIComponent(id)}`, {
-        bearer,
-        sessionUrl
-      })
-      return { ws, result }
-    })
-  )
-
-  for (const { ws, result } of details) {
-    const body = result.body
-    const extracted = extractComputers(body)
-    console.info('[computer-viewer] orgo discovery', {
-      stage: 'detail',
-      status: result.status,
-      keys: orgoShapeKeys(body),
-      computerCount: extracted.length,
-      computerKey:
-        computerArrayKey(body) ||
-        computerArrayKey(body && body.data) ||
-        computerArrayKey(body && body.workspace)
-    })
-    if (!result.ok || body == null) continue
-    const workspaceName =
-      String((ws && ws.name) || '').trim() ||
-      String((body && body.name) || '').trim() ||
-      'Workspace'
-    pushOrgoComputers(computers, extracted, workspaceName)
-  }
-
-  let uuidFallback = false
-  let uuidFallbackStatus = null
-  if (computers.length === 0) {
-    const uuid = uuidFromText(sessionUrl)
-    if (uuid) {
-      uuidFallback = true
-      const result = await orgoFetchJsonOptional(`${origin}/api/computers/${encodeURIComponent(uuid)}`, {
-        bearer,
-        sessionUrl
-      })
-      uuidFallbackStatus = result.status
-      const record = unwrapSessionBody(result.body)
-      const id = record && typeof record.id === 'string' ? record.id.trim() : ''
-      console.info('[computer-viewer] orgo discovery', {
-        stage: 'uuid-fallback',
-        status: result.status,
-        keys: orgoShapeKeys(result.body),
-        hasId: Boolean(id)
-      })
-      if (result.ok && id) {
-        const workspaceName =
-          String(record.project_name || record.projectName || '').trim() || 'Workspace'
-        computers.push(mapOrgoPick(record, workspaceName))
-      }
-    }
-  }
-
-  console.info('[computer-viewer] orgo discovery', {
-    stage: 'done',
-    workspaceCount,
-    computerCount: computers.length,
-    detailFetches: detailSlice.length,
-    uuidFallback,
-    uuidFallbackStatus,
-    statuses: computers.map(item => item.status)
-  })
-
-  return { computers, workspaceCount }
-}
-
-function hostnameOf(value) {
-  if (value == null || value === '') return ''
-  try {
-    return String(new URL(String(value)).hostname || '').trim()
-  } catch {
-    return ''
-  }
-}
-
-const NON_RUNNING_COMPUTER = {
-  stopped: true,
-  stopping: true,
-  creating: true,
-  starting: true,
-  restarting: true,
-  deleting: true,
-  error: true
 }
 
 function errorTitle(code) {
@@ -1287,6 +973,8 @@ function showPane() {
 
 function hidePane() {
   if (!unregisterPane) return
+  paneClosedAt = Date.now()
+  handBackOnClose()
   const dispose = unregisterPane
   unregisterPane = null
   engine.paneVisible = false
@@ -1583,7 +1271,17 @@ function ensureIframeEl() {
 function syncSurfacePointer() {
   const expanded = $ui.get().expanded
   if (engine.surfaceEl) engine.surfaceEl.style.pointerEvents = expanded ? 'auto' : 'none'
-  if (engine.iframeEl) engine.iframeEl.style.pointerEvents = expanded ? 'auto' : 'none'
+  // An embedded page cannot be told to ignore input, so a locked machine gets none.
+  if (engine.iframeEl) engine.iframeEl.style.pointerEvents = expanded && !controlLocked() ? 'auto' : 'none'
+}
+
+/** Input goes to the remote only in the expanded view, and for a remote-cua
+ *  machine only while this window holds control. */
+function effectiveViewOnly() {
+  const ui = $ui.get()
+  if (!ui.expanded) return true
+  if (controlTarget()) return !iHoldControl()
+  return Boolean(ui.viewOnly)
 }
 
 function liveEl() {
@@ -1658,9 +1356,8 @@ function applyRfbDisplay() {
   const rfb = engine.rfb
   const expanded = $ui.get().expanded
   const scaleMode = $ui.get().scaleMode
-  const viewOnly = $ui.get().viewOnly
   if (rfb) {
-    rfb.viewOnly = !expanded || viewOnly
+    rfb.viewOnly = effectiveViewOnly()
     rfb.scaleViewport = !expanded || scaleMode === 'fit'
     rfb.clipViewport = false
     rfb.resizeSession = false
@@ -1726,37 +1423,6 @@ function teardownIframe(blank) {
   if (!engine.iframeEl) return
   engine.iframeEl.onload = null
   if (blank) engine.iframeEl.src = 'about:blank'
-}
-
-async function fetchOrgoVncPassword(origin, computerId, bearer, sessionUrl, signal, gen) {
-  let response
-  try {
-    const url = `${origin}/api/computers/${encodeURIComponent(computerId)}/vnc-password`
-    if (bearer) {
-      response = await authFetch(url, { bearer, sessionUrl, signal })
-    } else {
-      response = await fetch(url, { headers: { Accept: 'application/json' }, signal })
-    }
-  } catch (error) {
-    if (error && error.name === 'AbortError') throw error
-    if (isCredentialError(error)) throw error
-    return ''
-  }
-  if (!still(gen)) {
-    const aborted = new Error('aborted')
-    aborted.status = 'aborted'
-    throw aborted
-  }
-  if (!response.ok) return ''
-  let payload
-  try {
-    payload = await response.json()
-  } catch {
-    return ''
-  }
-  const record = unwrapSessionBody(payload)
-  const raw = record.password ?? record.vnc_password ?? payload.password ?? payload.vnc_password
-  return raw == null ? '' : String(raw)
 }
 
 function credentialErrorDetail(error) {
@@ -1832,46 +1498,8 @@ async function fetchSession(endpoint, gen) {
     throw wrapped
   }
   const record = unwrapSessionBody(payload)
-  let websocketUrl = String(record.websocketUrl || payload.websocketUrl || '').trim()
-  let password = String(record.password ?? payload.password ?? '')
-  if (!websocketUrl) {
-    const instanceId = orgoInstanceId(record, payload)
-    if (instanceId) {
-      const statusRaw = record.status != null ? record.status : payload.status
-      if (statusRaw != null && statusRaw !== '') {
-        const status = String(statusRaw).trim()
-        if (NON_RUNNING_COMPUTER[status.toLowerCase()]) {
-          const wrapped = new Error('computer-status')
-          wrapped.status = status
-          wrapped.sessionDetail = `Computer status: ${status}. Start it in Orgo first.`
-          throw wrapped
-        }
-      }
-      const rawPassword = record.vnc_password ?? record.password ?? payload.vnc_password ?? payload.password
-      password = rawPassword == null ? '' : String(rawPassword)
-      if (password === '') {
-        const computerId = firstNonEmptyString([record.id, payload.id]) || uuidFromText(endpoint.sessionUrl)
-        if (computerId) {
-          password = await fetchOrgoVncPassword(
-            orgoApiOrigin(endpoint.sessionUrl),
-            computerId,
-            bearer,
-            endpoint.sessionUrl,
-            ac.signal,
-            gen
-          )
-        }
-      }
-      const host =
-        hostnameOf(record.connection_url != null ? record.connection_url : payload.connection_url) ||
-        String(record.hostname || payload.hostname || '').trim() ||
-        hostnameOf(endpoint.sessionUrl)
-      if (host) {
-        websocketUrl = `wss://${host}/desktops/${encodeURIComponent(instanceId)}/ws/websockify`
-        if (password !== '') websocketUrl += `?token=${encodeURIComponent(password)}`
-      }
-    }
-  }
+  const websocketUrl = String(record.websocketUrl || payload.websocketUrl || '').trim()
+  const password = String(record.password ?? payload.password ?? '')
   if (!websocketUrl) {
     const wrapped = new Error('missing-websocketUrl')
     wrapped.status = response.status
@@ -2218,6 +1846,7 @@ async function connect(endpoint) {
         )
       }
       patchState({ phase: 'connected', code: null, detail: rfbStatusDetail(), attempt: 0 })
+      void refreshLease()
       measureScreen()
       attachCanvasObserver()
       hiperfOnRfbConnected()
@@ -2331,6 +1960,7 @@ function userDisconnect(endpointId) {
   const id =
     endpointId || (engine.endpoint && engine.endpoint.id) || engine.currentEndpointId
   if (id) userDisconnectIds.add(id)
+  handBackOnClose()
   disconnect()
 }
 
@@ -2481,25 +2111,57 @@ function teardownEngine() {
   pluginCtx = null
 }
 
-// Auto-connect when the agent starts using its computer (Grok-Bot behavior):
-// a fresh orgo-computer tool row appearing DURING a live turn wakes the
-// viewer so the user can watch. Works even when Bot Chat's quiet mode hides
-// the row (display:none keeps it in the DOM). History renders don't trigger
-// it: a wake requires the response-loading indicator to be present.
-const AGENT_TOOL_RE = /orgo[\s_-]?computer/i
-let lastAgentWake = 0
+// ---------------------------------------------------------------------------
+// Waking on the bot's own tool calls.
+//
+// Same rules as Hermes's native "Open Screen when the bot uses it"
+// (hermes-bots/screen-autoraise.ts): a LIVE `tool.start` for a screen tool
+// (`computer_use`, `browser_*`) wakes the pane, never a replayed frame, at
+// most once per bot every 30 s, and a manual close holds until a quiet gap of
+// 30 s. Only for a bot that has its own computer bound in this pane
+// (Settings -> "Endpoint for <bot>"), and only when that bot is the one the
+// pane is showing: waking would otherwise connect a different bot's machine.
+// ---------------------------------------------------------------------------
+const SCREEN_TOOL_PREFIXES = ['computer_use', 'browser_']
+const AUTO_WAKE_COOLDOWN_MS = 30000
+const wakeState = new Map()
+let paneClosedAt = 0
 
-function turnInProgress() {
-  return Boolean(
-    document.querySelector(
-      '[data-slot="aui_response-loading"], [data-slot="aui_message-streaming-marker"]'
-    )
-  )
+function isScreenTool(name) {
+  return typeof name === 'string' && SCREEN_TOOL_PREFIXES.some(prefix => name.startsWith(prefix))
 }
 
-function wakeForAgentActivity() {
-  const endpoint = engine.endpoint || resolveEndpoint()
-  if (!endpoint) return
+function boundEndpointFor(profile) {
+  const settings = $settings.get()
+  const id = settings.perBotEndpoint ? settings.perBotEndpoint[profile] : null
+  if (!id) return null
+  return settings.endpoints.find(item => item.id === id) || null
+}
+
+function shouldWake(profile, now) {
+  if (paneClosedAt && now - paneClosedAt < AUTO_WAKE_COOLDOWN_MS) return false
+  const last = wakeState.get(profile) || 0
+  return !last || now - last >= AUTO_WAKE_COOLDOWN_MS
+}
+
+/** A gateway `tool.start` event. Returns true when it woke the pane. */
+function handleToolStart(event, now = Date.now()) {
+  if (!event || event.replayed === true) return false
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {}
+  if (!isScreenTool(payload.name)) return false
+  const shown = readProfileName()
+  const profile = String(event.profile || '').trim() || shown
+  if (profile !== shown) return false
+  const endpoint = boundEndpointFor(profile)
+  if (!endpoint) return false
+  if (!shouldWake(profile, now)) return false
+  wakeState.set(profile, now)
+  wakeForAgentActivity(endpoint)
+  return true
+}
+
+function wakeForAgentActivity(endpoint) {
+  showPane()
   const phase = engine.state.get().phase
   if (
     phase === 'connected' ||
@@ -2513,52 +2175,457 @@ function wakeForAgentActivity() {
   void connect(endpoint)
 }
 
-function watchAgentActivity() {
-  if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return null
-  const obs = new MutationObserver(mutations => {
-    const now = Date.now()
-    if (now - lastAgentWake < 30000) return
-    for (const m of mutations) {
-      for (const node of m.addedNodes || []) {
-        if (!node || node.nodeType !== 1) continue
-        let block = null
-        if (typeof node.matches === 'function' && node.matches('[data-slot="tool-block"]')) {
-          block = node
-        } else if (typeof node.querySelector === 'function') {
-          block = node.querySelector('[data-slot="tool-block"]')
-        }
-        if (!block) continue
-        if (!AGENT_TOOL_RE.test(block.textContent || '')) continue
-        if (!turnInProgress()) continue
-        lastAgentWake = now
-        wakeForAgentActivity()
-        return
-      }
-    }
+function watchAgentActivity(ctx) {
+  const listen =
+    ctx && typeof ctx.onEvent === 'function'
+      ? (type, fn) => ctx.onEvent(type, fn)
+      : typeof host.onEvent === 'function'
+        ? (type, fn) => host.onEvent(type, fn)
+        : null
+  if (!listen) return null
+  return listen('tool.start', event => {
+    handleToolStart(event)
   })
-  obs.observe(document.body || document.documentElement, { subtree: true, childList: true })
-  return obs
+}
+
+// ---------------------------------------------------------------------------
+// Take over / Hand back for machines the bot drives through the kit's
+// `remote-cua` agent plugin (Hermes's own `computer_use` tool, run on another
+// machine over SSH).
+//
+// The lease lives on the gateway host (`<HERMES_HOME>/remote-cua/lease.json`,
+// per bot profile); while a human holds it the plugin refuses the bot's
+// `computer_use` with `human_has_control`, as Hermes's Bot Screen does. The
+// pane reads and changes it through the plugin's gateway RPC methods; it
+// never writes the file itself. Wording and behaviour copy Hermes's Bot
+// Screen ("Using it" in bot-screen.md):
+//   - "Bot is in control" by default; the pane is view-only for that machine.
+//   - Take over: red border, keyboard and mouse drive the machine.
+//   - Hand back, closing the pane, or Disconnect hands control back.
+//   - A dropped connection keeps the human lease until you reconnect and
+//     hand back.
+//   - After a reload the old viewer id is gone; when the lease still says a
+//     human holds control, "Hand back (force)" clears it.
+// ---------------------------------------------------------------------------
+
+// Wire names of the remote-cua plugin's RPC methods (`ctx.register_rpc` in
+// Hermes serves `plugin.<plugin id>.<name>`). Change here only.
+const REMOTE_CUA_METHODS = {
+  lease: 'plugin.remote-cua.lease.get',
+  take: 'plugin.remote-cua.lease.take',
+  release: 'plugin.remote-cua.lease.release',
+  status: 'plugin.remote-cua.status'
+}
+const LEASE_POLL_MS = 5000
+
+const CONTROL_TEXT = {
+  takeOver: 'Take over',
+  handBack: 'Hand back',
+  handBackForce: 'Hand back (force)',
+  handBackForceHint: 'Release a lease held by a viewer that is no longer here, e.g. after a reload.',
+  youControl: 'You are in control',
+  otherControls: 'Another viewer is in control',
+  agentControls: 'Bot is in control',
+  controlTaken: 'Another viewer took control. Watching only.',
+  unbound: profile => `Bind this computer to ${profile} (Settings → Endpoint for ${profile}) to take over.`,
+  pluginMissing: "This bot's gateway doesn't have the remote-cua plugin, so control can't be checked."
+}
+
+function newViewerId() {
+  try {
+    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+      return `cv-${globalThis.crypto.randomUUID()}`
+    }
+  } catch {
+    /* fall through */
+  }
+  return `cv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const IDLE_CONTROL = {
+  key: '',
+  profile: '',
+  endpointId: '',
+  bound: false,
+  lease: null,
+  status: null,
+  statusError: '',
+  pending: null,
+  error: '',
+  evicted: false
+}
+
+const $control = atom({ ...IDLE_CONTROL })
+
+const control = {
+  // Minted per plugin load, like Hermes's per-attach viewer id: a reload is a
+  // new viewer, so a lease left behind needs "Hand back (force)".
+  viewerId: newViewerId(),
+  client: null,
+  pollStop: null
+}
+
+function normalizeLease(raw) {
+  const r = raw && typeof raw === 'object' && raw.lease && typeof raw.lease === 'object' ? raw.lease : raw
+  if (!r || typeof r !== 'object') return { holder: 'agent', viewer: null, since: 0, epoch: 0 }
+  const epoch = Number(r.epoch)
+  return {
+    holder: r.holder === 'human' ? 'human' : 'agent',
+    viewer: typeof r.viewer === 'string' && r.viewer ? r.viewer : null,
+    since: Number(r.since) || 0,
+    epoch: Number.isFinite(epoch) ? epoch : 0
+  }
+}
+
+function pickBool(...values) {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value
+  }
+  return null
+}
+
+/** GET status, tolerant of the field spellings a JSON API might use. */
+function normalizeStatus(raw) {
+  const s = raw && typeof raw === 'object' && raw.status && typeof raw.status === 'object' ? raw.status : raw
+  if (!s || typeof s !== 'object') return null
+  const driver = s.driver && typeof s.driver === 'object' ? s.driver : null
+  const perms = s.permissions && typeof s.permissions === 'object' ? s.permissions : null
+  const screen = s.screen && typeof s.screen === 'object' ? s.screen : null
+  const version =
+    (typeof s.driver_version === 'string' && s.driver_version) ||
+    (driver && typeof driver.version === 'string' && driver.version) ||
+    (typeof s.driver === 'string' && s.driver) ||
+    ''
+  let permissions = pickBool(s.permissions_ok, typeof s.permissions === 'boolean' ? s.permissions : null, perms && perms.ok)
+  if (permissions == null && perms) {
+    const ax = pickBool(perms.accessibility)
+    const sr = pickBool(perms.screen_recording, perms.screenRecording)
+    if (ax != null && sr != null) permissions = ax && sr
+  }
+  let screenAwake = pickBool(s.screen_awake, screen && screen.awake)
+  if (screenAwake == null) {
+    const asleep = pickBool(s.screen_asleep, screen && screen.asleep)
+    if (asleep != null) screenAwake = !asleep
+  }
+  const detail = [s.detail, s.error, s.message].find(v => typeof v === 'string' && v.trim()) || ''
+  return {
+    reachable: pickBool(s.reachable, s.ok_ssh),
+    driverFound: pickBool(s.driver_found, driver && driver.found, version ? true : null),
+    driverVersion: version,
+    permissions,
+    screenAwake,
+    detail: String(detail).trim()
+  }
+}
+
+/** One plain-words line for a bound machine: { tone, line }. */
+function statusWords(status) {
+  if (!status) return null
+  if (status.reachable === false) {
+    return {
+      tone: 'bad',
+      line: status.detail ? `Can't reach the machine: ${status.detail}` : "Can't reach the machine"
+    }
+  }
+  const parts = []
+  const bad = []
+  if (status.reachable === true) parts.push('Reachable')
+  if (status.driverFound === false) {
+    parts.push('driver not found')
+    bad.push(true)
+  } else if (status.driverVersion) {
+    parts.push(`driver ${status.driverVersion}`)
+  }
+  if (status.permissions === false) {
+    parts.push('needs Accessibility and Screen Recording permission')
+    bad.push(true)
+  } else if (status.permissions === true) {
+    parts.push('permissions OK')
+  }
+  if (status.screenAwake === false) {
+    parts.push('screen asleep or locked')
+    bad.push(true)
+  } else if (status.screenAwake === true) {
+    parts.push('screen awake')
+  }
+  if (!parts.length) return status.detail ? { tone: 'muted', line: status.detail } : null
+  const complete =
+    status.reachable === true &&
+    status.driverFound !== false &&
+    status.permissions === true &&
+    status.screenAwake === true
+  const line = parts.join(' · ')
+  return {
+    tone: bad.length ? 'bad' : complete ? 'good' : 'muted',
+    line: line.charAt(0).toUpperCase() + line.slice(1)
+  }
+}
+
+function activeProfileName() {
+  try {
+    return (host.state.profile && host.state.profile.get()) || ''
+  } catch {
+    return ''
+  }
+}
+
+/** The default transport: the plugin's RPC methods on that bot's own gateway. */
+async function remoteCuaGatewayRequest(profile, op, params) {
+  const method = REMOTE_CUA_METHODS[op]
+  if (!method) throw new Error(`unknown remote-cua op ${op}`)
+  let routes = null
+  try {
+    routes = typeof host.profileRoutes === 'function' ? await host.profileRoutes() : null
+  } catch {
+    routes = null
+  }
+  const route = Array.isArray(routes) ? routes.find(item => item && item.profile === profile) : null
+  if (route && typeof host.requestProfile === 'function') return host.requestProfile(route, method, params)
+  if (typeof host.request === 'function' && (!profile || profile === activeProfileName())) {
+    return host.request(method, params)
+  }
+  if (typeof host.requestProfile === 'function') return host.requestProfile(profile, method, params)
+  throw new Error('No gateway to ask.')
+}
+
+function createRemoteCuaClient(request) {
+  return {
+    lease: profile => request(profile, 'lease', {}),
+    take: (profile, viewer) => request(profile, 'take', { viewer }),
+    release: (profile, viewer, force) =>
+      request(profile, 'release', force ? { viewer, force: true } : { viewer }),
+    status: profile => request(profile, 'status', {})
+  }
+}
+
+control.client = createRemoteCuaClient(remoteCuaGatewayRequest)
+
+function controlErrorText(error) {
+  const message = String((error && (error.message || error.code)) || error || '')
+  const code = error && (error.code ?? error.status)
+  if (code === -32601 || /method not found|unknown method|no such method/i.test(message)) {
+    return CONTROL_TEXT.pluginMissing
+  }
+  return message || 'Request failed.'
+}
+
+/** The machine the pane shows, when the bot drives it through remote-cua. */
+function controlTarget() {
+  const endpoint = resolveEndpoint()
+  if (!endpoint || !endpoint.remoteCua) return null
+  const profile = readProfileName()
+  const settings = $settings.get()
+  const bound = Boolean(settings.perBotEndpoint && settings.perBotEndpoint[profile] === endpoint.id)
+  return { profile, endpoint, bound, key: `${profile}\u0000${endpoint.id}` }
+}
+
+function leaseHeldBy(lease, viewer) {
+  return Boolean(lease && lease.holder === 'human' && viewer && lease.viewer === viewer)
+}
+
+/** Pure view of the control state for one viewer. */
+function controlView(state, viewerId) {
+  const lease = state && state.lease
+  const iHold = leaseHeldBy(lease, viewerId)
+  const humanOther = Boolean(lease && lease.holder === 'human' && !iHold)
+  return {
+    iHold,
+    humanOther,
+    chip: iHold ? CONTROL_TEXT.youControl : humanOther ? CONTROL_TEXT.otherControls : CONTROL_TEXT.agentControls,
+    canTakeOver: Boolean(state && state.bound && !iHold && !state.pending),
+    canHandBack: Boolean(iHold && !state.pending),
+    canForce: Boolean(state && state.bound && humanOther && !state.pending),
+    inputEnabled: iHold
+  }
+}
+
+function iHoldControl() {
+  const target = controlTarget()
+  const state = $control.get()
+  if (!target || state.key !== target.key) return false
+  return leaseHeldBy(state.lease, control.viewerId)
+}
+
+/** True when the pane must not send input: a remote-cua machine the human does not hold. */
+function controlLocked() {
+  return Boolean(controlTarget()) && !iHoldControl()
+}
+
+function patchControl(partial) {
+  $control.set({ ...$control.get(), ...partial })
+}
+
+function applyLease(key, raw) {
+  const state = $control.get()
+  if (state.key !== key) return
+  const lease = normalizeLease(raw)
+  const had = leaseHeldBy(state.lease, control.viewerId)
+  const has = leaseHeldBy(lease, control.viewerId)
+  // Another viewer's Take over wins; this window drops back to watching.
+  let evicted = state.evicted
+  if (had && !has) evicted = lease.holder === 'human'
+  if (has || lease.holder !== 'human') evicted = false
+  patchControl({ lease, error: '', evicted })
+  applyRfbDisplay()
+  syncSurfacePointer()
+}
+
+async function refreshLease() {
+  const state = $control.get()
+  if (!state.key || !state.bound || !control.client) return
+  const key = state.key
+  try {
+    const raw = await control.client.lease(state.profile)
+    applyLease(key, raw)
+  } catch (error) {
+    if ($control.get().key === key) patchControl({ error: controlErrorText(error) })
+  }
+}
+
+async function refreshStatus() {
+  const state = $control.get()
+  if (!state.key || !state.bound || !control.client) return
+  const key = state.key
+  try {
+    const raw = await control.client.status(state.profile)
+    if ($control.get().key === key) patchControl({ status: normalizeStatus(raw), statusError: '' })
+  } catch (error) {
+    if ($control.get().key === key) patchControl({ statusError: controlErrorText(error) })
+  }
+}
+
+async function takeOver() {
+  const state = $control.get()
+  if (!state.key || !state.bound || state.pending || !control.client) return
+  const key = state.key
+  patchControl({ pending: 'take', error: '', evicted: false })
+  try {
+    const raw = await control.client.take(state.profile, control.viewerId)
+    if ($control.get().key !== key) return
+    patchControl({ pending: null })
+    applyLease(key, raw)
+    if (leaseHeldBy($control.get().lease, control.viewerId)) {
+      setUi({ viewOnly: false })
+      setExpanded(true)
+    }
+  } catch (error) {
+    if ($control.get().key === key) patchControl({ pending: null, error: controlErrorText(error) })
+  }
+}
+
+/** Hand control back. `force` clears a lease this window does not hold. */
+async function handBack(force = false) {
+  const state = $control.get()
+  if (!state.key || !control.client) return
+  if (!force && !leaseHeldBy(state.lease, control.viewerId)) return
+  if (force && !state.bound) return
+  const key = state.key
+  patchControl({ pending: force ? 'force' : 'release', error: '' })
+  try {
+    const raw = await control.client.release(state.profile, control.viewerId, force)
+    if ($control.get().key !== key) return
+    patchControl({ pending: null, evicted: false })
+    applyLease(key, raw)
+  } catch (error) {
+    if ($control.get().key === key) patchControl({ pending: null, error: controlErrorText(error) })
+  }
+}
+
+/** Closing the pane (or Disconnect) hands back. A dropped connection does not. */
+function handBackOnClose() {
+  const state = $control.get()
+  if (!state.key || !leaseHeldBy(state.lease, control.viewerId) || !control.client) return
+  const { profile } = state
+  // Fire and forget: the pane is going away, the gateway still gets the release.
+  patchControl({ lease: { ...state.lease, holder: 'agent', viewer: null } })
+  Promise.resolve()
+    .then(() => control.client.release(profile, control.viewerId, false))
+    .catch(() => {})
+  applyRfbDisplay()
+  syncSurfacePointer()
+}
+
+/** Follow the pane to the machine it shows; a machine left behind is handed back. */
+function syncControlTarget() {
+  const target = controlTarget()
+  const state = $control.get()
+  const key = target ? target.key : ''
+  if (state.key === key && (!target || state.bound === target.bound)) return
+  if (state.key && state.key !== key) handBackOnClose()
+  if (!target) {
+    $control.set({ ...IDLE_CONTROL })
+    syncLeasePoll()
+    applyRfbDisplay()
+    syncSurfacePointer()
+    return
+  }
+  $control.set({
+    ...IDLE_CONTROL,
+    key,
+    profile: target.profile,
+    endpointId: target.endpoint.id,
+    bound: target.bound
+  })
+  syncLeasePoll()
+  applyRfbDisplay()
+  syncSurfacePointer()
+  if (target.bound) {
+    void refreshLease()
+    void refreshStatus()
+  }
+}
+
+/** Poll the lease only while a bound remote-cua machine is on screen, so the
+ *  chip follows a Take over from another window or a forced hand back. */
+function syncLeasePoll() {
+  const want = Boolean($control.get().bound)
+  if (want && !control.pollStop) {
+    const tick = () => {
+      if (engine.paneVisible && $control.get().bound) void refreshLease()
+    }
+    const ctx = pluginCtx
+    if (ctx && typeof ctx.setInterval === 'function') {
+      control.pollStop = ctx.setInterval(tick, LEASE_POLL_MS)
+    } else if (typeof setInterval === 'function') {
+      const id = setInterval(tick, LEASE_POLL_MS)
+      control.pollStop = () => clearInterval(id)
+    }
+  } else if (!want && control.pollStop) {
+    stopLeasePoll()
+  }
+}
+
+function stopLeasePoll() {
+  const stop = control.pollStop
+  control.pollStop = null
+  if (typeof stop === 'function') {
+    try {
+      stop()
+    } catch {
+      /* already cleared */
+    }
+  }
 }
 
 function attachEngine(ctx) {
   pluginCtx = ctx
   loadSettingsFrom(ctx)
   const unsubs = []
-  const agentActivityObserver = watchAgentActivity()
-  unsubs.push(() => {
-    try {
-      agentActivityObserver?.disconnect()
-    } catch {
-      /* ignore */
-    }
-  })
+  const stopAgentActivity = watchAgentActivity(ctx)
+  if (typeof stopAgentActivity === 'function') unsubs.push(stopAgentActivity)
+  unsubs.push(stopLeasePoll)
+  const follow = () => {
+    syncConnection()
+    syncControlTarget()
+  }
   if (host.state.focusedSessionProfile && typeof host.state.focusedSessionProfile.listen === 'function') {
-    unsubs.push(host.state.focusedSessionProfile.listen(() => syncConnection()))
+    unsubs.push(host.state.focusedSessionProfile.listen(follow))
   }
   if (host.state.profile && typeof host.state.profile.listen === 'function') {
-    unsubs.push(host.state.profile.listen(() => syncConnection()))
+    unsubs.push(host.state.profile.listen(follow))
   }
-  unsubs.push($settings.listen(() => syncConnection()))
+  unsubs.push($settings.listen(follow))
+  syncControlTarget()
   if (typeof host.paneVisibility === 'function') {
     const vis = host.paneVisibility(PANE_CONTRIB_ID)
     if (vis && typeof vis.get === 'function') engine.paneVisible = Boolean(vis.get())
@@ -2566,8 +2633,11 @@ function attachEngine(ctx) {
       unsubs.push(
         vis.listen(value => {
           engine.paneVisible = Boolean(value)
-          if (value) syncConnection()
-          else {
+          if (value) {
+            syncConnection()
+            void refreshLease()
+          } else {
+            handBackOnClose()
             setExpanded(false)
             disconnect()
           }
@@ -2576,6 +2646,7 @@ function attachEngine(ctx) {
     }
   }
   const dispose = () => {
+    handBackOnClose()
     for (const stop of unsubs) {
       try {
         stop()
@@ -3609,96 +3680,6 @@ function Field({ label, hint, warn, children }) {
   )
 }
 
-function OrgoComputerFinder({ bearer, sessionUrl, onPick }) {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [computers, setComputers] = useState([])
-  const [selectedId, setSelectedId] = useState('')
-  const genRef = useRef(0)
-
-  async function findComputers() {
-    const token = String(bearer || '').trim()
-    if (!token) return
-    const gen = ++genRef.current
-    setLoading(true)
-    setError('')
-    setComputers([])
-    setSelectedId('')
-    try {
-      const found = await discoverOrgoComputers(orgoApiOrigin(sessionUrl), token, sessionUrl)
-      if (gen !== genRef.current) return
-      const list = found && Array.isArray(found.computers) ? found.computers : []
-      setComputers(list)
-      if (list.length === 0) {
-        const n = found && typeof found.workspaceCount === 'number' ? found.workspaceCount : 0
-        setError(
-          n === 0
-            ? 'No workspaces for this key.'
-            : `Found ${n} workspace(s) but no computers.`
-        )
-      }
-    } catch (err) {
-      if (gen !== genRef.current) return
-      const credential = credentialErrorDetail(err)
-      if (credential) setError(credential.detail)
-      else if (err && err.kind === 'auth') setError('This API key was rejected.')
-      else setError("Couldn't reach the API from the app — set the API address in Advanced.")
-    } finally {
-      if (gen === genRef.current) setLoading(false)
-    }
-  }
-
-  const tokenReady = String(bearer || '').trim() !== ''
-
-  return el(
-    'div',
-    { className: 'grid gap-1.5' },
-    el(
-      Button,
-      {
-        type: 'button',
-        size: 'sm',
-        variant: 'secondary',
-        disabled: !tokenReady || loading,
-        onClick: () => void findComputers()
-      },
-      'Find my computers'
-    ),
-    error
-      ? el('p', { className: 'text-[0.64rem] leading-4 text-(--ui-text-secondary)' }, error)
-      : null,
-    computers.length > 0
-      ? el(
-          Field,
-          { label: 'Computer' },
-          el(
-            Select,
-            {
-              value: selectedId || undefined,
-              onValueChange: value => {
-                setSelectedId(value)
-                const computer = computers.find(item => item.computerId === value)
-                if (computer) onPick(computer)
-              }
-            },
-            el(SelectTrigger, { className: 'w-full' }, el(SelectValue, { placeholder: 'Pick a computer' })),
-            el(
-              SelectContent,
-              {},
-              computers.map(item =>
-                el(
-                  SelectItem,
-                  { key: `${item.workspaceName}:${item.computerId}`, value: item.computerId },
-                  `${item.workspaceName} / ${item.computerName} (${item.status})`
-                )
-              )
-            )
-          )
-        )
-      : null
-  )
-}
-
 function localSetupCommand(os) {
   if (os === 'windows') return `irm ${RAW_REPO_URL}/connect-windows.ps1 | iex`
   if (os === 'linux') return `curl -fsSL ${RAW_REPO_URL}/connect-linux.sh | bash`
@@ -3790,17 +3771,6 @@ function EndpointEditor({
     if ($settings.get().endpoints.some(item => item.id === next.id)) persistHiperfFields(next)
   }
 
-  function pickComputer(computer) {
-    setDraft(current => {
-      if (!current) return current
-      return {
-        ...current,
-        sessionUrl: `${orgoApiOrigin(current.sessionUrl)}/api/computers/${computer.computerId}`,
-        name: isDefaultishName(current.name) ? computer.computerName : current.name
-      }
-    })
-  }
-
   function submit() {
     const address = String(draft.address || '').trim()
     const next =
@@ -3867,7 +3837,7 @@ function EndpointEditor({
     },
       el(Input, {
         value: draft.address || '',
-        placeholder: "Paste your computer's address or API key",
+        placeholder: "Paste your computer's address",
         onChange: event => {
           advancedTouchedRef.current = false
           setDraft(withClassifiedAddress(draft, event.target.value))
@@ -3891,13 +3861,6 @@ function EndpointEditor({
             onChange: event => setDraft({ ...draft, username: event.target.value })
           })
         )
-      : null,
-    classified.kind === 'api-key'
-      ? el(OrgoComputerFinder, {
-          bearer: draft.sessionBearer,
-          sessionUrl: draft.sessionUrl,
-          onPick: pickComputer
-        })
       : null,
     el(
       'div',
@@ -4020,6 +3983,29 @@ function EndpointEditor({
                   )
                 )
               : null,
+            el(
+              'div',
+              { className: 'grid gap-1' },
+              el(
+                'div',
+                { className: 'flex items-center justify-between gap-3' },
+                el(
+                  'span',
+                  { className: 'text-[0.7rem] text-(--ui-text-secondary)' },
+                  'The bot drives this computer (remote-cua)'
+                ),
+                el(Switch, {
+                  size: 'xs',
+                  checked: draft.remoteCua === true,
+                  onCheckedChange: value => touchAdvanced({ remoteCua: value })
+                })
+              ),
+              el(
+                'p',
+                { className: 'text-[0.64rem] leading-4 text-(--ui-text-quaternary)' },
+                "For a Mac the bot drives with Hermes's computer_use through the kit's remote-cua plugin. The pane stays view-only while the bot is in control; Take over and Hand back appear once the computer is the bot's endpoint."
+              )
+            ),
             el(
               'div',
               { className: 'flex items-center justify-between gap-3' },
@@ -4394,13 +4380,14 @@ function CollapsePill() {
   )
 }
 
-function OverlayBar({ iframeMode, connected, viewOnly }) {
+function OverlayBar({ iframeMode, connected, viewOnly, remote }) {
   const ui = useValue($ui)
   const hiperfState = useValue($hiperf)
   if (iframeMode) {
     return el(
       'div',
       { className: 'flex flex-wrap items-center gap-1' },
+      remote ? el(ControlBar, { onDark: true }) : null,
       el(Button, { size: 'xs', variant: 'ghost', className: 'text-white hover:bg-white/15 hover:text-white', onClick: reloadIframe },
         el(icons.RefreshCw, { className: 'size-3.5' }), 'Reload'),
       el(Button, {
@@ -4423,19 +4410,21 @@ function OverlayBar({ iframeMode, connected, viewOnly }) {
   return el(
     'div',
     { className: 'flex flex-wrap items-center gap-1.5' },
-    el(
-      'div',
-      { className: 'flex items-center gap-1.5 px-1' },
-      el('span', { className: 'text-[0.68rem] text-white/80' }, 'View only'),
-      el(Switch, {
-        size: 'xs',
-        checked: viewOnly,
-        onCheckedChange: value => {
-          setUi({ viewOnly: value })
-          applyRfbDisplay()
-        }
-      })
-    ),
+    remote
+      ? el(ControlBar, { onDark: true })
+      : el(
+          'div',
+          { className: 'flex items-center gap-1.5 px-1' },
+          el('span', { className: 'text-[0.68rem] text-white/80' }, 'View only'),
+          el(Switch, {
+            size: 'xs',
+            checked: viewOnly,
+            onCheckedChange: value => {
+              setUi({ viewOnly: value })
+              applyRfbDisplay()
+            }
+          })
+        ),
     el(SegmentedControl, {
       options: SCALE_OPTIONS,
       value: ui.scaleMode,
@@ -4525,6 +4514,10 @@ function guardDomParent(parent) {
 function ComputerOverlay({ iframeMode }) {
   const ui = useValue($ui)
   const conn = useValue(engine.state)
+  const controlState = useValue($control)
+  useValue($settings)
+  const remote = Boolean(controlTarget())
+  const inControl = remote && leaseHeldBy(controlState.lease, control.viewerId)
   const overlayRef = useRef(null)
   const mountRef = useRef(null)
   useEffect(() => {
@@ -4607,7 +4600,13 @@ function ComputerOverlay({ iframeMode }) {
         'fixed right-0 bottom-0 left-0 z-[9999] flex flex-col bg-black',
         ui.expanded ? 'pointer-events-auto' : 'hidden pointer-events-none'
       ),
-      style: { top: `${ui.overlayTop || 40}px`, zIndex: 9999, background: '#000' },
+      'data-in-control': inControl ? '' : undefined,
+      style: {
+        top: `${ui.overlayTop || 40}px`,
+        zIndex: 9999,
+        background: '#000',
+        boxShadow: inControl ? RED_RING : undefined
+      },
       onMouseMove: () => {
         if (!ui.expanded) return
         setUi({ chromeOn: true })
@@ -4634,7 +4633,8 @@ function ComputerOverlay({ iframeMode }) {
         el(OverlayBar, {
           iframeMode,
           connected: conn.phase === 'connected',
-          viewOnly: ui.viewOnly
+          viewOnly: remote ? !inControl : ui.viewOnly,
+          remote
         })
       )
     ),
@@ -4727,6 +4727,110 @@ function PaneError({ code, detail }) {
   )
 }
 
+const RED_RING = 'inset 0 0 0 2px rgba(239, 68, 68, 0.7)'
+
+/** Who is in control of a remote-cua machine, and the buttons to change it.
+ *  `onDark` styles it for the expanded overlay's black bar. */
+function ControlBar({ onDark }) {
+  const state = useValue($control)
+  useValue($settings)
+  const target = controlTarget()
+  if (!target || state.key !== target.key) return null
+  if (!target.bound) {
+    return el(
+      'p',
+      { className: cn('text-[0.64rem] leading-4', onDark ? 'px-1 text-white/80' : 'text-center text-(--ui-text-tertiary)') },
+      CONTROL_TEXT.unbound(target.profile)
+    )
+  }
+  const view = controlView(state, control.viewerId)
+  const ghost = onDark ? 'text-white hover:bg-white/15 hover:text-white disabled:text-white/40' : undefined
+  const chip = el(
+    'span',
+    {
+      'data-control-chip': view.iHold ? 'you' : view.humanOther ? 'other' : 'bot',
+      className: cn(
+        'shrink-0 rounded px-2 py-0.5 text-[0.68rem] font-medium',
+        view.iHold
+          ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+          : onDark
+            ? 'bg-white/15 text-white/80'
+            : 'bg-muted text-muted-foreground'
+      )
+    },
+    view.chip
+  )
+  const buttons = view.iHold
+    ? [
+        el(Button, {
+          key: 'hand-back',
+          type: 'button',
+          size: 'xs',
+          variant: onDark ? 'ghost' : 'secondary',
+          className: ghost,
+          disabled: !view.canHandBack,
+          onClick: () => void handBack(false)
+        }, CONTROL_TEXT.handBack)
+      ]
+    : [
+        view.humanOther
+          ? el(Tip, { key: 'force', label: CONTROL_TEXT.handBackForceHint },
+              el(Button, {
+                type: 'button',
+                size: 'xs',
+                variant: onDark ? 'ghost' : 'secondary',
+                className: ghost,
+                disabled: !view.canForce,
+                onClick: () => void handBack(true)
+              }, CONTROL_TEXT.handBackForce)
+            )
+          : null,
+        el(Button, {
+          key: 'take-over',
+          type: 'button',
+          size: 'xs',
+          variant: onDark ? 'ghost' : undefined,
+          className: ghost,
+          disabled: !view.canTakeOver,
+          onClick: () => void takeOver()
+        }, CONTROL_TEXT.takeOver)
+      ]
+  return el(
+    'div',
+    { className: cn('grid gap-1', onDark ? '' : 'mt-2') },
+    el(
+      'div',
+      { className: cn('flex flex-wrap items-center gap-1.5', onDark ? 'px-1' : 'justify-center') },
+      chip,
+      ...buttons
+    ),
+    state.evicted
+      ? el('p', { className: cn('text-[0.64rem]', onDark ? 'px-1 text-amber-200' : 'text-center text-(--ui-text-secondary)') }, CONTROL_TEXT.controlTaken)
+      : null,
+    state.error
+      ? el('p', { className: cn('text-[0.64rem]', onDark ? 'px-1 text-red-200' : 'text-center text-(--ui-text-secondary)') }, state.error)
+      : null
+  )
+}
+
+/** GET status for a bound machine, in plain words. */
+function ControlStatusLine() {
+  const state = useValue($control)
+  useValue($settings)
+  const target = controlTarget()
+  if (!target || !target.bound || state.key !== target.key) return null
+  const words = statusWords(state.status)
+  const line = words ? words.line : state.statusError || 'Checking the machine…'
+  const tone = words ? words.tone : state.statusError ? 'bad' : 'muted'
+  return el(
+    'div',
+    { className: 'mt-1 flex items-center justify-center gap-1.5' },
+    el(StatusDot, { tone: tone === 'good' ? 'good' : tone === 'bad' ? 'bad' : 'muted' }),
+    el('p', { 'data-control-status': '', className: 'min-w-0 truncate text-[0.64rem] text-(--ui-text-tertiary)', title: line }, line),
+    el(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => void refreshStatus() }, 'Check')
+  )
+}
+
 function ComputerPane() {
   const settings = useValue($settings)
   const ui = useValue($ui)
@@ -4737,10 +4841,12 @@ function ComputerPane() {
   const focused = useValue(safeAtom(host.state.focusedSessionProfile))
   const profile = useValue(safeAtom(host.state.profile))
   const viewport = useValue(safeAtom(host.state.viewport))
+  const controlState = useValue($control)
   const profileName = focused || profile || 'default'
   const overrideId = settings.perBotEndpoint ? settings.perBotEndpoint[profileName] : null
   const endpointId = overrideId || settings.globalEndpointId
   const endpoint = endpointId ? settings.endpoints.find(item => item.id === endpointId) || null : null
+  const inControl = Boolean(endpoint && endpoint.remoteCua) && leaseHeldBy(controlState.lease, control.viewerId)
   const slotRef = useRef(null)
   const iframeMode = Boolean(endpoint && endpoint.mode === 'iframe')
   const aspect = conn.fbW && conn.fbH ? `${conn.fbW} / ${conn.fbH}` : '16 / 10'
@@ -4750,9 +4856,13 @@ function ComputerPane() {
   useEffect(() => {
     engine.paneVisible = true
     syncConnection()
+    syncControlTarget()
     return () => {
       engine.paneVisible = false
-      if (!$ui.get().expanded) disconnect()
+      if (!$ui.get().expanded) {
+        handBackOnClose()
+        disconnect()
+      }
     }
   }, [])
 
@@ -4813,7 +4923,8 @@ function ComputerPane() {
         'div',
         {
           className: 'group relative w-full overflow-hidden rounded-[8px] border border-(--ui-stroke-secondary)',
-          style: { aspectRatio: aspect }
+          'data-in-control': inControl ? '' : undefined,
+          style: inControl ? { aspectRatio: aspect, boxShadow: RED_RING } : { aspectRatio: aspect }
         },
         el('div', { ref: slotRef, className: 'absolute inset-0 bg-black' }),
         showSnapshot
@@ -4888,6 +4999,8 @@ function ComputerPane() {
           : null
       ),
       el('p', { className: 'mt-1.5 truncate text-center text-[0.68rem] text-(--ui-text-tertiary)' }, phaseLine(conn)),
+      el(ControlBar, {}),
+      el(ControlStatusLine, {}),
       hiperfLine
         ? el(
             'div',

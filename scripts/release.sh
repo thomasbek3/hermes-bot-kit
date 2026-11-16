@@ -79,26 +79,13 @@ run_ci_tests() {
   node --check computer-viewer/plugin.js
   node --check grokbot-override/plugin.js
   node --test computer-viewer/plugin.test.mjs
-  python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
   python3 -m unittest discover -s texting-style/tests -p 'test_*.py'
   # -n 1: without it xargs passes every later path as an ARGUMENT to the
   # first script, so only one file was ever parsed.
   find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n 1 bash -n
   python3 computer-viewer/tests/test-hiperf-agent.py
   bash computer-viewer/tests/test-bind.sh
-  bash computer-viewer/tests/test-install-agent-plugin.sh
-  python3 -c '
-import sys
-from pathlib import Path
-root = Path("computer-viewer/agent-plugin")
-bad = [p for p in root.rglob("*.py") if any(b > 127 for b in p.read_bytes())]
-if bad:
-    print("non-ASCII bytes in:")
-    for p in bad:
-        print(" ", p)
-    sys.exit(1)
-print("ASCII OK")
-'
+  bash computer-viewer/tests/test-remove-orgo-computer.sh
   bash scripts/make-manifest.sh --check
   bash tests/test-install.sh
 }

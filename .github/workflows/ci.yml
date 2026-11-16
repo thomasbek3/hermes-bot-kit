@@ -50,12 +50,6 @@ jobs:
           npm run --prefix grokbot-override check
           node --test grokbot-override/test/*.test.mjs
 
-      - name: Install PyYAML (the orgo-computer config writer needs it)
-        run: python3 -m pip install --disable-pip-version-check --quiet pyyaml
-
-      - name: Orgo computer plugin tests
-        run: python3 -m unittest discover -s computer-viewer/agent-plugin/orgo-computer/tests -p 'test_*.py'
-
       - name: Texting-style tests
         run: python3 -m unittest discover -s texting-style/tests -p 'test_*.py'
 
@@ -74,23 +68,8 @@ jobs:
       - name: Host-script bind tests
         run: bash computer-viewer/tests/test-bind.sh
 
-      - name: Agent-plugin installer tests
-        run: bash computer-viewer/tests/test-install-agent-plugin.sh
-
-      - name: ASCII check (agent plugin)
-        run: |
-          python3 -c '
-          import sys
-          from pathlib import Path
-          root = Path("computer-viewer/agent-plugin")
-          bad = [p for p in root.rglob("*.py") if any(b > 127 for b in p.read_bytes())]
-          if bad:
-              print("non-ASCII bytes in:")
-              for p in bad:
-                  print(" ", p)
-              sys.exit(1)
-          print("ASCII OK")
-          '
+      - name: Retired-plugin remover tests
+        run: bash computer-viewer/tests/test-remove-orgo-computer.sh
 
       - name: Manifest check
         run: bash scripts/make-manifest.sh --check

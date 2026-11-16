@@ -33,7 +33,7 @@ Desktop plugins plus an optional agent plugin, one install:
 | Plugin | What it does |
 |---|---|
 | 🤖 **[Grokbot Override](grokbot-override/)** *(preview, the kit's main plugin, installed switched on)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots and **your own named sections**, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘⇧P → Grokbot Override: toggle** switches back to stock instantly (and on again). See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
-| 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — cloud boxes (Orgo, VPS, Docker), spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Auto-connects the moment your bot starts using its computer**, so you watch it work. Optional H.264 HD mode, per-bot computer bindings, and an agent plugin (**orgo-computer**) that gives your bots **hands** (shell + screenshot/click/type) on their pinned machine. |
+| 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — VPS and Docker boxes, spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Opens the moment your bot calls Hermes's own `computer_use` or browser tools** on its bound machine, so you watch it work, and **Take over / Hand back** for Macs the bot drives over SSH. Optional H.264 HD mode and per-bot computer bindings. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 | ✉️ **[email-drafts](email-drafts/)** | An **agent plugin**: bots write email as **drafts** that appear as Grok-Bot-style cards in the override's chat (editable To, Cc and body, your signature, attachments). Nothing leaves until you click **Send** (through Composio by default, using the `composio` CLI logged in on the bot's machine; or Gmail through Hermes's own OAuth sign-in, or SMTP), unless you allowed every recipient. Per-bot rules: allow recipient, needs approval, drafts off. Per-profile install. |
 | 💼 **[Slack](slack-connect/)** | Optional add-ons for the override's Slack card: **one-click Add to Slack** ([slack-connect](slack-connect/README.md), with [slack-relay](slack-relay/README.md) and [slack-http](slack-http/README.md)) and **Test connection** ([slack-check](slack-check/README.md)). |
@@ -150,8 +150,7 @@ slack-check/        optional backend plugin: the Slack card's Test connection
 slack-connect/      optional Add to Slack add-on (with slack-relay/, slack-http/)
 texting-style/      agent plugin: SMS-register reply style, per profile
 email-drafts/       agent plugin: email drafts the user sends from a chat card, per profile
-computer-viewer/    Computer: plugin, host connect scripts, HD agent,
-                    orgo-computer agent plugin, orgo-term / orgo-hands, docs
+computer-viewer/    Computer: plugin, host connect scripts, HD agent, docs
 SECURITY.md         security policy (VNC/networking guidance lives in the
                     computer-viewer README)
 ```
@@ -169,10 +168,10 @@ working while new ones use the `computer-viewer/` path.
 ## Fine print
 
 Independent community project. Not built by, endorsed by, or affiliated with
-Nous Research, xAI, Orgo, or Tailscale. "Grok" and "Grok Bot" are trademarks
+Nous Research, xAI, or Tailscale. "Grok" and "Grok Bot" are trademarks
 of their respective owner — this kit simply chases the same feel for Hermes.
-Parts of the agent plugin are adapted from
-[Korgo Bot](https://github.com/nickvasilescu/korgo-bot) (MIT) — see
+The Computer pane studied
+[Korgo Bot](https://github.com/nickvasilescu/korgo-bot) (MIT) for UI patterns — see
 [computer-viewer/NOTICE.md](computer-viewer/NOTICE.md).
 
 MIT — see [LICENSE](LICENSE).

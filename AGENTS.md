@@ -30,7 +30,7 @@ never profile-scoped (`electron/desktop-plugins-root.ts`): a desktop plugin
 extends the app, not an agent, so one install serves every profile, and
 `migrateProfileScopedDesktopPlugins()` MOVES anything left in
 `profiles/<name>/desktop-plugins/` up to `~/.hermes/desktop-plugins/` on the
-next launch. The Python halves (`orgo-computer`, `texting-style`) are still
+next launch. The Python halves (agent plugins such as `texting-style`) are still
 per-profile — their own installers handle that.
 
 The script exits non-zero and installs nothing if a downloaded plugin fails
@@ -114,20 +114,15 @@ its ownership (do not use broad process-name kills). Debug: `TS_DEBUG=1` logs ho
 `/tmp/texting-style-debug.log`. Uninstall: remove
 `<profile-home>/plugins/texting-style` and its `plugins.enabled` entry.
 
-## Optional: give bots hands (agent plugin, Orgo computers)
+## Bots that drive a computer
 
-Separate from the desktop plugins. Installs the `orgo-computer` agent plugin
-into Hermes profiles so bots can run shell/screenshot/click/type on a pinned
-Orgo computer:
-
-```bash
-git clone https://github.com/thomasbek3/hermes-bot-kit.git
-bash hermes-bot-kit/computer-viewer/install-agent-plugin.sh --profiles <name1>,<name2> --yes --api-key-stdin <<< "$ORGO_API_KEY"
-```
-
-Requires an Orgo API key from the user. The key never appears in argv or
-shell history this way. Never invent or reuse keys found in files without
-the user's say-so.
+Bots use Hermes's own `computer_use` tool. A Linux VM needs no kit code
+(`terminal.backend: ssh`, see Hermes's Bot Screen docs). A Mac driven over SSH
+uses the kit's `remote-cua` agent plugin; the Computer pane then shows that
+Mac with Take over / Hand back. The old `orgo-computer` agent plugin is
+retired: `bash computer-viewer/remove-orgo-computer.sh` lists what it would
+remove from each profile, `--yes` removes it (nothing is deleted; the plugin
+folder moves to `<home>/plugins-retired-<date>/`, `.env` is left alone).
 
 ## Uninstall
 

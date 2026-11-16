@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, orgoApiOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint }\n'
+        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaGatewayRequest, REMOTE_CUA_METHODS, ControlBar, ControlStatusLine, ComputerPane, OverlayBar }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -242,8 +242,8 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
 
 test('credentialTargetAllowed accepts the configured https origin only', () => {
   const { t } = loadPlugin()
-  const session = 'https://www.orgo.ai/api/session'
-  assert.equal(t.credentialTargetAllowed('https://www.orgo.ai/api/computers/1', session), true)
+  const session = 'https://api.example.com/api/session'
+  assert.equal(t.credentialTargetAllowed('https://api.example.com/api/computers/1', session), true)
   assert.equal(t.credentialTargetAllowed('https://evil.example/steal', session), false)
   assert.equal(
     t.credentialTargetAllowed('http://example.com/api/x', 'http://example.com/api'),
@@ -277,8 +277,8 @@ test('classifyAddress rejects public http and names iframe origins', () => {
   const publicSession = t.classifyAddress('http://1.2.3.4/api/session')
   assert.equal(publicSession.kind, 'invalid')
 
-  const orgo = t.classifyAddress('https://www.orgo.ai/api/session')
-  assert.equal(orgo.kind, 'session-json')
+  const api = t.classifyAddress('https://api.example.com/api/session')
+  assert.equal(api.kind, 'session-json')
 })
 
 test('iframePolicy sandboxes the viewer and keeps clipboard-read opt-in', () => {
@@ -299,7 +299,7 @@ test('authFetch refuses off-origin targets without calling fetch', async () => {
     () =>
       t.authFetch('https://evil.example/api', {
         bearer: 'secret',
-        sessionUrl: 'https://www.orgo.ai/api/session'
+        sessionUrl: 'https://api.example.com/api/session'
       }),
     err => err && err.status === 'unsafe-origin'
   )
@@ -312,9 +312,9 @@ test('authFetch throws redirect on opaqueredirect and never follows', async () =
   })
   await assert.rejects(
     () =>
-      t.authFetch('https://www.orgo.ai/api/session', {
+      t.authFetch('https://api.example.com/api/session', {
         bearer: 'secret',
-        sessionUrl: 'https://www.orgo.ai/api/session'
+        sessionUrl: 'https://api.example.com/api/session'
       }),
     err => err && err.status === 'redirect'
   )
@@ -328,9 +328,9 @@ test('authFetch sends the bearer with redirect: manual on an allowed call', asyn
       return { ok: true, status: 200, type: 'basic' }
     }
   })
-  const response = await t.authFetch('https://www.orgo.ai/api/computers/1', {
+  const response = await t.authFetch('https://api.example.com/api/computers/1', {
     bearer: 'secret-token',
-    sessionUrl: 'https://www.orgo.ai/api/session'
+    sessionUrl: 'https://api.example.com/api/session'
   })
   assert.equal(response.status, 200)
   assert.equal(seen.init.redirect, 'manual')
@@ -569,15 +569,22 @@ test('hiperfReadUe decodes exp-Golomb codes', () => {
   }
 })
 
-test('classifyAddress treats a bare hostname as a host, not an API key', () => {
+test('classifyAddress treats a bare hostname as a host, and a bare key as nothing', () => {
   const { t } = loadPlugin()
   const host = t.classifyAddress('windows-11-desktop')
-  assert.notEqual(host.kind, 'api-key')
   assert.equal(host.kind, 'probe')
   assert.equal(host.connectEnabled, true)
 
+  // No cloud-provider key discovery any more: a key on its own is not an address.
   const key = t.classifyAddress('sk_live_abc123456789')
-  assert.equal(key.kind, 'api-key')
+  assert.notEqual(key.kind, 'api-key')
+  assert.equal(key.connectEnabled, key.kind === 'probe')
+})
+
+test('credentialTargetAllowed sends a key nowhere without a session address', () => {
+  const { t } = loadPlugin()
+  assert.equal(t.credentialTargetAllowed('https://api.example.com/x', ''), false)
+  assert.equal(t.credentialTargetAllowed('https://api.example.com/x', 'not a url'), false)
 })
 
 test('probeUrlsFromHostPort refuses a plain-http iframe for a public host', () => {
@@ -925,4 +932,364 @@ test('connect() reports why the vendored viewer lost, not a generic body', async
   assert.match(state.detail, /Re-run the kit installer/)
   assert.match(state.detail, /vendored file missing/)
   assert.deepEqual(imported, [])
+})
+
+// ---------------------------------------------------------------------------
+// Orgo is gone.
+// ---------------------------------------------------------------------------
+
+test('no Orgo strings are left in the kit (history and the remover excepted)', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const root = new URL('..', import.meta.url)
+  const files = execFileSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], { cwd: root })
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean)
+  const allowed = new Set([
+    'computer-viewer/remove-orgo-computer.sh',
+    'computer-viewer/tests/test-remove-orgo-computer.sh',
+    'computer-viewer/plugin.test.mjs',
+    'install.sh',
+    'tests/test-install.sh'
+  ])
+  const hits = []
+  for (const rel of files) {
+    if (/(^|\/)CHANGELOG\.md$/.test(rel) || allowed.has(rel)) continue
+    if (/\.(png|jpe?g|gif|webp|ico|pdf|woff2?)$/i.test(rel)) continue
+    let text
+    try {
+      text = fs.readFileSync(new URL(rel, root), 'utf8')
+    } catch {
+      continue
+    }
+    // Upgrade notes may name the remover script and the retired plugin it removes.
+    text = text.replace(/remove-orgo-computer\.sh|`orgo-computer`/g, '')
+    // Word boundary: the MIT-attributed "Korgo Bot" project stays credited.
+    if (/\borgo/i.test(text)) hits.push(rel)
+  }
+  assert.deepEqual(hits, [])
+})
+
+// ---------------------------------------------------------------------------
+// Auto-open on Hermes's own computer_use / browser tool calls.
+// ---------------------------------------------------------------------------
+
+function boundSetup({ remoteCua = false, bind = true, profile = 'ava', client } = {}) {
+  const instances = []
+  const loaded = loadPlugin({
+    hermesDesktop: fakeBridge(),
+    importHook: async () => ({ default: fakeRfbCtorWithListeners(instances) })
+  })
+  const { t, context } = loaded
+  context.__host.state.profile = atom(profile)
+  const ctx = makeCtx()
+  ctx.os.__written = []
+  const registered = []
+  // Scoped timers: the lease poll is cleared with the plugin, never left running.
+  ctx.intervals = []
+  ctx.setInterval = (fn, ms) => {
+    ctx.intervals.push({ fn, ms })
+    return () => {}
+  }
+  ctx.register = contribution => {
+    registered.push(contribution)
+    return () => {}
+  }
+  const ep = t.normalizeEndpoint({
+    id: 'ep-mac',
+    name: 'Bot Mac',
+    mode: 'websocket',
+    wsUrl: 'ws://127.0.0.1:6080/websockify',
+    remoteCua
+  })
+  ctx.storage.set('endpoints', [ep])
+  ctx.storage.set('globalEndpointId', ep.id)
+  if (bind) ctx.storage.set('perBotEndpoint', { [profile]: ep.id })
+  if (client) t.control.client = client
+  t.attachEngine(ctx)
+  return { t, ctx, ep, instances, registered, context }
+}
+
+const toolStart = (name, extra = {}) => ({ type: 'tool.start', profile: 'ava', payload: { name }, ...extra })
+
+test('a live computer_use call wakes the pane for a bot with a bound computer', () => {
+  const { t, registered } = boundSetup()
+  assert.equal(t.handleToolStart(toolStart('computer_use'), 1_000_000), true)
+  assert.equal(registered.length, 1, 'the pane was shown')
+  assert.notEqual(t.engine.state.get().phase, 'idle')
+})
+
+test('browser tool calls wake too; other tools do not', () => {
+  const a = boundSetup()
+  assert.equal(a.t.handleToolStart(toolStart('browser_navigate'), 1_000_000), true)
+  const b = boundSetup()
+  assert.equal(b.t.handleToolStart(toolStart('terminal'), 1_000_000), false)
+  assert.equal(b.t.handleToolStart(toolStart('orgo_computer_bash'), 1_000_000), false)
+  assert.equal(b.registered.length, 0)
+})
+
+test('replayed history never wakes the pane', () => {
+  const { t, registered } = boundSetup()
+  assert.equal(t.handleToolStart(toolStart('computer_use', { replayed: true }), 1_000_000), false)
+  assert.equal(registered.length, 0)
+})
+
+test('no wake for a bot without its own bound computer, or for another bot', () => {
+  const unbound = boundSetup({ bind: false })
+  assert.equal(unbound.t.handleToolStart(toolStart('computer_use'), 1_000_000), false)
+  const other = boundSetup()
+  assert.equal(other.t.handleToolStart(toolStart('computer_use', { profile: 'bob' }), 1_000_000), false)
+})
+
+test('at most one wake per bot every 30 s, and a manual close holds for 30 s', () => {
+  const { t } = boundSetup()
+  assert.equal(t.handleToolStart(toolStart('computer_use'), 1_000_000), true)
+  assert.equal(t.handleToolStart(toolStart('computer_use'), 1_010_000), false)
+  assert.equal(t.handleToolStart(toolStart('computer_use'), 1_031_000), true)
+
+  const closed = boundSetup()
+  closed.t.showPane()
+  const realNow = Date.now
+  try {
+    closed.context.Date.now = () => 2_000_000
+    closed.t.hidePane()
+  } finally {
+    closed.context.Date.now = realNow
+  }
+  assert.equal(closed.t.handleToolStart(toolStart('computer_use'), 2_010_000), false)
+  assert.equal(closed.t.handleToolStart(toolStart('computer_use'), 2_031_000), true)
+})
+
+// ---------------------------------------------------------------------------
+// Take over / Hand back against a fake remote-cua lease (contract shape).
+// ---------------------------------------------------------------------------
+
+function fakeLeaseServer(initial = { holder: 'agent', viewer: null, since: 0, epoch: 0 }) {
+  const server = { lease: { ...initial }, calls: [], status: { reachable: true, driver_version: '0.21.0', permissions_ok: true, screen_awake: true } }
+  server.client = {
+    lease: async profile => {
+      server.calls.push(['lease', profile])
+      return { lease: { ...server.lease } }
+    },
+    take: async (profile, viewer) => {
+      server.calls.push(['take', profile, viewer])
+      server.lease = { holder: 'human', viewer, since: 1, epoch: server.lease.epoch + 1 }
+      return { lease: { ...server.lease } }
+    },
+    release: async (profile, viewer, force) => {
+      server.calls.push(['release', profile, viewer, Boolean(force)])
+      if (force || server.lease.viewer === viewer) {
+        server.lease = { holder: 'agent', viewer: null, since: 2, epoch: server.lease.epoch + 1 }
+      }
+      return { lease: { ...server.lease } }
+    },
+    status: async profile => {
+      server.calls.push(['status', profile])
+      return server.status
+    }
+  }
+  return server
+}
+
+// Objects made inside the plugin's vm realm: compare by value.
+const plain = value => JSON.parse(JSON.stringify(value))
+
+const settle = async () => {
+  for (let i = 0; i < 5; i += 1) await new Promise(resolve => setTimeout(resolve, 0))
+}
+
+async function remoteSetup(server, opts = {}) {
+  const setup = boundSetup({ remoteCua: true, client: server.client, ...opts })
+  setup.t.syncControlTarget()
+  await setup.t.connect(setup.ep)
+  await settle()
+  return setup
+}
+
+test('bot in control: the pane is view-only for that machine, even expanded', async () => {
+  const server = fakeLeaseServer()
+  const { t, instances } = await remoteSetup(server)
+  t.$ui.set({ ...t.$ui.get(), expanded: true, viewOnly: false })
+  const view = t.controlView(t.$control.get(), t.control.viewerId)
+  assert.equal(view.chip, 'Bot is in control')
+  assert.equal(view.canTakeOver, true)
+  assert.equal(t.controlLocked(), true)
+  assert.equal(t.effectiveViewOnly(), true)
+  assert.ok(instances.length >= 1)
+})
+
+test('Take over gives input and the red-border state; Hand back returns it', async () => {
+  const server = fakeLeaseServer()
+  const { t, instances } = await remoteSetup(server)
+  await t.takeOver()
+  assert.deepEqual(server.calls.find(c => c[0] === 'take'), ['take', 'ava', t.control.viewerId])
+  const view = t.controlView(t.$control.get(), t.control.viewerId)
+  assert.equal(view.iHold, true)
+  assert.equal(view.chip, 'You are in control')
+  assert.equal(t.$ui.get().expanded, true, 'Take over opens the large view')
+  assert.equal(t.controlLocked(), false)
+  assert.equal(instances[instances.length - 1].viewOnly, false)
+
+  await t.handBack()
+  assert.equal(server.lease.holder, 'agent')
+  assert.equal(t.controlLocked(), true)
+  assert.equal(instances[instances.length - 1].viewOnly, true)
+})
+
+test('a dropped connection keeps the human lease until reconnect', async () => {
+  const server = fakeLeaseServer()
+  const { t, instances } = await remoteSetup(server)
+  instances[instances.length - 1].listeners.get('connect')({})
+  await t.takeOver()
+  const releasesBefore = server.calls.filter(c => c[0] === 'release').length
+  // The stream drops (not clean, not intentional).
+  instances[instances.length - 1].listeners.get('disconnect')({ detail: { clean: false } })
+  await settle()
+  assert.equal(server.calls.filter(c => c[0] === 'release').length, releasesBefore)
+  assert.equal(server.lease.holder, 'human')
+  // Reconnected: the lease is re-read and is still ours.
+  await t.refreshLease()
+  assert.equal(t.controlView(t.$control.get(), t.control.viewerId).iHold, true)
+})
+
+test('closing the pane hands back; so does Disconnect', async () => {
+  const server = fakeLeaseServer()
+  const a = await remoteSetup(server)
+  a.t.showPane()
+  await a.t.takeOver()
+  a.t.hidePane()
+  await settle()
+  assert.equal(server.lease.holder, 'agent')
+
+  const server2 = fakeLeaseServer()
+  const b = await remoteSetup(server2)
+  await b.t.takeOver()
+  b.t.userDisconnect()
+  await settle()
+  assert.equal(server2.lease.holder, 'agent')
+})
+
+test('after a reload the old lease shows "Hand back (force)", which clears it', async () => {
+  const server = fakeLeaseServer({ holder: 'human', viewer: 'cv-from-before-reload', since: 1, epoch: 3 })
+  const { t } = await remoteSetup(server)
+  const view = t.controlView(t.$control.get(), t.control.viewerId)
+  assert.equal(view.iHold, false)
+  assert.equal(view.chip, 'Another viewer is in control')
+  assert.equal(view.canForce, true)
+  assert.equal(t.controlLocked(), true)
+  // A plain hand back from a non-holder does nothing.
+  await t.handBack(false)
+  assert.equal(server.calls.some(c => c[0] === 'release'), false)
+  await t.handBack(true)
+  assert.deepEqual(server.calls.find(c => c[0] === 'release'), ['release', 'ava', t.control.viewerId, true])
+  assert.equal(server.lease.holder, 'agent')
+})
+
+test('another viewer taking over drops this window back to watching', async () => {
+  const server = fakeLeaseServer()
+  const { t } = await remoteSetup(server)
+  await t.takeOver()
+  server.lease = { holder: 'human', viewer: 'cv-other-window', since: 5, epoch: 9 }
+  await t.refreshLease()
+  assert.equal(t.$control.get().evicted, true)
+  assert.equal(t.controlLocked(), true)
+})
+
+test('a remote-cua computer that is only the global default cannot be taken over', async () => {
+  const server = fakeLeaseServer()
+  const { t } = await remoteSetup(server, { bind: false })
+  const view = t.controlView(t.$control.get(), t.control.viewerId)
+  assert.equal(view.canTakeOver, false)
+  assert.equal(t.controlLocked(), true)
+  await t.takeOver()
+  assert.equal(server.calls.length, 0)
+})
+
+test('plain VNC computers keep the manual View only switch', async () => {
+  const { t } = boundSetup({ remoteCua: false })
+  t.$ui.set({ ...t.$ui.get(), expanded: true, viewOnly: false })
+  assert.equal(t.controlLocked(), false)
+  assert.equal(t.effectiveViewOnly(), false)
+  t.$ui.set({ ...t.$ui.get(), viewOnly: true })
+  assert.equal(t.effectiveViewOnly(), true)
+})
+
+test('a bound machine shows GET status in plain words', async () => {
+  const server = fakeLeaseServer()
+  const { t } = await remoteSetup(server)
+  assert.deepEqual(plain(t.statusWords(t.$control.get().status)), {
+    tone: 'good',
+    line: 'Reachable · driver 0.21.0 · permissions OK · screen awake'
+  })
+  const asleep = t.statusWords(
+    t.normalizeStatus({ reachable: true, driver: { found: true, version: '0.21.0' }, permissions: { accessibility: true, screen_recording: false }, screen: { asleep: true } })
+  )
+  assert.equal(asleep.tone, 'bad')
+  assert.match(asleep.line, /needs Accessibility and Screen Recording permission/)
+  assert.match(asleep.line, /screen asleep or locked/)
+  const down = t.statusWords(t.normalizeStatus({ reachable: false, detail: 'ssh: connect timed out' }))
+  assert.equal(down.line, "Can't reach the machine: ssh: connect timed out")
+  assert.equal(t.statusWords(t.normalizeStatus({ reachable: true, driver_found: false })).line, 'Reachable · driver not found')
+})
+
+test('missing lease file reads as agent; the RPC wire names follow the plugin namespace', () => {
+  const { t } = loadPlugin()
+  assert.deepEqual(plain(t.normalizeLease(null)), { holder: 'agent', viewer: null, since: 0, epoch: 0 })
+  assert.deepEqual(plain(t.normalizeLease({ holder: 'human', viewer: 'v', since: 4, epoch: 2 })), {
+    holder: 'human', viewer: 'v', since: 4, epoch: 2
+  })
+  for (const method of Object.values(t.REMOTE_CUA_METHODS)) assert.match(method, /^plugin\.remote-cua\./)
+})
+
+test('the gateway transport routes to the bot profile and sends the contract params', async () => {
+  const { t, context } = loadPlugin()
+  const sent = []
+  context.__host.profileRoutes = () => [{ profile: 'ava', targetProfile: 'ava', connectionId: 'local', mode: 'local' }]
+  context.__host.requestProfile = async (route, method, params) => {
+    sent.push([route.profile, method, params])
+    return { lease: { holder: 'agent' } }
+  }
+  const client = t.createRemoteCuaClient(t.remoteCuaGatewayRequest)
+  await client.lease('ava')
+  await client.take('ava', 'cv-1')
+  await client.release('ava', 'cv-1', false)
+  await client.release('ava', 'cv-1', true)
+  await client.status('ava')
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    ['ava', 'plugin.remote-cua.lease.get', {}],
+    ['ava', 'plugin.remote-cua.lease.take', { viewer: 'cv-1' }],
+    ['ava', 'plugin.remote-cua.lease.release', { viewer: 'cv-1' }],
+    ['ava', 'plugin.remote-cua.lease.release', { viewer: 'cv-1', force: true }],
+    ['ava', 'plugin.remote-cua.status', {}]
+  ])
+})
+
+function textOf(node) {
+  if (node == null || node === false) return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join(' ')
+  const props = node.props || {}
+  return textOf(props.children) + (props.label ? ' ' + props.label : '')
+}
+
+test('the pane and overlay render the chip, the buttons and the status line', async () => {
+  const server = fakeLeaseServer()
+  const { t } = await remoteSetup(server)
+  let text = textOf(t.ControlBar({})) + ' ' + textOf(t.ControlStatusLine())
+  assert.match(text, /Bot is in control/)
+  assert.match(text, /Take over/)
+  assert.match(text, /Reachable · driver 0\.21\.0/)
+  // The whole pane and the overlay bar build without throwing.
+  assert.ok(t.ComputerPane())
+  const bar = t.OverlayBar({ iframeMode: false, connected: true, viewOnly: true, remote: true })
+  assert.doesNotMatch(JSON.stringify(bar), /"View only"/)
+  await t.takeOver()
+  text = textOf(t.ControlBar({ onDark: true }))
+  assert.match(text, /You are in control/)
+  assert.match(text, /Hand back/)
+  server.lease = { holder: 'human', viewer: 'cv-gone', since: 1, epoch: 7 }
+  await t.refreshLease()
+  text = textOf(t.ControlBar({}))
+  assert.match(text, /Another viewer is in control/)
+  assert.match(text, /Hand back \(force\)/)
 })

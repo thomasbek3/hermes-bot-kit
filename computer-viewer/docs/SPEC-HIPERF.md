@@ -12,7 +12,7 @@
 - **hiperf applies to `websocket`-mode endpoints only** (including probe-promoted ones). `iframe` and `session-json` endpoints ignore `hiperfEnabled` entirely — no socket attempt, no errors. (Iframe mode has no RFB surface to layer over; session-json hosts are public API hosts where a derived `ws://host:6090` URL would be both wrong and refused by the private-host guard.)
 - **Why not WebRTC/UDP (the "real Parsec" transport):** on the links this plugin targets — localhost, Tailscale, LAN — packet loss is near zero, so TCP head-of-line blocking rarely bites. The dominant wins (GPU capture, GPU encode, GPU decode, no JS pixel pushing) are all delivered by H.264-over-WebSocket + WebCodecs at ~10% of the complexity of WebRTC signaling/ICE/DTLS/SRTP. WebRTC is the named v2 upgrade path (§11).
 - **Why input stays on VNC:** noVNC's input path is battle-tested and already wired. The video layer renders *on top of* the live RFB canvas with `pointer-events: none`; all pointer/keyboard events fall through to the RFB surface exactly as today. Zero new input code, and if the video layer dies you're looking at live VNC within one frame.
-- **No-GPU hosts (e.g. the 1-vCPU Orgo box):** ffmpeg falls back to `libx264 -preset ultrafast`. README must set expectations: hiperf pays off on machines with hardware encoders.
+- **No-GPU hosts (e.g. a 1-vCPU cloud box):** ffmpeg falls back to `libx264 -preset ultrafast`. README must set expectations: hiperf pays off on machines with hardware encoders.
 
 ---
 
