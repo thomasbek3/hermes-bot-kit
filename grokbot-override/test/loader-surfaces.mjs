@@ -272,6 +272,10 @@ export async function exerciseSurfaces(t, { primitives }) {
   const [, screenTab] = await waitFor(() => [...workspaces.entries()].find(([id]) => String(id).startsWith('grokbot-override-screen-')), 'the screen tab')
   const screenEl = mount(screenTab.render)
   const store = screenStore(SCOUT)
+  // The tab's own first display.status read (its mount effect) must land
+  // before the phases are injected, or its answer overwrites one of them
+  // (a load-dependent race; review tighter-b r1, flake note).
+  await waitFor(() => store.get().status || store.get().unavailable, 'the screen tab’s first status read')
   const lease = { holder: 'agent', epoch: 1, since: 0 }
   for (const [status, texts] of [
     [{ supported: true, installed: true, running: false, lease }, ['asleep', 'Start']],
