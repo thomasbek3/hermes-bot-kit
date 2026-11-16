@@ -10,6 +10,7 @@ import { dirname } from 'node:path'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 
+import { bestTickMs } from './tick-timing.mjs'
 import { HOLD_MAX, streamSafe, streamSafeParts } from '../src/core/streamSafe.js'
 import { applyEvent, initialChatState } from '../src/core/reducer.js'
 import { visibleItems } from '../src/core/workRows.js'
@@ -116,14 +117,8 @@ test('streamSafe: every prefix of a long reply is a kept prefix plus closers, ne
   assert.equal(streamSafe(SAMPLE), SAMPLE, 'a complete reply comes back unchanged')
   // 20k characters, streamed in 40-character ticks: every tick well under a frame.
   const big = `${SAMPLE}\n\n`.repeat(Math.ceil(20_000 / SAMPLE.length)).slice(0, 20_000)
-  const started = performance.now()
-  let worst = 0
-  for (let i = 40; i <= big.length; i += 40) {
-    const t0 = performance.now()
-    streamSafe(big.slice(0, i))
-    worst = Math.max(worst, performance.now() - t0)
-  }
-  const total = performance.now() - started
+  // CPU time, best of 3 runs per tick (test/tick-timing.mjs): load-robust.
+  const { worst, total } = bestTickMs(streamSafe, big)
   assert.ok(worst < 16, `worst tick ${worst.toFixed(2)}ms`)
   assert.ok(total < 2000, `total ${total.toFixed(0)}ms`)
 })

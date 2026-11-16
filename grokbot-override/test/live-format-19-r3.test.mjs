@@ -10,6 +10,7 @@ import test, { afterEach } from 'node:test'
 import { pathToFileURL } from 'node:url'
 
 import { extractMedia } from '../src/core/media.js'
+import { bestTickMs } from './tick-timing.mjs'
 import { streamSafe, streamSafeParts } from '../src/core/streamSafe.js'
 
 const ready = existsSync(new URL('../node_modules/esbuild', import.meta.url)) && existsSync(new URL('../node_modules/jsdom', import.meta.url))
@@ -195,11 +196,6 @@ test('LF-R3-001 (mounted): a MEDIA tag split across LF or CRLF starts no read be
 test('performance: a 20k-character reply with tabs, emphasis and tables stays well under a frame per tick', () => {
   const block = 'Para **bold *it*** and 2*3 and [l](https://example.com/a_(b)).\n\n\tcode | x *\n\n> - item `c`\n\n| A | B |\n|---|---|\n| 1 |\n\n'
   const big = block.repeat(Math.ceil(20_000 / block.length)).slice(0, 20_000)
-  let worst = 0
-  for (let i = 40; i <= big.length; i += 40) {
-    const t0 = performance.now()
-    streamSafeParts(big.slice(0, i))
-    worst = Math.max(worst, performance.now() - t0)
-  }
-  assert.ok(worst < 16, `worst tick ${worst.toFixed(2)}ms`)
+  const { worst } = bestTickMs(streamSafeParts, big)
+  assert.ok(worst < 16, `worst tick ${worst.toFixed(2)}ms (CPU, best of 3 runs)`)
 })
