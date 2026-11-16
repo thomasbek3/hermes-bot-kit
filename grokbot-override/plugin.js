@@ -42177,7 +42177,42 @@ function annotateSources(rows, sources) {
     const source = byId.get(String(row?.connectionId || ""));
     if (!source) return row;
     const reachable = source.reachable === false || source.error ? false : source.reachable ?? null;
-    return { ...row, sourceReachable: reachable, sourceError: source.error || null };
+    const error = source.error || null;
+    if (row?.sourceReachable === reachable && (row?.sourceError ?? null) === error) return row;
+    return { ...row, sourceReachable: reachable, sourceError: error };
+  });
+}
+function sameData(a2, b2) {
+  if (Object.is(a2, b2)) return true;
+  if (!a2 || !b2 || typeof a2 !== "object" || typeof b2 !== "object") return false;
+  if (Array.isArray(a2) !== Array.isArray(b2)) return false;
+  if (Array.isArray(a2)) {
+    if (a2.length !== b2.length) return false;
+    for (let i = 0; i < a2.length; i++) if (!sameData(a2[i], b2[i])) return false;
+    return true;
+  }
+  const keys2 = Object.keys(a2);
+  if (keys2.length !== Object.keys(b2).length) return false;
+  for (const key of keys2) {
+    if (!Object.prototype.hasOwnProperty.call(b2, key) || !sameData(a2[key], b2[key])) return false;
+  }
+  return true;
+}
+function sameRows(a2, b2) {
+  if (a2 === b2) return true;
+  if (!Array.isArray(a2) || !Array.isArray(b2) || a2.length !== b2.length) return false;
+  for (let i = 0; i < a2.length; i++) {
+    if (rowKey(a2[i]) !== rowKey(b2[i]) || !sameData(a2[i], b2[i])) return false;
+  }
+  return true;
+}
+function keepRows(prev, next) {
+  if (!Array.isArray(prev) || !Array.isArray(next)) return next;
+  if (sameRows(prev, next)) return prev;
+  const byKey = new Map(prev.map((row) => [rowKey(row), row]));
+  return next.map((row) => {
+    const old = byKey.get(rowKey(row));
+    return old && sameData(old, row) ? old : row;
   });
 }
 function rowKey(bot) {
@@ -50455,6 +50490,7 @@ var rosterTimer = null;
 var remoteAvatars = null;
 var unwatchAvatars = null;
 var lastOwnFetch = 0;
+var lastOwnRead = 0;
 var liveNames = /* @__PURE__ */ new Map();
 var lastVerify = 0;
 var verifyInFlight = false;
@@ -50499,9 +50535,35 @@ function activeConnectionId() {
     return null;
   }
 }
+var LOCAL_META_KEY = "hermes.plugin.hermes-bots.bot-meta-v2";
+var sideRaw = void 0;
+var sideMeta = {};
 function readSideData() {
-  const localMeta = readPluginStorage("hermes-bots", "bot-meta-v2", {}) || {};
-  return { localMeta: localMeta && typeof localMeta === "object" ? localMeta : {} };
+  let raw = null;
+  try {
+    raw = globalThis.localStorage?.getItem(LOCAL_META_KEY) ?? null;
+  } catch {
+    raw = null;
+  }
+  if (raw !== sideRaw) {
+    sideRaw = raw;
+    const localMeta = readPluginStorage("hermes-bots", "bot-meta-v2", {}) || {};
+    sideMeta = localMeta && typeof localMeta === "object" ? localMeta : {};
+  }
+  return { localMeta: sideMeta };
+}
+function mergeRosterState(s, patch) {
+  let changed = false;
+  const next = { ...s };
+  for (const [key, value] of Object.entries(patch)) {
+    const old = s[key];
+    let kept = value;
+    if (key === "rows") kept = keepRows(old, value);
+    else if (key === "sources" && sameData(old, value)) kept = old;
+    if (key !== "updatedAt" && !Object.is(kept, old)) changed = true;
+    next[key] = kept;
+  }
+  return changed ? next : s;
 }
 async function fetchOwnRoster() {
   if (ownFetchInFlight) return;
@@ -50520,10 +50582,14 @@ async function fetchOwnRoster() {
     }
     if (union) liveNames = liveRosterNames(union);
     const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames);
-    app.roster.set((s) => ({ ...s, rows, sources: union?.sources || [], origin: "own", error: null, updatedAt: Date.now(), protocolInjected: Boolean(local?.bot_mode_protocol) }));
+    lastOwnRead = Date.now();
+    app.roster.set((s) => {
+      return mergeRosterState(s, { rows, sources: union?.sources || [], origin: "own", error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) });
+    });
     trackActivity();
   } catch (error) {
-    app.roster.set((s) => ({ ...s, error: String(error?.message || error) }));
+    const message = String(error?.message || error);
+    app.roster.set((s) => s.error === message ? s : { ...s, error: message });
   } finally {
     ownFetchInFlight = false;
   }
@@ -50569,19 +50635,20 @@ function refreshRoster() {
   const side = readSideData();
   const cached2 = readStockRoster(queryClient2(), activeConnectionId());
   const own2 = app.roster.get();
-  if (cached2 && cached2.profiles.length && !(own2.origin === "own" && own2.updatedAt > cached2.updatedAt)) {
+  if (cached2 && cached2.profiles.length && !(own2.origin === "own" && Math.max(own2.updatedAt, lastOwnRead) > cached2.updatedAt)) {
     const sources = cached2.sources.length ? cached2.sources : own2.sources;
-    app.roster.set((s) => ({
-      ...s,
-      ...side,
-      rows: dropDeadRows(annotateSources(cached2.profiles, sources), liveNames),
-      sources,
-      origin: "stock",
-      error: null,
-      updatedAt: cached2.updatedAt
-    }));
+    app.roster.set(
+      (s) => mergeRosterState(s, {
+        ...side,
+        rows: dropDeadRows(annotateSources(cached2.profiles, sources), liveNames),
+        sources,
+        origin: "stock",
+        error: null,
+        updatedAt: cached2.updatedAt
+      })
+    );
   } else {
-    app.roster.set((s) => ({ ...s, ...side }));
+    app.roster.set((s) => mergeRosterState(s, side));
   }
   trackActivity();
   void refreshRooms();
@@ -51554,7 +51621,7 @@ async function selfCheck({ notify: notify2 = true } = {}) {
       await fetchOwnRoster();
       rows = app.roster.get().rows;
     } else {
-      app.roster.set((s) => ({ ...s, ...readSideData(), rows: annotateSources(cached2.profiles, cached2.sources), origin: "stock" }));
+      app.roster.set((s) => mergeRosterState(s, { ...readSideData(), rows: annotateSources(cached2.profiles, cached2.sources), origin: "stock" }));
     }
     const secs = sections();
     step("roster", rows.length > 0, {

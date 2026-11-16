@@ -145,7 +145,52 @@ export function annotateSources(rows, sources) {
     const source = byId.get(String(row?.connectionId || ''))
     if (!source) return row
     const reachable = source.reachable === false || source.error ? false : source.reachable ?? null
-    return { ...row, sourceReachable: reachable, sourceError: source.error || null }
+    const error = source.error || null
+    // Nothing changed: the same row object, so subscribers see no change.
+    if (row?.sourceReachable === reachable && (row?.sourceError ?? null) === error) return row
+    return { ...row, sourceReachable: reachable, sourceError: error }
+  })
+}
+
+/** Structural equality for plain JSON-shaped data (roster rows, sources). */
+export function sameData(a, b) {
+  if (Object.is(a, b)) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!sameData(a[i], b[i])) return false
+    return true
+  }
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !sameData(a[key], b[key])) return false
+  }
+  return true
+}
+
+/** Whether two roster row lists are the same (same order, same keys, same
+ *  fields). */
+export function sameRows(a, b) {
+  if (a === b) return true
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (rowKey(a[i]) !== rowKey(b[i]) || !sameData(a[i], b[i])) return false
+  }
+  return true
+}
+
+/** `next` with every row equal to one in `prev` (by rowKey) swapped for the
+ *  old object, and `prev` itself when nothing changed: a roster tick that
+ *  read the same data leaves the store, and every row object, untouched. */
+export function keepRows(prev, next) {
+  if (!Array.isArray(prev) || !Array.isArray(next)) return next
+  if (sameRows(prev, next)) return prev
+  const byKey = new Map(prev.map(row => [rowKey(row), row]))
+  return next.map(row => {
+    const old = byKey.get(rowKey(row))
+    return old && sameData(old, row) ? old : row
   })
 }
 

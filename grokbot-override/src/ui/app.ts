@@ -4,6 +4,8 @@ import { canonicalIds, CANONICAL_CHAT_TITLE, expectHistory, findCanonicalChat, o
 import { historyToItems } from '../core/history.js'
 import {
   annotateSources,
+  keepRows,
+  sameData,
   dropDeadRows,
   liveRosterNames,
   botMeta,
@@ -155,6 +157,8 @@ let rosterTimer: null | (() => void) = null
 let remoteAvatars: null | ReturnType<typeof createRemoteAvatars> = null
 let unwatchAvatars: null | (() => void) = null
 let lastOwnFetch = 0
+// When the own read last answered (it may have changed nothing).
+let lastOwnRead = 0
 // What each source listed on the last fresh read (core/roster.js liveRosterNames).
 let liveNames: Map<string, Set<string>> = new Map()
 let lastVerify = 0
@@ -214,9 +218,42 @@ function activeConnectionId(): null | string {
   }
 }
 
+// Bot Mode's local meta, parsed again only when its stored text changes, so
+// a roster tick hands the store the same object (T2).
+const LOCAL_META_KEY = 'hermes.plugin.hermes-bots.bot-meta-v2'
+let sideRaw: null | string | undefined = undefined
+let sideMeta: Record<string, any> = {}
+
 function readSideData() {
-  const localMeta = readPluginStorage<Record<string, any>>('hermes-bots', 'bot-meta-v2', {}) || {}
-  return { localMeta: localMeta && typeof localMeta === 'object' ? localMeta : {} }
+  let raw: null | string = null
+  try {
+    raw = globalThis.localStorage?.getItem(LOCAL_META_KEY) ?? null
+  } catch {
+    raw = null
+  }
+  if (raw !== sideRaw) {
+    sideRaw = raw
+    const localMeta = readPluginStorage<Record<string, any>>('hermes-bots', 'bot-meta-v2', {}) || {}
+    sideMeta = localMeta && typeof localMeta === 'object' ? localMeta : {}
+  }
+  return { localMeta: sideMeta }
+}
+
+/** The roster state with only what changed replaced; `s` itself when
+ *  nothing did (store.ts skips an identical value, so nobody re-renders).
+ *  A new `updatedAt` alone is not a change. */
+function mergeRosterState(s: RosterState, patch: Partial<RosterState>): RosterState {
+  let changed = false
+  const next: any = { ...s }
+  for (const [key, value] of Object.entries(patch)) {
+    const old = (s as any)[key]
+    let kept = value
+    if (key === 'rows') kept = keepRows(old, value as any[])
+    else if (key === 'sources' && sameData(old, value)) kept = old
+    if (key !== 'updatedAt' && !Object.is(kept, old)) changed = true
+    next[key] = kept
+  }
+  return changed ? next : s
 }
 
 async function fetchOwnRoster() {
@@ -236,10 +273,15 @@ async function fetchOwnRoster() {
     }
     if (union) liveNames = liveRosterNames(union)
     const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), union?.sources), liveNames)
-    app.roster.set(s => ({ ...s, rows, sources: union?.sources || [], origin: 'own', error: null, updatedAt: Date.now(), protocolInjected: Boolean(local?.bot_mode_protocol) }))
+    lastOwnRead = Date.now()
+    app.roster.set(s => {
+      // updatedAt moves only with a real change; lastOwnRead says how fresh it is.
+      return mergeRosterState(s, { rows, sources: union?.sources || [], origin: 'own', error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) })
+    })
     trackActivity()
   } catch (error: any) {
-    app.roster.set(s => ({ ...s, error: String(error?.message || error) }))
+    const message = String(error?.message || error)
+    app.roster.set(s => (s.error === message ? s : { ...s, error: message }))
   } finally {
     ownFetchInFlight = false
   }
@@ -298,22 +340,23 @@ export function refreshRoster() {
   // An own read newer than the stock snapshot wins (a Retry, or a stock
   // roster that stopped refreshing while its pane is off screen).
   const own = app.roster.get()
-  if (cached && cached.profiles.length && !(own.origin === 'own' && own.updatedAt > cached.updatedAt)) {
+  if (cached && cached.profiles.length && !(own.origin === 'own' && Math.max(own.updatedAt, lastOwnRead) > cached.updatedAt)) {
     // A stock snapshot taken while the union roster failed has no sources
     // (data.ts keeps its rows painted as unreachable and the pane falls back
     // to its remembered sources): annotate with the last sources known here.
     const sources = cached.sources.length ? cached.sources : own.sources
-    app.roster.set(s => ({
-      ...s,
-      ...side,
-      rows: dropDeadRows(annotateSources(cached.profiles, sources), liveNames),
-      sources,
-      origin: 'stock',
-      error: null,
-      updatedAt: cached.updatedAt
-    }))
+    app.roster.set(s =>
+      mergeRosterState(s, {
+        ...side,
+        rows: dropDeadRows(annotateSources(cached.profiles, sources), liveNames),
+        sources,
+        origin: 'stock',
+        error: null,
+        updatedAt: cached.updatedAt
+      })
+    )
   } else {
-    app.roster.set(s => ({ ...s, ...side }))
+    app.roster.set(s => mergeRosterState(s, side))
   }
   trackActivity()
   void refreshRooms()
@@ -1583,7 +1626,7 @@ export async function selfCheck({ notify = true } = {}) {
       await fetchOwnRoster()
       rows = app.roster.get().rows
     } else {
-      app.roster.set(s => ({ ...s, ...readSideData(), rows: annotateSources(cached!.profiles, cached!.sources), origin: 'stock' }))
+      app.roster.set(s => mergeRosterState(s, { ...readSideData(), rows: annotateSources(cached!.profiles, cached!.sources), origin: 'stock' }))
     }
     const secs = sections()
     step('roster', rows.length > 0, {

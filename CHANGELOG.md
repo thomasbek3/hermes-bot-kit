@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **grokbot-override: the roster tick no longer re-renders the open chat (T2, 2026-11-15)**: the 3 s roster
+  refresh used to hand the store new row objects and a re-parsed Bot Mode meta on every tick, so the open chat
+  re-rendered its whole transcript every 3 s. Rows equal to the last read now keep their objects (and the list
+  its array), Bot Mode's local meta is re-parsed only when its stored text changes, and a tick that changed
+  nothing leaves the roster state untouched.
 - **grokbot-override: replies are formatted live while they stream (2026-11-15)**: a bot reply no longer
   types as plain text and then snaps into formatting when it finishes. It renders through the same markdown
   path as a finished reply from the first token: bold, lists, headings, links, inline code and code blocks
