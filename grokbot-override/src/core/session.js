@@ -206,6 +206,22 @@ export function createChatController(bot, deps, options = {}) {
   // remembered transcript; the first open() re-checks it in the background.
   const seed = chatSeed(options.seed)
   let seeded = Boolean(seed)
+  // A seed is only a picture: nothing is sent, attached or written for this
+  // chat until open() has checked the registry and read the history (review
+  // tighter-b r1 #1, #2). Every action the UI can start waits for it.
+  let releaseValidation = null
+  let validation = seed ? new Promise(resolve => (releaseValidation = resolve)) : null
+  let openStarted = false
+  const endValidation = () => {
+    validation = null
+    releaseValidation?.()
+    releaseValidation = null
+  }
+  const gated = fn => (...args) => {
+    if (!validation) return fn(...args)
+    if (!openStarted) void open()
+    return (validation || Promise.resolve()).then(() => fn(...args))
+  }
   const now = deps.now || (() => Date.now())
   const setTimer = deps.setTimer || ((fn, ms) => {
     const id = setTimeout(fn, ms)
@@ -513,6 +529,16 @@ export function createChatController(bot, deps, options = {}) {
   }
 
   async function open() {
+    openStarted = true
+    if (!validation) return openChecked()
+    try {
+      return await openChecked()
+    } finally {
+      endValidation()
+    }
+  }
+
+  async function openChecked() {
     const mine = ++generation
     // Seeded: the remembered transcript stays on screen while this re-checks.
     const quiet = seeded && state.phase === 'ready'
@@ -573,13 +599,19 @@ export function createChatController(bot, deps, options = {}) {
     try {
       const rows = await readPage(0)
       if (mine !== generation || disposed) return state
-      set({
-        phase: 'ready',
-        rows,
-        loadedCount: rows.length,
-        hasMore: rows.length >= HISTORY_PAGE,
-        chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
-      })
+      if (quiet) {
+        // The same Bot Chat as the seed: the fresh tail merges into the
+        // remembered rows, earlier pages and all (review tighter-b r1 #4).
+        mergeTail(rows, keepLocal)
+      } else {
+        set({
+          phase: 'ready',
+          rows,
+          loadedCount: rows.length,
+          hasMore: rows.length >= HISTORY_PAGE,
+          chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
+        })
+      }
       loaded = true
     } catch (error) {
       if (!attachOnOpen) {
@@ -2250,6 +2282,7 @@ export function createChatController(bot, deps, options = {}) {
     stopReconnectNotice()
     retireCancel?.()
     retireCancel = null
+    endValidation()
     for (const cancel of deliveryChecks.values()) cancel()
     deliveryChecks.clear()
     payloads.clear()
@@ -2293,34 +2326,34 @@ export function createChatController(bot, deps, options = {}) {
     },
     open,
     create,
-    attach,
-    loadEarlier,
-    refresh,
-    reconcile,
-    send,
-    sendDraft,
-    retry,
-    recheck,
+    attach: gated(attach),
+    loadEarlier: gated(loadEarlier),
+    refresh: gated(refresh),
+    reconcile: gated(reconcile),
+    send: gated(send),
+    sendDraft: gated(sendDraft),
+    retry: gated(retry),
+    recheck: gated(recheck),
     dropFailed,
-    discardStaged,
-    interrupt,
-    respondApproval,
-    editMessage,
-    regenerate,
-    rewindTo,
-    retryTurn,
+    discardStaged: gated(discardStaged),
+    interrupt: gated(interrupt),
+    respondApproval: gated(respondApproval),
+    editMessage: gated(editMessage),
+    regenerate: gated(regenerate),
+    rewindTo: gated(rewindTo),
+    retryTurn: gated(retryTurn),
     laterTurns,
-    react,
-    runSlash,
-    completeSlash,
-    pluginRequest,
-    sendIntent,
-    answerPrompt,
+    react: gated(react),
+    runSlash: gated(runSlash),
+    completeSlash: gated(completeSlash),
+    pluginRequest: gated(pluginRequest),
+    sendIntent: gated(sendIntent),
+    answerPrompt: gated(answerPrompt),
     pickClarify,
     pageClarify,
-    answerClarifyText,
-    respondConnection,
-    pollApprovals,
+    answerClarifyText: gated(answerClarifyText),
+    respondConnection: gated(respondConnection),
+    pollApprovals: gated(pollApprovals),
     hasPendingApproval: () => hasPendingApproval(state.chat.items),
     retire,
     revive,

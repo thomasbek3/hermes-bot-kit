@@ -7,12 +7,16 @@
   jobs and computer status. The last eight bots' transcripts, scheduled jobs and screen status are now kept in
   memory: going back shows them straight away while the Bot Chat registry, history, jobs and status are re-read in
   the background. If the bot's Bot Chat changed meanwhile, the remembered transcript is dropped and the chat opens
-  the normal way.
+  the normal way. The remembered transcript is only a picture: a send, edit or any other action waits until the
+  registry check and history read are done (so it always goes to the current Bot Chat and is never overtaken by
+  that read), and the fresh read merges into the remembered rows, keeping earlier pages.
 - **grokbot-override: Hermes's own session views work again (T3, 2026-11-15)**: the override claimed the main
   pane back on every session focus, so session search, a notification click, a cron run's "open", ⌘N and artifact
   links were undone at once. Start-up and reload still land on the override's chat tab. After that (the first
   click or key press, or 10 s), a session that is a roster bot's Bot Chat opens in the override with that bot
-  selected; any other session, or a new draft, stays in Hermes's own view until you go back to the override. The
+  selected; any other session, or a new draft, stays in Hermes's own view until you go back to the override. This
+  is decided by the session Hermes has focused when its view comes up, so ⌘N with nothing open and re-opening the
+  same session work too; closing the override's tab still reopens it. The
   computer-viewer status now reads the SDK's `paneVisibility` first; the layout-tree query remains only to tell
   that a hidden viewer pane exists.
 - **grokbot-override: the roster tick no longer re-renders the open chat (T2, 2026-11-15)**: the 3 s roster
