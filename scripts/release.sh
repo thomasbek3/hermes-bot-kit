@@ -41,6 +41,7 @@ OLD_ESC=$(printf '%s' "${OLD}" | sed 's/\./\\./g')
 PINNED_FILES="
 install.sh
 texting-style/install.sh
+remote-cua/install.sh
 README.md
 AGENTS.md
 texting-style/README.md
