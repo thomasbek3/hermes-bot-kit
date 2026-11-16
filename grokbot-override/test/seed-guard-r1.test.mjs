@@ -19,7 +19,7 @@ const row = (id, role, content) => ({ id, role, content, timestamp: 1762560000 +
 const SEED_ROWS = [row(1, 'user', 'hi'), row(2, 'assistant', 'hello')]
 const seed = (rows = SEED_ROWS, extra = {}) => ({ storedId: 'tip', canonical: { id: 'root', resolved_id: 'tip' }, rows, hasMore: false, ...extra })
 
-test('r1 #1 a send before the registry answers waits, and lands on the replacement Bot Chat', async () => {
+test('r1 #1 a send before the registry answers is refused; after it, sends go to the replacement Bot Chat', async () => {
   const registry = deferred()
   const gw = gateway({
     'session.list': () => registry.promise,
@@ -28,9 +28,11 @@ test('r1 #1 a send before the registry answers waits, and lands on the replaceme
   })
   const chat = createChatController(BOT, gw.deps, { seed: seed() })
   assert.equal(chat.get().phase, 'ready', 'the remembered transcript paints at once')
+  assert.equal(chat.get().checking, true, 'while it is checked (the composer is disabled)')
   const opening = chat.open()
-  const sending = chat.sendDraft('new prompt')
-  await flush()
+  const early = await chat.sendDraft('new prompt')
+  assert.equal(early.ok, false)
+  assert.equal(early.delivery, 'not-sent', 'refused before anything: the composer gets the draft back')
   await flush()
   assert.deepEqual(
     gw.calls.filter(c => c.method !== 'session.list').map(c => c.method),
@@ -40,7 +42,8 @@ test('r1 #1 a send before the registry answers waits, and lands on the replaceme
 
   registry.resolve({ sessions: [{ id: 'replacement', title: 'Bot Chat', message_count: 2 }] })
   await opening
-  await sending
+  assert.equal(chat.get().checking, false)
+  assert.ok((await chat.sendDraft('new prompt')).ok)
   const state = chat.get()
   assert.equal(state.storedId, 'replacement')
   assert.equal(state.runtimeId, 'rt-replacement')
@@ -60,15 +63,13 @@ test('r1 #2 a send and a streaming reply are never overtaken by the first histor
   })
   const chat = createChatController(BOT, gw.deps, { seed: seed() })
   const opening = chat.open()
-  const sending = chat.sendDraft('new prompt')
   await flush()
-  await flush()
-  assert.ok(!gw.calls.some(c => c.method === 'prompt.submit'), 'held until the history read is in')
+  assert.equal((await chat.sendDraft('new prompt')).delivery, 'not-sent', 'refused while the history read is out')
+  assert.ok(!gw.calls.some(c => c.method === 'prompt.submit'))
 
   history.resolve({ session_id: 'tip', messages: SEED_ROWS })
   await opening
-  await sending
-  assert.ok(gw.calls.some(c => c.method === 'prompt.submit'), 'then sent')
+  assert.ok((await chat.sendDraft('new prompt')).ok, 'then sent')
   gw.emit({ type: 'message.start', session_id: 'rt-1', payload: {} })
   gw.emit({ type: 'message.delta', session_id: 'rt-1', payload: { text: 'new streaming reply' } })
   await flush()
@@ -93,11 +94,11 @@ test('r1 #4 the background read keeps the remembered earlier pages', async () =>
   assert.equal(state.chat.items.filter(i => i.text === 'm1').length, 1, 'the oldest message still shows, once')
 })
 
-test('r1 #1 a seeded chat that is disposed before open() never hangs its waiting actions', async () => {
+test('r1 #1 a seeded chat refuses background actions before open() and never writes', async () => {
   const gw = gateway()
   const chat = createChatController(BOT, gw.deps, { seed: seed() })
-  const refreshing = chat.refresh()
+  assert.equal(await chat.refresh(), false)
+  await assert.rejects(chat.attach(), /still being checked/)
   chat.dispose()
-  await refreshing
-  assert.ok(!gw.calls.some(c => c.method === 'session.resume'))
+  assert.deepEqual(gw.calls, [])
 })

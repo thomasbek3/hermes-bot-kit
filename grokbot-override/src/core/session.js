@@ -112,6 +112,8 @@ import {
 } from './approvals.js'
 
 export const HISTORY_PAGE = 120
+// Why an action on a remembered chat (T9) is refused while it is checked.
+export const CHECKING_TEXT = 'this chat is still being checked, try again in a moment'
 const RESUME_TIMEOUT_MS = 180_000
 const APPROVAL_POLL_MS = 2_000
 const IDLE_REFRESH_MS = 15_000
@@ -206,22 +208,20 @@ export function createChatController(bot, deps, options = {}) {
   // remembered transcript; the first open() re-checks it in the background.
   const seed = chatSeed(options.seed)
   let seeded = Boolean(seed)
-  // A seed is only a picture: nothing is sent, attached or written for this
-  // chat until open() has checked the registry and read the history (review
-  // tighter-b r1 #1, #2). Every action the UI can start waits for it.
-  let releaseValidation = null
-  let validation = seed ? new Promise(resolve => (releaseValidation = resolve)) : null
-  let openStarted = false
-  const endValidation = () => {
-    validation = null
-    releaseValidation?.()
-    releaseValidation = null
-  }
-  const gated = fn => (...args) => {
-    if (!validation) return fn(...args)
-    if (!openStarted) void open()
-    return (validation || Promise.resolve()).then(() => fn(...args))
-  }
+  // A seed is only a picture (review tighter-b r1 #1 #2, r2 #1 #2): until
+  // the newest open() has confirmed the Bot Chat in the registry and loaded
+  // it, `checking` is set (the composer is disabled, as on any open) and
+  // every action is refused at once: nothing is attached, sent or written,
+  // and nothing waits, so nothing can be released late onto a stale chat or
+  // lost with a closed one. A failed check forgets the remembered stored id.
+  let trusted = !seed
+  let opensInFlight = 0
+  let validatedGen = -1
+  const guard = (fn, refuse) => (...args) => (trusted ? fn(...args) : refuse())
+  const notSent = () => Promise.resolve({ ok: false, delivery: 'not-sent', error: CHECKING_TEXT })
+  const notDone = () => Promise.resolve({ ok: false, error: CHECKING_TEXT })
+  const nothing = () => Promise.resolve(false)
+  const rejected = () => Promise.reject(new Error(CHECKING_TEXT))
   const now = deps.now || (() => Date.now())
   const setTimer = deps.setTimer || ((fn, ms) => {
     const id = setTimeout(fn, ms)
@@ -260,6 +260,8 @@ export function createChatController(bot, deps, options = {}) {
     // A failed-turn card's Try again (retryTurn): { running, from, text,
     // failed } of the newest one, or null (core/turnError.js).
     turnRetry: null,
+    // A remembered transcript that is still being checked (T9).
+    checking: Boolean(seed),
     chat: initialChatState(seed ? rowsToItems(seed.rows) : [])
   }
   const listeners = new Set()
@@ -529,13 +531,31 @@ export function createChatController(bot, deps, options = {}) {
   }
 
   async function open() {
-    openStarted = true
-    if (!validation) return openChecked()
+    if (trusted) return openChecked()
+    opensInFlight += 1
     try {
       return await openChecked()
     } finally {
-      endValidation()
+      opensInFlight -= 1
+      concludeCheck()
     }
+  }
+
+  /** Once no open() is running: trusted only if the newest one loaded the
+   *  Bot Chat it confirmed; otherwise fail closed. */
+  function concludeCheck() {
+    if (trusted || disposed || opensInFlight > 0) return
+    if (validatedGen === generation && state.phase === 'ready' && state.storedId) {
+      trusted = true
+      set({ checking: false })
+      return
+    }
+    set(s => ({
+      checking: false,
+      storedId: '',
+      canonical: null,
+      ...(s.phase === 'ready' ? { phase: 'error', error: 'Could not check this Bot Chat. Try again.' } : {})
+    }))
   }
 
   async function openChecked() {
@@ -632,6 +652,11 @@ export function createChatController(bot, deps, options = {}) {
           scheduleReattach()
         }
       }
+    }
+    if (mine === generation && !disposed && state.phase === 'ready' && canonicalIds(canonical).includes(state.storedId)) {
+      validatedGen = mine
+      // A load not started by open() (create) concludes the check itself.
+      if (!trusted && opensInFlight === 0) concludeCheck()
     }
     if (state.phase === 'ready' && !retiring) scheduleIdleRefresh()
     return state
@@ -2282,7 +2307,6 @@ export function createChatController(bot, deps, options = {}) {
     stopReconnectNotice()
     retireCancel?.()
     retireCancel = null
-    endValidation()
     for (const cancel of deliveryChecks.values()) cancel()
     deliveryChecks.clear()
     payloads.clear()
@@ -2326,34 +2350,34 @@ export function createChatController(bot, deps, options = {}) {
     },
     open,
     create,
-    attach: gated(attach),
-    loadEarlier: gated(loadEarlier),
-    refresh: gated(refresh),
-    reconcile: gated(reconcile),
-    send: gated(send),
-    sendDraft: gated(sendDraft),
-    retry: gated(retry),
-    recheck: gated(recheck),
+    attach: guard(attach, rejected),
+    loadEarlier: guard(loadEarlier, nothing),
+    refresh: guard(refresh, nothing),
+    reconcile: guard(reconcile, nothing),
+    send: guard(send, () => Promise.resolve(false)),
+    sendDraft: guard(sendDraft, notSent),
+    retry: guard(retry, notSent),
+    recheck: guard(recheck, nothing),
     dropFailed,
-    discardStaged: gated(discardStaged),
-    interrupt: gated(interrupt),
-    respondApproval: gated(respondApproval),
-    editMessage: gated(editMessage),
-    regenerate: gated(regenerate),
-    rewindTo: gated(rewindTo),
-    retryTurn: gated(retryTurn),
+    discardStaged: guard(discardStaged, nothing),
+    interrupt: guard(interrupt, nothing),
+    respondApproval: guard(respondApproval, nothing),
+    editMessage: guard(editMessage, notSent),
+    regenerate: guard(regenerate, notSent),
+    rewindTo: guard(rewindTo, notDone),
+    retryTurn: guard(retryTurn, notDone),
     laterTurns,
-    react: gated(react),
-    runSlash: gated(runSlash),
-    completeSlash: gated(completeSlash),
-    pluginRequest: gated(pluginRequest),
-    sendIntent: gated(sendIntent),
-    answerPrompt: gated(answerPrompt),
+    react: guard(react, nothing),
+    runSlash: guard(runSlash, notDone),
+    completeSlash: guard(completeSlash, () => Promise.resolve({ items: [], replaceFrom: 0 })),
+    pluginRequest: guard(pluginRequest, rejected),
+    sendIntent: guard(sendIntent, notDone),
+    answerPrompt: guard(answerPrompt, notDone),
     pickClarify,
     pageClarify,
-    answerClarifyText: gated(answerClarifyText),
-    respondConnection: gated(respondConnection),
-    pollApprovals: gated(pollApprovals),
+    answerClarifyText: guard(answerClarifyText, notDone),
+    respondConnection: guard(respondConnection, notDone),
+    pollApprovals: guard(pollApprovals, nothing),
     hasPendingApproval: () => hasPendingApproval(state.chat.items),
     retire,
     revive,

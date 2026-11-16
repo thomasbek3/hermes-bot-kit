@@ -7,9 +7,10 @@
   jobs and computer status. The last eight bots' transcripts, scheduled jobs and screen status are now kept in
   memory: going back shows them straight away while the Bot Chat registry, history, jobs and status are re-read in
   the background. If the bot's Bot Chat changed meanwhile, the remembered transcript is dropped and the chat opens
-  the normal way. The remembered transcript is only a picture: a send, edit or any other action waits until the
-  registry check and history read are done (so it always goes to the current Bot Chat and is never overtaken by
-  that read), and the fresh read merges into the remembered rows, keeping earlier pages.
+  the normal way. The remembered transcript is only a picture: until the registry check and history read are done
+  the composer is disabled (as on any open) and any action is refused at once, never queued; a failed check shows
+  the usual error and forgets the remembered chat, so nothing can reach a replaced Bot Chat. The fresh read merges
+  into the remembered rows, keeping earlier pages.
 - **grokbot-override: Hermes's own session views work again (T3, 2026-11-15)**: the override claimed the main
   pane back on every session focus, so session search, a notification click, a cron run's "open", ⌘N and artifact
   links were undone at once. Start-up and reload still land on the override's chat tab. After that (the first
