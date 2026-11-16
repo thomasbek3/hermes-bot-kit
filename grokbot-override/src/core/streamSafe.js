@@ -413,27 +413,65 @@ function delimiterRun(t, i, j) {
 /** CommonMark's "process emphasis" over delimiter runs, in order: each
  *  closer pairs with the nearest eligible opener of its character (the
  *  multiple-of-3 rule; GFM strikethrough pairs equal runs of one or two
- *  tildes), consuming from both and removing every delimiter between them. */
+ *  tildes), consuming from both and removing every delimiter between them.
+ *
+ *  Linear in the number of runs (INT-03): runs that can no longer take part
+ *  (removed, or nothing left) are skipped through a path-compressed link to
+ *  the nearest live run below, and a failed opener search remembers its
+ *  bottom per kind of closer (CommonMark's `openers_bottom`: character,
+ *  whether the closer can also open, its length mod 3; tildes by length),
+ *  since an opener that was not eligible never becomes eligible later. */
+/** Work counter for the scaling tests (runs visited by processEmphasis). */
+export const scanStats = { emphasisSteps: 0 }
+
 function processEmphasis(list) {
-  for (let ci = 0; ci < list.length; ci += 1) {
+  const n = list.length
+  // up[i] === i: run i is live; otherwise a link toward the next live run
+  // below it (-1: none).
+  const up = new Int32Array(n)
+  for (let i = 0; i < n; i += 1) up[i] = list[i].removed || list[i].rem === 0 ? i - 1 : i
+  const live = from => {
+    let r = from
+    while (r >= 0 && up[r] !== r) r = up[r]
+    while (from >= 0 && up[from] !== from) {
+      const next = up[from]
+      up[from] = r
+      from = next
+    }
+    return r
+  }
+  const bottoms = new Map()
+  for (let ci = 0; ci < n; ci += 1) {
     const c = list[ci]
     while (!c.removed && c.canClose && c.rem > 0) {
-      let oi = ci - 1
-      for (; oi >= 0; oi -= 1) {
+      const kind = c.ch === '~' ? `~${c.count}` : `${c.ch}${c.canOpen ? 1 : 0}${c.count % 3}`
+      const bottom = bottoms.get(kind) ?? 0
+      let oi = live(ci - 1)
+      for (; oi >= bottom; oi = live(oi - 1)) {
+        scanStats.emphasisSteps += 1
         const d = list[oi]
-        if (d.removed || d.rem === 0 || d.ch !== c.ch || !d.canOpen) continue
+        if (d.ch !== c.ch || !d.canOpen) continue
         if (c.ch === '~') {
           if (d.count !== c.count) continue
         } else if ((d.canClose || c.canOpen) && (d.count + c.count) % 3 === 0 && !(d.count % 3 === 0 && c.count % 3 === 0)) continue
         break
       }
-      if (oi < 0) break
+      if (oi < bottom) {
+        bottoms.set(kind, ci)
+        break
+      }
       const o = list[oi]
       if (c.firstOpener === undefined) c.firstOpener = oi
       const use = c.ch === '~' ? Math.min(o.rem, c.rem) : o.rem >= 2 && c.rem >= 2 ? 2 : 1
       o.rem -= use
       c.rem -= use
-      for (let k = oi + 1; k < ci; k += 1) list[k].removed = true
+      if (o.rem === 0) up[oi] = oi - 1
+      for (let k = live(ci - 1); k > oi; k = live(k - 1)) {
+        scanStats.emphasisSteps += 1
+        list[k].removed = true
+        up[k] = k - 1
+      }
+      if (c.rem === 0) up[ci] = ci - 1
     }
   }
 }
