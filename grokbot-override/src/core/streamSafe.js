@@ -74,15 +74,19 @@ function holdLastLine(line) {
   if (link && !oddBackticks(line.slice(0, link.index))) pick(link.index)
   // A bare URL still typing (it autolinks into a source chip, ui/SourceLink.tsx,
   // whose label and icon depend on the whole URL): shown once a space or the
-  // line end arrives.
-  // A link's own `](https://…)` target is the half-link rule's, above; a
-  // finished `[text](url)` is not held.
-  const bare = new RegExp(String.raw`(^|[\s(<])https?:(?:/{0,2}|//\S{1,${HOLD_MAX}})$`).exec(line)
-  if (bare) {
+  // line end arrives. An angle autolink `<https://…` is held from its `<`
+  // until the closing `>` arrives (then it is complete). A link's own
+  // `](https://…)` target is the half-link rule's, above. Reported as `url`,
+  // not cut here: streamSafeParts drops it when the URL is inside inline code.
+  let url = -1
+  const angle = new RegExp(String.raw`<(?:h|ht|htt|https?|https?:|https?:/{1,2}[^\s<>]{0,${HOLD_MAX}})?$`).exec(line)
+  const bare = new RegExp(String.raw`(^|[\s(])https?:(?:/{0,2}|//\S{1,${HOLD_MAX}})$`).exec(line)
+  if (angle) url = angle.index
+  else if (bare) {
     const start = bare.index + bare[1].length
-    if (line.slice(start - 2, start) !== '](' && !oddBackticks(line.slice(0, start))) pick(start)
+    if (line.slice(start - 2, start) !== '](') url = start
   }
-  return { at, directive: false }
+  return { at, directive: false, url }
 }
 
 /** Inline code and emphasis in the tail block: where to cut a trailing
@@ -217,6 +221,10 @@ export function streamSafeParts(input) {
   let cut = source.length
   const hold = holdLastLine(lastLine)
   if (hold.at >= 0) cut = lastStart + hold.at
+  // A URL still typing, unless it is inside inline code (the code state of
+  // the tail block up to it, delimiter runs and earlier lines included):
+  // code shows as it types.
+  if (hold.url >= 0 && !inlineTail(`${source.slice(blockStart, lastStart + hold.url)}x`).code) cut = Math.min(cut, lastStart + hold.url)
   // A table header whose separator line has not arrived yet.
   if (pipeRun === 1 && (!lastLine || PIPE_LINE.test(lastLine))) cut = Math.min(cut, pipeStart)
   const directive = hold.directive && cut === lastStart + hold.at

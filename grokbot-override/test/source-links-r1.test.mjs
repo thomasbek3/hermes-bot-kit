@@ -127,3 +127,37 @@ test('SL24-02: invalid or unsupported slack:// links stay inert; inline code is 
   assert.deepEqual(sourceLinkFor(forged).opens, [forged], 'a forged stand-in opens only its own https page')
   assert.equal(sourceLinkFor('https://app.slack.com.evil.io/client/T0EXAMPLE1/C0123ABCD#gbo-slack-app=' + encodeURIComponent(SLACK_APP))?.service.id, 'web')
 })
+
+// ---- SL24-03: the bare-URL hold never hides text inside inline code ----
+
+test('SL24-03: a URL inside a double-backtick or multi-line code span shows as it types', async () => {
+  const { streamSafe, streamSafeParts } = await import('../src/core/streamSafe.js')
+  assert.equal(streamSafe('See ``code https://example.com/path'), 'See ``code https://example.com/path``')
+  assert.equal(streamSafe('See `one\nhttps://example.com/path'), 'See `one\nhttps://example.com/path`')
+  assert.equal(streamSafe('See `code https://example.com/pa'), 'See `code https://example.com/pa`')
+  assert.equal(streamSafeParts('See ``code https://example.com/path').held, '')
+  // Outside code it is still held, also after a closed span.
+  assert.equal(streamSafe('See ``a`` https://example.com/pa'), 'See ``a`` ')
+  assert.equal(streamSafe('See `one`\nhttps://example.com/pa'), 'See `one`\n')
+})
+
+// ---- SL24-04: a complete angle autolink is complete ----
+
+test('SL24-04: <https://…> shows once its > arrives; while typing, the whole construct waits, never a raw <', async () => {
+  const { streamSafe, streamSafeParts } = await import('../src/core/streamSafe.js')
+  const done = 'See <https://github.com/example/repo/pull/12>'
+  assert.deepEqual(streamSafeParts(done), { text: done, held: '', directive: false })
+  for (let i = 'See '.length + 1; i < done.length; i += 1) {
+    assert.equal(streamSafe(done.slice(0, i)), 'See ', JSON.stringify(done.slice(0, i)))
+  }
+})
+
+test('SL24-04: in the host pipeline the last streaming tick of a closed angle autolink draws the finished chip', { skip: skipHost }, async t => {
+  const { m } = await setup(t)
+  const { streamSafe } = await import('../src/core/streamSafe.js')
+  const done = 'See <https://github.com/example/repo/pull/12>'
+  const finished = host.render(done, m.sourceLinkUi.decorateSourceLinks)
+  assert.match(finished, /data-service="github"/)
+  assert.equal(host.render(streamSafe(done), m.sourceLinkUi.decorateSourceLinks), finished)
+  assert.doesNotMatch(host.render(streamSafe(done.slice(0, -5)), m.sourceLinkUi.decorateSourceLinks), /&lt;/, 'no raw < while it types')
+})

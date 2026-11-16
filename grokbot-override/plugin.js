@@ -51968,12 +51968,15 @@ function holdLastLine(line) {
   if (tagHead) pick(tagHead.index + tagHead[1].length);
   const link = new RegExp(String.raw`!?\[[^\[\]\n]{0,${HOLD_MAX}}(?:\](?:\([^)\n]{0,${HOLD_MAX}})?)?$`).exec(line);
   if (link && !oddBackticks(line.slice(0, link.index))) pick(link.index);
-  const bare2 = new RegExp(String.raw`(^|[\s(<])https?:(?:/{0,2}|//\S{1,${HOLD_MAX}})$`).exec(line);
-  if (bare2) {
+  let url = -1;
+  const angle = new RegExp(String.raw`<(?:h|ht|htt|https?|https?:|https?:/{1,2}[^\s<>]{0,${HOLD_MAX}})?$`).exec(line);
+  const bare2 = new RegExp(String.raw`(^|[\s(])https?:(?:/{0,2}|//\S{1,${HOLD_MAX}})$`).exec(line);
+  if (angle) url = angle.index;
+  else if (bare2) {
     const start2 = bare2.index + bare2[1].length;
-    if (line.slice(start2 - 2, start2) !== "](" && !oddBackticks(line.slice(0, start2))) pick(start2);
+    if (line.slice(start2 - 2, start2) !== "](") url = start2;
   }
-  return { at, directive: false };
+  return { at, directive: false, url };
 }
 function inlineTail(tail) {
   const stack = [];
@@ -52093,6 +52096,7 @@ function streamSafeParts(input) {
   let cut2 = source.length;
   const hold = holdLastLine(lastLine);
   if (hold.at >= 0) cut2 = lastStart + hold.at;
+  if (hold.url >= 0 && !inlineTail(`${source.slice(blockStart, lastStart + hold.url)}x`).code) cut2 = Math.min(cut2, lastStart + hold.url);
   if (pipeRun === 1 && (!lastLine || PIPE_LINE.test(lastLine))) cut2 = Math.min(cut2, pipeStart);
   const directive = hold.directive && cut2 === lastStart + hold.at;
   let safe = source.slice(0, cut2);
