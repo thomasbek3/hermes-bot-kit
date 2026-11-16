@@ -63,6 +63,9 @@ const banner = `/*!
  *    headed "xlsx.js (C) 2013-present SheetJS"), unmodified, Copyright (C)
  *    2012-present SheetJS LLC, Apache License 2.0 (text below);
  *    https://sheetjs.com, https://git.sheetjs.com/sheetjs/sheetjs.
+ *  - Source-link brand marks (src/ui/brandMarks.ts) are Simple Icons 15.22.0
+ *    paths, CC0 1.0 (https://simpleicons.org); brand names and logos are
+ *    their owners' trademarks (see NOTICE.md in the source).
  *
  * ─── MIT License (Grokbot Override / Hermes bot kit) ───────────────────────
  *

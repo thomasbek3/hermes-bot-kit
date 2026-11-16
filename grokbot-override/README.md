@@ -93,6 +93,12 @@ Hermes Bot Mode** shows up only in error states. The full capability list is in 
   (with Copy) appear as the bot types, through the same renderer as a finished reply, so nothing jumps when it
   completes. A half-typed `**`, link, table row, `MEDIA:` line or list marker waits a moment until it is
   complete; an open code block shows and grows; a card still streaming shows a quiet placeholder line.
+- **Source links**: a link in a bot's reply to a Slack message, a Gmail email, a GitHub PR, a Google doc and
+  about 25 other services draws as the service's small logo plus the link's short text (other public sites get
+  a plain globe). A bare URL gets a short label ("Slack message", "GitHub PR #12"), never the whole URL. A click
+  opens it in your browser (a Slack permalink hands off to the Slack app at that message); hovering shows the
+  full URL. Logos are bundled (Simple Icons, CC0): nothing is fetched. The agent-cards skill tells bots to end
+  a line about something they read with a short `[label](permalink)`.
 - Bot Chats opened here are **desktop sessions** (as in stock Desktop), so the bot knows markdown, files and
   cards render. A chat whose session started before you installed or updated the override keeps its old mode
   until that session restarts.

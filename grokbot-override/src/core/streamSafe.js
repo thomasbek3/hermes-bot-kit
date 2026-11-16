@@ -72,6 +72,16 @@ function holdLastLine(line) {
   // A half link or image: `[text`, `[text]`, `[text](url`.
   const link = new RegExp(String.raw`!?\[[^\[\]\n]{0,${HOLD_MAX}}(?:\](?:\([^)\n]{0,${HOLD_MAX}})?)?$`).exec(line)
   if (link && !oddBackticks(line.slice(0, link.index))) pick(link.index)
+  // A bare URL still typing (it autolinks into a source chip, ui/SourceLink.tsx,
+  // whose label and icon depend on the whole URL): shown once a space or the
+  // line end arrives.
+  // A link's own `](https://…)` target is the half-link rule's, above; a
+  // finished `[text](url)` is not held.
+  const bare = new RegExp(String.raw`(^|[\s(<])https?:(?:/{0,2}|//\S{1,${HOLD_MAX}})$`).exec(line)
+  if (bare) {
+    const start = bare.index + bare[1].length
+    if (line.slice(start - 2, start) !== '](' && !oddBackticks(line.slice(0, start))) pick(start)
+  }
   return { at, directive: false }
 }
 

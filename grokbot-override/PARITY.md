@@ -147,6 +147,15 @@ work rows hidden), read and written through the bot's own gateway and route (`pl
 the plugin's `/email-drafts` command through `slash.exec`), sent once on **Send**. `src/core/emailDrafts.js`,
 `src/ui/EmailDraft.tsx`; tests `test/email-drafts*.test.mjs`.
 
+Beyond stock: **source links**. A link in bot prose (streaming or finished) whose host is a known service
+(Slack, Gmail, Google Docs/Sheets/Slides/Drive/Calendar/Meet, GitHub, Notion, Linear, Figma, Zoom,
+Outlook/Office 365, Dropbox, Zoho, Stripe, HubSpot, Airtable, Trello, Asana, Calendly, Loom, YouTube, X,
+LinkedIn) draws as a bundled logo plus its text; other public hosts get a neutral globe; a bare URL gets a
+short label. It hooks the SDK renderer's `decorateText` prop, so the renderer's own safe-link rules still
+apply (no chip for `javascript:`, `data:`, `mailto:`, private hosts or code). Clicks go through
+`ctx.os.openExternal`. `src/core/sourceLinks.js`, `src/ui/SourceLink.tsx`, `src/ui/brandMarks.ts`; tests
+`test/source-links-24.test.mjs`.
+
 ## Right panel (profile)
 
 | # | Bot Mode capability | Source | Status | Notes |

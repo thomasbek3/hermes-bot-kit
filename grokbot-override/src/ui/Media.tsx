@@ -17,6 +17,7 @@ import { FileTile } from './FileIcons'
 import { FileViewer, type ViewerFile } from './FileViewer'
 import { IconDownload } from './icons'
 import { Markdown } from './sdk'
+import { decorateSourceLinks } from './SourceLink'
 
 function saveDataUrl(dataUrl: string, name: string) {
   try {
@@ -225,7 +226,7 @@ export function BotText({ bot, text }: { bot: any; text: string }) {
   return (
     <>
       {parts.map((part: any, index: number) =>
-        part.kind === 'code' ? <CodeBlock key={index} code={part.code} lang={part.lang} /> : <Markdown key={index} text={part.text} />
+        part.kind === 'code' ? <CodeBlock key={index} code={part.code} lang={part.lang} /> : <Markdown key={index} text={part.text} decorateText={decorateSourceLinks} />
       )}
       <MediaStrip bot={bot} media={media} />
     </>

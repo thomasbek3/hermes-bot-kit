@@ -43,19 +43,32 @@ export const MARKDOWN_CLASSES = [
 ].join(' ')
 const PARAGRAPH_CLASSES = 'wrap-anywhere leading-(--dt-line-height)'
 
-/** `code`, **bold** and [label](url) only: enough to preview their look in
- *  a bubble. */
+/** `code`, **bold**, [label](url) and bare https URLs only: enough to
+ *  preview their look in a bubble. Links follow the real renderer's
+ *  preview-only rule (markdown-text.tsx PreviewOnlyMarkdownLink): only an
+ *  http(s) URL becomes an anchor; anything else is a plain span. */
+function PreviewLink({ href, children }: { href: string; children?: any }) {
+  const safe = /^https?:\/\//i.test(String(href).trim())
+  return safe ? React.createElement('a', { href: String(href).trim(), className: 'ref wrap-anywhere' }, children) : React.createElement('span', null, children)
+}
+/** Like the real renderer's `a` component element: the raw href as a prop
+ *  (a `decorateText` hook sees it, safe or not). */
+function link(key: number, href: string, label: any) {
+  return React.createElement(PreviewLink, { key, href }, label)
+}
 function inline(text: string): any[] {
-  return text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/).map((part, i) => {
+  return text.split(/(`[^`]+`|\*\*(?:[^*]|\*(?!\*))+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/).map((part, i) => {
     if (/^`[^`]+`$/.test(part)) return React.createElement('code', { key: i }, part.slice(1, -1))
-    if (/^\*\*[^*]+\*\*$/.test(part)) return React.createElement('strong', { key: i }, part.slice(2, -2))
-    const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
-    if (link) return React.createElement('a', { key: i, href: link[2], className: 'wrap-anywhere' }, link[1])
+    if (/^\*\*[\s\S]+\*\*$/.test(part)) return React.createElement('strong', { key: i }, inline(part.slice(2, -2)))
+    const md = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+    if (md) return link(i, md[2], md[1])
+    if (/^https?:\/\/\S+$/.test(part)) return link(i, part, part)
     return part
   })
 }
 
-export function MessageTextContent({ text, media, previewOnly }: { text: string; media?: boolean; previewOnly?: boolean }) {
+export function MessageTextContent({ text, media, previewOnly, decorateText }: { text: string; media?: boolean; previewOnly?: boolean; decorateText?: (children: any) => any }) {
+  const deco = (children: any) => (decorateText ? decorateText(children) : children)
   const blocks = String(text).split(/\n{2,}/)
   return React.createElement(
     'div',
@@ -65,9 +78,9 @@ export function MessageTextContent({ text, media, previewOnly }: { text: string;
       const heading = block.match(/^(#{1,4}) (.*)$/)
       if (heading) return React.createElement(`h${heading[1].length}`, { key: i }, inline(heading[2]))
       if (lines.every(line => /^[-*] /.test(line))) {
-        return React.createElement('ul', { key: i, className: 'my-1 gap-0' }, lines.map((line, j) => React.createElement('li', { key: j, className: 'leading-(--dt-line-height)' }, inline(line.slice(2)))))
+        return React.createElement('ul', { key: i, className: 'my-1 gap-0' }, lines.map((line, j) => React.createElement('li', { key: j, className: 'leading-(--dt-line-height)' }, deco(inline(line.slice(2))))))
       }
-      return React.createElement('p', { key: i, className: PARAGRAPH_CLASSES }, inline(block))
+      return React.createElement('p', { key: i, className: PARAGRAPH_CLASSES }, deco(inline(block)))
     })
   )
 }

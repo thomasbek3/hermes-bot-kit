@@ -273,6 +273,8 @@ export { ComposerNote } from '../src/ui/Composer'
 export { ProfilePanel } from '../src/ui/Profile'
 export { STICK_PX, UserMeta } from '../src/ui/Chat'
 export { DirectiveBlock } from '../src/ui/Directives'
+export { BotText } from '../src/ui/Media'
+export * as sourceLinkUi from '../src/ui/SourceLink'
 export * as newMarkerApi from '../src/core/newMarker.js'
 export * as personApi from '../src/core/person.js'
 export function renderElement(component: any, props: any) {

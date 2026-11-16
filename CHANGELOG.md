@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **grokbot-override: source links with service logos in bot replies (2026-11-15)**: a markdown link in a
+  bot's reply to a known service now draws as the service's small logo (14 px, full colour, a fixed box so
+  nothing shifts) plus its underlined text, like "Her message" next to the Slack logo. About 27 services are
+  recognised by exact host or subdomain (lookalikes such as `slack.com.evil.io` are not); any other public
+  site gets a neutral globe, never a fetched favicon. A bare URL gets a short label ("Slack message", "Gmail",
+  "GitHub PR #12"). A click opens it through the plugin SDK's `openExternal`; a Slack permalink opens on
+  slack.com, which hands off to the Slack app at that message (no team id is ever guessed). Unsafe links,
+  `mailto:`, private hosts and code stay as before. Logos are Simple Icons (CC0, bundled); dark marks such as
+  GitHub and X switch to the light text colour in dark mode. A bare URL still typing waits until it ends, so
+  its chip never changes mid-stream. The agent-cards skill gains "Link your sources": end a line about a
+  specific message, email, doc, ticket, PR or event with `[short label](permalink)`, with how to build Slack
+  and Gmail permalinks.
 - **grokbot-override: replies are formatted live while they stream (2026-11-15)**: a bot reply no longer
   types as plain text and then snaps into formatting when it finishes. It renders through the same markdown
   path as a finished reply from the first token: bold, lists, headings, links, inline code and code blocks
