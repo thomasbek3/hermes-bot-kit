@@ -96,7 +96,8 @@ go back to the override's tab or roster.
 - **Group chats** (gateway-owned rooms) are listed under the bots and open as their own tab. A member's
   failed group turn puts the needs-attention badge on its row, like a failed Bot Chat turn.
 - The profile panel creates, edits, runs and deletes scheduled jobs, opens the bot's computer (live screen
-  with take over / hand back), lists the group chats the bot is in, and shows the bot's model in one
+  with take over / hand back; opening it wakes a screen that is asleep, and a dropped stream reconnects by
+  itself), lists the group chats the bot is in, and shows the bot's model in one
   **Model** row. It opens the model sheet at once: **Provider**, **Model**, **Effort** (reasoning effort) and
   **Speed** (Standard / Fast / Ultrafast), offering only what the picked model supports (others greyed out:
   "Not supported by this model"); **Default** removes the setting; one Save writes all four to the bot's own

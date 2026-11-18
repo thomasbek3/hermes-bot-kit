@@ -261,7 +261,22 @@ export const ROSTER_CSS = /* css */ `
 .gbo-screen-stage.is-held { box-shadow: 0 0 0 1.5px var(--gbo-ring), 0 0 0 5px color-mix(in srgb, var(--gbo-ring) 16%, transparent); }
 .gbo-screen-stage.is-asleep { background: #1b1b1b; box-shadow: inset 0 0 0 1px #ffffff0d; }
 .gbo-screen-canvas { position: absolute; inset: 0; }
-.gbo-screen-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: #ffffffb3; font: 13px/18px var(--gbo-font); text-align: center; pointer-events: none; }
+/* waking / reconnecting / lost: one calm line (and a quieter one) centred on
+   the stage, under a small ring spinner in the pill's own grey. */
+.gbo-screen-note {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 24px; text-align: center; background: #1b1b1bd9; pointer-events: none;
+  animation: gbo-screen-note-in 240ms var(--gbo-ease) both;
+}
+.gbo-screen-note strong { font: 500 15px/22px var(--gbo-font); color: #f5f5f5; letter-spacing: .1px; }
+.gbo-screen-note span { max-width: 380px; font: 13px/18px var(--gbo-font); color: #ffffff80; }
+.gbo-screen-note-spin {
+  width: 22px; height: 22px; margin-bottom: 8px; border-radius: 50%;
+  border: 2px solid #ffffff1f; border-top-color: #ffffffd9;
+  animation: gbo-screen-spin .9s linear infinite;
+}
+@keyframes gbo-screen-note-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .gbo-screen-note, .gbo-screen-note-spin { animation: none; } }
 .gbo-screen-banner {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px);
   padding: 6px 12px; border-radius: 999px; background: #000000b8; backdrop-filter: blur(8px);
@@ -271,7 +286,6 @@ export const ROSTER_CSS = /* css */ `
 .gbo-screen-asleep { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
 .gbo-screen-asleep strong { font: 500 15px/22px var(--gbo-font); color: #f5f5f5; }
 .gbo-screen-asleep span { max-width: 380px; font: 13px/18px var(--gbo-font); color: #ffffff94; }
-.gbo-screen-asleep span.is-error { color: #ff8f8f; }
 .gbo-screen-corner { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 2px; }
 .gbo-screen-icon-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;

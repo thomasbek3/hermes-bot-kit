@@ -166,7 +166,7 @@ if (live) writeFileSync(join(outDir, 'avatars-sheet.html'), renderAvatarSheet())
 if (live) {
   // The bot's computer: the control pill in each state, in both app themes
   // (the surround is dark in both).
-  for (const state of ['watching', 'in-control', 'stale-hold', 'not-running'])
+  for (const state of ['watching', 'in-control', 'stale-hold', 'not-running', 'waking', 'reconnecting', 'gave-up'])
     for (const theme of ['light', 'dark']) writeFileSync(join(outDir, `screen-${state}-${theme}.html`), renderScreenState(state, theme))
 }
 rmSync(dirname(file), { recursive: true, force: true })

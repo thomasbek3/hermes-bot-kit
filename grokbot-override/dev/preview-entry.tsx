@@ -339,11 +339,24 @@ function findKeyFor(name: string): string {
 /** The bot's computer in one state, framed like its workspace tab (the
  *  control pill under the desk image). The desk image itself is a stand-in
  *  drawn by this page's CSS (no screen stream in a static render). */
-export function renderScreenState(state: 'watching' | 'in-control' | 'stale-hold' | 'not-running', theme: 'light' | 'dark' = 'light') {
+type ScreenPreviewState = 'watching' | 'in-control' | 'stale-hold' | 'not-running' | 'waking' | 'reconnecting' | 'gave-up'
+
+/** The wake machine's state for each preview (core/screenWake.js). */
+const PREVIEW_WAKE: Record<ScreenPreviewState, { mode: string; error: string | null; recovering: boolean }> = {
+  watching: { mode: 'live', error: null, recovering: false },
+  'in-control': { mode: 'live', error: null, recovering: false },
+  'stale-hold': { mode: 'live', error: null, recovering: false },
+  'not-running': { mode: 'paused', error: null, recovering: false },
+  waking: { mode: 'waking', error: null, recovering: false },
+  reconnecting: { mode: 'retrying', error: 'The screen stream was lost.', recovering: true },
+  'gave-up': { mode: 'gave-up', error: 'this profile’s Bot Desktop is not running; call display.start first', recovering: true }
+}
+
+export function renderScreenState(state: ScreenPreviewState, theme: 'light' | 'dark' = 'light') {
   const bot = ROSTER[0]
   const store = screenStore(bot)
   const viewer = { id: 'preview-viewer', hash: 'aaaaaaaaaaaa' }
-  const running = state !== 'not-running'
+  const running = state !== 'not-running' && state !== 'waking'
   const lease =
     state === 'in-control'
       ? { holder: 'human', viewer_hash: viewer.hash, epoch: 2, since: 0 }
@@ -355,7 +368,7 @@ export function renderScreenState(state: 'watching' | 'in-control' | 'stale-hold
   store.setViewer(viewer)
   const body = renderToStaticMarkup(
     <div className="preview-screen">
-      <BotScreen bot={bot} />
+      <BotScreen bot={bot} initialWake={PREVIEW_WAKE[state]} />
     </div>
   )
   const page = `
@@ -363,8 +376,10 @@ html, body { margin: 0; }
 body { background: ${theme === 'dark' ? '#0a0a0a' : '#ffffff'}; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .preview-screen { width: 960px; height: 680px; display: flex; }
 .preview-screen > .gbo-screen { flex: 1; }
-/* Stand-in desk image (preview only): a grey wallpaper and a taskbar. */
-.preview-screen .gbo-screen-canvas {
+/* A still: no fade or spin (a capture would catch frame 0). */
+.preview-screen *, .preview-screen *::before { animation: none !important; transition: none !important; }
+/* Stand-in desk image (preview only, live stream only): a grey wallpaper and a taskbar. */
+.preview-screen .gbo-screen-stage:not(.is-asleep) .gbo-screen-canvas {
   background:
     linear-gradient(#1f2226, #1f2226) bottom / 100% 3.4% no-repeat,
     radial-gradient(120% 90% at 85% 75%, #555 0%, #6a6a6a 35%, transparent 70%),

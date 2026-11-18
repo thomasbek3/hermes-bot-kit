@@ -51097,7 +51097,22 @@ var ROSTER_CSS = (
 .gbo-screen-stage.is-held { box-shadow: 0 0 0 1.5px var(--gbo-ring), 0 0 0 5px color-mix(in srgb, var(--gbo-ring) 16%, transparent); }
 .gbo-screen-stage.is-asleep { background: #1b1b1b; box-shadow: inset 0 0 0 1px #ffffff0d; }
 .gbo-screen-canvas { position: absolute; inset: 0; }
-.gbo-screen-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: #ffffffb3; font: 13px/18px var(--gbo-font); text-align: center; pointer-events: none; }
+/* waking / reconnecting / lost: one calm line (and a quieter one) centred on
+   the stage, under a small ring spinner in the pill's own grey. */
+.gbo-screen-note {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 24px; text-align: center; background: #1b1b1bd9; pointer-events: none;
+  animation: gbo-screen-note-in 240ms var(--gbo-ease) both;
+}
+.gbo-screen-note strong { font: 500 15px/22px var(--gbo-font); color: #f5f5f5; letter-spacing: .1px; }
+.gbo-screen-note span { max-width: 380px; font: 13px/18px var(--gbo-font); color: #ffffff80; }
+.gbo-screen-note-spin {
+  width: 22px; height: 22px; margin-bottom: 8px; border-radius: 50%;
+  border: 2px solid #ffffff1f; border-top-color: #ffffffd9;
+  animation: gbo-screen-spin .9s linear infinite;
+}
+@keyframes gbo-screen-note-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .gbo-screen-note, .gbo-screen-note-spin { animation: none; } }
 .gbo-screen-banner {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px);
   padding: 6px 12px; border-radius: 999px; background: #000000b8; backdrop-filter: blur(8px);
@@ -51107,7 +51122,6 @@ var ROSTER_CSS = (
 .gbo-screen-asleep { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
 .gbo-screen-asleep strong { font: 500 15px/22px var(--gbo-font); color: #f5f5f5; }
 .gbo-screen-asleep span { max-width: 380px; font: 13px/18px var(--gbo-font); color: #ffffff94; }
-.gbo-screen-asleep span.is-error { color: #ff8f8f; }
 .gbo-screen-corner { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 2px; }
 .gbo-screen-icon-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;
@@ -60642,31 +60656,51 @@ function handBackParams(viewer, force = false) {
 }
 
 // src/core/screenPill.js
+function screenLink(wake, phase) {
+  const mode = wake?.mode ?? "idle";
+  if (mode === "live") return "live";
+  if (mode === "gave-up") return "error";
+  if (mode === "waking") return "waking";
+  if (mode === "retrying") return "reconnecting";
+  if (mode === "checking" || mode === "connecting") return wake?.recovering ? "reconnecting" : "attaching";
+  return phase === "running" ? "attaching" : "idle";
+}
 function screenPill({ phase, conn, iHold, humanOther, busy, hasViewer, blocker }) {
-  if (phase === "stopped") {
+  const retry = { id: "retry", label: "Retry", kind: "dark", disabled: false, title: "Try to reach the screen again" };
+  if (phase === "stopped" || phase === "loading") {
+    if (conn === "error") return { tone: "idle", icon: "warn", label: "Connection lost", actions: [retry] };
+    if (phase === "loading") return { tone: "idle", icon: "spinner", label: "Connecting…", actions: [] };
+    if (conn !== "idle" && conn !== "live" && !blocker) return { tone: "idle", icon: "spinner", label: "Starting…", actions: [] };
     return {
       tone: "idle",
       icon: "power",
       label: "Not running",
-      actions: [{ id: "start", label: busy ? "Starting…" : "Start screen", kind: "dark", disabled: Boolean(busy || blocker) }]
+      actions: [{ id: "start", label: "Start screen", kind: "dark", disabled: Boolean(busy || blocker) }]
     };
   }
   if (phase !== "running") return null;
+  const live = conn === "live";
   const actions = [];
-  if (conn === "error") actions.push({ id: "retry", label: "Retry", kind: "light", disabled: false, title: "Reconnect to the screen" });
+  if (conn === "error") actions.push(retry);
   if (iHold) {
     actions.push({ id: "stop", label: "Stop", kind: "light", disabled: Boolean(busy), title: "Hand control back to the bot" });
-  } else {
+  } else if (live) {
     if (humanOther) {
       actions.push({ id: "take-back", label: "Take back", kind: "light", disabled: Boolean(busy), title: "Take control back from a viewer that is gone (hands it to the bot)" });
     }
-    actions.push({ id: "take", label: "Take control", kind: "dark", disabled: Boolean(busy || conn === "attaching" || !hasViewer) });
+    actions.push({ id: "take", label: "Take control", kind: "dark", disabled: Boolean(busy || !hasViewer) });
   }
   let icon = iHold ? "pointer" : humanOther ? "person" : "eye";
   let label = iHold ? "You’re in control" : humanOther ? "Someone else is in control" : "Watching";
-  if (conn === "attaching") {
+  if (conn === "attaching" || conn === "idle") {
     icon = "spinner";
     label = "Connecting…";
+  } else if (conn === "reconnecting") {
+    icon = "spinner";
+    label = "Reconnecting…";
+  } else if (conn === "waking") {
+    icon = "spinner";
+    label = "Starting…";
   } else if (conn === "error") {
     icon = "warn";
     label = "Connection lost";
@@ -60679,13 +60713,150 @@ function screenRatio(geometry) {
   const height = match ? Number(match[2]) : 0;
   return width > 0 && height > 0 ? width / height : 1.6;
 }
-function screenPillTitle(who, status, lease) {
+function screenPillTitle(who, status, lease, error = null) {
   const parts = [`${who}’s computer`];
   if (status?.display) parts.push(status.geometry ? `${status.display} · ${status.geometry}` : String(status.display));
   const placement = String(status?.placement || "");
   if (placement.startsWith("terminal:")) parts.push(`in sandbox ${placement.slice(9)}`);
   if (lease?.holder === "human" && lease.reason) parts.push(String(lease.reason));
+  if (error) parts.push(String(error));
   return parts.join(" — ");
+}
+
+// src/core/screenWake.js
+var RECOVERY_DELAYS_MS = Object.freeze([1e3, 2e3, 4e3, 8e3]);
+var RECOVERY_GIVE_UP_MS = 6e4;
+function wakeDecision(status) {
+  const phase = screenPhase({ status });
+  if (phase === "running") return "connect";
+  if (phase === "stopped" && !status.blocker) return "start";
+  return "blocked";
+}
+function recoveryDelay(attempt) {
+  return RECOVERY_DELAYS_MS[Math.min(Math.max(0, attempt), RECOVERY_DELAYS_MS.length - 1)];
+}
+function createScreenWaker({ readStatus, start: start2, connect, isVisible: isVisible2, onChange = () => void 0, now = Date.now, setTimer: setTimer2 = setTimeout, clearTimer = clearTimeout }) {
+  let state = { mode: "idle", error: null, recovering: false };
+  let token = 0;
+  let timer = null;
+  let attempt = 0;
+  let lostSince = null;
+  let disposed = false;
+  const set = (mode, error = state.error) => {
+    if (disposed) return;
+    state = { mode, error, recovering: lostSince !== null };
+    onChange(state);
+  };
+  const cancelTimer = () => {
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+  };
+  const reason = (err2) => err2 == null ? null : String(err2?.message || err2);
+  const failed = (mine, err2) => {
+    if (disposed || mine !== token) return;
+    const error = reason(err2) || state.error;
+    const at = now();
+    if (lostSince === null) lostSince = at;
+    const wait = recoveryDelay(attempt);
+    if (at - lostSince + wait > RECOVERY_GIVE_UP_MS) return set("gave-up", error);
+    if (!isVisible2()) return set("paused", error);
+    attempt += 1;
+    set("retrying", error);
+    cancelTimer();
+    timer = setTimer2(() => {
+      timer = null;
+      if (mine !== token || disposed) return;
+      if (!isVisible2()) return set("paused", state.error);
+      void run(mine);
+    }, wait);
+  };
+  const run = async (mine) => {
+    set("checking");
+    let status;
+    try {
+      status = await readStatus();
+    } catch (err2) {
+      return failed(mine, err2);
+    }
+    if (disposed || mine !== token) return;
+    let decision = status === "blocked" ? "blocked" : wakeDecision(status);
+    if (decision === "blocked") return set("blocked", null);
+    if (decision === "start") {
+      if (!isVisible2()) return set("paused");
+      set("waking");
+      try {
+        status = await start2();
+      } catch (err2) {
+        return failed(mine, err2);
+      }
+      if (disposed || mine !== token) return;
+      decision = wakeDecision(status);
+      if (decision === "blocked") return set("blocked", null);
+      if (decision !== "connect") return failed(mine, new Error("The screen did not come up."));
+    }
+    set("connecting");
+    try {
+      await connect();
+    } catch (err2) {
+      failed(mine, err2);
+    }
+  };
+  const begin = () => {
+    if (disposed) return;
+    cancelTimer();
+    token += 1;
+    attempt = 0;
+    lostSince = null;
+    void run(token);
+  };
+  const ACTIVE = /* @__PURE__ */ new Set(["checking", "waking", "connecting", "live", "retrying"]);
+  const api = {
+    get: () => state,
+    /** The viewer was opened or shown: wake and dial unless already on it. */
+    open() {
+      if (disposed || ACTIVE.has(state.mode) || !isVisible2()) return;
+      begin();
+    },
+    /** Retry / Reconnect / Start screen: a fresh sequence whatever the mode. */
+    retry: begin,
+    /** The stream drew its first frame. */
+    connected() {
+      if (disposed) return;
+      cancelTimer();
+      attempt = 0;
+      lostSince = null;
+      set("live", null);
+    },
+    /** The stream dropped or the dial failed: recover (only from connecting/live). */
+    lost(err2) {
+      if (disposed || state.mode !== "connecting" && state.mode !== "live") return;
+      failed(token, err2);
+    },
+    /** Lost for good without retrying (e.g. someone keeps taking control). */
+    fail(err2) {
+      if (disposed) return;
+      cancelTimer();
+      token += 1;
+      set("gave-up", reason(err2));
+    },
+    /** Visibility edges: shown again → open(); hidden → stop waiting out a backoff. */
+    setVisible(visible2) {
+      if (disposed) return;
+      if (visible2) {
+        if (state.mode === "paused") set("idle");
+        api.open();
+      } else if (state.mode === "retrying") {
+        cancelTimer();
+        set("paused");
+      }
+    },
+    dispose() {
+      cancelTimer();
+      token += 1;
+      disposed = true;
+    }
+  };
+  return api;
 }
 
 // src/ui/RosterMenus.tsx
@@ -60818,6 +60989,40 @@ function onDisplayEvent(type, fn) {
 function errText(err2) {
   return String(err2?.message || err2);
 }
+function useViewerVisibility(paneId, onEdge) {
+  const visible2 = React21.useRef(true);
+  const edge = React21.useRef(onEdge);
+  edge.current = onEdge;
+  React21.useEffect(() => {
+    let pane = true;
+    const doc = typeof document === "undefined" ? null : document;
+    const update = () => {
+      const next = pane && doc?.visibilityState !== "hidden";
+      if (next === visible2.current) return;
+      visible2.current = next;
+      edge.current(next);
+    };
+    let offPane;
+    try {
+      const atom = typeof host2?.paneVisibility === "function" ? host2.paneVisibility(paneId) : null;
+      if (atom && typeof atom.subscribe === "function") {
+        const off = atom.subscribe((shown) => {
+          pane = shown !== false;
+          update();
+        });
+        if (typeof off === "function") offPane = off;
+      }
+    } catch {
+    }
+    doc?.addEventListener("visibilitychange", update);
+    update();
+    return () => {
+      offPane?.();
+      doc?.removeEventListener("visibilitychange", update);
+    };
+  }, [paneId]);
+  return visible2;
+}
 var pillIcon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
 var PILL_ICONS = {
   eye: () => /* @__PURE__ */ jsx23(IconEye, {}),
@@ -60833,6 +61038,13 @@ var PILL_ICONS = {
   power: () => /* @__PURE__ */ jsx23("svg", { ...pillIcon, children: /* @__PURE__ */ jsx23("path", { d: "M12 3.5v7.5M6.6 7a7.5 7.5 0 1 0 10.8 0" }) }),
   spinner: () => /* @__PURE__ */ jsx23("svg", { ...pillIcon, className: "gbo-screen-spin", children: /* @__PURE__ */ jsx23("path", { d: "M20 12a8 8 0 1 1-8-8" }) })
 };
+function StageNote({ text: text3, spinner = true, sub }) {
+  return /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-note", role: "status", "aria-live": "polite", children: [
+    spinner ? /* @__PURE__ */ jsx23("span", { className: "gbo-screen-note-spin", "aria-hidden": "true" }) : null,
+    text3 ? /* @__PURE__ */ jsx23("strong", { children: text3 }) : null,
+    sub ? /* @__PURE__ */ jsx23("span", { children: sub }) : null
+  ] });
+}
 function ControlPill({ pill, title, run }) {
   return /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-pill is-${pill.tone}`, role: "group", "aria-label": "Screen control", title, children: [
     /* @__PURE__ */ jsxs21("span", { className: "gbo-screen-pill-state", "aria-live": "polite", children: [
@@ -60842,7 +61054,7 @@ function ControlPill({ pill, title, run }) {
     pill.actions.map((action) => /* @__PURE__ */ jsx23("button", { type: "button", className: `gbo-screen-pill-btn is-${action.kind}`, disabled: action.disabled, title: action.title, onClick: () => run(action.id), children: action.label }, action.id))
   ] });
 }
-function BotScreen({ bot }) {
+function BotScreen({ bot, initialWake }) {
   const store = screenStore(bot);
   const state = useScreenState(store);
   const status = state.status;
@@ -60863,23 +61075,64 @@ function BotScreen({ bot }) {
   const generation2 = React21.useRef(0);
   const dialedAt = React21.useRef(0);
   const evictions = React21.useRef(0);
-  const [conn, setConn] = React21.useState("idle");
   const [error, setError] = React21.useState(null);
   const [busy, setBusy] = React21.useState(false);
   const [evicted, setEvicted] = React21.useState(false);
   const [installLog, setInstallLog] = React21.useState([]);
-  const refresh = React21.useCallback(async () => {
+  const readStatus = React21.useCallback(async () => {
     const request2 = store.beginRequest();
     try {
-      store.setStatus(await displayRequest(host2, bot, "display.status"), request2);
+      const next = await displayRequest(host2, bot, "display.status");
+      store.setStatus(next, request2);
       setError(null);
+      return store.get().status ?? next;
     } catch (err2) {
-      if (looksUnsupported(err2)) store.setUnavailable();
+      if (looksUnsupported(err2)) {
+        store.setUnavailable();
+        return "blocked";
+      }
       setError(errText(err2));
+      throw err2;
     }
   }, [rowKey(bot)]);
+  const refresh = React21.useCallback(() => readStatus().catch(() => void 0), [readStatus]);
+  const attachRef = React21.useRef(async () => void 0);
+  const [wake, setWake] = React21.useState(initialWake ?? { mode: "idle", error: null, recovering: false });
+  const wakerRef = React21.useRef(null);
+  const waker = React21.useMemo(
+    () => ({
+      open: () => wakerRef.current?.open(),
+      retry: () => wakerRef.current?.retry(),
+      connected: () => wakerRef.current?.connected(),
+      lost: (err2) => wakerRef.current?.lost(err2),
+      fail: (err2) => wakerRef.current?.fail(err2),
+      setVisible: (shown) => wakerRef.current?.setVisible(shown),
+      mode: () => wakerRef.current?.get().mode ?? "idle"
+    }),
+    []
+  );
+  const visible2 = useViewerVisibility(`plugin-workspace:${screenWorkspaceId(bot)}`, (shown) => waker.setVisible(shown));
   React21.useEffect(() => {
-    void refresh();
+    const machine = createScreenWaker({
+      readStatus,
+      start: async () => {
+        const next = await displayRequest(host2, bot, "display.start");
+        store.setStatus(next);
+        return next;
+      },
+      connect: () => attachRef.current(true),
+      isVisible: () => visible2.current,
+      onChange: setWake
+    });
+    wakerRef.current = machine;
+    if (visible2.current) machine.open();
+    else void refresh();
+    return () => {
+      machine.dispose();
+      if (wakerRef.current === machine) wakerRef.current = null;
+    };
+  }, [readStatus]);
+  React21.useEffect(() => {
     const key = () => store.get().status?.profile_key;
     const offLease = onDisplayEvent("display.lease", (event) => {
       if (event?.payload?.lease && isEventForBotScreen(bot, event, key())) store.setLease(event.payload.lease);
@@ -60902,7 +61155,7 @@ function BotScreen({ bot }) {
       offLog?.();
       offDone?.();
     };
-  }, [refresh, releaseInstall]);
+  }, [refresh, releaseInstall, rowKey(bot)]);
   const detach = React21.useCallback((handBack2 = false) => {
     generation2.current += 1;
     if (handBack2) socket.current?.close(1e3);
@@ -60920,28 +61173,29 @@ function BotScreen({ bot }) {
   }, []);
   const attach = React21.useCallback(
     async (auto = false) => {
-      if (!canvasHost.current) return;
       if (!auto) evictions.current = 0;
       detach();
+      if (!canvasHost.current) throw new Error("The screen view is not on the page yet.");
       if (!globalThis.crypto?.subtle) {
-        setConn("error");
-        setError("The screen needs a secure (HTTPS) window.");
+        const message = "The screen needs a secure (HTTPS) window.";
+        setError(message);
+        waker.fail(message);
         return;
       }
       const mine = generation2.current;
-      setConn("attaching");
       setError(null);
       try {
         const Rfb = await loadRfb();
         const retain = await retainBotScreen(host2, bot);
-        if (mine !== generation2.current) return retain();
+        if (mine !== generation2.current) return void retain();
         retention.current = retain;
         const prior = store.get().viewer?.id;
         const observe = await displayRequest(host2, bot, "display.observe", prior ? { viewer_id: prior } : {});
         const minted = { id: observe.viewer_id, hash: await viewerHash(observe.viewer_id) };
         store.setStatus(observe);
         const url = await resolveScreenWsUrl(sdk.resolveSiblingWsUrl, bot, observe.ticket);
-        if (mine !== generation2.current || !canvasHost.current) return;
+        if (mine !== generation2.current) return;
+        if (!canvasHost.current) throw new Error("The screen view is not on the page yet.");
         store.setViewer(minted);
         dialedAt.current = Date.now();
         const ws = new WebSocket(url);
@@ -60960,8 +61214,9 @@ function BotScreen({ bot }) {
         client.viewOnly = !leaseHeldBy(observe.lease, minted);
         client.addEventListener("connect", () => {
           if (mine === generation2.current) {
-            setConn("live");
             setEvicted(false);
+            setError(null);
+            waker.connected();
           }
         });
         client.addEventListener("disconnect", (event) => {
@@ -60973,18 +61228,17 @@ function BotScreen({ bot }) {
             evictions.current = next.count;
             if (next.giveUp) {
               setEvicted(false);
-              setConn("error");
               setError("Someone else took control of this screen.");
+              waker.fail("Someone else took control of this screen.");
             } else {
               setEvicted(true);
-              setConn("idle");
+              waker.retry();
             }
-          } else if (event?.detail?.clean) setConn("idle");
-          else {
-            setConn("error");
-            setError(reason || "The screen stream was lost.");
+            return;
           }
-          void refresh();
+          const message = reason || (event?.detail?.clean ? "The screen stream closed." : "The screen stream was lost.");
+          setError(message);
+          waker.lost(message);
         });
         rfb.current = client;
         const target = canvasHost.current;
@@ -60999,14 +61253,19 @@ function BotScreen({ bot }) {
         target.addEventListener("paste", onPaste);
         pasteCleanup.current = () => target.removeEventListener("paste", onPaste);
       } catch (err2) {
-        if (mine === generation2.current) {
-          setConn("error");
-          setError(errText(err2));
-        }
+        if (mine === generation2.current) throw err2;
       }
     },
-    [rowKey(bot), detach, refresh]
+    [rowKey(bot), detach, waker]
   );
+  attachRef.current = async (auto) => {
+    try {
+      await attach(auto);
+    } catch (err2) {
+      setError(errText(err2));
+      throw err2;
+    }
+  };
   React21.useEffect(() => {
     unmounted.current = false;
     return () => {
@@ -61015,9 +61274,6 @@ function BotScreen({ bot }) {
       detach(true);
     };
   }, [detach, releaseInstall]);
-  React21.useEffect(() => {
-    if (status?.running && conn === "idle") void attach(true);
-  }, [status?.running, conn, attach]);
   React21.useEffect(() => {
     if (rfb.current) {
       rfb.current.viewOnly = !iHold;
@@ -61034,10 +61290,11 @@ function BotScreen({ bot }) {
       setBusy(false);
     }
   };
-  const start2 = () => act(async () => {
-    store.setStatus(await displayRequest(host2, bot, "display.start"));
-    setConn("idle");
-  });
+  const wakeAgain = () => {
+    evictions.current = 0;
+    setError(null);
+    waker.retry();
+  };
   const decideImage = (approve) => act(async () => void store.setStatus(await displayRequest(host2, bot, "display.switchSandboxImage", { approve })));
   const install = () => act(async () => {
     setInstallLog([]);
@@ -61056,13 +61313,15 @@ function BotScreen({ bot }) {
     if (!viewer) return;
     const result = await displayRequest(host2, bot, "display.lease.acquire", { viewer_id: viewer.id });
     store.setLease(result.lease);
-    if (conn !== "live") void attach();
+    if (waker.mode() !== "live") wakeAgain();
   });
   const handBack = (force = false) => act(async () => {
     const result = await displayRequest(host2, bot, "display.lease.release", handBackParams(viewer, force));
     store.setLease(result.lease);
   });
   const phase = screenPhase(state);
+  const link = screenLink(wake, phase);
+  const waking = wake.mode !== "idle" && wake.mode !== "paused" && wake.mode !== "blocked";
   const who = displayName(bot, metaFor(bot));
   const center = (title, body, actions) => /* @__PURE__ */ jsxs21("div", { className: "gbo-center", children: [
     /* @__PURE__ */ jsx23("h2", { children: title }),
@@ -61073,7 +61332,7 @@ function BotScreen({ bot }) {
   let content;
   if (phase === "unavailable") {
     content = center("No screen on this Hermes", isManagedBackend(bot) ? "Bot Screen has not reached this managed Hermes release yet." : `${who}’s Hermes predates Bot Screen; update Hermes on that machine.`);
-  } else if (phase === "loading") {
+  } else if (phase === "loading" && !waking) {
     content = center("Checking the screen…", error || " ");
   } else if (phase === "unsupported") {
     content = center("No screen for this bot", "Its machine cannot run a headless desktop.");
@@ -61100,28 +61359,36 @@ function BotScreen({ bot }) {
   } else {
     const running = phase === "running";
     const humanOther = lease?.holder === "human" && !iHold;
-    const pill = screenPill({ phase, conn, iHold, humanOther, busy, hasViewer: Boolean(viewer), blocker: status?.blocker });
+    const pill = screenPill({ phase, conn: link, iHold, humanOther, busy, hasViewer: Boolean(viewer), blocker: status?.blocker });
     const run = (id) => {
-      if (id === "start") void start2();
-      else if (id === "retry") void attach();
+      if (id === "start" || id === "retry") wakeAgain();
       else if (id === "take") void takeOver();
       else if (id === "stop") void handBack();
       else if (id === "take-back") void handBack(true);
     };
     const ratio = { "--gbo-screen-ratio": screenRatio(status?.geometry) };
+    const settling = link === "attaching" || link === "reconnecting" || link === "waking";
+    let note = null;
+    if (link === "error") note = /* @__PURE__ */ jsx23(StageNote, { spinner: false, text: "Can’t reach the computer", sub: "Tried for a minute without an answer." });
+    else if (phase === "loading") note = /* @__PURE__ */ jsx23(StageNote, {});
+    else if (!running && settling && !status?.blocker) note = /* @__PURE__ */ jsx23(StageNote, { text: "Waking the computer…", sub: "This takes a few seconds." });
+    else if (running && link === "waking") note = /* @__PURE__ */ jsx23(StageNote, { text: "Waking the computer…", sub: "This takes a few seconds." });
+    else if (running && link !== "live") note = /* @__PURE__ */ jsx23(StageNote, {});
+    else if (!running)
+      note = /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-asleep", children: [
+        /* @__PURE__ */ jsx23("strong", { children: "The computer is asleep" }),
+        /* @__PURE__ */ jsx23("span", { children: status?.blocker ?? "Start it to watch the bot work, or to take over." })
+      ] });
+    const lostWords = link === "error" || link === "reconnecting" ? wake.error || error : null;
     content = /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-view", children: [
-      running ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-corner", children: /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-screen-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: conn === "attaching", onClick: () => void attach(), children: /* @__PURE__ */ jsx23(IconRefresh, {}) }) }) : null,
+      running ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-corner", children: /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-screen-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: settling, onClick: wakeAgain, children: /* @__PURE__ */ jsx23(IconRefresh, {}) }) }) : null,
       /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-fit", children: [
-        running ? /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}`, style: ratio, children: [
+        /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}${running && link === "live" ? "" : " is-asleep"}`, style: ratio, children: [
           /* @__PURE__ */ jsx23("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
           evicted ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
-          conn === "error" && error ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-overlay", children: error }) : null
-        ] }) : /* @__PURE__ */ jsx23("div", { className: "gbo-screen-stage is-asleep", style: ratio, children: /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-asleep", children: [
-          /* @__PURE__ */ jsx23("strong", { children: "The computer is asleep" }),
-          /* @__PURE__ */ jsx23("span", { children: status?.blocker ?? "Start it to watch the bot work, or to take over." }),
-          error ? /* @__PURE__ */ jsx23("span", { className: "is-error", children: error }) : null
-        ] }) }),
-        /* @__PURE__ */ jsx23(ControlPill, { pill, title: screenPillTitle(who, status, lease), run })
+          note
+        ] }),
+        /* @__PURE__ */ jsx23(ControlPill, { pill, title: screenPillTitle(who, status, lease, lostWords), run })
       ] })
     ] });
   }
