@@ -62,6 +62,12 @@ go back to the override's tab or roster.
 - A bot on another connection shows the avatar its own gateway holds (`has_avatar`), which stock Bot
   Mode only does for the active connection's bots. It is read once per app session over the bot's own
   route (re-checked every 15 minutes); the generated shape shows until it arrives or if it cannot be read.
+- A bot on an SSH connection that is not the live gateway shows the name (and look) its own gateway
+  holds. Hermes lists such a machine without asking it, so its rows carry no name; the override reads
+  the name from replies it gets anyway over a route that is up (the per-machine avatar list, a save, a
+  chat being opened) and keeps it in its plugin storage per connection and profile, so the right name
+  shows at start and after a reload, also while that machine is not connected. It never dials a
+  machine just for a name.
 - **Pin to top** (row menu) puts up to four bots as big avatars above the roster; the pins live in the
   override's own plugin storage and never touch Bot Mode's data.
 - **Sections.** **+ → New section…** adds a named section (an emoji in the name is just text). Right-click a

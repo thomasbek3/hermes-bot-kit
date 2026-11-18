@@ -40,12 +40,21 @@ export function serverReportedTitle(bot, server) {
   return typeof bot?.title === 'string' ? bot.title.trim() : undefined
 }
 
-/** Local snapshot record for a row: route key first, then the bare name
- *  (routing.ts botRosterMeta). */
+/** Whether a row may use the bare profile-name record of the local
+ *  snapshot: rows of this desktop only (no route, or a local route). The
+ *  bare `default` record is this desktop's own bot; a bot on another
+ *  connection never reads it (stock routing.ts botRosterMeta reads only the
+ *  route key for scoped rows). */
+export function usesBareNameMeta(route) {
+  return !route || route.mode === 'local'
+}
+
+/** Local snapshot record for a row: route key first, then (local rows only)
+ *  the bare name (routing.ts botRosterMeta). */
 export function localMetaFor(bot, localMeta) {
   const route = resolveBotConnectionRoute(bot).route
   const byRoute = route ? localMeta?.[botRouteKey(route)] : null
-  const byName = localMeta?.[bot?.name]
+  const byName = usesBareNameMeta(route) ? localMeta?.[bot?.name] : null
   const record = byRoute || byName || null
   return record && typeof record === 'object' ? record : null
 }
@@ -55,16 +64,28 @@ export function localMetaFor(bot, localMeta) {
  * desktop's own pending writes.
  *
  * `writes`: key -> { patch, at, sticky } (the override's overlay).
+ * `gateway`: for a row with no listing data of its own (an SSH source), the
+ * meta its own gateway reported (core/gatewayMeta.js gatewayMetaFor: this
+ * session's read, else the cached one). It stands in for the row's server
+ * namespace and, being the gateway's own word, corrects the local snapshot
+ * even though the row's source is connect-on-demand.
  */
-export function effectiveMeta(bot, localMeta, writes = {}, now = Date.now()) {
+export function effectiveMeta(bot, localMeta, writes = {}, now = Date.now(), gateway = null) {
   const raw = bot?.ui_meta?.['hermes-bots']
-  const server = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null
+  let server = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null
   const mine = localMetaFor(bot, localMeta) || {}
   let merged = { ...mine }
   // A retained or unreachable row cannot correct anything (profile-ops.ts:261).
-  const authoritative = !(bot?.retained || bot?.sourceReachable === false)
+  let authoritative = !(bot?.retained || bot?.sourceReachable === false)
+  let title
+  const fromGateway = !server && gateway?.meta && typeof gateway.meta === 'object' && !Array.isArray(gateway.meta) ? gateway : null
+  if (fromGateway) {
+    server = fromGateway.meta
+    authoritative = true
+    title = String(server.title || fromGateway.display_name || '').trim()
+  }
   if (authoritative) {
-    const title = serverReportedTitle(bot, server)
+    if (!fromGateway) title = serverReportedTitle(bot, server)
     if (server || (title !== undefined && Object.keys(mine).length)) {
       merged = { ...mine, ...(server || {}) }
       if (title) merged.title = title
@@ -125,6 +146,9 @@ export async function persistBotMetaPatch(request, bot, patch, { rebase, progres
     const { image: _image, pet: _pet, ...fields } = rebase ? rebase(server.meta) : patch
     const params = { name, ui_meta: { 'hermes-bots': { ...base, ...fields } } }
     if (server.revision !== null) params.ui_meta_expected_revisions = { 'hermes-bots': server.revision }
+    // What this attempt writes, and the row it was read from.
+    progress.written = params.ui_meta['hermes-bots']
+    progress.row = server.row
     const result = await request(bot, 'profiles.configure', params)
     if (!result?.applied?.ui_meta_conflicts) return result
   }
@@ -167,7 +191,9 @@ export async function saveBotMetaPatch(request, bot, patch, { rebase, prevImage 
       .catch(() => undefined)
   }
   const outcome = pending ? await settleServerOutcome(pending, Boolean(route), progress) : 'unsupported'
-  return { serverOutcome: outcome, serverPersisted: outcome === 'persisted' }
+  const persisted = outcome === 'persisted'
+  // `written`: the namespace the gateway now holds (persisted saves only).
+  return { serverOutcome: outcome, serverPersisted: persisted, written: persisted ? progress.written || null : null, row: persisted ? progress.row || null : null }
 }
 
 /** The overlay entry a save leaves behind (see the header). */

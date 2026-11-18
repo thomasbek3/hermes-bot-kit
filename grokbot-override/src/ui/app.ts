@@ -48,8 +48,9 @@ import { createBackgroundPolls, createIdleRotation } from '../core/backgroundPol
 import { CANONICAL_HYDRATION_TIMEOUT_MS, host, queryClient, readPluginStorage, sdk } from './sdk'
 // ── roster-side parity (R6 R9 R11-R13 R15 P3 P4 P6 C21 C25) ──
 import { effectiveMeta } from '../core/botMeta.js'
+import { gatewayMetaFor } from '../core/gatewayMeta.js'
 import { createRemoteAvatars } from '../core/remoteAvatars.js'
-import { startRosterParity, stopRosterParity } from './rosterActions'
+import { noteGatewayProfiles, startRosterParity, stopRosterParity } from './rosterActions'
 import { roster2 } from './rosterStores'
 // ── end roster-side parity imports ──
 import { createStore, type Store } from './store'
@@ -592,9 +593,12 @@ function requestOpenRefresh() {
 }
 
 /** Bot Mode's effective meta for a row: server ui_meta over the local
- *  snapshot, plus this desktop's own pending writes (core/botMeta.js). */
+ *  snapshot, plus this desktop's own pending writes (core/botMeta.js). A row
+ *  with no listing meta (an SSH source) is named by its own gateway's meta,
+ *  read this session or cached (core/gatewayMeta.js). */
 export function metaFor(bot: any) {
-  return effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get())
+  const { fresh, cache } = roster2.gatewayMeta.get()
+  return effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get(), Date.now(), gatewayMetaFor(bot, fresh, cache))
 }
 
 export function activeConnection(): null | string {
@@ -1700,11 +1704,29 @@ function startRemoteAvatars() {
       const image = metaFor(bot)?.image
       return typeof image === 'string' && image.length > 0
     },
-    onChange: (images: Record<string, string>) => roster2.remoteAvatars.set(images)
+    onChange: (images: Record<string, string>) => roster2.remoteAvatars.set(images),
+    // The same list names the SSH bots (no request of its own).
+    onProfiles: (connectionId: string, profiles: any[]) => noteGatewayProfiles(connectionId, profiles)
   })
   remoteAvatars = loader
   unwatchAvatars = app.roster.subscribe(() => loader.sync(app.roster.get().rows))
   loader.sync(app.roster.get().rows)
+}
+
+// A gateway-read name that changes while the bot's chat tab is open
+// re-captions the tab (the roster, panel and chat re-render on their own).
+let unwatchNames: null | (() => void) = null
+function watchGatewayNames() {
+  unwatchNames?.()
+  unwatchNames = roster2.gatewayMeta.subscribe(() => {
+    const bot = controller?.get?.()?.bot
+    if (bot && closeWorkspace) retitleWorkspace(chatTabTitle(findBot(rowKey(bot)) || bot))
+  })
+}
+
+function unwatchGatewayNames() {
+  unwatchNames?.()
+  unwatchNames = null
 }
 
 function stopRemoteAvatars() {
@@ -1725,6 +1747,7 @@ function enable() {
   startObserver()
   watchVisibility()
   startRemoteAvatars()
+  watchGatewayNames()
   refreshRoster()
   startRosterParity()
   watchDocumentVisibility()
@@ -1768,6 +1791,7 @@ function disable() {
   lastLocal = null
   roomSeq += 1
   stopRemoteAvatars()
+  unwatchGatewayNames()
   unwatchPane?.()
   unwatchPane = null
   unwatchComputer?.()

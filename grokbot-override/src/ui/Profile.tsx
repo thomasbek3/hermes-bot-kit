@@ -74,6 +74,7 @@ export function ProfilePanel({ bot, onClose }: { bot: any; onClose?: () => void 
   const running = useStore(roster2.running)
   useStore(app.roster)
   useStore(roster2.metaWrites)
+  useStore(roster2.gatewayMeta)
   const rooms = useStore(app.rooms)
   const botRooms = rooms.loaded && rooms.route ? rooms.rooms.filter((room: any) =>
           (room.members || []).some((m: any) => {

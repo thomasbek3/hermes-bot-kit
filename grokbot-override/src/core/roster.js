@@ -7,6 +7,7 @@
 // hermes-bots/data.ts (Hermes Agent, MIT, (c) Nous Research) without its
 // offline-row retention.
 
+import { usesBareNameMeta } from './botMeta.js'
 import { botRouteKey, resolveBotConnectionRoute } from './routing.js'
 import { sectionIdFor } from './sections.js'
 import { shownReplyText } from './silence.js'
@@ -201,12 +202,13 @@ export function rowKey(bot) {
 }
 
 /** Bot Mode's per-bot meta: the row's `ui_meta['hermes-bots']` merged under
- *  the desktop's local snapshot (`hermes.plugin.hermes-bots.bot-meta-v2`). */
+ *  the desktop's local snapshot (`hermes.plugin.hermes-bots.bot-meta-v2`).
+ *  A bot on another connection never reads the bare-name record (that one
+ *  is this desktop's own bot of the same profile name). */
 export function botMeta(bot, localMeta) {
   const server = bot?.ui_meta?.['hermes-bots']
   const route = resolveBotConnectionRoute(bot).route
-  const local =
-    (route && localMeta?.[botRouteKey(route)]) || (!route && localMeta?.[bot?.name]) || localMeta?.[bot?.name] || null
+  const local = (route && localMeta?.[botRouteKey(route)]) || (usesBareNameMeta(route) ? localMeta?.[bot?.name] : null) || null
   return { ...(server && typeof server === 'object' ? server : {}), ...(local && typeof local === 'object' ? local : {}) }
 }
 

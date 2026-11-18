@@ -18,7 +18,10 @@
 // - has_avatar: the union roster carries it when the source's /api/profiles
 //   reports it. When a row cannot say (older backends do not), one
 //   `profiles.list` per connection (on one of its rows' routes) answers for
-//   every profile on that machine, so no per-bot probe is ever made.
+//   every profile on that machine, so no per-bot probe is ever made. That
+//   answer also carries each profile's Bot Mode meta (its shown name); it is
+//   handed to `onProfiles` (core/gatewayMeta.js) so the names of SSH bots
+//   come with no request of their own.
 // - Fetch: `profiles.get_asset {name, asset:'avatar'}` on the bot's own route,
 //   only for has_avatar bots that show no picture of their own yet. One
 //   request in flight per bot; a result is kept for AVATAR_TTL_MS (the server
@@ -70,9 +73,10 @@ export function remoteAvatarRoute(bot) {
  * The loader. `request(bot, method, params, options)` is the kit's
  * requestForBot; `hasOwnImage(bot)` says the row already shows a picture
  * (Bot Mode's meta), so nothing is fetched for it; `onChange(images)` gets
- * the route key → data URL map whenever it changes.
+ * the route key → data URL map whenever it changes; `onProfiles(connectionId,
+ * profiles)` gets every connection list's rows as they arrive.
  */
-export function createRemoteAvatars({ request, hasOwnImage = () => false, onChange = () => undefined, now = () => Date.now() } = {}) {
+export function createRemoteAvatars({ request, hasOwnImage = () => false, onChange = () => undefined, onProfiles = () => undefined, now = () => Date.now() } = {}) {
   /** route key → { image, at, failedAt } */
   const entries = new Map()
   const inflight = new Set()
@@ -121,6 +125,12 @@ export function createRemoteAvatars({ request, hasOwnImage = () => false, onChan
           if (name) flags.set(name, row?.has_avatar === true)
         }
         lists.set(connectionId, { at: now(), failedAt: 0, flags })
+        if (stopped) return
+        try {
+          onProfiles(connectionId, Array.isArray(result?.profiles) ? result.profiles : [])
+        } catch {
+          /* names are best-effort; the avatars go on */
+        }
       })
       .catch(() => {
         lists.set(connectionId, { ...(lists.get(connectionId) || { at: 0, flags: null }), failedAt: now() })

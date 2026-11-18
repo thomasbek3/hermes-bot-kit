@@ -246,6 +246,7 @@ export function RosterPane() {
   const hiddenExpanded = useStore(roster2.hiddenExpanded)
   const retrying = useStore(roster2.retrying)
   useStore(roster2.metaWrites)
+  useStore(roster2.gatewayMeta)
   useStore(roster2.attention)
   const pins = useStore(app.pinnedBots)
   const ownSections = useStore(app.sections)

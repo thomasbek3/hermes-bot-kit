@@ -42028,6 +42028,306 @@ function rebuildItems(current, persisted, keep) {
   return carryKeys(current, [...out, ...tail]);
 }
 
+// src/core/outcomes.js
+function rpcErrorParts(error) {
+  let code;
+  let data;
+  let node = error;
+  for (let depth = 0; node && typeof node === "object" && depth < 5; depth += 1) {
+    if (code === void 0 && typeof node.code === "number") code = node.code;
+    if (data === void 0 && node.data && typeof node.data === "object") data = node.data;
+    if (code !== void 0 && data !== void 0) break;
+    node = node.cause ?? (node.error && typeof node.error === "object" ? node.error : null);
+  }
+  const message = typeof error?.message === "string" ? error.message : typeof error === "string" ? error : "";
+  const reason = typeof data?.reason === "string" ? data.reason : "";
+  return { code, data, reason, message };
+}
+function withoutRefusedParams(error, params, keep = []) {
+  const { data, reason } = rpcErrorParts(error);
+  if (reason !== "invalid_params" || !Array.isArray(data?.fields) || !params || typeof params !== "object") return null;
+  const drop = [...new Set(data.fields.map((field) => String(field).split(".")[0]))].filter((field) => !keep.includes(field) && Object.prototype.hasOwnProperty.call(params, field));
+  if (!drop.length) return null;
+  const next = { ...params };
+  for (const field of drop) delete next[field];
+  return next;
+}
+var HOST_PRE_SEND = /\bnot connected\b|execution identity unavailable|^Session revision unavailable|^No retained rewind to replay|is not available on the shared gateway yet/i;
+var DISPATCH_REFUSED_CODES = /* @__PURE__ */ new Set([-32600, -32602, -32601, 4e3, 5035]);
+function isDispatchRefusal(parts) {
+  const { code, data, reason, message } = parts;
+  if (data && data.admitted === false) return true;
+  if (code === void 0) return data === void 0 && HOST_PRE_SEND.test(message);
+  if (code === -32601) return !reason || reason === "unknown_method";
+  return !reason && DISPATCH_REFUSED_CODES.has(code);
+}
+var LEGACY_REFUSED_CODES = /* @__PURE__ */ new Set([-32600, -32602, -32601, 4e3, 4004, 4007, 4009, 5035, 5070, 5071, 5072]);
+var LEGACY_4090_REFUSED = /* @__PURE__ */ new Set([
+  "SESSION_OWNER_BUSY",
+  "SESSION_NOT_OWNED",
+  "MAX_CONCURRENT_SESSIONS",
+  "SESSION_COORDINATION_UNAVAILABLE"
+]);
+var CANONICAL_REFUSED_BEFORE_COMMIT = /* @__PURE__ */ new Set([
+  "invalid_params",
+  "runtime_draining",
+  "runtime_retired",
+  "profile_mismatch",
+  "permission_denied",
+  "not_found",
+  "stale_epoch",
+  "queue_full"
+]);
+function classifySubmitFailure(error) {
+  const { code, data, reason, message } = rpcErrorParts(error);
+  const refused = (why, extra = {}) => ({ delivery: "not-sent", reason: why, imagesUnstaged: false, ...extra });
+  const unknown = (why) => ({ delivery: "unknown", reason: why, imagesUnstaged: false });
+  if (data && data.admitted === false) return refused(reason || "not admitted");
+  if (code === void 0) {
+    if (data === void 0 && /\bnot connected\b/i.test(message)) return refused("not connected");
+    return unknown(message ? "no answer" : "unknown failure");
+  }
+  if (code === 4090) {
+    if (reason === "SESSION_OWNER_BUSY") return refused(reason, { imagesUnstaged: true });
+    if (LEGACY_4090_REFUSED.has(reason)) return refused(reason);
+    return unknown(reason || "owner refusal without a reason");
+  }
+  if (code === 4001) {
+    if (!reason) return refused("session not found");
+    return CANONICAL_REFUSED_BEFORE_COMMIT.has(reason) ? refused(reason) : unknown(reason);
+  }
+  if (code === -32601) return !reason || reason === "unknown_method" ? refused("unknown method") : unknown(reason);
+  if (reason) return unknown(reason);
+  return LEGACY_REFUSED_CODES.has(code) ? refused(`code ${code}`) : unknown(`code ${code}`);
+}
+function isRuntimeNotFoundRefusal(error) {
+  const { code, reason } = rpcErrorParts(error);
+  return code === 4001 && !reason;
+}
+function isIdentityRefusal(error) {
+  const { code, message } = rpcErrorParts(error);
+  return code === 4094 || code === 4e3 && /submission_id/.test(message);
+}
+function isAdmittedConflict(error) {
+  const { data } = rpcErrorParts(error);
+  return data?.reason === "admission_conflict" && data?.field === "request_id";
+}
+var CANONICAL_PRE_RUN = ["invalid_params", "profile_mismatch", "permission_denied", "not_found"];
+var CONTROL_CONTRACTS = {
+  "session.steer": {
+    codes: /* @__PURE__ */ new Set([4001, 4002, 4010]),
+    reasons: /* @__PURE__ */ new Set([...CANONICAL_PRE_RUN, "execution_not_ready", "stale_generation", "unsupported_control"]),
+    exact: []
+  },
+  "slash.exec": {
+    codes: /* @__PURE__ */ new Set([4001, 4004]),
+    reasons: /* @__PURE__ */ new Set([...CANONICAL_PRE_RUN, "unsupported_command", "session_read_only", "runtime_draining"]),
+    exact: [
+      [4018, /^skill command: use command\.dispatch for \//],
+      [4018, /^snapshot restore mutates live config\/state; use command\.dispatch/],
+      [5030, /^slash worker start failed: /]
+    ]
+  },
+  "session.rewind": {
+    codes: /* @__PURE__ */ new Set([4001]),
+    reasons: /* @__PURE__ */ new Set([...CANONICAL_PRE_RUN, "runtime_draining"]),
+    exact: []
+  },
+  "session.title": {
+    codes: /* @__PURE__ */ new Set([4001, 4006, 4021]),
+    reasons: new Set(CANONICAL_PRE_RUN),
+    exact: []
+  }
+};
+function controlFailure(error, operation) {
+  const parts = rpcErrorParts(error);
+  if (isDispatchRefusal(parts)) return "refused";
+  const contract = CONTROL_CONTRACTS[operation];
+  const { code, reason, message } = parts;
+  if (!contract || code === void 0) return "uncertain";
+  if (reason) return code === 4001 && contract.reasons.has(reason) ? "refused" : "uncertain";
+  if (contract.codes.has(code)) return "refused";
+  return contract.exact.some(([c2, re]) => c2 === code && re.test(message)) ? "refused" : "uncertain";
+}
+var steerFailure = (error) => controlFailure(error, "session.steer");
+var slashExecFailure = (error) => controlFailure(error, "slash.exec");
+var rewindFailure = (error) => controlFailure(error, "session.rewind");
+function titleFailure(error) {
+  if (/already in use/i.test(rpcErrorParts(error).message)) return "conflict";
+  return controlFailure(error, "session.title");
+}
+function isMethodNotServed(error) {
+  const { code, reason } = rpcErrorParts(error);
+  return code === -32601 && (!reason || reason === "unknown_method");
+}
+function looksUnsupported(error) {
+  if (isMethodNotServed(error)) return true;
+  return /unknown method|method not found|method-not-found|no handler for|unexpected session\.active_list/i.test(rpcErrorParts(error).message);
+}
+function isSessionGoneError(error) {
+  if (!error) return false;
+  const { code, reason, message } = rpcErrorParts(error);
+  if (code === 4001) return !reason || reason === "not_found";
+  if (code !== void 0) return false;
+  return message.includes("not in memory") || /session not found/i.test(message);
+}
+function roomPostFailure(error) {
+  return rpcErrorParts(error).data?.admitted === false ? "refused" : "uncertain";
+}
+
+// src/core/botMeta.js
+var BOT_META_WRITE_FENCE_MS = 6e4;
+var BOT_META_CAS_ATTEMPTS = 3;
+function botMetaKey(bot) {
+  const route = resolveBotConnectionRoute(bot).route;
+  return route ? botRouteKey(route) : String(bot?.name || "default");
+}
+function serverReportedTitle(bot, server) {
+  if (server) return String(server.title || "").trim();
+  if (bot && Object.prototype.hasOwnProperty.call(bot, "ui_meta_revisions")) return "";
+  return typeof bot?.title === "string" ? bot.title.trim() : void 0;
+}
+function usesBareNameMeta(route) {
+  return !route || route.mode === "local";
+}
+function localMetaFor(bot, localMeta) {
+  const route = resolveBotConnectionRoute(bot).route;
+  const byRoute = route ? localMeta?.[botRouteKey(route)] : null;
+  const byName = usesBareNameMeta(route) ? localMeta?.[bot?.name] : null;
+  const record = byRoute || byName || null;
+  return record && typeof record === "object" ? record : null;
+}
+function effectiveMeta(bot, localMeta, writes = {}, now = Date.now(), gateway = null) {
+  const raw = bot?.ui_meta?.["hermes-bots"];
+  let server = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+  const mine = localMetaFor(bot, localMeta) || {};
+  let merged = { ...mine };
+  let authoritative = !(bot?.retained || bot?.sourceReachable === false);
+  let title;
+  const fromGateway = !server && gateway?.meta && typeof gateway.meta === "object" && !Array.isArray(gateway.meta) ? gateway : null;
+  if (fromGateway) {
+    server = fromGateway.meta;
+    authoritative = true;
+    title = String(server.title || fromGateway.display_name || "").trim();
+  }
+  if (authoritative) {
+    if (!fromGateway) title = serverReportedTitle(bot, server);
+    if (server || title !== void 0 && Object.keys(mine).length) {
+      merged = { ...mine, ...server || {} };
+      if (title) merged.title = title;
+      else if (title !== void 0) delete merged.title;
+      if (mine.image) merged.image = mine.image;
+      if (Array.isArray(server?.groups) && Object.prototype.hasOwnProperty.call(mine, "group") && !Object.prototype.hasOwnProperty.call(server, "group")) {
+        delete merged.group;
+      }
+    }
+  }
+  delete merged.chat;
+  const write = writes?.[botMetaKey(bot)];
+  if (write && (write.sticky || now - Number(write.at || 0) < BOT_META_WRITE_FENCE_MS)) {
+    merged = { ...merged, ...write.patch };
+  }
+  return merged;
+}
+async function readServerBotMeta(request2, bot) {
+  const route = resolveBotConnectionRoute(bot).route;
+  const result = await request2(bot, "profiles.list", { include_sessions: false }, route ? { spawnPriority: "foreground" } : {});
+  const target = route?.targetProfile || String(bot?.name || "");
+  const row = (Array.isArray(result?.profiles) ? result.profiles : []).find((profile) => profile?.name === target);
+  if (!row) return null;
+  const meta = row.ui_meta?.["hermes-bots"];
+  const revisions = row.ui_meta_revisions;
+  return {
+    meta: meta && typeof meta === "object" && !Array.isArray(meta) ? meta : {},
+    revision: revisions && typeof revisions === "object" ? Math.max(0, Number(revisions["hermes-bots"] || 0)) : null,
+    row
+  };
+}
+async function persistBotMetaPatch(request2, bot, patch, { rebase, progress = { reached: false } } = {}) {
+  const name = String(bot?.name || "").trim();
+  for (let attempt = 0; attempt < BOT_META_CAS_ATTEMPTS; attempt += 1) {
+    const server = await readServerBotMeta(request2, bot);
+    progress.reached = true;
+    if (!server) return null;
+    const { chat: _chat, ...base4 } = server.meta;
+    const { image: _image, pet: _pet, ...fields } = rebase ? rebase(server.meta) : patch;
+    const params = { name, ui_meta: { "hermes-bots": { ...base4, ...fields } } };
+    if (server.revision !== null) params.ui_meta_expected_revisions = { "hermes-bots": server.revision };
+    progress.written = params.ui_meta["hermes-bots"];
+    progress.row = server.row;
+    const result = await request2(bot, "profiles.configure", params);
+    if (!result?.applied?.ui_meta_conflicts) return result;
+  }
+  return { applied: { ui_meta: false } };
+}
+async function settleServerOutcome(pending, routed, progress) {
+  try {
+    const result = await pending;
+    if (result?.applied?.ui_meta === true) return "persisted";
+    return result && typeof result === "object" && result.applied && typeof result.applied === "object" ? "failed" : "unsupported";
+  } catch (error) {
+    if (!routed || looksUnsupported(error)) return "unsupported";
+    return progress.reached ? "failed" : "unreachable";
+  }
+}
+async function saveBotMetaPatch(request2, bot, patch, { rebase, prevImage = null } = {}) {
+  const route = resolveBotConnectionRoute(bot).route;
+  const progress = { reached: false };
+  let pending = null;
+  try {
+    pending = persistBotMetaPatch(request2, bot, patch, { rebase, progress });
+  } catch {
+    pending = null;
+  }
+  if (patch && "image" in patch && patch.image !== (prevImage ?? null)) {
+    const name = String(bot?.name || "");
+    const params = patch.image ? { name, asset: "avatar", data: patch.image } : { name, asset: "avatar", clear: true };
+    Promise.resolve().then(() => request2(bot, "profiles.set_asset", params)).catch(() => void 0);
+  }
+  const outcome = pending ? await settleServerOutcome(pending, Boolean(route), progress) : "unsupported";
+  const persisted = outcome === "persisted";
+  return { serverOutcome: outcome, serverPersisted: persisted, written: persisted ? progress.written || null : null, row: persisted ? progress.row || null : null };
+}
+function overlayEntry(patch, outcome, now = Date.now()) {
+  return { patch: { ...patch }, at: now, sticky: outcome === "unsupported" };
+}
+function pruneOverlay(writes, now = Date.now()) {
+  const next = {};
+  for (const [key, entry] of Object.entries(writes || {})) {
+    if (entry?.sticky || now - Number(entry?.at || 0) < BOT_META_WRITE_FENCE_MS) next[key] = entry;
+  }
+  return next;
+}
+function botGroups(meta) {
+  const groups = [];
+  const seen = /* @__PURE__ */ new Set();
+  const values = Array.isArray(meta?.groups) ? meta.groups : [meta?.group];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const group = value.trim();
+    if (group && !seen.has(group)) {
+      seen.add(group);
+      groups.push(group);
+    }
+  }
+  return groups;
+}
+function knownGroups(metas) {
+  const names = /* @__PURE__ */ new Set();
+  for (const meta of metas || []) for (const group of botGroups(meta)) names.add(group);
+  return [...names].sort((a2, b2) => a2.localeCompare(b2, void 0, { sensitivity: "base" }));
+}
+function groupMembershipPatch(meta, group, enabled) {
+  const name = String(group || "").trim();
+  let groups = botGroups(meta);
+  if (enabled) {
+    if (name && !groups.includes(name)) groups = [...groups, name];
+  } else {
+    groups = groups.filter((existing) => existing !== name);
+  }
+  return { groups, group: groups[0] || null };
+}
+
 // src/core/sections.js
 var SECTIONS_KEY = "sections";
 var LEGACY_SECTIONS_PLUGIN = "bot-sections";
@@ -42925,153 +43225,6 @@ function micErrorMessage(error) {
   if (name === "NotReadableError" || name === "TrackStartError") return "The microphone is in use by another app.";
   if (name === "OverconstrainedError") return "The microphone does not support the requested settings.";
   return String(error?.message || error || "Could not start the microphone.");
-}
-
-// src/core/outcomes.js
-function rpcErrorParts(error) {
-  let code;
-  let data;
-  let node = error;
-  for (let depth = 0; node && typeof node === "object" && depth < 5; depth += 1) {
-    if (code === void 0 && typeof node.code === "number") code = node.code;
-    if (data === void 0 && node.data && typeof node.data === "object") data = node.data;
-    if (code !== void 0 && data !== void 0) break;
-    node = node.cause ?? (node.error && typeof node.error === "object" ? node.error : null);
-  }
-  const message = typeof error?.message === "string" ? error.message : typeof error === "string" ? error : "";
-  const reason = typeof data?.reason === "string" ? data.reason : "";
-  return { code, data, reason, message };
-}
-function withoutRefusedParams(error, params, keep = []) {
-  const { data, reason } = rpcErrorParts(error);
-  if (reason !== "invalid_params" || !Array.isArray(data?.fields) || !params || typeof params !== "object") return null;
-  const drop = [...new Set(data.fields.map((field) => String(field).split(".")[0]))].filter((field) => !keep.includes(field) && Object.prototype.hasOwnProperty.call(params, field));
-  if (!drop.length) return null;
-  const next = { ...params };
-  for (const field of drop) delete next[field];
-  return next;
-}
-var HOST_PRE_SEND = /\bnot connected\b|execution identity unavailable|^Session revision unavailable|^No retained rewind to replay|is not available on the shared gateway yet/i;
-var DISPATCH_REFUSED_CODES = /* @__PURE__ */ new Set([-32600, -32602, -32601, 4e3, 5035]);
-function isDispatchRefusal(parts) {
-  const { code, data, reason, message } = parts;
-  if (data && data.admitted === false) return true;
-  if (code === void 0) return data === void 0 && HOST_PRE_SEND.test(message);
-  if (code === -32601) return !reason || reason === "unknown_method";
-  return !reason && DISPATCH_REFUSED_CODES.has(code);
-}
-var LEGACY_REFUSED_CODES = /* @__PURE__ */ new Set([-32600, -32602, -32601, 4e3, 4004, 4007, 4009, 5035, 5070, 5071, 5072]);
-var LEGACY_4090_REFUSED = /* @__PURE__ */ new Set([
-  "SESSION_OWNER_BUSY",
-  "SESSION_NOT_OWNED",
-  "MAX_CONCURRENT_SESSIONS",
-  "SESSION_COORDINATION_UNAVAILABLE"
-]);
-var CANONICAL_REFUSED_BEFORE_COMMIT = /* @__PURE__ */ new Set([
-  "invalid_params",
-  "runtime_draining",
-  "runtime_retired",
-  "profile_mismatch",
-  "permission_denied",
-  "not_found",
-  "stale_epoch",
-  "queue_full"
-]);
-function classifySubmitFailure(error) {
-  const { code, data, reason, message } = rpcErrorParts(error);
-  const refused = (why, extra = {}) => ({ delivery: "not-sent", reason: why, imagesUnstaged: false, ...extra });
-  const unknown = (why) => ({ delivery: "unknown", reason: why, imagesUnstaged: false });
-  if (data && data.admitted === false) return refused(reason || "not admitted");
-  if (code === void 0) {
-    if (data === void 0 && /\bnot connected\b/i.test(message)) return refused("not connected");
-    return unknown(message ? "no answer" : "unknown failure");
-  }
-  if (code === 4090) {
-    if (reason === "SESSION_OWNER_BUSY") return refused(reason, { imagesUnstaged: true });
-    if (LEGACY_4090_REFUSED.has(reason)) return refused(reason);
-    return unknown(reason || "owner refusal without a reason");
-  }
-  if (code === 4001) {
-    if (!reason) return refused("session not found");
-    return CANONICAL_REFUSED_BEFORE_COMMIT.has(reason) ? refused(reason) : unknown(reason);
-  }
-  if (code === -32601) return !reason || reason === "unknown_method" ? refused("unknown method") : unknown(reason);
-  if (reason) return unknown(reason);
-  return LEGACY_REFUSED_CODES.has(code) ? refused(`code ${code}`) : unknown(`code ${code}`);
-}
-function isRuntimeNotFoundRefusal(error) {
-  const { code, reason } = rpcErrorParts(error);
-  return code === 4001 && !reason;
-}
-function isIdentityRefusal(error) {
-  const { code, message } = rpcErrorParts(error);
-  return code === 4094 || code === 4e3 && /submission_id/.test(message);
-}
-function isAdmittedConflict(error) {
-  const { data } = rpcErrorParts(error);
-  return data?.reason === "admission_conflict" && data?.field === "request_id";
-}
-var CANONICAL_PRE_RUN = ["invalid_params", "profile_mismatch", "permission_denied", "not_found"];
-var CONTROL_CONTRACTS = {
-  "session.steer": {
-    codes: /* @__PURE__ */ new Set([4001, 4002, 4010]),
-    reasons: /* @__PURE__ */ new Set([...CANONICAL_PRE_RUN, "execution_not_ready", "stale_generation", "unsupported_control"]),
-    exact: []
-  },
-  "slash.exec": {
-    codes: /* @__PURE__ */ new Set([4001, 4004]),
-    reasons: /* @__PURE__ */ new Set([...CANONICAL_PRE_RUN, "unsupported_command", "session_read_only", "runtime_draining"]),
-    exact: [
-      [4018, /^skill command: use command\.dispatch for \//],
-      [4018, /^snapshot restore mutates live config\/state; use command\.dispatch/],
-      [5030, /^slash worker start failed: /]
-    ]
-  },
-  "session.rewind": {
-    codes: /* @__PURE__ */ new Set([4001]),
-    reasons: /* @__PURE__ */ new Set([...CANONICAL_PRE_RUN, "runtime_draining"]),
-    exact: []
-  },
-  "session.title": {
-    codes: /* @__PURE__ */ new Set([4001, 4006, 4021]),
-    reasons: new Set(CANONICAL_PRE_RUN),
-    exact: []
-  }
-};
-function controlFailure(error, operation) {
-  const parts = rpcErrorParts(error);
-  if (isDispatchRefusal(parts)) return "refused";
-  const contract = CONTROL_CONTRACTS[operation];
-  const { code, reason, message } = parts;
-  if (!contract || code === void 0) return "uncertain";
-  if (reason) return code === 4001 && contract.reasons.has(reason) ? "refused" : "uncertain";
-  if (contract.codes.has(code)) return "refused";
-  return contract.exact.some(([c2, re]) => c2 === code && re.test(message)) ? "refused" : "uncertain";
-}
-var steerFailure = (error) => controlFailure(error, "session.steer");
-var slashExecFailure = (error) => controlFailure(error, "slash.exec");
-var rewindFailure = (error) => controlFailure(error, "session.rewind");
-function titleFailure(error) {
-  if (/already in use/i.test(rpcErrorParts(error).message)) return "conflict";
-  return controlFailure(error, "session.title");
-}
-function isMethodNotServed(error) {
-  const { code, reason } = rpcErrorParts(error);
-  return code === -32601 && (!reason || reason === "unknown_method");
-}
-function looksUnsupported(error) {
-  if (isMethodNotServed(error)) return true;
-  return /unknown method|method not found|method-not-found|no handler for|unexpected session\.active_list/i.test(rpcErrorParts(error).message);
-}
-function isSessionGoneError(error) {
-  if (!error) return false;
-  const { code, reason, message } = rpcErrorParts(error);
-  if (code === 4001) return !reason || reason === "not_found";
-  if (code !== void 0) return false;
-  return message.includes("not in memory") || /session not found/i.test(message);
-}
-function roomPostFailure(error) {
-  return rpcErrorParts(error).data?.admitted === false ? "refused" : "uncertain";
 }
 
 // src/core/create-chat.js
@@ -46866,144 +47019,102 @@ function desktopBridge() {
   }
 }
 
-// src/core/botMeta.js
-var BOT_META_WRITE_FENCE_MS = 6e4;
-var BOT_META_CAS_ATTEMPTS = 3;
-function botMetaKey(bot) {
+// src/core/gatewayMeta.js
+var GATEWAY_META_STORAGE_KEY = "botMetaCache";
+var GATEWAY_META_MAX = 200;
+var GATEWAY_META_ENTRY_MAX_CHARS = 16e3;
+var GATEWAY_META_FRESH_MS = 5 * 6e4;
+var LISTING_FIELDS = ["ui_meta", "display_name", "title", "ui_meta_revisions"];
+var DROPPED = /* @__PURE__ */ new Set(["chat", "image", "pet"]);
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+function hasListingMeta(bot) {
+  return Boolean(bot) && LISTING_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(bot, field) && bot[field] !== void 0 && bot[field] !== null);
+}
+function gatewayMetaKey(bot) {
+  if (!bot || hasListingMeta(bot)) return "";
   const route = resolveBotConnectionRoute(bot).route;
-  return route ? botRouteKey(route) : String(bot?.name || "default");
+  return route && route.mode === "remote" ? botRouteKey(route) : "";
 }
-function serverReportedTitle(bot, server) {
-  if (server) return String(server.title || "").trim();
-  if (bot && Object.prototype.hasOwnProperty.call(bot, "ui_meta_revisions")) return "";
-  return typeof bot?.title === "string" ? bot.title.trim() : void 0;
-}
-function localMetaFor(bot, localMeta) {
-  const route = resolveBotConnectionRoute(bot).route;
-  const byRoute = route ? localMeta?.[botRouteKey(route)] : null;
-  const byName = localMeta?.[bot?.name];
-  const record = byRoute || byName || null;
-  return record && typeof record === "object" ? record : null;
-}
-function effectiveMeta(bot, localMeta, writes = {}, now = Date.now()) {
-  const raw = bot?.ui_meta?.["hermes-bots"];
-  const server = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
-  const mine = localMetaFor(bot, localMeta) || {};
-  let merged = { ...mine };
-  const authoritative = !(bot?.retained || bot?.sourceReachable === false);
-  if (authoritative) {
-    const title = serverReportedTitle(bot, server);
-    if (server || title !== void 0 && Object.keys(mine).length) {
-      merged = { ...mine, ...server || {} };
-      if (title) merged.title = title;
-      else if (title !== void 0) delete merged.title;
-      if (mine.image) merged.image = mine.image;
-      if (Array.isArray(server?.groups) && Object.prototype.hasOwnProperty.call(mine, "group") && !Object.prototype.hasOwnProperty.call(server, "group")) {
-        delete merged.group;
-      }
-    }
+function gatewayMetaEntry(row, now = Date.now()) {
+  if (!plainObject(row)) return null;
+  const raw = row.ui_meta?.["hermes-bots"];
+  const meta = {};
+  if (plainObject(raw)) {
+    for (const [key, value] of Object.entries(raw)) if (!DROPPED.has(key) && value !== void 0) meta[key] = value;
   }
-  delete merged.chat;
-  const write = writes?.[botMetaKey(bot)];
-  if (write && (write.sticky || now - Number(write.at || 0) < BOT_META_WRITE_FENCE_MS)) {
-    merged = { ...merged, ...write.patch };
-  }
-  return merged;
-}
-async function readServerBotMeta(request2, bot) {
-  const route = resolveBotConnectionRoute(bot).route;
-  const result = await request2(bot, "profiles.list", { include_sessions: false }, route ? { spawnPriority: "foreground" } : {});
-  const target = route?.targetProfile || String(bot?.name || "");
-  const row = (Array.isArray(result?.profiles) ? result.profiles : []).find((profile) => profile?.name === target);
-  if (!row) return null;
-  const meta = row.ui_meta?.["hermes-bots"];
-  const revisions = row.ui_meta_revisions;
-  return {
-    meta: meta && typeof meta === "object" && !Array.isArray(meta) ? meta : {},
-    revision: revisions && typeof revisions === "object" ? Math.max(0, Number(revisions["hermes-bots"] || 0)) : null,
-    row
+  const entry = {
+    meta,
+    display_name: typeof row.display_name === "string" ? row.display_name.trim() : "",
+    description: typeof row.description === "string" ? row.description : "",
+    at: Number(now) || 0
   };
-}
-async function persistBotMetaPatch(request2, bot, patch, { rebase, progress = { reached: false } } = {}) {
-  const name = String(bot?.name || "").trim();
-  for (let attempt = 0; attempt < BOT_META_CAS_ATTEMPTS; attempt += 1) {
-    const server = await readServerBotMeta(request2, bot);
-    progress.reached = true;
-    if (!server) return null;
-    const { chat: _chat, ...base4 } = server.meta;
-    const { image: _image, pet: _pet, ...fields } = rebase ? rebase(server.meta) : patch;
-    const params = { name, ui_meta: { "hermes-bots": { ...base4, ...fields } } };
-    if (server.revision !== null) params.ui_meta_expected_revisions = { "hermes-bots": server.revision };
-    const result = await request2(bot, "profiles.configure", params);
-    if (!result?.applied?.ui_meta_conflicts) return result;
-  }
-  return { applied: { ui_meta: false } };
-}
-async function settleServerOutcome(pending, routed, progress) {
   try {
-    const result = await pending;
-    if (result?.applied?.ui_meta === true) return "persisted";
-    return result && typeof result === "object" && result.applied && typeof result.applied === "object" ? "failed" : "unsupported";
-  } catch (error) {
-    if (!routed || looksUnsupported(error)) return "unsupported";
-    return progress.reached ? "failed" : "unreachable";
-  }
-}
-async function saveBotMetaPatch(request2, bot, patch, { rebase, prevImage = null } = {}) {
-  const route = resolveBotConnectionRoute(bot).route;
-  const progress = { reached: false };
-  let pending = null;
-  try {
-    pending = persistBotMetaPatch(request2, bot, patch, { rebase, progress });
+    if (JSON.stringify(entry).length > GATEWAY_META_ENTRY_MAX_CHARS) return null;
   } catch {
-    pending = null;
+    return null;
   }
-  if (patch && "image" in patch && patch.image !== (prevImage ?? null)) {
-    const name = String(bot?.name || "");
-    const params = patch.image ? { name, asset: "avatar", data: patch.image } : { name, asset: "avatar", clear: true };
-    Promise.resolve().then(() => request2(bot, "profiles.set_asset", params)).catch(() => void 0);
+  return entry;
+}
+function entriesFromProfiles(rows, connectionId, profiles, now = Date.now()) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const row of Array.isArray(profiles) ? profiles : []) {
+    const name = String(row?.name || "").trim();
+    if (name && !byName.has(name)) byName.set(name, row);
   }
-  const outcome = pending ? await settleServerOutcome(pending, Boolean(route), progress) : "unsupported";
-  return { serverOutcome: outcome, serverPersisted: outcome === "persisted" };
-}
-function overlayEntry(patch, outcome, now = Date.now()) {
-  return { patch: { ...patch }, at: now, sticky: outcome === "unsupported" };
-}
-function pruneOverlay(writes, now = Date.now()) {
-  const next = {};
-  for (const [key, entry] of Object.entries(writes || {})) {
-    if (entry?.sticky || now - Number(entry?.at || 0) < BOT_META_WRITE_FENCE_MS) next[key] = entry;
+  const out = {};
+  for (const bot of Array.isArray(rows) ? rows : []) {
+    const route = resolveBotConnectionRoute(bot).route;
+    if (!route || route.mode !== "remote" || route.connectionId !== connectionId) continue;
+    const listed = byName.get(route.targetProfile || route.profile);
+    const entry = listed ? gatewayMetaEntry(listed, now) : null;
+    if (entry) out[botRouteKey(route)] = entry;
   }
-  return next;
+  return out;
 }
-function botGroups(meta) {
-  const groups = [];
-  const seen = /* @__PURE__ */ new Set();
-  const values = Array.isArray(meta?.groups) ? meta.groups : [meta?.group];
-  for (const value of values) {
-    if (typeof value !== "string") continue;
-    const group = value.trim();
-    if (group && !seen.has(group)) {
-      seen.add(group);
-      groups.push(group);
-    }
+function gatewayMetaFor(bot, fresh, cache) {
+  const key = gatewayMetaKey(bot);
+  if (!key) return null;
+  const entry = plainObject(fresh) && fresh[key] || plainObject(cache) && cache[key] || null;
+  return plainObject(entry) && plainObject(entry.meta) ? entry : null;
+}
+function sameEntry(a2, b2) {
+  if (!a2 || !b2) return a2 === b2;
+  const { at: _a, ...left } = a2;
+  const { at: _b, ...right } = b2;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+function mergeEntries(map, entries, { touch = false } = {}) {
+  const base4 = plainObject(map) ? map : {};
+  let next = null;
+  for (const [key, entry] of Object.entries(entries || {})) {
+    if (!key || !plainObject(entry)) continue;
+    const old = base4[key];
+    if (old && sameEntry(old, entry) && !touch) continue;
+    next ??= { ...base4 };
+    next[key] = entry;
   }
-  return groups;
+  return next || base4;
 }
-function knownGroups(metas) {
-  const names = /* @__PURE__ */ new Set();
-  for (const meta of metas || []) for (const group of botGroups(meta)) names.add(group);
-  return [...names].sort((a2, b2) => a2.localeCompare(b2, void 0, { sensitivity: "base" }));
+function pruneCache(saved) {
+  if (!plainObject(saved)) return {};
+  const valid = Object.entries(saved).filter(([key, entry]) => key.includes("::") && plainObject(entry) && plainObject(entry.meta));
+  if (valid.length <= GATEWAY_META_MAX && valid.length === Object.keys(saved).length) return saved;
+  valid.sort((a2, b2) => Number(b2[1].at || 0) - Number(a2[1].at || 0));
+  return Object.fromEntries(valid.slice(0, GATEWAY_META_MAX));
 }
-function groupMembershipPatch(meta, group, enabled) {
-  const name = String(group || "").trim();
-  let groups = botGroups(meta);
-  if (enabled) {
-    if (name && !groups.includes(name)) groups = [...groups, name];
-  } else {
-    groups = groups.filter((existing) => existing !== name);
+function entryAfterSave(previous, written, now = Date.now()) {
+  const meta = {};
+  for (const [key, value] of Object.entries(plainObject(written) ? written : {})) {
+    if (!DROPPED.has(key) && value !== void 0) meta[key] = value;
   }
-  return { groups, group: groups[0] || null };
+  return {
+    meta,
+    display_name: String(previous?.display_name || ""),
+    description: String(previous?.description || ""),
+    at: Number(now) || 0
+  };
 }
 
 // src/core/remoteAvatars.js
@@ -47033,7 +47144,7 @@ function remoteAvatarRoute(bot) {
   const route = resolveBotConnectionRoute(bot).route;
   return route && route.mode === "remote" ? route : null;
 }
-function createRemoteAvatars({ request: request2, hasOwnImage = () => false, onChange = () => void 0, now = () => Date.now() } = {}) {
+function createRemoteAvatars({ request: request2, hasOwnImage = () => false, onChange = () => void 0, onProfiles = () => void 0, now = () => Date.now() } = {}) {
   const entries = /* @__PURE__ */ new Map();
   const inflight = /* @__PURE__ */ new Set();
   const lists = /* @__PURE__ */ new Map();
@@ -47073,6 +47184,11 @@ function createRemoteAvatars({ request: request2, hasOwnImage = () => false, onC
         if (name) flags.set(name, row?.has_avatar === true);
       }
       lists.set(connectionId, { at: now(), failedAt: 0, flags });
+      if (stopped) return;
+      try {
+        onProfiles(connectionId, Array.isArray(result?.profiles) ? result.profiles : []);
+      } catch {
+      }
     }).catch(() => {
       lists.set(connectionId, { ...lists.get(connectionId) || { at: 0, flags: null }, failedAt: now() });
     }).finally(() => {
@@ -48322,7 +48438,11 @@ var roster2 = {
   sectionDelete: createStore(null),
   /** Server avatars of bots on other connections (core/remoteAvatars.js):
    *  route key -> data URL, for the app session. */
-  remoteAvatars: createStore({})
+  remoteAvatars: createStore({}),
+  /** Bot Mode meta of bots whose row carries none (SSH sources), as their own
+   *  gateway reported it (core/gatewayMeta.js): `fresh` = read this app
+   *  session, `cache` = plugin storage `botMetaCache`. Route key -> entry. */
+  gatewayMeta: createStore({ fresh: {}, cache: {} })
 };
 function openDialog(state) {
   roster2.dialog.set(state);
@@ -48371,6 +48491,60 @@ function loadMetaWrites() {
     roster2.metaWrites.set({});
   }
 }
+function loadGatewayMeta() {
+  let saved = {};
+  try {
+    saved = app.ctx?.storage?.get?.(GATEWAY_META_STORAGE_KEY, {});
+  } catch {
+    saved = {};
+  }
+  roster2.gatewayMeta.set({ fresh: {}, cache: pruneCache(saved && typeof saved === "object" ? saved : {}) });
+}
+function noteGatewayMeta(entries) {
+  if (!entries || !Object.keys(entries).length) return;
+  const cur = roster2.gatewayMeta.get();
+  const fresh = mergeEntries(cur.fresh, entries, { touch: true });
+  const cache = mergeEntries(cur.cache, entries);
+  if (fresh === cur.fresh && cache === cur.cache) return;
+  if (cache !== cur.cache) {
+    const pruned = pruneCache(cache);
+    storageSet(GATEWAY_META_STORAGE_KEY, pruned);
+    roster2.gatewayMeta.set({ fresh, cache: pruned });
+    return;
+  }
+  roster2.gatewayMeta.set({ fresh, cache });
+}
+function noteGatewayRow(bot, row) {
+  const key = gatewayMetaKey(bot);
+  const entry = key ? gatewayMetaEntry(row) : null;
+  if (entry) noteGatewayMeta({ [key]: entry });
+}
+function noteGatewayProfiles(connectionId, profiles) {
+  const rows = app.roster.get().rows.filter((bot) => gatewayMetaKey(bot));
+  noteGatewayMeta(entriesFromProfiles(rows, connectionId, profiles));
+}
+function gatewayMetaOf(bot) {
+  const { fresh, cache } = roster2.gatewayMeta.get();
+  return gatewayMetaFor(bot, fresh, cache);
+}
+var gatewayReads = /* @__PURE__ */ new Set();
+async function refreshGatewayMeta(bot) {
+  const key = gatewayMetaKey(bot);
+  if (!key || gatewayReads.has(key)) return;
+  const seen = roster2.gatewayMeta.get().fresh[key];
+  if (seen && Date.now() - Number(seen.at || 0) < GATEWAY_META_FRESH_MS) return;
+  gatewayReads.add(key);
+  try {
+    const result = await request(bot, "profiles.list", { include_sessions: false });
+    const route = resolveBotConnectionRoute(bot).route;
+    const target = route?.targetProfile || String(bot?.name || "");
+    const row = (Array.isArray(result?.profiles) ? result.profiles : []).find((p) => p?.name === target);
+    if (row) noteGatewayRow(bot, row);
+  } catch {
+  } finally {
+    gatewayReads.delete(key);
+  }
+}
 function recordWrite(bot, patch, outcome) {
   const key = botMetaKey(bot);
   roster2.metaWrites.set((writes) => {
@@ -48382,10 +48556,15 @@ function recordWrite(bot, patch, outcome) {
   });
 }
 async function saveMeta(bot, patch, { rebase, label } = {}) {
-  const prevImage = effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get()).image ?? null;
+  const prevImage = metaFor(bot).image ?? null;
   recordWrite(bot, patch, "pending");
   const result = await saveBotMetaPatch(request, bot, patch, { rebase, prevImage });
   recordWrite(bot, patch, result.serverOutcome);
+  const key = result.serverOutcome === "persisted" && result.written ? gatewayMetaKey(bot) : "";
+  if (key) {
+    const previous = result.row && gatewayMetaEntry(result.row) || gatewayMetaOf(bot);
+    noteGatewayMeta({ [key]: entryAfterSave(previous, result.written) });
+  }
   if (result.serverOutcome === "failed" || result.serverOutcome === "unreachable") {
     notify("error", `${label || "The change"} was saved on this screen only: ${result.serverOutcome === "unreachable" ? "the bot’s machine did not answer" : "the bot’s Hermes did not take it"}.`);
   }
@@ -48411,16 +48590,21 @@ async function currentMeta(bot) {
   if (bot?.sourceScoped) {
     try {
       const server = await readServerBotMeta(request, bot);
+      if (server && gatewayMetaKey(bot)) {
+        noteGatewayRow(bot, server.row);
+        return metaFor(bot);
+      }
       if (server) return effectiveMeta({ ...bot, ui_meta: { ...bot.ui_meta || {}, "hermes-bots": server.meta } }, app.roster.get().localMeta, roster2.metaWrites.get());
     } catch {
     }
   }
-  return effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get());
+  return metaFor(bot);
 }
 async function ensureBotProfile(bot) {
   if (!bot?.sourceScoped) return bot;
   try {
     const server = await readServerBotMeta(request, bot);
+    if (server) noteGatewayRow(bot, server.row);
     return typeof server?.row?.description === "string" ? { ...bot, description: server.row.description } : bot;
   } catch {
     return bot;
@@ -48489,13 +48673,13 @@ function newChatWith(bot) {
   }
 }
 async function duplicateBot(bot) {
-  notify("info", `Duplicating ${nameOf(bot, effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get()))}…`);
+  notify("info", `Duplicating ${nameOf(bot, metaFor(bot))}…`);
   try {
     const source = await ensureBotProfile(bot);
     const name = duplicateName(source, app.roster.get().rows);
     await request(source, "profiles.create", duplicateParams(source, name));
     if (typeof host2?.dropLeftoverProfilePrefs === "function") host2.dropLeftoverProfilePrefs(name, resolveBotConnectionRoute(source).route?.connectionId);
-    const look = duplicateLook(effectiveMeta(source, app.roster.get().localMeta, roster2.metaWrites.get()));
+    const look = duplicateLook(metaFor(source));
     if (look && Object.keys(look).length) await saveMeta(duplicateRow(source, name), look, { label: "The copy’s look" });
     invalidateRoster();
     notify("success", `Created ${name} — full copy of ${source.name}`);
@@ -48899,6 +49083,7 @@ function onChatState(state) {
   if (runtimeId && runtimeId !== usageRuntime && state?.bot) {
     usageRuntime = runtimeId;
     void readUsage(state.bot, runtimeId, key);
+    void refreshGatewayMeta(state.bot);
   }
   if (!runtimeId) usageRuntime = "";
 }
@@ -48919,6 +49104,7 @@ function onGatewayEvent(event) {
 }
 function startRosterParity() {
   loadMetaWrites();
+  loadGatewayMeta();
   if (!offChat) {
     offChat = app.chat.subscribe(() => onChatState(app.chat.get()));
     onChatState(app.chat.get());
@@ -51538,7 +51724,8 @@ function requestOpenRefresh() {
   pumpPolls();
 }
 function metaFor(bot) {
-  return effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get());
+  const { fresh, cache } = roster2.gatewayMeta.get();
+  return effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get(), Date.now(), gatewayMetaFor(bot, fresh, cache));
 }
 function activeConnection() {
   return activeConnectionId();
@@ -52362,11 +52549,25 @@ function startRemoteAvatars() {
       const image = metaFor(bot)?.image;
       return typeof image === "string" && image.length > 0;
     },
-    onChange: (images) => roster2.remoteAvatars.set(images)
+    onChange: (images) => roster2.remoteAvatars.set(images),
+    // The same list names the SSH bots (no request of its own).
+    onProfiles: (connectionId, profiles) => noteGatewayProfiles(connectionId, profiles)
   });
   remoteAvatars = loader;
   unwatchAvatars = app.roster.subscribe(() => loader.sync(app.roster.get().rows));
   loader.sync(app.roster.get().rows);
+}
+var unwatchNames = null;
+function watchGatewayNames() {
+  unwatchNames?.();
+  unwatchNames = roster2.gatewayMeta.subscribe(() => {
+    const bot = controller?.get?.()?.bot;
+    if (bot && closeWorkspace) retitleWorkspace(chatTabTitle(findBot(rowKey(bot)) || bot));
+  });
+}
+function unwatchGatewayNames() {
+  unwatchNames?.();
+  unwatchNames = null;
 }
 function stopRemoteAvatars() {
   unwatchAvatars?.();
@@ -52383,6 +52584,7 @@ function enable() {
   startObserver();
   watchVisibility();
   startRemoteAvatars();
+  watchGatewayNames();
   refreshRoster();
   startRosterParity();
   watchDocumentVisibility();
@@ -52418,6 +52620,7 @@ function disable() {
   lastLocal = null;
   roomSeq += 1;
   stopRemoteAvatars();
+  unwatchGatewayNames();
   unwatchPane?.();
   unwatchPane = null;
   unwatchComputer?.();
@@ -59585,11 +59788,14 @@ function lookOf(bot, meta) {
   return { shape: meta?.shape || "blobatar", color: meta?.color ?? null, image: meta?.image ?? null, title: meta?.title || bot?.title || "" };
 }
 function EditProfileDialog({ bot: row, onClose }) {
-  const [bot, setBot] = React19.useState(row);
+  const [bot, setBot] = React19.useState(() => {
+    const cached2 = row?.description === void 0 ? gatewayMetaOf(row)?.description : void 0;
+    return typeof cached2 === "string" && cached2 ? { ...row, description: cached2 } : row;
+  });
   const meta = metaFor(row);
   const [opened] = React19.useState(() => lookOf(row, meta));
   const [look, setLook] = React19.useState(() => lookOf(row, meta));
-  const [description, setDescriptionState] = React19.useState(String(row.description || ""));
+  const [description, setDescriptionState] = React19.useState(String(bot.description || ""));
   const descriptionTouched = React19.useRef(false);
   const setDescription = (value) => {
     descriptionTouched.current = true;
@@ -59603,8 +59809,9 @@ function EditProfileDialog({ bot: row, onClose }) {
     let live = true;
     void ensureBotProfile(row).then((next) => {
       if (!live) return;
+      if (next === row) return;
       setBot(next);
-      if (next.description !== row.description && !descriptionTouched.current) setDescriptionState(String(next.description || ""));
+      if (next.description !== bot.description && !descriptionTouched.current) setDescriptionState(String(next.description || ""));
     });
     return () => {
       live = false;
@@ -59787,6 +59994,7 @@ function ModelDialog({ bot, onClose }) {
 }
 function GroupsDialog({ bot, onClose }) {
   useStore(roster2.metaWrites);
+  useStore(roster2.gatewayMeta);
   useStore(app.roster);
   const [name, setName] = React19.useState("");
   const [error, setError] = React19.useState(null);
@@ -61110,6 +61318,7 @@ function ProfilePanel({ bot, onClose }) {
   const running = useStore(roster2.running);
   useStore(app.roster);
   useStore(roster2.metaWrites);
+  useStore(roster2.gatewayMeta);
   const rooms = useStore(app.rooms);
   const botRooms = rooms.loaded && rooms.route ? rooms.rooms.filter(
     (room) => (room.members || []).some((m) => {
@@ -62132,6 +62341,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
   const panelWidth = useStore(app.panelWidth);
   const roster = useStore(app.roster);
   const rosterShown = useStore(app.rosterShown);
+  useStore(roster2.gatewayMeta);
   const rootRef = React26.useRef(null);
   const draftRef = React26.useRef(null);
   const chatRef = React26.useRef(null);
@@ -62409,6 +62619,7 @@ function RosterPane() {
   const hiddenExpanded = useStore(roster2.hiddenExpanded);
   const retrying = useStore(roster2.retrying);
   useStore(roster2.metaWrites);
+  useStore(roster2.gatewayMeta);
   useStore(roster2.attention);
   const pins = useStore(app.pinnedBots);
   const ownSections = useStore(app.sections);

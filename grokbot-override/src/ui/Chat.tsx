@@ -767,6 +767,8 @@ export function ChatWorkspace({ slot = mainSlot }: { slot?: ChatSlot } = {}) {
   const panelWidth = useStore(app.panelWidth)
   const roster = useStore(app.roster)
   const rosterShown = useStore(app.rosterShown)
+  // A name read from an SSH bot's own gateway (core/gatewayMeta.js).
+  useStore(roster2.gatewayMeta)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const draftRef = React.useRef<null | ((text: string, owner?: string) => void)>(null)
   const chatRef = React.useRef<HTMLDivElement | null>(null)

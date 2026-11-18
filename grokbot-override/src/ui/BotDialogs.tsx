@@ -21,6 +21,7 @@ import {
   createBot,
   deleteBot,
   ensureBotProfile,
+  gatewayMetaOf,
   generateAvatar,
   groupHasRoom,
   listConnections,
@@ -279,11 +280,16 @@ function lookOf(bot: any, meta: any) {
 }
 
 export function EditProfileDialog({ bot: row, onClose }: { bot: any; onClose: () => void }) {
-  const [bot, setBot] = React.useState(row)
+  // A row with no listing meta (an SSH source) starts from the description
+  // its gateway last reported (core/gatewayMeta.js) until the read below.
+  const [bot, setBot] = React.useState(() => {
+    const cached = row?.description === undefined ? gatewayMetaOf(row)?.description : undefined
+    return typeof cached === 'string' && cached ? { ...row, description: cached } : row
+  })
   const meta = metaFor(row)
   const [opened] = React.useState(() => lookOf(row, meta))
   const [look, setLook] = React.useState(() => lookOf(row, meta))
-  const [description, setDescriptionState] = React.useState(String(row.description || ''))
+  const [description, setDescriptionState] = React.useState(String(bot.description || ''))
   // Review override-v2-r2 sweep: the server read below may land after the
   // user started typing; it then only updates the baseline, never the text.
   const descriptionTouched = React.useRef(false)
@@ -300,8 +306,10 @@ export function EditProfileDialog({ bot: row, onClose }: { bot: any; onClose: ()
     let live = true
     void ensureBotProfile(row).then(next => {
       if (!live) return
+      // No answer (the same row back): the seeded description stays.
+      if (next === row) return
       setBot(next)
-      if (next.description !== row.description && !descriptionTouched.current) setDescriptionState(String(next.description || ''))
+      if (next.description !== bot.description && !descriptionTouched.current) setDescriptionState(String(next.description || ''))
     })
     return () => {
       live = false
@@ -512,6 +520,7 @@ export function ModelDialog({ bot, onClose }: { bot: any; onClose: () => void })
 
 export function GroupsDialog({ bot, onClose }: { bot: any; onClose: () => void }) {
   useStore(roster2.metaWrites)
+  useStore(roster2.gatewayMeta)
   useStore(app.roster)
   const [name, setName] = React.useState('')
   const [error, setError] = React.useState<null | string>(null)

@@ -22,6 +22,17 @@ import {
   newBotLook,
   requestOnTarget
 } from '../core/profileOps.js'
+import {
+  entriesFromProfiles,
+  entryAfterSave,
+  gatewayMetaEntry,
+  gatewayMetaFor,
+  gatewayMetaKey,
+  GATEWAY_META_FRESH_MS,
+  GATEWAY_META_STORAGE_KEY,
+  mergeEntries,
+  pruneCache
+} from '../core/gatewayMeta.js'
 import { createSeen, nativeNotifications } from '../core/nativeNotify.js'
 import { displayName, rowKey } from '../core/roster.js'
 import { botRestScope, botWorkspaceOwnerKey, createBotRequester, resolveBotConnectionRoute, stockOpenTarget } from '../core/routing.js'
@@ -84,6 +95,77 @@ export function loadMetaWrites() {
   }
 }
 
+// ── names of bots on SSH sources (core/gatewayMeta.js) ───────────────────
+
+export function loadGatewayMeta() {
+  let saved: any = {}
+  try {
+    saved = app.ctx?.storage?.get?.(GATEWAY_META_STORAGE_KEY, {})
+  } catch {
+    saved = {}
+  }
+  roster2.gatewayMeta.set({ fresh: {}, cache: pruneCache(saved && typeof saved === 'object' ? saved : {}) })
+}
+
+/** Entries read from the bots' own gateways: this session's view and the
+ *  stored cache (written only when it changed). */
+export function noteGatewayMeta(entries: Record<string, any>) {
+  if (!entries || !Object.keys(entries).length) return
+  const cur = roster2.gatewayMeta.get()
+  const fresh = mergeEntries(cur.fresh, entries, { touch: true })
+  const cache = mergeEntries(cur.cache, entries)
+  if (fresh === cur.fresh && cache === cur.cache) return
+  if (cache !== cur.cache) {
+    const pruned = pruneCache(cache)
+    storageSet(GATEWAY_META_STORAGE_KEY, pruned)
+    roster2.gatewayMeta.set({ fresh, cache: pruned })
+    return
+  }
+  roster2.gatewayMeta.set({ fresh, cache })
+}
+
+/** One bot's `profiles.list` row, read over its own route. */
+function noteGatewayRow(bot: any, row: any) {
+  const key = gatewayMetaKey(bot)
+  const entry = key ? gatewayMetaEntry(row) : null
+  if (entry) noteGatewayMeta({ [key]: entry })
+}
+
+/** A connection's `profiles.list` answer (the remote-avatar list). */
+export function noteGatewayProfiles(connectionId: string, profiles: any[]) {
+  const rows = app.roster.get().rows.filter((bot: any) => gatewayMetaKey(bot))
+  noteGatewayMeta(entriesFromProfiles(rows, connectionId, profiles))
+}
+
+/** The gateway meta that names this row, or null (core/gatewayMeta.js). */
+export function gatewayMetaOf(bot: any) {
+  const { fresh, cache } = roster2.gatewayMeta.get()
+  return gatewayMetaFor(bot, fresh, cache)
+}
+
+const gatewayReads = new Set<string>()
+/** Re-read a bot's meta once its route is up (its chat resumed over it):
+ *  only for rows whose listing has none, at most once per
+ *  GATEWAY_META_FRESH_MS, never a dial of its own. */
+export async function refreshGatewayMeta(bot: any) {
+  const key = gatewayMetaKey(bot)
+  if (!key || gatewayReads.has(key)) return
+  const seen = roster2.gatewayMeta.get().fresh[key]
+  if (seen && Date.now() - Number(seen.at || 0) < GATEWAY_META_FRESH_MS) return
+  gatewayReads.add(key)
+  try {
+    const result: any = await request(bot, 'profiles.list', { include_sessions: false })
+    const route = resolveBotConnectionRoute(bot).route
+    const target = route?.targetProfile || String(bot?.name || '')
+    const row = (Array.isArray(result?.profiles) ? result.profiles : []).find((p: any) => p?.name === target)
+    if (row) noteGatewayRow(bot, row)
+  } catch {
+    /* the cached name stays */
+  } finally {
+    gatewayReads.delete(key)
+  }
+}
+
 function recordWrite(bot: any, patch: any, outcome: string) {
   const key = botMetaKey(bot)
   roster2.metaWrites.set(writes => {
@@ -99,10 +181,17 @@ function recordWrite(bot: any, patch: any, outcome: string) {
  *  change at once (stock's local half); a server miss is reported like stock
  *  (an explicit failure is an error; older gateways fall back silently). */
 export async function saveMeta(bot: any, patch: any, { rebase, label }: { rebase?: (server: any) => any; label?: string } = {}) {
-  const prevImage = effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get()).image ?? null
+  const prevImage = metaFor(bot).image ?? null
   recordWrite(bot, patch, 'pending')
   const result = await saveBotMetaPatch(request, bot, patch, { rebase, prevImage })
   recordWrite(bot, patch, result.serverOutcome)
+  // A bot named by its gateway (SSH): what the gateway now holds is kept at
+  // once, so the new name outlives the write fence and a reload.
+  const key = result.serverOutcome === 'persisted' && result.written ? gatewayMetaKey(bot) : ''
+  if (key) {
+    const previous = (result.row && gatewayMetaEntry(result.row)) || gatewayMetaOf(bot)
+    noteGatewayMeta({ [key]: entryAfterSave(previous, result.written) })
+  }
   if (result.serverOutcome === 'failed' || result.serverOutcome === 'unreachable') {
     notify('error', `${label || 'The change'} was saved on this screen only: ${result.serverOutcome === 'unreachable' ? 'the bot’s machine did not answer' : 'the bot’s Hermes did not take it'}.`)
   }
@@ -136,12 +225,17 @@ export async function currentMeta(bot: any) {
   if (bot?.sourceScoped) {
     try {
       const server = await readServerBotMeta(request, bot)
+      if (server && gatewayMetaKey(bot)) {
+        // A row with no listing meta (SSH): the read IS its gateway meta.
+        noteGatewayRow(bot, server.row)
+        return metaFor(bot)
+      }
       if (server) return effectiveMeta({ ...bot, ui_meta: { ...(bot.ui_meta || {}), 'hermes-bots': server.meta } }, app.roster.get().localMeta, roster2.metaWrites.get())
     } catch {
       /* fall back to the row */
     }
   }
-  return effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get())
+  return metaFor(bot)
 }
 
 /** canonical-chat.ts:692 ensureBotProfile: the description its own backend holds. */
@@ -149,6 +243,7 @@ export async function ensureBotProfile(bot: any) {
   if (!bot?.sourceScoped) return bot
   try {
     const server = await readServerBotMeta(request, bot)
+    if (server) noteGatewayRow(bot, server.row)
     return typeof server?.row?.description === 'string' ? { ...bot, description: server.row.description } : bot
   } catch {
     return bot
@@ -239,13 +334,13 @@ export function newChatWith(bot: any) {
 
 /** bot-row.tsx:418 Duplicate (profile-ops.ts duplicateBot). */
 export async function duplicateBot(bot: any) {
-  notify('info', `Duplicating ${nameOf(bot, effectiveMeta(bot, app.roster.get().localMeta, roster2.metaWrites.get()))}…`)
+  notify('info', `Duplicating ${nameOf(bot, metaFor(bot))}…`)
   try {
     const source = await ensureBotProfile(bot)
     const name = duplicateName(source, app.roster.get().rows)
     await request(source, 'profiles.create', duplicateParams(source, name))
     if (typeof host?.dropLeftoverProfilePrefs === 'function') host.dropLeftoverProfilePrefs(name, resolveBotConnectionRoute(source).route?.connectionId)
-    const look = duplicateLook(effectiveMeta(source, app.roster.get().localMeta, roster2.metaWrites.get()))
+    const look = duplicateLook(metaFor(source))
     if (look && Object.keys(look).length) await saveMeta(duplicateRow(source, name), look, { label: 'The copy’s look' })
     invalidateRoster()
     notify('success', `Created ${name} — full copy of ${source.name}`)
@@ -825,6 +920,8 @@ function onChatState(state: any) {
   if (runtimeId && runtimeId !== usageRuntime && state?.bot) {
     usageRuntime = runtimeId
     void readUsage(state.bot, runtimeId, key)
+    // The chat resumed over the bot's route: it is up, so its name is read.
+    void refreshGatewayMeta(state.bot)
   }
   if (!runtimeId) usageRuntime = ''
 }
@@ -847,6 +944,7 @@ function onGatewayEvent(event: any) {
 
 export function startRosterParity() {
   loadMetaWrites()
+  loadGatewayMeta()
   if (!offChat) {
     offChat = app.chat.subscribe(() => onChatState(app.chat.get()))
     onChatState(app.chat.get())

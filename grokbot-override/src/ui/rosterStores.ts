@@ -69,7 +69,11 @@ export const roster2 = {
   sectionDelete: createStore<null | { id: string; name: string; count: number }>(null),
   /** Server avatars of bots on other connections (core/remoteAvatars.js):
    *  route key -> data URL, for the app session. */
-  remoteAvatars: createStore<Record<string, string>>({})
+  remoteAvatars: createStore<Record<string, string>>({}),
+  /** Bot Mode meta of bots whose row carries none (SSH sources), as their own
+   *  gateway reported it (core/gatewayMeta.js): `fresh` = read this app
+   *  session, `cache` = plugin storage `botMetaCache`. Route key -> entry. */
+  gatewayMeta: createStore<{ fresh: Record<string, any>; cache: Record<string, any> }>({ fresh: {}, cache: {} })
 }
 
 export function openDialog(state: DialogState) {
