@@ -243,20 +243,67 @@ export const ROSTER_CSS = /* css */ `
 .gbo-status-meter { display: inline-flex; align-items: center; gap: 6px; font: 11px/16px var(--gbo-font); }
 .gbo-status-meter .gbo-meter-bar { width: 44px; height: 4px; }
 
-/* bot screen */
-.gbo-screen { display: flex; flex-direction: column; background: var(--gbo-bg); }
-.gbo-screen-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--gbo-border); font: var(--gbo-text-label); flex-wrap: wrap; }
-.gbo-screen-bar .gbo-spacer { flex: 1; }
-.gbo-screen-tag { border-radius: 999px; padding: 2px 10px; background: var(--gbo-card); color: var(--gbo-muted-fg); }
-.gbo-screen-tag.is-you { background: color-mix(in srgb, var(--gbo-destructive) 15%, transparent); color: var(--gbo-destructive); font-weight: 600; }
-.gbo-screen-tag.is-reason { background: color-mix(in srgb, var(--gbo-warning) 15%, transparent); color: var(--gbo-warning); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gbo-screen-stage { position: relative; flex: 1; min-height: 0; background: #000; }
-.gbo-screen-stage.is-held { box-shadow: inset 0 0 0 2px var(--gbo-destructive); }
+/* bot screen: a near-black surround in both themes, the desk image centred
+   and scaled to fit, and one white control pill centred just under it (Grok
+   Bot's viewer). The stage takes the display's aspect ratio, so the pill sits
+   on the image's bottom edge rather than the pane's. */
+.gbo-screen { display: flex; flex-direction: column; background: #141414; color: #f5f5f5; }
+.gbo-screen-view { position: relative; flex: 1; min-height: 0; container-type: size; }
+.gbo-screen-fit { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 48px 28px 36px; }
+.gbo-screen-stage {
+  /* the fit box's vertical padding + gap + pill height */
+  --gbo-screen-chrome: 138px;
+  position: relative; flex: none; aspect-ratio: var(--gbo-screen-ratio, 1.6);
+  width: min(100cqw - 56px, (100cqh - var(--gbo-screen-chrome)) * var(--gbo-screen-ratio, 1.6));
+  border-radius: 6px; overflow: hidden; background: #000;
+  transition: box-shadow 180ms var(--gbo-ease);
+}
+.gbo-screen-stage.is-held { box-shadow: 0 0 0 1.5px var(--gbo-ring), 0 0 0 5px color-mix(in srgb, var(--gbo-ring) 16%, transparent); }
+.gbo-screen-stage.is-asleep { background: #1b1b1b; box-shadow: inset 0 0 0 1px #ffffff0d; }
 .gbo-screen-canvas { position: absolute; inset: 0; }
-.gbo-screen-overlay { position: absolute; inset: 0; display: grid; place-items: center; color: #fffb; font: var(--gbo-text-label); pointer-events: none; text-align: center; padding: 16px; }
-.gbo-screen-banner { position: absolute; left: 0; right: 0; padding: 6px 12px; font: var(--gbo-text-label); text-align: center; }
-.gbo-screen-banner.is-top { top: 0; background: #451a03cc; color: #fde68a; }
-.gbo-screen-banner.is-bottom { bottom: 0; background: #450a0acc; color: #fecaca; text-align: left; }
+.gbo-screen-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: #ffffffb3; font: 13px/18px var(--gbo-font); text-align: center; pointer-events: none; }
+.gbo-screen-banner {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px);
+  padding: 6px 12px; border-radius: 999px; background: #000000b8; backdrop-filter: blur(8px);
+  box-shadow: 0 0 0 .5px #ffffff1f; color: #f5f5f5; font: 13px/18px var(--gbo-font);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.gbo-screen-asleep { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
+.gbo-screen-asleep strong { font: 500 15px/22px var(--gbo-font); color: #f5f5f5; }
+.gbo-screen-asleep span { max-width: 380px; font: 13px/18px var(--gbo-font); color: #ffffff94; }
+.gbo-screen-asleep span.is-error { color: #ff8f8f; }
+.gbo-screen-corner { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 2px; }
+.gbo-screen-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: #ffffff8c; cursor: pointer;
+  transition: background 150ms var(--gbo-ease), color 150ms var(--gbo-ease);
+}
+.gbo-screen-icon-btn:hover:not(:disabled) { background: #ffffff14; color: #ffffff; }
+.gbo-screen-icon-btn:disabled { opacity: .4; cursor: default; }
+.gbo-screen-icon-btn svg { width: 16px; height: 16px; }
+.gbo-screen-pill {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 40px;
+  padding: 4px 4px 4px 14px; border-radius: 999px; background: #ffffff; color: #1c1c1c;
+  font: 500 14px/20px var(--gbo-font); letter-spacing: .1px;
+  box-shadow: 0 1px 2px #0000004d, 0 8px 24px -4px #00000066;
+}
+.gbo-screen-pill-state { display: inline-flex; align-items: center; gap: 7px; min-width: 0; padding-right: 8px; white-space: nowrap; }
+.gbo-screen-pill-state > span { overflow: hidden; text-overflow: ellipsis; }
+.gbo-screen-pill.is-watch .gbo-screen-pill-state, .gbo-screen-pill.is-idle .gbo-screen-pill-state { color: #1c1c1cad; }
+.gbo-screen-pill-state svg { flex: none; width: 15px; height: 15px; }
+.gbo-screen-pill-btn {
+  flex: none; height: 32px; padding: 0 14px; border: 0; border-radius: 999px; font: inherit; letter-spacing: inherit;
+  white-space: nowrap; cursor: pointer; transition: background 150ms var(--gbo-ease), opacity 150ms var(--gbo-ease);
+}
+.gbo-screen-pill-btn.is-dark { background: #1c1c1c; color: #ffffff; }
+.gbo-screen-pill-btn.is-dark:hover:not(:disabled) { background: #383838; }
+.gbo-screen-pill-btn.is-light { background: #efefef; color: #1c1c1c; }
+.gbo-screen-pill-btn.is-light:hover:not(:disabled) { background: #e4e4e4; }
+.gbo-screen-pill-btn:disabled { opacity: .45; cursor: default; }
+.gbo-screen-pill-btn:focus-visible { outline: 2px solid var(--gbo-ring); outline-offset: 2px; }
+.gbo-screen-spin { animation: gbo-screen-spin .9s linear infinite; }
+@keyframes gbo-screen-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gbo-screen-spin { animation: none; } }
 .gbo-screen-thumb { width: 100%; border-radius: 10px; display: block; background: #000; aspect-ratio: 16 / 10; object-fit: contain; }
 .gbo-log { max-height: 10rem; overflow: auto; border-radius: 10px; background: #000; color: #ddd; padding: 8px; font: 11px/15px var(--gbo-mono); white-space: pre-wrap; text-align: left; width: min(520px, 100%); }
 `

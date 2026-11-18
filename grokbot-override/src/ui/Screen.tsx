@@ -1,5 +1,6 @@
 // The bot's computer (P4): Bot Screen in an override workspace tab. Live view
-// through noVNC on the gateway's display bridge, with Take over / Hand back.
+// through noVNC on the gateway's display bridge, with Take control / Stop in
+// a white pill under the desk image (core/screenPill.js maps the state).
 // Behaviour is stock screen-pane.tsx (see core/screen.js for the citations);
 // the RFB client is the kit computer-viewer's vendored noVNC 1.7.0 (MPL-2.0,
 // ../../computer-viewer/vendor), loaded only when a screen attaches.
@@ -23,8 +24,9 @@ import {
   screenPhase,
   viewerHash
 } from '../core/screen.js'
+import { screenPill, screenPillTitle, screenRatio } from '../core/screenPill.js'
 import { app, metaFor } from './app'
-import { IconPlay, IconRefresh } from './iconsRoster'
+import { IconEye, IconRefresh, IconWarn } from './iconsRoster'
 import { onRosterParityStop } from './rosterActions'
 import { setScreenOpener } from './RosterMenus'
 import { host, sdk } from './sdk'
@@ -54,6 +56,52 @@ function onDisplayEvent(type: string, fn: (event: any) => void) {
 
 function errText(err: any) {
   return String(err?.message || err)
+}
+
+// The control pill's small icons (14px, same line style as ./iconsRoster).
+const pillIcon = { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
+const PILL_ICONS: Record<string, () => React.ReactNode> = {
+  eye: () => <IconEye />,
+  warn: () => <IconWarn />,
+  pointer: () => (
+    <svg {...pillIcon}>
+      <path d="M10.5 20H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v3.5" />
+      <path d="m12.5 12.5 8 2.6-3.4 1.4-1.4 3.4-3.2-7.4Z" />
+    </svg>
+  ),
+  person: () => (
+    <svg {...pillIcon}>
+      <circle cx="12" cy="8.5" r="3.5" />
+      <path d="M5 20c.8-3.5 3.6-5.5 7-5.5s6.2 2 7 5.5" />
+    </svg>
+  ),
+  power: () => (
+    <svg {...pillIcon}>
+      <path d="M12 3.5v7.5M6.6 7a7.5 7.5 0 1 0 10.8 0" />
+    </svg>
+  ),
+  spinner: () => (
+    <svg {...pillIcon} className="gbo-screen-spin">
+      <path d="M20 12a8 8 0 1 1-8-8" />
+    </svg>
+  )
+}
+
+/** One white pill under the desk image: state, then its one or two actions. */
+function ControlPill({ pill, title, run }: { pill: NonNullable<ReturnType<typeof screenPill>>; title: string; run: (id: string) => void }) {
+  return (
+    <div className={`gbo-screen-pill is-${pill.tone}`} role="group" aria-label="Screen control" title={title}>
+      <span className="gbo-screen-pill-state" aria-live="polite">
+        {PILL_ICONS[pill.icon]?.()}
+        <span>{pill.label}</span>
+      </span>
+      {pill.actions.map(action => (
+        <button key={action.id} type="button" className={`gbo-screen-pill-btn is-${action.kind}`} disabled={action.disabled} title={action.title} onClick={() => run(action.id)}>
+          {action.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 export function BotScreen({ bot }: { bot: any }) {
@@ -339,65 +387,52 @@ export function BotScreen({ bot }: { bot: any }) {
         </button>
       </div>
     )
-  } else if (phase === 'stopped') {
-    content = center(
-      `${who}’s computer is asleep`,
-      status?.blocker ?? 'Start it to watch the bot work, or to take over.',
-      <button type="button" className="gbo-btn is-primary" disabled={busy || Boolean(status?.blocker)} onClick={() => void start()}>
-        <IconPlay />
-        {busy ? 'Starting…' : 'Start'}
-      </button>
-    )
   } else {
+    // Running or asleep: the desk image (or its empty frame) with the control
+    // pill centred under it, and Reconnect as a quiet corner icon.
+    const running = phase === 'running'
     const humanOther = lease?.holder === 'human' && !iHold
+    const pill = screenPill({ phase, conn, iHold, humanOther, busy, hasViewer: Boolean(viewer), blocker: status?.blocker })!
+    const run = (id: string) => {
+      if (id === 'start') void start()
+      else if (id === 'retry') void attach()
+      else if (id === 'take') void takeOver()
+      else if (id === 'stop') void handBack()
+      else if (id === 'take-back') void handBack(true)
+    }
+    const ratio = { '--gbo-screen-ratio': screenRatio(status?.geometry) } as React.CSSProperties
     content = (
-      <>
-        <div className="gbo-screen-bar">
-          <strong>{who}’s computer</strong>
-          {status?.display ? (
-            <span className="gbo-field-hint">
-              {status.display} · {status.geometry}
-            </span>
-          ) : null}
-          {String(status?.placement || '').startsWith('terminal:') ? <span className="gbo-screen-tag">in sandbox {String(status.placement).slice(9)}</span> : null}
-          <span className="gbo-spacer" />
-          {lease?.holder === 'human' && lease.reason ? (
-            <span className="gbo-screen-tag is-reason" title={lease.reason}>
-              {lease.reason}
-            </span>
-          ) : null}
-          <span className={`gbo-screen-tag${iHold ? ' is-you' : ''}`}>{iHold ? 'You have control' : humanOther ? 'Someone else has control' : 'The bot has control'}</span>
-          {iHold ? (
-            <button type="button" className="gbo-btn is-small" disabled={busy} onClick={() => void handBack()}>
-              Hand back
+      <div className="gbo-screen-view">
+        {running ? (
+          <div className="gbo-screen-corner">
+            <button type="button" className="gbo-screen-icon-btn" aria-label="Reconnect" title="Reconnect" disabled={conn === 'attaching'} onClick={() => void attach()}>
+              <IconRefresh />
             </button>
+          </div>
+        ) : null}
+        <div className="gbo-screen-fit">
+          {running ? (
+            <div className={`gbo-screen-stage${iHold ? ' is-held' : ''}`} style={ratio}>
+              <div className="gbo-screen-canvas" data-remote-screen="" data-terminal="" ref={canvasHost} />
+              {evicted ? <div className="gbo-screen-banner is-top">Someone else took control; watching again.</div> : null}
+              {conn === 'error' && error ? <div className="gbo-screen-overlay">{error}</div> : null}
+            </div>
           ) : (
-            <>
-              {humanOther ? (
-                <button type="button" className="gbo-btn is-small" disabled={busy} title="Take control back from a viewer that is gone" onClick={() => void handBack(true)}>
-                  Force hand back
-                </button>
-              ) : null}
-              <button type="button" className="gbo-btn is-small is-primary" disabled={busy || conn === 'attaching' || !viewer} onClick={() => void takeOver()}>
-                Take over
-              </button>
-            </>
+            <div className="gbo-screen-stage is-asleep" style={ratio}>
+              <div className="gbo-screen-asleep">
+                <strong>The computer is asleep</strong>
+                <span>{status?.blocker ?? 'Start it to watch the bot work, or to take over.'}</span>
+                {error ? <span className="is-error">{error}</span> : null}
+              </div>
+            </div>
           )}
-          <button type="button" className="gbo-icon-btn" aria-label="Reconnect" title="Reconnect" disabled={conn === 'attaching'} onClick={() => void attach()}>
-            <IconRefresh />
-          </button>
+          <ControlPill pill={pill} title={screenPillTitle(who, status, lease)} run={run} />
         </div>
-        <div className={`gbo-screen-stage${iHold ? ' is-held' : ''}`}>
-          <div className="gbo-screen-canvas" data-remote-screen="" data-terminal="" ref={canvasHost} />
-          {conn === 'attaching' ? <div className="gbo-screen-overlay">Connecting…</div> : null}
-          {evicted ? <div className="gbo-screen-banner is-top">Someone else took control; watching again.</div> : null}
-          {conn === 'error' && error ? <div className="gbo-screen-banner is-bottom">{error}</div> : null}
-        </div>
-      </>
+      </div>
     )
   }
   return (
-    <div data-gbo-root="" className="gbo-screen">
+    <div data-gbo-root="" data-gbo-theme="dark" className="gbo-screen">
       {content}
     </div>
   )

@@ -90,7 +90,7 @@ function slackPages() {
 
 mkdirSync(outDir, { recursive: true })
 const file = await bundlePreview()
-const { render, renderAvatarSheet, CARDS_DEMO_FILES, CARDS_DEMO_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
+const { render, renderAvatarSheet, renderScreenState, CARDS_DEMO_FILES, CARDS_DEMO_ITEMS, DIRECTIVE_FILES, DIRECTIVE_ITEMS, LIVE_APPROVAL_FILES, LIVE_APPROVAL_ITEMS, LIVE_APPROVAL_SETTLED_FILES, LIVE_APPROVAL_SETTLED_ITEMS, LIVE_EMAIL_ITEMS, LIVE_TASK_FILES, LIVE_TASK_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CARD_SETTLED_ITEMS, CARD_WAITING, MD_ITEMS, NEW_ITEMS, NEW_ITEMS_FIRST_UNREAD, SHORT_ITEMS, USER_ITEMS } = await import(pathToFileURL(file).href)
 const host = live ? hostCss() : ''
 if (live && !host) console.warn('no Hermes stylesheet found: rendering without the host cascade')
 // ROSTER indexes: 0 travel, 1 scholar, 4 recipes (pink), 5 sunny (yellow).
@@ -163,5 +163,11 @@ for (const [name, options] of Object.entries(pages)) {
   if (!framed) writeFileSync(join(outDir, name.replace(/\.html$/, '.svg')), toSvg(html, options.theme === 'light'))
 }
 if (live) writeFileSync(join(outDir, 'avatars-sheet.html'), renderAvatarSheet())
+if (live) {
+  // The bot's computer: the control pill in each state, in both app themes
+  // (the surround is dark in both).
+  for (const state of ['watching', 'in-control', 'stale-hold', 'not-running'])
+    for (const theme of ['light', 'dark']) writeFileSync(join(outDir, `screen-${state}-${theme}.html`), renderScreenState(state, theme))
+}
 rmSync(dirname(file), { recursive: true, force: true })
 console.log(`wrote ${Object.keys(pages).length} pages to ${outDir}`)

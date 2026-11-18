@@ -50893,20 +50893,67 @@ var ROSTER_CSS = (
 .gbo-status-meter { display: inline-flex; align-items: center; gap: 6px; font: 11px/16px var(--gbo-font); }
 .gbo-status-meter .gbo-meter-bar { width: 44px; height: 4px; }
 
-/* bot screen */
-.gbo-screen { display: flex; flex-direction: column; background: var(--gbo-bg); }
-.gbo-screen-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--gbo-border); font: var(--gbo-text-label); flex-wrap: wrap; }
-.gbo-screen-bar .gbo-spacer { flex: 1; }
-.gbo-screen-tag { border-radius: 999px; padding: 2px 10px; background: var(--gbo-card); color: var(--gbo-muted-fg); }
-.gbo-screen-tag.is-you { background: color-mix(in srgb, var(--gbo-destructive) 15%, transparent); color: var(--gbo-destructive); font-weight: 600; }
-.gbo-screen-tag.is-reason { background: color-mix(in srgb, var(--gbo-warning) 15%, transparent); color: var(--gbo-warning); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gbo-screen-stage { position: relative; flex: 1; min-height: 0; background: #000; }
-.gbo-screen-stage.is-held { box-shadow: inset 0 0 0 2px var(--gbo-destructive); }
+/* bot screen: a near-black surround in both themes, the desk image centred
+   and scaled to fit, and one white control pill centred just under it (Grok
+   Bot's viewer). The stage takes the display's aspect ratio, so the pill sits
+   on the image's bottom edge rather than the pane's. */
+.gbo-screen { display: flex; flex-direction: column; background: #141414; color: #f5f5f5; }
+.gbo-screen-view { position: relative; flex: 1; min-height: 0; container-type: size; }
+.gbo-screen-fit { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 48px 28px 36px; }
+.gbo-screen-stage {
+  /* the fit box's vertical padding + gap + pill height */
+  --gbo-screen-chrome: 138px;
+  position: relative; flex: none; aspect-ratio: var(--gbo-screen-ratio, 1.6);
+  width: min(100cqw - 56px, (100cqh - var(--gbo-screen-chrome)) * var(--gbo-screen-ratio, 1.6));
+  border-radius: 6px; overflow: hidden; background: #000;
+  transition: box-shadow 180ms var(--gbo-ease);
+}
+.gbo-screen-stage.is-held { box-shadow: 0 0 0 1.5px var(--gbo-ring), 0 0 0 5px color-mix(in srgb, var(--gbo-ring) 16%, transparent); }
+.gbo-screen-stage.is-asleep { background: #1b1b1b; box-shadow: inset 0 0 0 1px #ffffff0d; }
 .gbo-screen-canvas { position: absolute; inset: 0; }
-.gbo-screen-overlay { position: absolute; inset: 0; display: grid; place-items: center; color: #fffb; font: var(--gbo-text-label); pointer-events: none; text-align: center; padding: 16px; }
-.gbo-screen-banner { position: absolute; left: 0; right: 0; padding: 6px 12px; font: var(--gbo-text-label); text-align: center; }
-.gbo-screen-banner.is-top { top: 0; background: #451a03cc; color: #fde68a; }
-.gbo-screen-banner.is-bottom { bottom: 0; background: #450a0acc; color: #fecaca; text-align: left; }
+.gbo-screen-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: #ffffffb3; font: 13px/18px var(--gbo-font); text-align: center; pointer-events: none; }
+.gbo-screen-banner {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px);
+  padding: 6px 12px; border-radius: 999px; background: #000000b8; backdrop-filter: blur(8px);
+  box-shadow: 0 0 0 .5px #ffffff1f; color: #f5f5f5; font: 13px/18px var(--gbo-font);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.gbo-screen-asleep { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
+.gbo-screen-asleep strong { font: 500 15px/22px var(--gbo-font); color: #f5f5f5; }
+.gbo-screen-asleep span { max-width: 380px; font: 13px/18px var(--gbo-font); color: #ffffff94; }
+.gbo-screen-asleep span.is-error { color: #ff8f8f; }
+.gbo-screen-corner { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 2px; }
+.gbo-screen-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: #ffffff8c; cursor: pointer;
+  transition: background 150ms var(--gbo-ease), color 150ms var(--gbo-ease);
+}
+.gbo-screen-icon-btn:hover:not(:disabled) { background: #ffffff14; color: #ffffff; }
+.gbo-screen-icon-btn:disabled { opacity: .4; cursor: default; }
+.gbo-screen-icon-btn svg { width: 16px; height: 16px; }
+.gbo-screen-pill {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 40px;
+  padding: 4px 4px 4px 14px; border-radius: 999px; background: #ffffff; color: #1c1c1c;
+  font: 500 14px/20px var(--gbo-font); letter-spacing: .1px;
+  box-shadow: 0 1px 2px #0000004d, 0 8px 24px -4px #00000066;
+}
+.gbo-screen-pill-state { display: inline-flex; align-items: center; gap: 7px; min-width: 0; padding-right: 8px; white-space: nowrap; }
+.gbo-screen-pill-state > span { overflow: hidden; text-overflow: ellipsis; }
+.gbo-screen-pill.is-watch .gbo-screen-pill-state, .gbo-screen-pill.is-idle .gbo-screen-pill-state { color: #1c1c1cad; }
+.gbo-screen-pill-state svg { flex: none; width: 15px; height: 15px; }
+.gbo-screen-pill-btn {
+  flex: none; height: 32px; padding: 0 14px; border: 0; border-radius: 999px; font: inherit; letter-spacing: inherit;
+  white-space: nowrap; cursor: pointer; transition: background 150ms var(--gbo-ease), opacity 150ms var(--gbo-ease);
+}
+.gbo-screen-pill-btn.is-dark { background: #1c1c1c; color: #ffffff; }
+.gbo-screen-pill-btn.is-dark:hover:not(:disabled) { background: #383838; }
+.gbo-screen-pill-btn.is-light { background: #efefef; color: #1c1c1c; }
+.gbo-screen-pill-btn.is-light:hover:not(:disabled) { background: #e4e4e4; }
+.gbo-screen-pill-btn:disabled { opacity: .45; cursor: default; }
+.gbo-screen-pill-btn:focus-visible { outline: 2px solid var(--gbo-ring); outline-offset: 2px; }
+.gbo-screen-spin { animation: gbo-screen-spin .9s linear infinite; }
+@keyframes gbo-screen-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gbo-screen-spin { animation: none; } }
 .gbo-screen-thumb { width: 100%; border-radius: 10px; display: block; background: #000; aspect-ratio: 16 / 10; object-fit: contain; }
 .gbo-log { max-height: 10rem; overflow: auto; border-radius: 10px; background: #000; color: #ddd; padding: 8px; font: 11px/15px var(--gbo-mono); white-space: pre-wrap; text-align: left; width: min(520px, 100%); }
 `
@@ -60386,6 +60433,53 @@ function handBackParams(viewer, force = false) {
   return force ? { force: true } : { viewer_id: viewer?.id };
 }
 
+// src/core/screenPill.js
+function screenPill({ phase, conn, iHold, humanOther, busy, hasViewer, blocker }) {
+  if (phase === "stopped") {
+    return {
+      tone: "idle",
+      icon: "power",
+      label: "Not running",
+      actions: [{ id: "start", label: busy ? "Starting…" : "Start screen", kind: "dark", disabled: Boolean(busy || blocker) }]
+    };
+  }
+  if (phase !== "running") return null;
+  const actions = [];
+  if (conn === "error") actions.push({ id: "retry", label: "Retry", kind: "light", disabled: false, title: "Reconnect to the screen" });
+  if (iHold) {
+    actions.push({ id: "stop", label: "Stop", kind: "light", disabled: Boolean(busy), title: "Hand control back to the bot" });
+  } else {
+    if (humanOther) {
+      actions.push({ id: "take-back", label: "Take back", kind: "light", disabled: Boolean(busy), title: "Take control back from a viewer that is gone (hands it to the bot)" });
+    }
+    actions.push({ id: "take", label: "Take control", kind: "dark", disabled: Boolean(busy || conn === "attaching" || !hasViewer) });
+  }
+  let icon = iHold ? "pointer" : humanOther ? "person" : "eye";
+  let label = iHold ? "You’re in control" : humanOther ? "Someone else is in control" : "Watching";
+  if (conn === "attaching") {
+    icon = "spinner";
+    label = "Connecting…";
+  } else if (conn === "error") {
+    icon = "warn";
+    label = "Connection lost";
+  }
+  return { tone: iHold ? "you" : "watch", icon, label, actions };
+}
+function screenRatio(geometry) {
+  const match = /^\s*(\d+)\s*[x×]\s*(\d+)\s*$/.exec(String(geometry ?? ""));
+  const width = match ? Number(match[1]) : 0;
+  const height = match ? Number(match[2]) : 0;
+  return width > 0 && height > 0 ? width / height : 1.6;
+}
+function screenPillTitle(who, status, lease) {
+  const parts = [`${who}’s computer`];
+  if (status?.display) parts.push(status.geometry ? `${status.display} · ${status.geometry}` : String(status.display));
+  const placement = String(status?.placement || "");
+  if (placement.startsWith("terminal:")) parts.push(`in sandbox ${placement.slice(9)}`);
+  if (lease?.holder === "human" && lease.reason) parts.push(String(lease.reason));
+  return parts.join(" — ");
+}
+
 // src/ui/RosterMenus.tsx
 import { jsx as jsx22 } from "react/jsx-runtime";
 var newGroupOpener = null;
@@ -60494,7 +60588,7 @@ function newMenuEntries() {
 }
 
 // src/ui/Screen.tsx
-import { Fragment as Fragment14, jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
+import { jsx as jsx23, jsxs as jsxs21 } from "react/jsx-runtime";
 var stores = /* @__PURE__ */ new Map();
 function screenStore(bot) {
   const key = rowKey(bot);
@@ -60515,6 +60609,30 @@ function onDisplayEvent(type, fn) {
 }
 function errText(err2) {
   return String(err2?.message || err2);
+}
+var pillIcon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
+var PILL_ICONS = {
+  eye: () => /* @__PURE__ */ jsx23(IconEye, {}),
+  warn: () => /* @__PURE__ */ jsx23(IconWarn, {}),
+  pointer: () => /* @__PURE__ */ jsxs21("svg", { ...pillIcon, children: [
+    /* @__PURE__ */ jsx23("path", { d: "M10.5 20H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v3.5" }),
+    /* @__PURE__ */ jsx23("path", { d: "m12.5 12.5 8 2.6-3.4 1.4-1.4 3.4-3.2-7.4Z" })
+  ] }),
+  person: () => /* @__PURE__ */ jsxs21("svg", { ...pillIcon, children: [
+    /* @__PURE__ */ jsx23("circle", { cx: "12", cy: "8.5", r: "3.5" }),
+    /* @__PURE__ */ jsx23("path", { d: "M5 20c.8-3.5 3.6-5.5 7-5.5s6.2 2 7 5.5" })
+  ] }),
+  power: () => /* @__PURE__ */ jsx23("svg", { ...pillIcon, children: /* @__PURE__ */ jsx23("path", { d: "M12 3.5v7.5M6.6 7a7.5 7.5 0 1 0 10.8 0" }) }),
+  spinner: () => /* @__PURE__ */ jsx23("svg", { ...pillIcon, className: "gbo-screen-spin", children: /* @__PURE__ */ jsx23("path", { d: "M20 12a8 8 0 1 1-8-8" }) })
+};
+function ControlPill({ pill, title, run }) {
+  return /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-pill is-${pill.tone}`, role: "group", "aria-label": "Screen control", title, children: [
+    /* @__PURE__ */ jsxs21("span", { className: "gbo-screen-pill-state", "aria-live": "polite", children: [
+      PILL_ICONS[pill.icon]?.(),
+      /* @__PURE__ */ jsx23("span", { children: pill.label })
+    ] }),
+    pill.actions.map((action) => /* @__PURE__ */ jsx23("button", { type: "button", className: `gbo-screen-pill-btn is-${action.kind}`, disabled: action.disabled, title: action.title, onClick: () => run(action.id), children: action.label }, action.id))
+  ] });
 }
 function BotScreen({ bot }) {
   const store = screenStore(bot);
@@ -60771,50 +60889,35 @@ function BotScreen({ bot }) {
         /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-ghost", disabled: busy, onClick: () => void decideImage(false), children: "Keep the current one" })
       ] })
     );
-  } else if (phase === "stopped") {
-    content = center(
-      `${who}’s computer is asleep`,
-      status?.blocker ?? "Start it to watch the bot work, or to take over.",
-      /* @__PURE__ */ jsxs21("button", { type: "button", className: "gbo-btn is-primary", disabled: busy || Boolean(status?.blocker), onClick: () => void start2(), children: [
-        /* @__PURE__ */ jsx23(IconPlay, {}),
-        busy ? "Starting…" : "Start"
-      ] })
-    );
   } else {
+    const running = phase === "running";
     const humanOther = lease?.holder === "human" && !iHold;
-    content = /* @__PURE__ */ jsxs21(Fragment14, { children: [
-      /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-bar", children: [
-        /* @__PURE__ */ jsxs21("strong", { children: [
-          who,
-          "’s computer"
-        ] }),
-        status?.display ? /* @__PURE__ */ jsxs21("span", { className: "gbo-field-hint", children: [
-          status.display,
-          " · ",
-          status.geometry
-        ] }) : null,
-        String(status?.placement || "").startsWith("terminal:") ? /* @__PURE__ */ jsxs21("span", { className: "gbo-screen-tag", children: [
-          "in sandbox ",
-          String(status.placement).slice(9)
-        ] }) : null,
-        /* @__PURE__ */ jsx23("span", { className: "gbo-spacer" }),
-        lease?.holder === "human" && lease.reason ? /* @__PURE__ */ jsx23("span", { className: "gbo-screen-tag is-reason", title: lease.reason, children: lease.reason }) : null,
-        /* @__PURE__ */ jsx23("span", { className: `gbo-screen-tag${iHold ? " is-you" : ""}`, children: iHold ? "You have control" : humanOther ? "Someone else has control" : "The bot has control" }),
-        iHold ? /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-small", disabled: busy, onClick: () => void handBack(), children: "Hand back" }) : /* @__PURE__ */ jsxs21(Fragment14, { children: [
-          humanOther ? /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-small", disabled: busy, title: "Take control back from a viewer that is gone", onClick: () => void handBack(true), children: "Force hand back" }) : null,
-          /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-btn is-small is-primary", disabled: busy || conn === "attaching" || !viewer, onClick: () => void takeOver(), children: "Take over" })
-        ] }),
-        /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: conn === "attaching", onClick: () => void attach(), children: /* @__PURE__ */ jsx23(IconRefresh, {}) })
-      ] }),
-      /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}`, children: [
-        /* @__PURE__ */ jsx23("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
-        conn === "attaching" ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-overlay", children: "Connecting…" }) : null,
-        evicted ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
-        conn === "error" && error ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-banner is-bottom", children: error }) : null
+    const pill = screenPill({ phase, conn, iHold, humanOther, busy, hasViewer: Boolean(viewer), blocker: status?.blocker });
+    const run = (id) => {
+      if (id === "start") void start2();
+      else if (id === "retry") void attach();
+      else if (id === "take") void takeOver();
+      else if (id === "stop") void handBack();
+      else if (id === "take-back") void handBack(true);
+    };
+    const ratio = { "--gbo-screen-ratio": screenRatio(status?.geometry) };
+    content = /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-view", children: [
+      running ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-corner", children: /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-screen-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: conn === "attaching", onClick: () => void attach(), children: /* @__PURE__ */ jsx23(IconRefresh, {}) }) }) : null,
+      /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-fit", children: [
+        running ? /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}`, style: ratio, children: [
+          /* @__PURE__ */ jsx23("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
+          evicted ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
+          conn === "error" && error ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-overlay", children: error }) : null
+        ] }) : /* @__PURE__ */ jsx23("div", { className: "gbo-screen-stage is-asleep", style: ratio, children: /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-asleep", children: [
+          /* @__PURE__ */ jsx23("strong", { children: "The computer is asleep" }),
+          /* @__PURE__ */ jsx23("span", { children: status?.blocker ?? "Start it to watch the bot work, or to take over." }),
+          error ? /* @__PURE__ */ jsx23("span", { className: "is-error", children: error }) : null
+        ] }) }),
+        /* @__PURE__ */ jsx23(ControlPill, { pill, title: screenPillTitle(who, status, lease), run })
       ] })
     ] });
   }
-  return /* @__PURE__ */ jsx23("div", { "data-gbo-root": "", className: "gbo-screen", children: content });
+  return /* @__PURE__ */ jsx23("div", { "data-gbo-root": "", "data-gbo-theme": "dark", className: "gbo-screen", children: content });
 }
 var openScreens = /* @__PURE__ */ new Map();
 function screenWorkspaceId(bot) {
@@ -61148,7 +61251,7 @@ function ProfilePanel({ bot, onClose }) {
 
 // src/ui/Prompts.tsx
 import * as React24 from "react";
-import { Fragment as Fragment15, jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
+import { Fragment as Fragment14, jsx as jsx26, jsxs as jsxs24 } from "react/jsx-runtime";
 var TITLES = {
   sudo: "needs your administrator password",
   secret: "needs a secret value",
@@ -61389,7 +61492,7 @@ function ConnectionCard({ waiting, onRespond }) {
   const busy = Boolean(waiting.answering);
   const forms = React24.useRef({});
   const targets = waiting.targets || [];
-  return /* @__PURE__ */ jsxs24(Fragment15, { children: [
+  return /* @__PURE__ */ jsxs24(Fragment14, { children: [
     targets.length === 0 ? /* @__PURE__ */ jsx26("div", { className: "gbo-card-desc", children: "Open the connections directory or keep going." }) : null,
     targets.map((target) => {
       const name = String(target?.name || "");
@@ -61553,7 +61656,7 @@ function ToolGroup({ item, bot }) {
 }
 
 // src/ui/Chat.tsx
-import { Fragment as Fragment16, jsx as jsx28, jsxs as jsxs26 } from "react/jsx-runtime";
+import { Fragment as Fragment15, jsx as jsx28, jsxs as jsxs26 } from "react/jsx-runtime";
 function Thinking({ text: text3 }) {
   return /* @__PURE__ */ jsxs26("details", { className: "gbo-think", children: [
     /* @__PURE__ */ jsxs26("summary", { children: [
@@ -61678,7 +61781,7 @@ function AssistantBody({ item, bot, pos }) {
     );
   }, [segments, bot, pos, time, streaming, poll, scope]);
   const placeholder = React26.useMemo(() => safe?.pending && scope ? /* @__PURE__ */ jsx28(DirectivePlaceholder, { pending: safe.pending }) : null, [safe, scope]);
-  return /* @__PURE__ */ jsxs26(Fragment16, { children: [
+  return /* @__PURE__ */ jsxs26(Fragment15, { children: [
     body,
     placeholder
   ] });
@@ -62000,7 +62103,7 @@ function ProfileDrawer({ bot, onClose, backgroundRef }) {
     if (!ref.current) return;
     return trapFocus(ref.current, { background: backgroundRef.current });
   }, [backgroundRef]);
-  return /* @__PURE__ */ jsxs26(Fragment16, { children: [
+  return /* @__PURE__ */ jsxs26(Fragment15, { children: [
     /* @__PURE__ */ jsx28("div", { className: "gbo-scrim", "aria-hidden": "true", onClick: onClose }),
     /* @__PURE__ */ jsxs26(
       "div",
@@ -62139,7 +62242,7 @@ function UnreadDot({ bot }) {
 }
 
 // src/ui/Roster.tsx
-import { Fragment as Fragment18, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
+import { Fragment as Fragment17, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
   const [now, setNow] = React28.useState(() => Date.now());
   React28.useEffect(() => {
@@ -62444,7 +62547,7 @@ function RosterPane() {
         /* @__PURE__ */ jsx30("strong", { children: "All bots are hidden" }),
         /* @__PURE__ */ jsx30("span", { children: "Hidden bots keep working; they are just not listed." }),
         /* @__PURE__ */ jsx30("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
-      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx30("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs27(Fragment18, { children: [
+      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx30("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs27(Fragment17, { children: [
         ownCount === 0 ? newSectionField : null,
         list.map((section, index) => {
           const isCollapsed = section.own ? section.collapsed : collapsed.includes(section.name);

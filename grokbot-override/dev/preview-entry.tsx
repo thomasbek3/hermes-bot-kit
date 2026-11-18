@@ -20,6 +20,7 @@ import { primeBotModel } from '../src/ui/rosterActions'
 import { primeModelOptions } from '../src/ui/ProfileConfig'
 import { slack } from '../src/ui/slackActions'
 import { SlackConnect } from '../src/ui/SlackConnect'
+import { BotScreen, screenStore } from '../src/ui/Screen'
 const avatarShapeForKey = (key: string) => avatarShapeFor(key).name
 
 /** Demo scheduled jobs per fixture bot (one paused, for the off switch). */
@@ -333,6 +334,44 @@ function findKeyFor(name: string): string {
     if (avatarShapeForKey(key) === name) return key
   }
   return ''
+}
+
+/** The bot's computer in one state, framed like its workspace tab (the
+ *  control pill under the desk image). The desk image itself is a stand-in
+ *  drawn by this page's CSS (no screen stream in a static render). */
+export function renderScreenState(state: 'watching' | 'in-control' | 'stale-hold' | 'not-running', theme: 'light' | 'dark' = 'light') {
+  const bot = ROSTER[0]
+  const store = screenStore(bot)
+  const viewer = { id: 'preview-viewer', hash: 'aaaaaaaaaaaa' }
+  const running = state !== 'not-running'
+  const lease =
+    state === 'in-control'
+      ? { holder: 'human', viewer_hash: viewer.hash, epoch: 2, since: 0 }
+      : state === 'stale-hold'
+        ? { holder: 'human', viewer_hash: 'bbbbbbbbbbbb', epoch: 2, since: 0 }
+        : { holder: 'agent', epoch: 1, since: 0 }
+  store.setStatus({ supported: true, installed: true, running, display: ':20', geometry: '1920x1200', profile_key: 'pk-travel', lease })
+  store.setLease(lease)
+  store.setViewer(viewer)
+  const body = renderToStaticMarkup(
+    <div className="preview-screen">
+      <BotScreen bot={bot} />
+    </div>
+  )
+  const page = `
+html, body { margin: 0; }
+body { background: ${theme === 'dark' ? '#0a0a0a' : '#ffffff'}; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.preview-screen { width: 960px; height: 680px; display: flex; }
+.preview-screen > .gbo-screen { flex: 1; }
+/* Stand-in desk image (preview only): a grey wallpaper and a taskbar. */
+.preview-screen .gbo-screen-canvas {
+  background:
+    linear-gradient(#1f2226, #1f2226) bottom / 100% 3.4% no-repeat,
+    radial-gradient(120% 90% at 85% 75%, #555 0%, #6a6a6a 35%, transparent 70%),
+    linear-gradient(120deg, #b8b8b8 0%, #a4a4a4 34%, #6b6b6b 36%, #7a7a7a 60%, #8d8d8d 100%);
+}
+`
+  return `<!doctype html><html class="${theme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8"><style>${CSS}\n${page}</style></head><body>${body}</body></html>`
 }
 
 export * as avatarShapesApi from '../src/ui/avatarShapes'
