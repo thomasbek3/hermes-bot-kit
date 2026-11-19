@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner, onFocusedOwnerChange }\n'
+        '\nglobalThis.__t = { isInsecurePublicWs, loadSettingsFrom, credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner, onFocusedOwnerChange }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -2175,4 +2175,46 @@ test('moving to another computer ends the old session even when the new one fail
   await settle()
   assert.equal(t.engine.rfb, null, 'no session to the previous machine stays open (it could take input)')
   assert.equal(instances.length, 1)
+})
+
+test('plaintext WebSocket targets to public hosts are refused, whatever the scheme spelling', async () => {
+  const { t } = loadPlugin({})
+  for (const url of ['ws://example.com:6090/stream', 'WS://example.com/x', 'http://example.com:6090/stream', 'HTTP://example.com/x']) {
+    assert.equal(t.isInsecurePublicWs(url), true, url)
+  }
+  for (const url of ['wss://example.com/x', 'https://example.com/x', 'ws://127.0.0.1:6090/stream', 'http://192.168.1.4:6090/x', 'ws://box.tail1234.ts.net/x', '']) {
+    assert.equal(t.isInsecurePublicWs(url), false, url)
+  }
+  const hd = endpoint => t.hiperfBuildUrl(t.normalizeEndpoint({ id: 'e', name: 'e', mode: 'websocket', wsUrl: 'ws://127.0.0.1:6080/websockify', ...endpoint }))
+  assert.equal(hd({ hiperfUrl: 'http://example.com:6090/stream' }).error, 'mixed-public')
+  assert.equal(hd({ hiperfUrl: 'https://example.com:6090/stream' }).url, 'wss://example.com:6090/stream')
+  assert.equal(hd({ hiperfUrl: 'ftp://example.com/stream' }).error, 'hiperf-unreachable')
+  assert.equal(hd({ hiperfUrl: 'ws://192.168.1.4:6090/stream' }).url, 'ws://192.168.1.4:6090/stream')
+})
+
+test('upgrade: the old auto-connecting "This Mac" seed is deselected once; a customised one is kept', async () => {
+  const { t } = loadPlugin({})
+  const legacy = { id: 'local-mac', name: 'This Mac', mode: 'websocket', wsUrl: 'ws://127.0.0.1:6081/websockify', password: ['Her', 'mes26'].join('') }
+  const ctx = makeCtx()
+  ctx.storage.set('endpoints', [legacy])
+  ctx.storage.set('globalEndpointId', 'local-mac')
+  t.loadSettingsFrom(ctx)
+  assert.equal(t.$settings.get().globalEndpointId, null, 'no longer selected')
+  assert.equal(t.$settings.get().endpoints[0].autoConnect, false, 'no longer auto-connects')
+  assert.equal(t.$settings.get().endpoints.length, 1, 'still listed so the user can choose it')
+  // The user chooses it again: not undone on the next load.
+  ctx.storage.set('globalEndpointId', 'local-mac')
+  t.loadSettingsFrom(ctx)
+  assert.equal(t.$settings.get().globalEndpointId, 'local-mac')
+
+  const custom = makeCtx()
+  custom.storage.set('endpoints', [{ ...legacy, password: 'mine1234' }])
+  custom.storage.set('globalEndpointId', 'local-mac')
+  t.loadSettingsFrom(custom)
+  assert.equal(t.$settings.get().globalEndpointId, 'local-mac', 'a customised endpoint stays selected')
+  assert.notEqual(t.$settings.get().endpoints[0].autoConnect, false)
+
+  const fresh = makeCtx()
+  t.loadSettingsFrom(fresh)
+  assert.deepEqual(plain(t.$settings.get().endpoints), [], 'a fresh install has no seeded computer')
 })

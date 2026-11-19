@@ -295,10 +295,15 @@ function isPrivateWsHost(hostName) {
 }
 
 function isInsecurePublicWs(wsUrl) {
-  // Scheme compared case-insensitively: WS://public-host is still plaintext.
-  if (!wsUrl || !/^ws:\/\//i.test(String(wsUrl).trim())) return false
+  // A plaintext WebSocket target to a public host. The scheme is compared on
+  // the parsed, normalized URL; http: counts as plaintext too, because the
+  // browser WebSocket API turns http(s): into ws(s):. Public hosts need wss:.
+  const raw = String(wsUrl || '').trim()
+  if (!raw || !/^(?:wss?|https?):\/\//i.test(raw)) return false
   try {
-    return !isPrivateWsHost(new URL(wsUrl).hostname)
+    const parsed = new URL(raw)
+    const plain = parsed.protocol === 'ws:' || parsed.protocol === 'http:'
+    return plain && !isPrivateWsHost(parsed.hostname)
   } catch {
     return true
   }
@@ -870,13 +875,44 @@ function rememberLastFrame(endpointId, rfb) {
   storeLastFrame(endpointId, dataUrl)
 }
 
+// FNV-1a 32-bit, to recognise the old seed's password without spelling it.
+function fnv1a(text) {
+  let h = 0x811c9dc5
+  for (const ch of String(text)) {
+    h ^= ch.charCodeAt(0)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16)
+}
+
+/** The exact unmodified "This Mac" endpoint older builds seeded. */
+function isLegacySeedEndpoint(item) {
+  return Boolean(item) && item.id === 'local-mac' && item.name === 'This Mac' && item.mode === 'websocket' &&
+    item.wsUrl === 'ws://127.0.0.1:6081/websockify' && fnv1a(item.password || '') === 'c2adb36f' &&
+    !item.sessionUrl && !item.iframeUrl && !item.hiperfUrl
+}
+
 function loadSettingsFrom(ctx) {
   // No seeded computer: the pane starts empty until the user adds one (an
   // auto-connecting default on an unclaimed loopback port with a fixed
   // password would hand the user's input to whatever process listened there).
   const endpoints = ctx.storage.get('endpoints', [])
-  const list = Array.isArray(endpoints) ? endpoints.map(normalizeEndpoint).filter(Boolean) : []
-  const globalEndpointId = ctx.storage.get('globalEndpointId', null)
+  let list = Array.isArray(endpoints) ? endpoints.map(normalizeEndpoint).filter(Boolean) : []
+  let globalEndpointId = ctx.storage.get('globalEndpointId', null)
+  // Older builds seeded an auto-connecting "This Mac" (loopback 6081, a fixed
+  // password). An upgrade keeps it in the list but stops selecting and
+  // auto-connecting it, once; the user can choose it again. A customised copy
+  // (anything changed) is left exactly as it is.
+  if (!ctx.storage.get('legacySeedCleared', false)) {
+    const seed = list.find(isLegacySeedEndpoint)
+    if (seed) {
+      list = list.map(item => (item === seed ? { ...item, autoConnect: false } : item))
+      if (globalEndpointId === seed.id) globalEndpointId = null
+      ctx.storage.set('endpoints', list)
+      ctx.storage.set('globalEndpointId', globalEndpointId)
+    }
+    ctx.storage.set('legacySeedCleared', true)
+  }
   const perBotEndpoint = ctx.storage.get('perBotEndpoint', {})
   const ui = ctx.storage.get('ui', { lastExpanded: false })
   $settings.set({
@@ -3303,6 +3339,12 @@ function hiperfBuildUrl(endpoint) {
     parsed = new URL(raw)
   } catch {
     return { error: 'hiperf-unreachable', url: raw }
+  }
+  // Only WebSocket schemes; http(s): is the same channel by another name.
+  if (parsed.protocol === 'http:') parsed.protocol = 'ws:'
+  else if (parsed.protocol === 'https:') parsed.protocol = 'wss:'
+  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+    return { error: 'hiperf-unreachable', url: parsed.toString() }
   }
   if (isInsecurePublicWs(parsed.toString())) {
     return { error: 'mixed-public', url: parsed.toString() }

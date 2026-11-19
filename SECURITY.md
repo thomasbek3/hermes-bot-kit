@@ -34,12 +34,16 @@ within a few days.
   `CV_BIND=0.0.0.0` exposes them on every interface and is supported only
   on a trusted LAN. Transport is plaintext `ws://`: confidentiality and
   peer authentication come from the tailnet (WireGuard) or an SSH tunnel,
-  not from the bridge. No TLS/`wss` mode exists. The HD token travels in
-  the WebSocket query string because the browser WebSocket API cannot set
-  headers; anyone who can read the wire can read it — keep it on the
-  tailnet or tunnel. The VNC password is 8 characters by protocol
+  not from the bridge. No TLS/`wss` mode exists. The HD token is sent
+  as the first WebSocket message (an `auth` frame), not in the URL; the agent
+  still accepts the old `?token=` query from older viewers. Either way it
+  crosses the network in plaintext over `ws://`: anyone who can read the
+  wire can read it — keep it on the tailnet or tunnel. Public hosts need
+  `wss://`; the viewer refuses plaintext (`ws://`, or `http://`, which the
+  browser turns into `ws://`) to any host that is not loopback, LAN,
+  `.local` or Tailscale. The VNC password is 8 characters by protocol
   (classic DES auth); treat it as a second factor, not the boundary. The
-  desktop plugin refuses `ws://` to public hosts.
+  desktop plugin refuses plaintext WebSockets to public hosts.
 - HD mode tokens and session-API bearer tokens are stored locally by design
   (`.env` / plugin storage, `0600`). They are never transmitted anywhere
   except to the endpoint you configure.
