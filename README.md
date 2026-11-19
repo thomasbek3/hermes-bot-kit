@@ -12,7 +12,7 @@ A chat-app Bot Mode screen + a live window into your bots' computers.
 [![Last commit](https://img.shields.io/github/last-commit/thomasbek3/hermes-bot-kit?style=flat-square)](https://github.com/thomasbek3/hermes-bot-kit/commits/master)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-[![Plugins](https://img.shields.io/badge/plugins-4-blue?style=flat-square)](#whats-in-the-kit)
+[![Plugins](https://img.shields.io/badge/plugins-2%20desktop%20%C2%B7%203%20agent%20%C2%B7%20Slack%20add--ons-blue?style=flat-square)](#whats-in-the-kit)
 [![Single file](https://img.shields.io/badge/plugins-single--file%20ESM-orange?style=flat-square)](#requirements)
 [![No build step](https://img.shields.io/badge/build%20step-none-success?style=flat-square)](#requirements)
 [![Agent installable](https://img.shields.io/badge/install-agent--safe%20%C2%B7%20unattended-blueviolet?style=flat-square)](#install)
@@ -21,6 +21,11 @@ A chat-app Bot Mode screen + a live window into your bots' computers.
 [![Install](https://img.shields.io/badge/%E2%AC%87%EF%B8%8E%20INSTALL-one%20command%2C%20desktop%20plugins-1f6feb?style=for-the-badge)](#install)
 
 </div>
+
+> **Quick start**
+> 1. Tell your AI agent: **"Install https://github.com/thomasbek3/hermes-bot-kit (follow its AGENTS.md)."**
+> 2. Or yourself: `curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh | bash`
+> 3. Then **⌘⇧P → Reload plugins** in Hermes Desktop: the Bots tab becomes the chat-app screen, and **Computer** appears under Settings → Plugins.
 
 ---
 
@@ -53,7 +58,10 @@ One command, the desktop plugins (idempotent, no sudo, agents can run it unatten
 curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh | bash
 ```
 
-Then in Hermes Desktop: **⌘K → Reload plugins** (or restart the app).
+It installs the newest release (it asks GitHub, and falls back to the release
+it came with) and checks every file against that release's `MANIFEST.sha256`
+before copying anything. Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or
+restart the app).
 
 - Grokbot Override is installed **switched on**: its Bots tab replaces the
   stock one. **⌘⇧P → Grokbot Override: toggle** switches back to stock Bot
@@ -90,9 +98,14 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.
 `computer_use.backend: remote-cua` and a `remote_cua` block in that profile's
 `config.yaml`. Mac setup and the check command: [remote-cua/README.md](remote-cua/README.md).
 
-**Installing via an AI agent?** Point it at [AGENTS.md](AGENTS.md) — exact
-unattended install, verify, and uninstall steps, plus the footguns. (Most
-coding agents read that file automatically.)
+**Installing via an AI agent?** Point it at [AGENTS.md](AGENTS.md): exact
+unattended prerequisites, install, verify, reload and uninstall steps for macOS
+and Linux, plus troubleshooting. (Most coding agents read that file
+automatically.)
+
+**Putting a bot in Slack?** [docs/SLACK.md](docs/SLACK.md) is a step-by-step
+runbook (for you or your agent): Socket Mode with two tokens, or one-click
+**Add to Slack** with the kit's relay, and which steps only you can do.
 
 ## New: Grokbot Override
 
@@ -158,7 +171,7 @@ texting-style/      agent plugin: SMS-register reply style, per profile
 email-drafts/       agent plugin: email drafts the user sends from a chat card, per profile
 remote-cua/         agent plugin: native computer_use on a remote Mac over SSH, take-over lease
 computer-viewer/    Computer: plugin, host connect scripts, HD agent, docs
-docs/               compatibility notes, LINUX-VM.md (native Linux VM computers)
+docs/               SLACK.md (Slack runbook), compatibility notes, LINUX-VM.md
 SECURITY.md         security policy (VNC/networking guidance lives in the
                     computer-viewer README)
 ```

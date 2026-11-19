@@ -1,6 +1,56 @@
 # Changelog (kit)
 
-## Unreleased
+## 2026-11-19 — release v2026.11.19: one-sentence agent install, security audit
+
+First GitHub Release since v2026.09.12. For new users, in short: tell your AI
+agent "install https://github.com/thomasbek3/hermes-bot-kit" (it follows
+`AGENTS.md`), or run the one-line installer, then reload plugins. Everything
+below shipped in tags v2026.11.09 to v2026.11.16.3 without a GitHub Release, or
+is new in this one.
+
+- **Install: the newest release by itself (2026-11-19).** With no `KIT_REF`,
+  `install.sh` asks the GitHub API for the newest release, accepts only a
+  `vYYYY.MM.DD[.N]` tag, and never installs one older than the tag it was
+  published with (`KIT_FALLBACK_REF`, rewritten by `scripts/release.sh`). No
+  network or an odd answer falls back to that tag. Every file is still checked
+  against the chosen release's `MANIFEST.sha256` before anything is copied.
+  `KIT_REF=<tag>` pins, `KIT_REF=latest` asks. Remote-mode installer tests
+  (fake curl: API ok, down, malformed, older, explicit ref).
+- **Docs: point your agent at it (2026-11-19).** README opens with a
+  three-line quick start. `AGENTS.md` is a step-by-step runbook for macOS and
+  Linux (prerequisites, install, verify, reload, add-ons, uninstall,
+  troubleshooting); every command exits non-zero on failure. New
+  `docs/SLACK.md`: Socket Mode or one-click Add to Slack, with the steps only
+  the human can do marked, where tokens live, the allowlist, the 👀
+  acknowledgement and the home channel.
+- **Security audit (2026-11-19).** A full source audit with Cloudflare's
+  security-audit skill. Fixed: the privacy-guard tests no longer spell the
+  private values they guard against; a reversible VNC password blob was
+  removed from the build notes; email-drafts "Allow recipient" is bound to the
+  revision and addresses on screen; the `/email-drafts` slash command changes
+  drafts only from Hermes Desktop/TUI (never from a messaging platform);
+  replies show their Gmail thread; bot-named SVG images never open as their own
+  window; preview pages need a real pointer step-in and a stable text before
+  Send; Slack first-DM approval shows the member ID; the skills hub installs
+  the exact entry shown; the Computer viewer has no seeded auto-connecting
+  endpoint and ends the old session at once when you switch computers; x11vnc
+  reads its password from a 0600 file; the macOS docs no longer claim Screen
+  Sharing is loopback-only; the Windows installers never reuse a password,
+  token, venv or ultravnc.ini another account created first, and refuse an
+  interpreter non-admins can change; texting-style's debug log moved out of
+  `/tmp`. See SECURITY.md.
+- **Hermes 0.23.2 canary checked (2026-11-18).** Source contracts and the
+  offline suites pass; see `docs/COMPATIBILITY.md`.
+- **Slack: `reactions:write` by default, a missing-scope warning and an
+  add-only repair (2026-11-18).** New bots get the scope the 👀
+  acknowledgement needs. **Test connection** warns when an older app lacks
+  it, and `scope_repair.py` adds only the missing required scope.
+- **grokbot-override: the bot's computer (2026-11-18).** The profile panel's
+  Computer card shows a thumbnail; the viewer wakes the screen on open,
+  recovers by itself, has a Close icon, a visible pointer and its controls as a
+  pill under the desk image. SSH bots keep the name their own gateway holds.
+
+Also in this release (merged since v2026.09.12, details below):
 
 - **grokbot-override: T3 Code links get the T3 Code logo (2026-11-16)**: a source link to `t3.codes` (e.g. `app.t3.codes/threads/…`) draws with T3 Code's own favicon, inlined as a data: PNG, instead of the neutral globe; lookalike hosts such as `t3.codes.evil.io` stay a globe.
 - **grokbot-override: the "delivery unknown" composer note clears itself (2026-11-16)**: after a send whose answer

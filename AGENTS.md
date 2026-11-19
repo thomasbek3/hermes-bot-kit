@@ -1,187 +1,168 @@
-# Agent instructions for Hermes Bot Kit
+# Agent runbook: install Hermes Bot Kit
 
-You are installing desktop plugins for Hermes Desktop. Everything here is
-safe to run unattended: no sudo, no prompts, idempotent, existing files are
-backed up (`*.bak.<timestamp>`) before overwrite.
+You are an AI agent and a person asked you to "install
+https://github.com/thomasbek3/hermes-bot-kit". Follow this file top to bottom.
+It is written to be run unattended on **macOS and Linux**.
 
-## Install the desktop plugins (default)
+- No sudo, no prompts. Every command block below can be copied as is, and it
+  exits non-zero when something is wrong. Stop and report when one fails.
+- It installs the two **desktop plugins**: Grokbot Override (the chat-app Bot
+  Mode screen, installed switched on) and the Computer viewer pane. They go
+  into `~/.hermes/desktop-plugins/`, or `$HERMES_HOME/desktop-plugins/` when
+  `HERMES_HOME` is set. Existing files are backed up (`*.bak.<timestamp>`) before
+  being replaced, and re-running changes nothing.
+- The installer picks the **newest GitHub release** by itself. If the GitHub API
+  can't be reached, it falls back to the release it was published with. Every
+  file is checked against that release's `MANIFEST.sha256` before anything is
+  copied; a mismatch installs nothing.
+- One step needs the human: reloading plugins in Hermes Desktop (step 4).
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh | bash
-```
-
-Install just one:
-
-```bash
-KIT_SKIP_COMPUTER=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh)"   # Grokbot Override only
-KIT_SKIP_GROKBOT=1  bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh)"   # Computer viewer only
-```
-
-Into a non-default Hermes home (a separate `~/.hermes`-shaped tree, e.g. a
-second install):
-
-```bash
-HERMES_HOME="/path/to/other/.hermes" bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh)"
-```
-
-Do **not** point `HERMES_HOME` at `~/.hermes/profiles/<name>` for these desktop
-plugins. Since hermes-agent `284d220ba4` the desktop-plugin root is APP-level,
-never profile-scoped (`electron/desktop-plugins-root.ts`): a desktop plugin
-extends the app, not an agent, so one install serves every profile, and
-`migrateProfileScopedDesktopPlugins()` MOVES anything left in
-`profiles/<name>/desktop-plugins/` up to `~/.hermes/desktop-plugins/` on the
-next launch. The Python halves (agent plugins such as `texting-style`) are still
-per-profile — their own installers handle that.
-
-The script exits non-zero and installs nothing if a downloaded plugin fails
-its sanity check (`node --check` + content marker).
-
-## Verify the install
+## 1. Check the prerequisites
 
 ```bash
-test -f ~/.hermes/desktop-plugins/computer-viewer/plugin.js && echo computer-viewer OK
-test -f ~/.hermes/desktop-plugins/grokbot-override/plugin.js && echo grokbot-override OK
+for c in bash curl grep awk; do command -v "$c" >/dev/null || { echo "missing: $c" >&2; false; break; }; done \
+  && { command -v shasum >/dev/null || command -v sha256sum >/dev/null || { echo "missing: shasum or sha256sum" >&2; false; }; } \
+  && { test -d "${HERMES_HOME:-$HOME/.hermes}" || { echo "No Hermes home at ${HERMES_HOME:-$HOME/.hermes}: install and open Hermes Desktop first (https://github.com/NousResearch/hermes-agent)" >&2; false; }; } \
+  && echo "prerequisites OK"
 ```
 
-Folder names must be exactly `computer-viewer` and `grokbot-override` (they
-must match the plugin ids). Do not rename them.
+- **Hermes Desktop 0.20.5 or newer is required.** On older builds the Computer
+  pane has zero size. Ask the person to check *About* in Hermes Desktop if you
+  can't.
+- `node` is optional. When it is present the installer also syntax-checks the
+  plugins.
+- Do **not** point `HERMES_HOME` at `~/.hermes/profiles/<name>`. Desktop plugins
+  belong to the app, not to one profile. Hermes moves profile-scoped desktop
+  plugins up to `~/.hermes/desktop-plugins/` on its next launch.
 
-Bubble Mode, Bot Sections and Task Dock were retired from the kit on
-2026-11-10 (Grokbot Override now owns roster sections and the work-rows
-setting). An older install may still have their folders; the installer names
-them and leaves them alone unless `KIT_REMOVE_RETIRED=1` is set.
-
-## After installing — needs the human or a running app
-
-Hermes Desktop loads disk plugins at startup and on plugin reload. One of:
-
-- In Hermes Desktop: command palette (Cmd+Shift+P / Ctrl+Shift+P) →
-  **Reload plugins**, or
-- Restart the Hermes Desktop app.
-
-An agent without GUI control cannot complete this step; tell the user to do
-it. Then:
-
-- **Grokbot Override** is installed switched **on** (it is the kit's main
-  plugin): its Bots tab replaces the stock one. palette → "Grokbot Override:
-  toggle" switches back to stock Bot Mode (the same command turns it on
-  again); a user who switched it off before keeps it off. Work rows:
-  palette → "Grokbot Override: show work rows". It is a preview: if Bot Mode
-  misbehaves, switch it off rather than editing files.
-- **Computer viewer** must be enabled once in Settings → Plugins
-  (inventory name: **Computer**), then a computer added in the pane. Endpoint
-  setup (cloud boxes, spare machines, HD mode) is interactive and documented
-  in [computer-viewer/README.md](computer-viewer/README.md); host-machine
-  one-liners are printed by the plugin itself.
-
-## Optional: the agent-cards skill (cards in the Grokbot Override chat)
-
-Off by default. It teaches bots to show approval, task and email-draft cards
-in the Grokbot Override chat (question cards need no skill: they come from
-Hermes's built-in `clarify` tool). From a clone, or from a release newer than
-v2026.11.16.3 (older release manifests do not list the skill; the installer says
-so and skips it):
+## 2. Install
 
 ```bash
-KIT_CARDS_SKILL=1 bash install.sh                               # default profile + every profile
-KIT_CARDS_SKILL=1 KIT_CARDS_PROFILES=default,helper bash install.sh
-KIT_CARDS_SKILL=remove bash install.sh                          # remove it again; installs nothing
+f=$(mktemp) && curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f" && bash "$f"; rc=$?; rm -f "$f"; [ "$rc" -eq 0 ]
 ```
 
-It lands at `<profile-home>/skills/agent-cards/SKILL.md` (the root home is
-`default`). An `agent-cards` skill that is not this kit's copy is left alone,
-on install and on remove. Bots also need the `file` and `clarify` toolsets
-for Desktop chat. A chat started before the install keeps its old mode until
-its session restarts. Details:
-[grokbot-override/README.md](grokbot-override/README.md#cards).
+The first output line names the release it installs, for example
+`Release -> v2026.11.19 (newest GitHub release)`.
 
-## Optional: texting-style (agent plugin, per profile)
+Variants (same command, with a variable in front of `bash "$f"`):
 
-Makes bots reply in a short SMS register. Installs into Hermes profile homes
-and enables itself in each profile's `config.yaml`:
+| Want | Put in front of `bash "$f"` |
+|---|---|
+| Grokbot Override only | `KIT_SKIP_COMPUTER=1` |
+| Computer viewer only | `KIT_SKIP_GROKBOT=1` |
+| A specific release | `KIT_REF=v2026.11.16.3` |
+| Another Hermes home (a second install) | `HERMES_HOME=/path/to/.hermes` |
+| Move retired kit plugins (Bubble Mode, Task Dock, Bot Sections) out of the way | `KIT_REMOVE_RETIRED=1` |
+
+From a clone, the same install copies from the checkout:
+`git clone https://github.com/thomasbek3/hermes-bot-kit && bash hermes-bot-kit/install.sh`.
+
+## 3. Verify
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/texting-style/install.sh | bash          # all profiles
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/texting-style/install.sh | bash -s -- --profiles default,helper
+D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; SUM=$(command -v sha256sum || echo "shasum -a 256"); (cd "$D" && grep -E ' (computer-viewer/plugin.js|grokbot-override/plugin.js)$' MANIFEST.sha256 | $SUM -c -) && echo "Bot Kit installed OK"
 ```
 
-Verify: `hermes plugins list` shows `texting-style enabled`. Takes effect on
-the next message in each Bot Chat (a pre_llm_call backfill hook covers
-existing eternal sessions whose frozen prompt predates the plugin) — but the
-NEW PLUGIN CODE only loads when the agent process restarts: after
-install/update, restart Hermes Desktop or gracefully restart the exact per-profile serve process after verifying
-its ownership (do not use broad process-name kills). Debug: `TS_DEBUG=1` logs hook decisions to
-`<HERMES_HOME>/logs/texting-style-debug.log`. Uninstall: remove
-`<profile-home>/plugins/texting-style` and its `plugins.enabled` entry.
+Expect two `: OK` lines and `Bot Kit installed OK`. (With `KIT_SKIP_*`, only
+the plugin you installed is listed.) The folder names must stay exactly
+`computer-viewer` and `grokbot-override`, because they are the plugin ids.
 
-## Optional: remote-cua (agent plugin, per bot profile)
+## 4. Finish (HUMAN)
 
-Lets a bot's own `computer_use` drive a remote Mac over SSH. Run on the
-gateway host, from a clone, naming the bot profiles explicitly:
+Hermes Desktop loads disk plugins at start and on reload. Ask the person to do
+one of these:
 
-```bash
-bash remote-cua/install.sh --profiles helper --dry-run   # show what would change
-bash remote-cua/install.sh --profiles helper
-```
+- Hermes Desktop: **⌘⇧P** (macOS) or **Ctrl+Shift+P** → **Reload plugins**, or
+- quit and reopen Hermes Desktop.
 
-It copies the plugin to `<profile-home>/plugins/remote-cua` and adds it to
-`plugins.enabled`. It does NOT set `computer_use.backend: remote-cua` or the
-`remote_cua` block (host, user, os) in the profile's `config.yaml`: ask the
-human for the Mac's address and user, then add them. The Mac needs a
-one-time setup at its own screen (Remote Login, the pinned cua-driver, a
-permissions grant), which an agent cannot do over SSH. Verify after a gateway
-restart: `hermes -p helper remote-cua check` (exit 0 = ready). Never run
-`cua-driver permissions grant` remotely. Uninstall: remove the plugin folder,
-its `plugins.enabled` entry and the two config keys.
+Then tell them what they will see:
 
-## Bots that drive a computer
+- **Grokbot Override** is on. The Bots tab is now the chat-app screen.
+  **⌘⇧P → Grokbot Override: toggle** switches back to stock Bot Mode and on
+  again. Someone who switched it off before keeps it off. It is a preview: if
+  Bot Mode misbehaves, switch it off rather than editing files.
+- **Computer viewer**: enable **Computer** once in **Settings → Plugins**, then
+  add a computer in the pane. Setting up the machine to view is interactive; see
+  [computer-viewer/README.md](computer-viewer/README.md).
 
-Bots use Hermes's own `computer_use` tool. A Linux VM needs no kit code
-(`terminal.backend: ssh`, see Hermes's Bot Screen docs). A Mac driven over SSH
-uses the kit's `remote-cua` agent plugin; the Computer pane then shows that
-Mac with Take over / Hand back. The old `orgo-computer` agent plugin is
-retired: `bash computer-viewer/remove-orgo-computer.sh` lists what it would
-remove from each profile, `--yes` removes it (nothing is deleted; the plugin
-folder moves to `<home>/plugins-retired-<date>/`, `.env` is left alone).
+## 5. Optional add-ons
+
+Offer these; install only what the person wants.
+
+- **Slack** (the bot answers DMs and @mentions in Slack): follow
+  [docs/SLACK.md](docs/SLACK.md). It has human-only steps.
+- **agent-cards skill** (approval, task and email-draft cards in the override's
+  chat; question cards work without it):
+
+  ```bash
+  f=$(mktemp) && curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f" && KIT_CARDS_SKILL=1 bash "$f"; rc=$?; rm -f "$f"; [ "$rc" -eq 0 ]
+  ```
+
+  It goes to `<profile home>/skills/agent-cards/SKILL.md` for the root home and
+  every profile; `KIT_CARDS_PROFILES=default,helper` limits it. Use
+  `KIT_CARDS_SKILL=remove` to take it out again. An `agent-cards` skill that is
+  not this kit's copy is left alone. Bots also need the `file` and `clarify`
+  toolsets. Chats started before the install keep their old mode until the
+  session restarts.
+- **texting-style** (bots reply in a short texting register, only in Bot Chat):
+
+  ```bash
+  f=$(mktemp) && curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/texting-style/install.sh -o "$f" && bash "$f"; rc=$?; rm -f "$f"; [ "$rc" -eq 0 ]
+  ```
+
+  Add `-s -- --profiles default,helper` style arguments after `bash "$f"` to
+  limit it. Verify: `hermes plugins list` shows `texting-style enabled`. New
+  plugin code loads only when the agent process restarts: restart Hermes
+  Desktop, or gracefully restart only that profile's `hermes --profile <name>
+  serve` process after checking its owner. Never use broad process-name kills.
+  Debug: `TS_DEBUG=1` logs to `<HERMES_HOME>/logs/texting-style-debug.log`.
+- **email-drafts** (bots write email as drafts you send from a card) and
+  **remote-cua** (a bot's `computer_use` drives a remote Mac over SSH) are
+  per-profile agent plugins installed from a clone. See
+  [email-drafts/README.md](email-drafts/README.md) and
+  [remote-cua/README.md](remote-cua/README.md). remote-cua needs a one-time
+  setup at the Mac's own screen, which an agent cannot do over SSH. Never run
+  `cua-driver permissions grant` remotely.
 
 ## Uninstall
 
 ```bash
-rm -rf ~/.hermes/desktop-plugins/computer-viewer ~/.hermes/desktop-plugins/grokbot-override
+D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; for p in computer-viewer grokbot-override; do [ ! -e "$D/$p" ] || mv "$D/$p" "$D/../desktop-plugins-removed-$(date +%Y%m%d%H%M%S)-$p" || false; done && echo "moved out of $D"
 ```
 
-The agent-cards skill, if you installed it: `KIT_CARDS_SKILL=remove bash install.sh`.
+This moves the two plugin folders out of `desktop-plugins/` (nothing is
+deleted), then the person reloads plugins. Remove the agent-cards skill with
+`KIT_CARDS_SKILL=remove` (step 5). Plugin settings live in Hermes plugin storage
+under `hermes.plugin.computer-viewer.*` and `hermes.plugin.grokbot-override.*`.
 
-Then reload plugins (same as above). Plugin settings live in Hermes plugin
-storage under `hermes.plugin.computer-viewer.*` / `hermes.plugin.grokbot-override.*`.
+## Troubleshooting
 
-## Facts that prevent wasted debugging
+| Symptom | Cause and fix |
+|---|---|
+| `install.sh: sha256 mismatch for …` | A downloaded file is not the released one (proxy, partial download). Nothing was installed. Re-run; if it repeats, report it and do not use `KIT_SKIP_VERIFY`. |
+| `Release -> … (GitHub API not reachable …)` | No network to api.github.com or a rate limit. The fallback release is still checked against its manifest. Fine to continue. |
+| `… has no Grokbot Override in its manifest; skipping it` | You pinned an old release with `KIT_REF`. Drop `KIT_REF`. |
+| The Bots tab looks unchanged after reload | The override was switched off earlier: **⌘⇧P → Grokbot Override: toggle**. |
+| The Computer pane is zero-size | Hermes Desktop is older than 0.20.5. Update the app. |
+| A plugin change "doesn't take" | Bot Chats are served by long-lived per-profile `hermes --profile <name> serve` processes that survive app restarts. Check which process it is and restart only that one gracefully. |
+| `Retired plugins still installed: …` | Old kit folders; harmless. `KIT_REMOVE_RETIRED=1` moves exactly those (marker-checked) to `desktop-plugins-retired-<date>/`. |
+| `Retired agent plugin still installed: …` (the retired `orgo-computer`) | Run the printed `remove-orgo-computer.sh` command: a dry run first, then `--yes`. Nothing is deleted. |
 
-- Requires Hermes Desktop ≥ 0.20.5. On older builds the Computer pane is
-  zero-size; there is no workaround, update the app.
-- Desktop Bot Chats are served by long-lived per-profile
-  `hermes --profile <name> serve` daemons that SURVIVE app restarts. If a
-  plugin change "doesn't take", verify the exact daemon owner and gracefully
-  restart only that process (it respawns on demand)
-  — do not keep redeploying files.
-- "Bot Chat" is the desktop's canonical per-bot conversation (session
-  literally titled `Bot Chat`, user-locked). Grokbot Override opens that same
-  session, and texting-style's doctrine gates on it; every other session
-  renders stock by design.
+## Facts that save time
+
+- "Bot Chat" is the desktop's own per-bot conversation (a session titled
+  `Bot Chat`). Grokbot Override opens that same session, and texting-style only
+  acts in it. Other sessions render stock.
+- CLI probes cannot reach a real Bot Chat: `-z --continue "Bot Chat"` and
+  `--resume <id>` both start new sessions. Only the desktop UI talks to the real
+  one.
 - A serve restart under an open Bot Chat tab can scramble the tab's caption
-  (stock Hermes bug; data unaffected); the caption is restored by: close tab
-  → quit app → relaunch → click the bot.
-- CLI probes cannot reach a canonical Bot Chat: `-z --continue "Bot Chat"`
-  and `--resume <id>` both fork new sessions. Only the desktop UI talks to
-  the real one.
-- Desktop plugins fail safe: if a Hermes update renames internal hooks, chats
-  render stock / the pane stays empty / the roster stays stock — nothing
+  (stock Hermes; data is fine). To fix it: close the tab, quit, relaunch, then
+  click the bot.
+- Desktop plugins fail safe. If a Hermes update renames an internal hook, the
+  chat renders stock, the pane stays empty or the roster stays stock. Nothing
   crashes.
-- The repo was formerly `hermes-computer-viewer`. The host scripts live in
-  `computer-viewer/` (`computer-viewer/connect-mac.sh` and so on); the old
-  root shims were removed on 2026-11-10, so use the `computer-viewer/` path
-  (one-liners pinned to an older release tag keep working).
-- Do not curl-pipe `connect-*.sh` / `hiperf-*.sh` on the machine running
-  Hermes Desktop unless the user asked to view **that** machine — they are
-  host-side setup scripts for the computer being viewed, and they install
-  LaunchAgents / services / scheduled tasks on it.
+- Do not run `connect-*.sh` / `hiperf-*.sh` on the machine running Hermes
+  Desktop unless the person asked to view **that** machine. They are host-side
+  setup scripts for the computer being viewed and install services on it.
+- The repo was formerly `hermes-computer-viewer`. GitHub redirects old links.

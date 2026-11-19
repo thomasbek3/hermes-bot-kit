@@ -48,41 +48,34 @@ within a few days.
 
 ## Audit
 
-**Date:** 2026-11-09.
+**Latest: 2026-11-19**, on `master` at `cdcaad2`, with Cloudflare's
+[security-audit skill](https://github.com/cloudflare/security-audit-skill)
+in full-audit mode (standard profile).
 
-**Method:** a multi-phase source audit of the whole repository (mapping,
-focused hunts, an independent check of every candidate, a final review), run
-as a quick, partial pass. No code was executed; every check was source review.
+**Method:** mapping first, then five waves of focused hunts with coverage
+critics, an independent check of every candidate, and a second fresh check of
+every surviving record. 30 coverage units in all, covering the installers and
+release chain, the desktop UI's handling of bot output, cards and previews,
+the Computer viewer and the host scripts, the Slack relay and connect flow,
+email-drafts, remote-cua and texting-style. No code was executed: every check
+was a source review, because the audit host could not enforce a memory limit
+for a sandbox. The pass is **partial**: hunting stopped after wave 5, and two
+areas were not reviewed: the bot's terminal and file tools versus the
+remote-cua take-over lease, and Duplicate bot versus Slack credentials.
 
-**Result:** no confirmed vulnerabilities. Eight leads could not be settled
-from source alone (they depend on Hermes, proxy or Windows behaviour). This
-change set closes all eight in source anyway:
+**Result:** three low-severity findings were confirmed, and all three are
+fixed. They were two disclosures of the maintainer's private details in the
+public tree (the privacy-guard test fixtures, and a reversible VNC password
+blob in the build notes) and one binding gap (email-drafts "Allow recipient"
+allowed the stored To list, not the one on screen). Fifteen leads that depend
+on Hermes, OS or deployment facts the source cannot show were closed in source
+anyway; the CHANGELOG entry for v2026.11.19 lists them. Two candidates were
+rejected as owner-only correctness issues. No credential value was found in
+the tree or in the published history; the history does still contain private
+names. The full report stays outside the repository.
 
-1. The (since retired) computer agent plugin's tool approvals now showed the full argument with control characters
-   escaped, up to 2000 characters, with an explicit "more characters" marker.
-2. `C:\usbmmidd_v2` (run by a SYSTEM startup task) gets a protected
-   Administrators/SYSTEM ACL, and an existing folder with any other owner
-   stops the install.
-3. The HD agent tree and venv under `C:\ProgramData\hermes-cv` get a
-   protected ACL, so other local users cannot add files the logon task runs.
-4. The Windows HD token file is readable only by the install user,
-   Administrators and SYSTEM.
-5. A `::preview` page can no longer send a hidden message without the user:
-   it shows the text with Send / Dismiss unless the user just clicked into it.
-6. A connection's sign-in link opens only for `https:` (or `http:` to this
-   machine); anything else is shown as text.
-7. Remote images in bot replies load only when the user clicks Load.
-8. The Slack relay's rate limit is per client behind the proxy and never
-   blocks requests that carry a valid Slack signature or OAuth state.
-
-Also tightened in the same change set: preview frames have no network, card
-buttons show what they send, Slack-supplied text is cleaned before it is
-saved, the Slack HTTP listener stays on loopback unless allowed, noVNC loads
-only from the verified vendored copy, `C:\ffmpeg` is used only when safe, and
-the CI workflows have read-only permissions and actions pinned to commits.
-
-**Not covered** (this pass does not claim these are safe): the
-computer-viewer noVNC loader; the per-plugin install scripts;
-the gateway tool-approval cards in the Grokbot Override desktop UI; Grokbot
-Override scheduled routines (cron); the relay service installer and Tailscale
-Funnel exposure; the texting-style backend plugin hooks.
+**Earlier: 2026-11-09**, a quick, partial, source-only pass. It confirmed no
+vulnerabilities and closed eight leads in source: tool-approval argument
+display, the `C:\usbmmidd_v2` and `C:\ProgramData\hermes-cv` ACLs, the
+Windows HD token ACL, `::preview` send confirmation, sign-in link schemes,
+click-to-load remote images, and the Slack relay's per-client rate limit.
