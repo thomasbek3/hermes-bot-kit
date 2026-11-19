@@ -1,5 +1,10 @@
 # Hermes compatibility
 
+Checked 2026-11-18 against NousResearch/hermes-agent canary
+**v0.23.2+canary.20261118T064620Z**, commit
+`f7e2898aaefc8f967dbf7345e3999a65672fe60e`. The source contracts and offline kit
+suites passed, including the Slack and remote-cua tests that import Hermes.
+
 Checked 2026-11-07 against NousResearch/hermes-agent stable **v0.23.0**, commit
 `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`.
 [Official release](https://github.com/NousResearch/hermes-agent/releases/tag/v0.23.0).
