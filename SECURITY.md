@@ -71,12 +71,27 @@ remote-cua take-over lease, and Duplicate bot versus Slack credentials.
 fixed. They were two disclosures of the maintainer's private details in the
 public tree (the privacy-guard test fixtures, and a reversible VNC password
 blob in the build notes) and one binding gap (email-drafts "Allow recipient"
-allowed the stored To list, not the one on screen). Fifteen leads that depend
-on Hermes, OS or deployment facts the source cannot show were closed in source
-anyway; the CHANGELOG entry for v2026.11.19 lists them. Two candidates were
+allowed the stored To list, not the one on screen). Two candidates were
 rejected as owner-only correctness issues. No credential value was found in
 the tree or in the published history; the history does still contain private
 names. The full report stays outside the repository.
+
+**Fifteen leads were not confirmed.** Each depends on facts the source cannot
+show (Windows ACLs on a real machine, a second local account, Hermes Desktop
+behaviour), so none was reproduced. All fifteen were changed in source, but
+**none has been checked on a live system**, so treat them as mitigated, not
+closed. A second review of the first round of fixes found eight of them
+incomplete, and they were redone before this release: the Linux X11 password
+file, the Windows interpreter check (now done before Python is first run, and
+for HD's ffmpeg too), the UltraVNC config (now locked down before the password
+is written, verified, and fail-closed), the Windows state and driver folders
+(another account's tree is refused, not adopted), the legacy "This Mac"
+endpoint (now also cleared for upgraders), preview pages (two leads: Send
+always needs your click, on the text shown), and ambiguous skills-hub names (Install is disabled). The other
+seven (the macOS Screen Sharing docs, the Computer pane's remote-cua session
+on switch, the Gmail thread on a reply card, `/email-drafts` from a messaging
+platform, bot-named SVG images, Slack first-DM approval, texting-style's debug
+log) were not reopened. The CHANGELOG entry for v2026.11.19 lists every change.
 
 **Earlier: 2026-11-09**, a quick, partial, source-only pass. It confirmed no
 vulnerabilities and closed eight leads in source: tool-approval argument

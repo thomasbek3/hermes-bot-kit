@@ -96,6 +96,9 @@ jobs:
       - name: AGENTS.md runbook commands (offline, fake curl)
         run: bash tests/test-agents-runbook.sh
 
+      - name: Release pins
+        run: bash tests/test-release-pins.sh
+
   windows:
     runs-on: windows-latest
     steps:

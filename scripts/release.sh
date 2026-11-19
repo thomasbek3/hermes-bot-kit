@@ -74,6 +74,9 @@ sed -e "s|hermes-bot-kit/[^/']*/computer-viewer|hermes-bot-kit/${TAG}/computer-v
 cat "${plugin_tmp}" > computer-viewer/plugin.js
 rm -f "${plugin_tmp}"
 
+# Every pin now names the new tag, or the release stops here.
+bash scripts/check-release-pins.sh "${TAG}"
+
 bash scripts/make-manifest.sh
 
 run_ci_tests() {
@@ -93,6 +96,7 @@ run_ci_tests() {
   bash computer-viewer/tests/test-remove-orgo-computer.sh
   bash scripts/make-manifest.sh --check
   bash tests/test-install.sh
+  bash tests/test-release-pins.sh
 }
 
 run_ci_tests
@@ -104,6 +108,8 @@ git tag -a "${TAG}" -m "release: ${TAG}"
 
 echo
 echo "Created commit and annotated tag ${TAG}."
+echo "If anything is merged after this commit, check the pins again first:"
+echo "  bash scripts/check-release-pins.sh ${TAG}"
 echo "Push with:"
 echo "  git push origin HEAD"
 echo "  git push origin ${TAG}"

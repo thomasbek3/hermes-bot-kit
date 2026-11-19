@@ -21,24 +21,74 @@ is new in this one.
   Linux (prerequisites, install, verify, reload, add-ons, uninstall,
   troubleshooting); every command exits non-zero on failure. New
   `docs/SLACK.md`: Socket Mode or one-click Add to Slack, with the steps only
-  the human can do marked, where tokens live, the allowlist, the 👀
+  the human can do marked, where tokens live, who can talk to the bot, the 👀
   acknowledgement and the home channel.
-- **Security audit (2026-11-19).** A full source audit with Cloudflare's
-  security-audit skill. Fixed: the privacy-guard tests no longer spell the
-  private values they guard against; a reversible VNC password blob was
-  removed from the build notes; email-drafts "Allow recipient" is bound to the
-  revision and addresses on screen; the `/email-drafts` slash command changes
-  drafts only from Hermes Desktop/TUI (never from a messaging platform);
-  replies show their Gmail thread; bot-named SVG images never open as their own
-  window; preview pages need a real pointer step-in and a stable text before
-  Send; Slack first-DM approval shows the member ID; the skills hub installs
-  the exact entry shown; the Computer viewer has no seeded auto-connecting
-  endpoint and ends the old session at once when you switch computers; x11vnc
-  reads its password from a 0600 file; the macOS docs no longer claim Screen
-  Sharing is loopback-only; the Windows installers never reuse a password,
-  token, venv or ultravnc.ini another account created first, and refuse an
-  interpreter non-admins can change; texting-style's debug log moved out of
-  `/tmp`. See SECURITY.md.
+- **Security audit (2026-11-19), a partial pass.** A source-only audit with
+  Cloudflare's security-audit skill (full-audit mode, stopped early after five
+  waves). Two areas were **not reviewed**: the bot's terminal and file tools
+  versus the remote-cua take-over lease, and Duplicate bot versus Slack
+  credentials. Three low-severity findings were confirmed and fixed: the
+  privacy-guard tests no longer spell the private values they guard against, a
+  reversible VNC password blob was removed from the build notes, and
+  email-drafts "Allow recipient" is bound to the revision and addresses on
+  screen. Fifteen leads that could not be confirmed from source were changed
+  in source but **not checked on a live system**; a second review found eight
+  of those first fixes incomplete, and they were redone (below). See
+  SECURITY.md.
+  - Mitigated in source: the `/email-drafts` slash command changes drafts only
+    from Hermes Desktop/TUI (never from a messaging platform); replies show
+    their Gmail thread; bot-named SVG images never open as their own window;
+    Slack first-DM approval shows the member ID; the Computer viewer ends the
+    old session at once when you switch computers; the macOS docs no longer
+    claim Screen Sharing is loopback-only; texting-style's debug log moved out
+    of `/tmp`.
+  - Redone after the second review: **Linux X11** stores the VNC password in a
+    0600 file it validates (a bad, linked or loose file is replaced) and no
+    longer crashes printing it. **Windows:** Python is used only from an
+    all-users install whose exe, folders and import locations are admin-only,
+    checked before it is first run, always in isolated mode (`-I`); HD's ffmpeg
+    gets the same check; a `C:\ProgramData\hermes-cv` tree or a
+    `C:\usbmmidd_v2` folder another account created is refused, not adopted, and
+    driver files are staged in a fresh admin-only folder and moved in only
+    after a last check; UltraVNC's config is locked down before the password is
+    written, then verified (ACL, password, loopback) and, after start, the
+    :5900 listener must be loopback-only, or UltraVNC is stopped and TightVNC
+    restored; the VNC password file's ACL is replaced and verified, never
+    best-effort; a new or replaced password is applied to the running TightVNC
+    server and read back before it is printed, and is no longer passed to
+    msiexec. **Computer viewer:** the legacy auto-connecting "This Mac" entry
+    is unselected and stops auto-connecting for upgraders too (once; you can
+    delete it). **Preview pages** never send on their own: Send always needs
+    your click and sends the text shown. **Skills hub:** when two results share
+    a name, Install is disabled for them, because the bot's backend installs by
+    name only.
+- **Slack: your team can talk to the bot (2026-11-19).** One-click Add to
+  Slack now lets every **full member** of the workspace DM and @mention the bot
+  by default; guests and Slack Connect users are left out. Hermes has no
+  members-only switch (`SLACK_ALLOW_ALL_USERS` would admit guests), so the kit
+  writes the member list into the bot's `SLACK_ALLOWED_USERS` and the relay
+  refreshes it every 15 minutes. **Only me** and **Only these people** are
+  explicit choices, before Connect or later. The Slack window, Slack's
+  confirmation page and the welcome DM state who can actually talk to the bot,
+  worked out from `SLACK_ALLOWED_USERS`, `SLACK_ALLOW_ALL_USERS`,
+  `GATEWAY_ALLOWED_USERS` and pairing approvals; extra grants are named, and
+  **Remove the extra access** clears the ones that belong to that bot.
+  `slack-connect/install.py --check` exits non-zero until the add-on is
+  ready. Anyone who can message a bot uses it with the bot's own access:
+  `docs/SLACK.md` says so and how to restrict it.
+- **Install: no downgrades, complete manifests, timeouts (2026-11-19).**
+  `install.sh` records the installed release
+  (`desktop-plugins/.hermes-bot-kit-install`) and, when it picked the release
+  itself, never replaces a newer one with an older one. A manifest that lacks
+  a plugin the release should have, or is empty, stops the install. Every
+  download has a connect timeout, a total timeout and a size cap. The quick
+  start and `AGENTS.md` download the installer to a file and run it, so a
+  failed download is an error, not an empty script; `AGENTS.md`'s verify step
+  checks every recorded plugin against its digest.
+- **Computer viewer: plaintext guard covers http: addresses (2026-11-19).** A
+  public `http:` HD address is refused like a `ws:` one (it becomes plaintext
+  `ws:`); SECURITY.md now says the HD token goes in the first frame (with the
+  legacy `?token=` still accepted).
 - **Hermes 0.23.2 canary checked (2026-11-18).** Source contracts and the
   offline suites pass; see `docs/COMPATIBILITY.md`.
 - **Slack: `reactions:write` by default, a missing-scope warning and an
