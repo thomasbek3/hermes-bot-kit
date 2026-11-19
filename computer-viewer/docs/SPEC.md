@@ -24,7 +24,7 @@ These come from the official Desktop Plugin SDK docs (`https://hermes-agent.nous
 1. **Single plain ESM `.js` file.** No bundler, no TypeScript, no multi-file relative imports.
 2. **Exactly three static import specifiers resolve:** `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`. Any other static import fails at load.
 3. **JSX syntax does not parse.** Use `jsx()` / `jsxs()` from `react/jsx-runtime` for all elements.
-4. **No lifecycle hooks.** Default-export a `HermesPlugin` object `{ id, name, defaultEnabled, register(ctx) }`. Every `ctx.register(...)` returns a disposer; disabling the plugin in Settings → Plugins disposes all contributions. Any side-band resources (RFB connections, observers, timers, portals) must be torn down by disposers you return / effect cleanups — assume the plugin can be disabled at any moment.
+4. **No lifecycle hooks.** Default-export a `HermesPlugin` object `{ id, name, defaultEnabled, register(ctx) }`. Every `ctx.register(...)` returns a disposer; switching the plugin off in Capabilities → Plugins disposes all contributions. Any side-band resources (RFB connections, observers, timers, portals) must be torn down by disposers you return / effect cleanups — assume the plugin can be disabled at any moment.
 5. **Hot reload is automatic** on file save (fallback: ⌘K → "Reload desktop plugins"). Design all module-level state to be safely re-creatable.
 6. Plugins run **unsandboxed in the renderer with full app authority**; `fetch()` to arbitrary external hosts is proven to work (Markets plugin), and external iframes are proven to work (TradingView embed in Markets plugin).
 7. Validation gate: `node --check plugin.js` must pass (this is what the ecosystem's `desktop-plugin-maker` skill uses).
@@ -165,7 +165,7 @@ Endpoint = {
 
 ### 4.2 Settings UI
 
-There is **no settings contribution point** in the SDK (Settings → Plugins is only the enable toggle — confirmed gap in the docs). Build settings **inside the pane**: a gear icon in the pane header opens a `Dialog` with:
+There is **no settings contribution point** in the SDK (Capabilities → Plugins is only the on/off switch — confirmed gap in the docs). Build settings **inside the pane**: a gear icon in the pane header opens a `Dialog` with:
 - Endpoint list (add / edit / delete / set-as-global-default), using SDK `Input`, `Select`, `Switch`, `SegmentedControl` (for mode), `ConfirmDialog` for delete.
 - Per-bot override: a `Select` of endpoints, bound to the currently focused bot, with a "use global default" option.
 - Password field: `Input` with `type: 'password'`. Show a permanent one-line caveat: *"Stored locally in plugin storage (plain text). Prefer token-in-URL or session endpoints for anything sensitive."* — `ctx.storage` has no secret facility; do not pretend otherwise, do not roll crypto. (README must repeat this limitation.)
@@ -293,7 +293,7 @@ All errors render as `ErrorState` in the pane with a Reconnect button and a gear
 Build is done when all of these pass:
 
 1. `node --check plugin.js` passes; file has zero static imports beyond the three allowed specifiers.
-2. Dropped into `~/.hermes/desktop-plugins/computer-viewer/plugin.js`, the plugin appears in Settings → Plugins, and a "Computer" pane appears docked right; disabling the plugin removes pane + statusbar item + palette entries cleanly (no console errors), re-enabling restores them.
+2. Dropped into `~/.hermes/desktop-plugins/computer-viewer/plugin.js`, the plugin appears in Capabilities → Plugins, and a "Computer" pane appears docked right; disabling the plugin removes pane + statusbar item + palette entries cleanly (no console errors), re-enabling restores them.
 3. Against a local test target (`x11vnc` or a Docker desktop image + `websockify 6080 localhost:5900`): pane shows a live thumbnail within ~2s of becoming visible; clicking it expands to fullscreen **without reconnecting** (verify: no second websocket in devtools network tab); Escape collapses; mouse + keyboard work in expanded interactive mode; view-only toggle stops input immediately.
 4. Kill websockify while connected → pane shows reconnecting states with backoff, then `unreachable` with a working Reconnect button; restart websockify + click Reconnect → live again.
 5. Wrong password → `vnc-auth-failed` (not a spinner, not `unreachable`). Empty password against a password-requiring server → `password-required`.

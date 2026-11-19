@@ -14,7 +14,7 @@ Built from `SPEC.md` (resolved). Korgo sources in `references/korgo/` were studi
 ## Acceptance criteria (§10)
 
 1. **`node --check` + import allowlist** — **PASS** (verified in this workspace).
-2. Drop into `~/.hermes/desktop-plugins/computer-viewer/plugin.js`, appears in Settings → Plugins, Computer pane docks right, disable/enable is clean — **needs a live Hermes Desktop app**.
+2. Drop into `~/.hermes/desktop-plugins/computer-viewer/plugin.js`, appears in Capabilities → Plugins, Computer pane docks right, disable/enable is clean — **needs a live Hermes Desktop app**.
 3. Local `x11vnc` / Docker + `websockify 6080 localhost:5900`: live thumbnail, expand without a second websocket, Escape, mouse/keyboard, view-only — **needs live Hermes + a VNC target**.
 4. Kill websockify → backoff → `unreachable` → Reconnect after restart — **needs live Hermes + a VNC target**.
 5. Wrong password → `vnc-auth-failed`; empty password against a password-requiring server → `password-required` — **needs live Hermes + a VNC target**. (`authLock` is in place so a following unclean `disconnect` cannot rewrite these as `unreachable`.)

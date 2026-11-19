@@ -108,6 +108,9 @@ jobs:
       - name: Release pins
         run: bash tests/test-release-pins.sh
 
+      - name: No stale shortcut or switch instructions
+        run: node --test tests/stale-instructions.test.mjs
+
   windows:
     runs-on: windows-latest
     steps:

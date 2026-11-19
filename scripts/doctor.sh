@@ -28,8 +28,8 @@
 #   - Plugin on/off choices live in the app's browser storage
 #     (src/contrib/plugins-store.ts:47, src/contrib/plugin.ts:214-232), which a
 #     script cannot read safely.
-#   - The command palette is Cmd+K or Cmd+P (Ctrl elsewhere); there is no
-#     Cmd+Shift+P (src/lib/keybinds/actions.ts:202). The reload command is
+#   - The command palette is Cmd+K or Cmd+P (Ctrl elsewhere)
+#     (src/lib/keybinds/actions.ts:202); Cmd+Shift+P is not a Hermes shortcut. The reload command is
 #     "Reload desktop plugins" (src/app/contrib/controller.tsx:332-339).
 #
 # Test overrides (never needed in normal use):
