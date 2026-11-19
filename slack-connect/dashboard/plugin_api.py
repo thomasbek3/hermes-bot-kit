@@ -119,6 +119,26 @@ def recycle_profile(root, profile):
         raise platform_module.GatewayReloadError('Could not confirm this bot restarted after removing Slack. Try again.')
 
 
+def env_saver(save_env_value, config=None):
+    """save_env for the service. Hermes's save_env_value refuses a locked key
+    (managed Hermes, an administrator-pinned key) by printing and returning;
+    require_env_writable (newer Hermes) raises that refusal instead, so every
+    key is checked first and a refusal writes nothing and fails the save."""
+    if config is None:
+        import hermes_cli.config as config
+    require = getattr(config, 'require_env_writable', None)
+    def save(values):
+        if require:
+            for key in values:
+                try:
+                    require(key, 'set')
+                except ValueError as exc:
+                    raise service_module.access_module.EnvNotApplied(str(exc)) from None
+        for key, value in values.items():
+            save_env_value(key, value)
+    return save
+
+
 def make_service():
     from hermes_constants import get_default_hermes_root, get_hermes_home
     from hermes_cli.config import load_env, save_env_value, remove_env_value
@@ -128,9 +148,7 @@ def make_service():
     root = Path(get_default_hermes_root())
     if home.parent != root / 'profiles':
         raise ValueError('a named profile is required')
-    def save(values):
-        for key, value in values.items():
-            save_env_value(key, value)
+    save = env_saver(save_env_value)
     def remove(keys):
         for key in keys:
             remove_env_value(key)
@@ -197,6 +215,9 @@ def handle(action, factory=None):
         raise HTTPException(status_code=409, detail='Slack setup token expired, add a new one') from None
     except service_module.Conflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    except service_module.access_module.EnvNotApplied as exc:
+        # Hermes's own refusal or what it kept: names a key and a file, never a secret.
+        raise HTTPException(status_code=409, detail=service_module.public_text(exc)) from None
     except platform_module.GatewayReloadError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
     except ValueError:

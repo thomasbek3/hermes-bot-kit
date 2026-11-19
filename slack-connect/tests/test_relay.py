@@ -114,6 +114,8 @@ def test_oauth_success_denial_and_single_use(tmp_path):
             return {'ok': True}
         async def writer(profile, values):
             writes.append((profile, values))
+            with open(tmp_path / 'profiles' / profile / '.env', 'a') as env:   # read back before the record changes
+                env.write(''.join(f'{k}={v}\n' for k, v in values.items()))
         async def notify(profile):
             notifications.append(profile)
         relay = relay_module.Relay(tmp_path, 'python', 'helper', base_url='https://example.test/slack', upstream='http://127.0.0.1:9999', slack=slack, writer=writer, notifier=notify)

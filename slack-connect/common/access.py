@@ -71,6 +71,11 @@ class SlackReadError(Exception):
         super().__init__(self.error)
 
 
+class EnvNotApplied(Exception):
+    """Hermes did not take a value the kit wrote: a refusal (managed Hermes,
+    an administrator-pinned key) or a value read back that differs."""
+
+
 def mode_of(value):
     """The record's audience; no (or an unknown) value is a legacy record."""
     value = str(value or '').strip().lower()
@@ -201,22 +206,28 @@ def read_env_file(path):
 
 # ---- the one write path -------------------------------------------------
 
-def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, fields=None, env_extra=None):
+def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, fields=None, env_extra=None,
+                      read_back=None):
     """Write SLACK_ALLOWED_USERS (and the record `fields`) for app `key`, only
     if the record still matches `expect` and the profile's .env SLACK_APP_ID is
     that app. `ids=None` updates the record only. `env_extra` are values the
     connect flow writes in the same .env write. Returns False, writing nothing,
-    on any mismatch. Both checks and the write happen under apps.lock."""
+    on any mismatch. Both checks and the write happen under apps.lock.
+    The record changes only once the value Hermes will use (`read_back()`, a
+    gate scope; by default the .env again) is the one intended: a writer that
+    refused silently, or an administrator-managed value, raises EnvNotApplied."""
     data = Path(data_dir)
     profile = expect.get('profile')
     if not isinstance(profile, str) or not expect.get('app_id'):
         return False
+    path = data.parent / 'profiles' / profile / '.env'
+    load = read_env or (lambda: read_env_file(path))
     with LockedFile(data / 'apps.lock'):
         apps = _read_json(data / 'apps.json', {})
         item = apps.get(key)
         if not isinstance(item, dict) or expect_of(item) != {k: expect.get(k) for k in EXPECT_KEYS}:
             return False
-        env = read_env() if read_env else read_env_file(data.parent / 'profiles' / profile / '.env')
+        env = load()
         if env.get('SLACK_APP_ID') != expect['app_id']:
             return False
         values = dict(env_extra or {})
@@ -224,6 +235,12 @@ def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, f
             values['SLACK_ALLOWED_USERS'] = env_value(ids)
         if values:
             write_env(values)
+        if ids is not None:
+            scope = read_back() if read_back else scope_from_env(load(), str(path))
+            kept = (((scope or {}).get('keys') or {}).get('SLACK_ALLOWED_USERS') or {}).get('value')
+            if coerce_allow_set(kept) != coerce_allow_set(env_value(ids)):
+                shown = kept if kept is None or len(kept) <= 80 else kept[:80] + '…'
+                raise EnvNotApplied(f'Hermes kept SLACK_ALLOWED_USERS={shown} (administrator-managed?)')
         item.update(fields or {})
         _atomic_json(data / 'apps.json', apps)
     return True
@@ -274,10 +291,43 @@ def stale_ids(item, owner):
     return [owner] if owner and (item or {}).get('last_members_owner_ok') is True else []
 
 
-def committed(item):
-    """Whether the Connect callback committed credentials and access for this
-    record (the member sync and audience changes need nothing else)."""
-    return type((item or {}).get('installed_at')) is int
+def committed(item, env=None):
+    """Whether this record is a completed connection (the member sync and
+    audience changes need nothing else). `env` is the .env of the record's
+    profile. Connect stamps `installed_at`; a record from an earlier release
+    (v2026.11.16.3 or the first team-access build) has none, and counts when
+    that .env has this app's SLACK_APP_ID and a SLACK_BOT_TOKEN. The pending
+    phase is not needed: that release wrote it only after the welcome DM."""
+    item, env = item or {}, env or {}
+    if type(item.get('installed_at')) is int:
+        return True
+    return bool(item.get('app_id')) and env.get('SLACK_APP_ID') == item['app_id'] and bool(env.get('SLACK_BOT_TOKEN'))
+
+
+def adopt(data_dir, key, profile, read_env, now=None):
+    """The record of app `key` (of `profile`) if it is a completed connection,
+    else None. An older one is migrated under apps.lock: `installed_at` set,
+    `migrated: true`; its audience (access, allowed, access_rev, the .env
+    allowlist) is left as it is. A v2026.11.16.3 record has no `owner`, but
+    that release wrote SLACK_ALLOWED_USERS=<the installer> and nothing else, so
+    a single member ID there is taken as the installer (it is already the one
+    allowed person, so "Only me" can never widen access)."""
+    data = Path(data_dir)
+    with LockedFile(data / 'apps.lock'):
+        apps = _read_json(data / 'apps.json', {})
+        item = apps.get(key)
+        if not isinstance(item, dict) or item.get('profile') != profile:
+            return None
+        env = read_env()
+        if not committed(item, env):
+            return None
+        if not committed(item):
+            item.update({'installed_at': int(time.time() if now is None else now), 'migrated': True})
+            only = sorted(_ids(env.get('SLACK_ALLOWED_USERS')))
+            if 'access' not in item and not owner_of(item) and len(only) == 1 and USER_ID.fullmatch(only[0]):
+                item['owner'] = only[0]
+            _atomic_json(data / 'apps.json', apps)
+        return item
 
 
 # ---- the profile's gate settings, as Hermes reads them -------------------

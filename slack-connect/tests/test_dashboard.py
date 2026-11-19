@@ -648,17 +648,104 @@ def test_set_access_members_when_slack_fails(context):
 
 def test_legacy_record_is_shown_and_kept_until_the_owner_chooses(context):
     client, slack, vault, env, data, _ = context
-    _installed(data, env, ['U1'], access=None, access_rev=None, owner=None)
+    # An earlier release wrote no installed_at, access or owner. Its list was
+    # edited to two people since, so the installer cannot be told from it.
+    _installed(data, env, ['U1', 'U2'], access=None, access_rev=None, owner=None, installed_at=None)
     body = client.get('/status').json()
     assert body['access'] == 'legacy' and body['owner_known'] is False
-    assert body['legacy']['ids'] == ['U1']
-    assert body['legacy']['text'] == 'Connected before team access: it allows U1.'
-    assert body['audience']['text'] == '1 person can talk to this bot: the 1 person in SLACK_ALLOWED_USERS.'
-    assert env['SLACK_ALLOWED_USERS'] == 'U1', 'nothing rewrote it'
-    assert client.post('/access', json={'access': 'owner'}).status_code == 409, 'Only me needs a known installer'
-    body = client.post('/access', json={'access': 'list', 'allowed': 'U1'}).json()   # Keep these people
-    assert body['access'] == 'list' and env['SLACK_ALLOWED_USERS'] == 'U1'
+    assert body['legacy']['ids'] == ['U1', 'U2']
+    assert body['legacy']['text'] == 'Connected before team access: it allows U1, U2.'
+    assert body['audience']['text'] == '2 people can talk to this bot: the 2 people in SLACK_ALLOWED_USERS.'
+    assert env['SLACK_ALLOWED_USERS'] == 'U1,U2', 'nothing rewrote it'
+    assert client.post('/access', json={'access': 'owner'}).json()['detail'] == (
+        'The installer of this bot is not known; name the people instead'), 'Only me needs a known installer'
+    body = client.post('/access', json={'access': 'list', 'allowed': 'U1,U2'}).json()   # Keep these people
+    assert body['access'] == 'list' and env['SLACK_ALLOWED_USERS'] == 'U1,U2'
     assert _record(data)['access'] == 'list' and _record(data)['access_rev'] == 1
+
+
+# What v2026.11.16.3 (the published release) left behind for a connected bot,
+# copied from its code: the record from slack-connect/dashboard/service.py:157-158
+# (apps[key] = {...}), :192-193 (app_id, icon_result) and :209
+# (manifest_update_result); the pending file from slack-relay/relay.py:234
+# (self.pending(key, 'installed', team_name=..., bot_user_id=...)); the .env from
+# service.py:187-189 (save_env) and relay.py:229 (write_profile, the installer
+# as the only SLACK_ALLOWED_USERS). No installed_at, access, access_rev or owner.
+PUBLISHED_RECORD = {'profile': 'test-profile', 'team_id': 'T1', 'bot_name': 'Helper', 'prior_allowed_users': None,
+                    'app_id': 'A1', 'icon_result': 'ok', 'manifest_update_result': 'ok'}
+PUBLISHED_PENDING = {'phase': 'installed', 'at': 1763300000, 'team_name': 'Acme', 'bot_user_id': 'B1'}
+PUBLISHED_ENV = {'SLACK_CONNECTION_MODE': 'http', 'SLACK_APP_ID': 'A1', 'SLACK_CLIENT_ID': 'C1',
+                 'SLACK_CLIENT_SECRET': 'fake-client-secret', 'SLACK_SIGNING_SECRET': 'fake-signing-secret',
+                 'SLACK_BOT_TOKEN': 'xoxb-FAKE-bot', 'SLACK_TEAM_ID': 'T1', 'SLACK_TEAM_NAME': 'Acme',
+                 'SLACK_ALLOWED_USERS': 'U1'}
+
+
+def _published(data, env, **env_changes):
+    (data / 'pending').mkdir(exist_ok=True)
+    (data / 'apps.json').write_text(json.dumps({'c' * 32: PUBLISHED_RECORD}))
+    (data / 'pending' / ('c' * 32 + '.json')).write_text(json.dumps(PUBLISHED_PENDING))
+    env.update({**PUBLISHED_ENV, **env_changes})
+
+
+def test_a_published_release_connection_is_migrated_and_its_audience_can_change(context):
+    client, slack, vault, env, data, _ = context
+    _published(data, env)
+    body = client.get('/status').json()
+    assert body['phase'] == 'installed' and body['access'] == 'legacy'
+    assert body['owner_known'] is True, 'that release wrote only the installer: Only me is offered'
+    assert body['legacy']['text'] == 'Connected before team access: it allows U1.'
+    rec = _record(data)
+    assert type(rec['installed_at']) is int and rec['migrated'] is True and rec['owner'] == 'U1'
+    assert 'access' not in rec and 'access_rev' not in rec, 'migration never chooses an audience'
+    assert env['SLACK_ALLOWED_USERS'] == 'U1'
+    response = client.post('/access', json={'access': 'owner'})
+    assert response.status_code == 200 and response.json()['audience']['text'] == 'Only you can talk to this bot.'
+    assert (_record(data)['access'], _record(data)['access_rev']) == ('owner', 1)
+    response = client.post('/access', json={'access': 'list', 'allowed': 'U2'})
+    assert response.status_code == 200 and env['SLACK_ALLOWED_USERS'] == 'U1,U2', 'the allowlist changed'
+
+
+def test_a_record_of_another_app_is_not_a_connection(context):
+    client, slack, vault, env, data, _ = context
+    _published(data, env, SLACK_APP_ID='A2')   # this profile's .env belongs to another app
+    response = client.post('/access', json={'access': 'list', 'allowed': 'U2'})
+    assert response.status_code == 409 and response.json()['detail'] == 'Connect the bot to Slack first'
+    client.get('/status')
+    assert _record(data) == PUBLISHED_RECORD, 'not migrated'
+    assert env['SLACK_ALLOWED_USERS'] == 'U1'
+
+
+def test_a_save_that_hermes_silently_refused_commits_nothing(context):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1', 'U2'])
+    before = _record(data)
+    api.make_service().save_env = lambda values: None   # save_env_value printed a refusal and returned
+    response = client.post('/access', json={'access': 'owner'})
+    assert response.status_code == 409
+    assert response.json()['detail'] == 'Hermes kept SLACK_ALLOWED_USERS=U1,U2 (administrator-managed?)'
+    assert _record(data) == before and env['SLACK_ALLOWED_USERS'] == 'U1,U2'
+
+
+def test_a_refusal_from_require_env_writable_fails_the_save_and_names_it(context):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1', 'U2'])
+    before = _record(data)
+    refusal = ('Cannot set SLACK_ALLOWED_USERS: it is managed by your administrator (/etc/hermes/.env) '
+               'and cannot be changed.')
+    def require_env_writable(key, action):
+        assert action == 'set'
+        if key == 'SLACK_ALLOWED_USERS':
+            raise ValueError(refusal)
+    written = []
+    save = api.env_saver(lambda key, value: written.append(key),
+                         SimpleNamespace(require_env_writable=require_env_writable))
+    api.make_service().save_env = save
+    response = client.post('/access', json={'access': 'owner'})
+    assert response.status_code == 409 and response.json()['detail'] == refusal
+    assert written == [] and _record(data) == before and env['SLACK_ALLOWED_USERS'] == 'U1,U2'
+    # Older Hermes has no require_env_writable: the save goes straight through.
+    api.env_saver(lambda key, value: written.append(key), SimpleNamespace())({'SLACK_ALLOWED_USERS': 'U1'})
+    assert written == ['SLACK_ALLOWED_USERS']
 
 
 def test_set_access_with_a_failed_save_leaves_the_record_as_it_was(context):

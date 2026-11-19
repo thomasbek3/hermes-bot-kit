@@ -35,6 +35,11 @@ KEY = 'a' * 32
 SECRET = 'test-secret'
 
 
+def append_env(root, values):
+    with open(root / 'profiles' / 'test-profile' / '.env', 'a') as env:
+        env.write(''.join(f'{k}={v}\n' for k, v in values.items()))
+
+
 def prepare(tmp_path):
     data = tmp_path / 'slack-connect'
     (data / 'pending').mkdir(parents=True)
@@ -81,8 +86,8 @@ def test_exhausted_bucket_never_blocks_signed_events_or_valid_callbacks(tmp_path
             if method == 'oauth.v2.access':
                 return {'ok': True, 'app_id': 'A1', 'team': {'id': 'T1', 'name': 'Test Team'}, 'authed_user': {'id': 'U1'}, 'access_token': 'fake-bot'}
             return {'ok': True}
-        async def writer(*_):
-            return None
+        async def writer(_profile, values):
+            append_env(tmp_path, values)   # the allowlist is read back before the record changes
         async def notify(*_):
             return True
         relay = relay_module.Relay(tmp_path, 'python', 'helper', base_url='https://example.test/slack',
@@ -185,6 +190,7 @@ def test_callback_writes_a_cleaned_team_name_and_refuses_an_odd_owner(tmp_path):
             return {'ok': True}
         async def writer(profile, values):
             writes.append(values)
+            append_env(root, values)
         async def notify(*_):
             return True
         relay = relay_module.Relay(root, 'python', 'helper', base_url='https://example.test/slack', upstream='http://127.0.0.1:9',

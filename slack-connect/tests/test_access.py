@@ -567,3 +567,109 @@ def test_backoff_never_stretches_the_24_hour_expiry(tmp_path):
     assert slack.calls == [], 'no Slack call while Slack asked to wait'
     assert env_of(home)['SLACK_ALLOWED_USERS'] == 'U1', 'the expired list fell back to the verified installer'
     assert record_of(data)['retry_after'] == NOW + 3600
+
+
+# ---- round 5: connections from earlier releases; a silent refusal ---------
+
+# A "full members" bot connected by the first team-access build (352a870),
+# copied from its code: the record from slack-connect/dashboard/service.py:166-169
+# (apps[key] = {...}, access='members') and :203-204/:220 (app_id, icon_result,
+# manifest_update_result); the callback's fields from slack-relay/relay.py:357
+# (owner, access, access_rev) and common/access.py:204-205 (sync_success); the
+# pending file from relay.py:379. It never wrote installed_at.
+ROUND3_RECORD = {'profile': 'bot', 'team_id': 'T1', 'bot_name': 'Helper', 'prior_allowed_users': None,
+                 'access': 'members', 'allowed': '', 'access_rev': 1,
+                 'synced_at': 1763300000, 'sync_error': None, 'retry_after': None,
+                 'app_id': 'A1', 'icon_result': 'ok', 'manifest_update_result': 'ok',
+                 'owner': 'U1', 'last_members_owner_ok': True}
+ROUND3_PENDING = {'phase': 'installed', 'at': 1763296400, 'team_name': 'Acme', 'bot_user_id': 'B1'}
+
+
+def round3(tmp_path, env_line='SLACK_APP_ID=A1'):
+    data = tmp_path / 'slack-connect'
+    (data / 'pending').mkdir(parents=True)
+    (data / 'apps.json').write_text(json.dumps({KEY: ROUND3_RECORD}))
+    (data / 'pending' / (KEY + '.json')).write_text(json.dumps(ROUND3_PENDING))
+    home = tmp_path / 'profiles' / 'bot'
+    home.mkdir(parents=True)
+    (home / '.env').write_text(f'SLACK_SIGNING_SECRET=s\n{env_line}\nSLACK_BOT_TOKEN=xoxb-FAKE\n'
+                               'SLACK_TEAM_NAME=Acme\nSLACK_ALLOWED_USERS=U1,U2\n')
+    return data, home
+
+
+def test_a_round3_members_record_is_migrated_and_refreshed(tmp_path):
+    data, home = round3(tmp_path)
+    relay = make_relay(tmp_path, home, FakeSlack())
+    assert asyncio.run(relay.sync_members_once()) == 1
+    assert env_of(home)['SLACK_ALLOWED_USERS'] == 'U1,U2,W9', 'refreshed from Slack'
+    rec = record_of(data)
+    assert type(rec['installed_at']) is int and rec['migrated'] is True and rec['synced_at'] > 1763300000
+    assert (rec['access'], rec['allowed'], rec['access_rev'], rec['owner']) == ('members', '', 1, 'U1'), 'audience kept'
+
+
+def test_a_record_whose_profile_has_another_app_is_not_migrated_or_synced(tmp_path):
+    data, home = round3(tmp_path, env_line='SLACK_APP_ID=A2')
+    slack = FakeSlack()
+    relay = make_relay(tmp_path, home, slack)
+    assert asyncio.run(relay.sync_members_once()) == 0 and slack.calls == []
+    assert record_of(data) == ROUND3_RECORD and env_of(home)['SLACK_ALLOWED_USERS'] == 'U1,U2'
+    assert access.committed(ROUND3_RECORD, env_of(home)) is False
+
+
+def test_a_relay_writer_that_writes_nothing_commits_nothing(tmp_path):
+    data, home = installed(tmp_path)
+    before = record_of(data)
+    relay = make_relay(tmp_path, home, FakeSlack([[{'id': 'U1', 'team_id': 'T1'}]]))
+
+    async def silent(_profile, _values):
+        return None   # the helper exited 0, but Hermes wrote nothing
+    relay.writer = silent
+    with pytest.raises(access.EnvNotApplied, match=r'^Hermes kept SLACK_ALLOWED_USERS=U1,U2,W9 \(administrator-managed\?\)$'):
+        asyncio.run(relay.sync_app(KEY, now=NOW))
+    assert asyncio.run(relay.sync_members_once()) == 0
+    assert record_of(data) == before and env_of(home)['SLACK_ALLOWED_USERS'] == 'U1,U2,W9'
+
+
+def test_a_connect_whose_allowlist_hermes_kept_is_not_committed(tmp_path):
+    data, home = prepare(tmp_path, env='SLACK_ALLOWED_USERS=U9\n')
+    before = record_of(data)
+    relay = make_relay(tmp_path, home, FakeSlack())
+    write = file_writer(home)
+
+    async def keeps_allowlist(_profile, values):
+        write({k: v for k, v in values.items() if k != 'SLACK_ALLOWED_USERS'})
+    relay.writer = keeps_allowlist
+
+    async def exercise():
+        client = TestClient(TestServer(relay.application()))
+        await client.start_server()
+        try:
+            response = await client.get('/oauth/callback', params={'state': issue_state(b'k' * 32, 'bot', KEY, 'T1'), 'code': 'c'})
+            return response.status
+        finally:
+            await client.close()
+    assert asyncio.run(exercise()) == 502
+    assert record_of(data) == before and 'installed_at' not in record_of(data)
+    assert json.loads((data / 'pending' / (KEY + '.json')).read_text())['phase'] == 'error'
+
+
+def test_profile_helper_writes_nothing_when_hermes_refuses_a_key(tmp_path):
+    fake = tmp_path / 'hermes'
+    (fake / 'hermes_cli').mkdir(parents=True)
+    (fake / 'hermes_cli' / '__init__.py').write_text('')
+    log = tmp_path / 'written.log'
+    (fake / 'hermes_cli' / 'config.py').write_text(
+        'def require_env_writable(key, action):\n'
+        '    if key == "SLACK_ALLOWED_USERS":\n'
+        '        raise ValueError(f"Cannot {action} {key}: it is managed by your administrator (/etc/hermes/.env) and cannot be changed.")\n'
+        'def save_env_value(key, value):\n'
+        f'    open({str(log)!r}, "a").write(key + "\\n")\n')
+    out = subprocess.run([sys.executable, '-I', str(HELPER)],
+                         input=json.dumps({'SLACK_BOT_TOKEN': 'xoxb-FAKE', 'SLACK_ALLOWED_USERS': 'U1'}).encode(),
+                         env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True)
+    assert out.returncode != 0
+    assert b'Cannot set SLACK_ALLOWED_USERS: it is managed by your administrator' in out.stderr
+    assert not log.exists(), 'nothing written, not even the keys before the refused one'
+    ok = subprocess.run([sys.executable, '-I', str(HELPER)], input=json.dumps({'SLACK_BOT_TOKEN': 'xoxb-FAKE'}).encode(),
+                        env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True)
+    assert ok.returncode == 0 and log.read_text() == 'SLACK_BOT_TOKEN\n'

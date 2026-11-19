@@ -240,29 +240,33 @@ class Relay:
         locked section runs in a thread and hands the write back to the loop.
         It waits for the write to end (write_profile bounds it and, on a
         timeout, kills the writer and waits for it to exit), so the lock is
-        never released while a writer can still change the .env."""
+        never released while a writer can still change the .env. The new
+        allowlist is read back through Hermes (gate_scope) before the record
+        changes, so a writer that refused silently commits nothing."""
         loop = asyncio.get_running_loop()
         def write(values):
             asyncio.run_coroutine_threadsafe(self.write_profile(expect['profile'], values), loop).result()
+        def read_back():
+            return asyncio.run_coroutine_threadsafe(self.gate_scope(expect['profile']), loop).result()
         return await asyncio.to_thread(access_module.publish_allowlist, self.data, key, expect, ids, write,
-                                       fields=fields, env_extra=env_extra)
+                                       fields=fields, env_extra=env_extra, read_back=read_back)
 
     async def sync_app(self, key, now=None):
         """Refresh one "full members" bot's SLACK_ALLOWED_USERS. True when a
         result (success or failure) was recorded. A bot is refreshed as soon
         as Connect committed its credentials and access (`installed_at`),
-        whatever happened to the welcome DM after that."""
+        whatever happened to the welcome DM after that. A connection from an
+        earlier release is migrated here first, whatever its audience."""
         record = self.record(key)
+        if record is None:
+            return False
+        profile = record['profile']
+        record = access_module.adopt(self.data, key, profile, lambda: self.profile_env(profile))
         if record is None or access_module.mode_of(record.get('access')) != 'members':
             return False   # owner and list need no sync; legacy is never rewritten
-        if not access_module.committed(record):
-            return False
         now = int(time.time() if now is None else now)
         expect = access_module.expect_of(record)
-        try:
-            env = self.profile_env(record['profile'])
-        except ValueError:
-            return False
+        env = self.profile_env(profile)
         token = env.get('SLACK_BOT_TOKEN') or ''
         if not token or env.get('SLACK_APP_ID') != record.get('app_id'):
             return False

@@ -45,5 +45,19 @@ else:
                 raise SystemExit(2)
         elif len(value) > 512:
             raise SystemExit(2)
+    # save_env_value refuses a locked key (managed Hermes, an administrator-
+    # pinned key) by printing and returning. Ask first, for every key, so a
+    # refusal writes nothing and fails the write. Older Hermes lacks the check.
+    try:
+        from hermes_cli.config import require_env_writable
+    except ImportError:
+        require_env_writable = None
+    if require_env_writable:
+        for key in values:
+            try:
+                require_env_writable(key, 'set')
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                raise SystemExit(3)
     for key, value in values.items():
         save_env_value(key, value)

@@ -101,7 +101,18 @@ is the app it created.
 their list. Nothing rewrites it on upgrade, and the relay never refreshes it.
 The window says *Connected before team access: it allows …* and offers
 **Keep these people**, **Everyone in the workspace**, or **Only me** (only
-when the kit knows who added the bot).
+when the kit knows who added the bot: that release allowed only the person who
+added it, so a list that still names exactly one member is taken as them).
+On first sight after the upgrade the kit marks such a bot as connected (when
+its `.env` still has that app's `SLACK_APP_ID` and a bot token) without
+changing who can talk to it; a "full members" bot from an earlier build of
+team access is then refreshed again like any other.
+
+**When Hermes won't take the change.** On a managed Hermes, or when an
+administrator pins `SLACK_ALLOWED_USERS`, Hermes refuses the write. The window
+then shows Hermes's refusal, or *Hermes kept SLACK_ALLOWED_USERS=…
+(administrator-managed?)*, and keeps the audience it had: the kit reads the
+allowlist back the way Hermes reads it before it records any change.
 
 How the kit does it: Hermes has no "full members only" switch.
 `SLACK_ALLOW_ALL_USERS=true` would also let guests in (Hermes refuses only

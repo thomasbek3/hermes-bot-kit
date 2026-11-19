@@ -287,8 +287,10 @@ class Service:
             raise ValueError('name at least one Slack member ID')
         key, item = self._record()
         pending = _read_json(self.data / 'pending' / (key + '.json'), {}) if key else {}
+        # A connection from an earlier release is migrated here (audience unchanged).
+        item = access_module.adopt(self.data, key, self.profile, self.read_env) if key else None
         env = self.read_env()
-        if not key or not access_module.committed(item) or not env.get('SLACK_BOT_TOKEN') or not item.get('app_id'):
+        if not item or not env.get('SLACK_BOT_TOKEN') or not item.get('app_id'):
             raise Conflict('Connect the bot to Slack first')
         owner = access_module.owner_of(item, pending)
         if access == 'owner' and not owner:
@@ -311,7 +313,7 @@ class Service:
         else:
             ids = access_module.allowlist(access, owner, named=named)
         if not access_module.publish_allowlist(self.data, key, expect, ids, self.save_env,
-                                               read_env=self.read_env, fields=fields):
+                                               read_env=self.read_env, fields=fields, read_back=self.gate_scope):
             raise Conflict('Who can talk to the bot changed meanwhile; check the window and try again')
         return self.status()
 
@@ -324,6 +326,9 @@ class Service:
             return {'phase':'none', 'mode':'socket'}
         for key, item in _read_json(self.data / 'apps.json', {}).items():
             if isinstance(item, dict) and item.get('profile') == self.profile:
+                # First sight of a connection from an earlier release migrates it.
+                if not access_module.committed(item):
+                    item = access_module.adopt(self.data, key, self.profile, lambda: env) or item
                 pending = _read_json(self.data / 'pending' / (key + '.json'), {})
                 phase = pending.get('phase', 'error')
                 scope_fields = {}

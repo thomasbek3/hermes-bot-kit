@@ -139,3 +139,47 @@ def test_coerce_allow_set_is_hermes_own(hermes):
     from gateway.authz_mixin import _coerce_allow_set
     for raw in ('U1,U2', ' ["U1", " U2 ", ""] ', '["*"]', '["U1",', '[1, 2]', '{"a": 1}', '[]', '', None, ['U1', ' '], 'NOBODY'):
         assert access.coerce_allow_set(raw) == _coerce_allow_set(raw), raw
+
+
+def test_an_administrator_managed_allowlist_is_refused_and_never_committed(hermes, tmp_path, monkeypatch):
+    """Hermes's real write lock: SLACK_ALLOWED_USERS pinned by a managed scope.
+    save_env_value refuses by printing and returning; the helper and the
+    dashboard saver ask require_env_writable first; the read-back through the
+    real gate_scope catches any writer that refuses silently."""
+    import subprocess
+    managed = tmp_path / 'managed'
+    managed.mkdir()
+    (managed / '.env').write_text('SLACK_ALLOWED_USERS=U1,U2\n')
+    monkeypatch.setenv('HERMES_MANAGED_DIR', str(managed))
+    root = tmp_path / 'root'
+    home, data = root / 'profiles' / 'bot', root / 'slack-connect'
+    home.mkdir(parents=True)
+    data.mkdir()
+    (home / '.env').write_text('SLACK_APP_ID=A1\nSLACK_ALLOWED_USERS=U1,U2\n')
+    monkeypatch.setenv('HERMES_HOME', str(home))
+    from hermes_cli import config, managed_scope
+    managed_scope.invalidate_managed_cache()
+    record = {'profile': 'bot', 'app_id': 'A1', 'access': 'members', 'access_rev': 1}
+    (data / 'apps.json').write_text(json.dumps({'k' * 32: record}))
+
+    def silent(values):   # an older writer: Hermes's own save_env_value, nothing asked first
+        for key, value in values.items():
+            config.save_env_value(key, value)
+    with pytest.raises(access.EnvNotApplied, match=r'Hermes kept SLACK_ALLOWED_USERS=U1,U2 \(administrator-managed\?\)'):
+        access.publish_allowlist(data, 'k' * 32, access.expect_of(record), ['U1'], silent,
+                                 fields={'access': 'owner', 'access_rev': 2}, read_back=lambda: access.gate_scope(home))
+    assert json.loads((data / 'apps.json').read_text()) == {'k' * 32: record}
+    assert (home / '.env').read_text() == 'SLACK_APP_ID=A1\nSLACK_ALLOWED_USERS=U1,U2\n'
+
+    helper = BASE.parent / 'slack-relay' / 'profile_helper.py'
+    out = subprocess.run([sys.executable, '-I', str(helper)], input=b'{"SLACK_ALLOWED_USERS": "U1"}', capture_output=True,
+                         env={**os.environ, 'HERMES_AGENT_DIR': CHECKOUT, 'HERMES_HOME': str(home)})
+    assert out.returncode != 0 and b'managed by your administrator' in out.stderr, out.stderr
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('parity_plugin_api', BASE / 'dashboard' / 'plugin_api.py')
+    api = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(api)
+    with pytest.raises(access.EnvNotApplied, match='managed by your administrator'):
+        api.env_saver(config.save_env_value, config)({'SLACK_ALLOWED_USERS': 'U1'})
+    assert (home / '.env').read_text() == 'SLACK_APP_ID=A1\nSLACK_ALLOWED_USERS=U1,U2\n'
