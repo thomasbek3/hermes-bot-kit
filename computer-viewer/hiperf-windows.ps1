@@ -27,6 +27,7 @@ $HiperfDir = Join-Path $StateDir 'hiperf'
 $VenvDir = Join-Path $HiperfDir 'venv'
 $AgentPath = Join-Path $HiperfDir 'hiperf-agent.py'
 $TokenFile = Join-Path $StateDir 'hiperf-token.txt'
+$RotationMarker = Join-Path $StateDir 'hiperf-rotation-pending'
 $LogFile = Join-Path $StateDir 'hiperf.log'
 $WebsocketsPin = 'websockets>=13,<16'
 
@@ -272,12 +273,14 @@ function Write-HiperfToken([string]$Token) {
 
 function Select-KitHiperf([object[]]$Processes, [string]$PythonwExe, [string]$AgentPath) {
     # Pure: the Win32_Process entries that are this kit's HD agent: the
-    # venv's pythonw.exe with $AgentPath on its command line. Any other
-    # python is never selected.
-    @($Processes) | Where-Object {
-        $_ -and ([string]$_.ExecutablePath -ieq $PythonwExe) -and
-        ([string]$_.CommandLine).IndexOf($AgentPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
-    }
+    # venv's pythonw.exe with $AgentPath on its command line, and the
+    # interpreter it starts: a venv's Scripts\pythonw.exe is a launcher that
+    # runs the base pythonw as its child (same command line), and that child
+    # is the one listening. Any other python is never selected.
+    $hasAgent = { ([string]$args[0].CommandLine).IndexOf($AgentPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+    $kit = @(@($Processes) | Where-Object { $_ -and ([string]$_.ExecutablePath -ieq $PythonwExe) -and (& $hasAgent $_) })
+    $kitIds = @($kit | ForEach-Object { $_.ProcessId })
+    $kit + @(@($Processes) | Where-Object { $_ -and ($kitIds -contains $_.ParentProcessId) -and ($kitIds -notcontains $_.ProcessId) -and (& $hasAgent $_) })
 }
 
 function Stop-KitHiperf {
@@ -300,58 +303,59 @@ function Start-KitHiperf {
     Write-Step "Started $TaskName"
 }
 
-function Get-HiperfProbeHost([string]$Bind) {
-    # Where the installer can reach the agent: its bind address, or loopback for 0.0.0.0.
-    if ($Bind -eq '0.0.0.0') { return '127.0.0.1' }
-    return $Bind
+function Get-RotationAction([bool]$NewToken, [bool]$MarkerPresent) {
+    # Pure: 'rotate' for a new token, or when an earlier rotation never got
+    # its confirmation (the marker is still there), even if the stored token
+    # looks fine now. Else 'none'.
+    if ($NewToken -or $MarkerPresent) { return 'rotate' }
+    return 'none'
 }
 
-function Test-HiperfAcceptsToken([string]$Token, [string]$Address, [int]$Port, [int]$TimeoutSec = 60) {
-    # True once the agent at ws://$Address:$Port/stream answers an auth
-    # frame carrying $Token with its "hello" (no stream is started). A close
-    # or an error after connecting is a no: the agent closes a wrong token
-    # with 4401. A refused connection is retried until $TimeoutSec, because
-    # the agent dry-runs its ffmpeg pipelines (up to 10 s each) before it
-    # listens.
-    $uri = [Uri]('ws://{0}:{1}/stream' -f $Address, $Port)
-    $auth = [Text.Encoding]::UTF8.GetBytes((@{ type = 'auth'; token = $Token } | ConvertTo-Json -Compress))
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $ws = New-Object System.Net.WebSockets.ClientWebSocket
-        $ws.Options.Proxy = $null
-        $cts = New-Object System.Threading.CancellationTokenSource ([TimeSpan]::FromSeconds(10))
-        try {
-            # [void]: PowerShell sees these Tasks as Task<VoidTaskResult>, whose
-            # GetResult() would otherwise land in the function's output.
-            try { [void]$ws.ConnectAsync($uri, $cts.Token).GetAwaiter().GetResult() }
-            catch { Start-Sleep -Seconds 1; continue }
-            try {
-                [void]$ws.SendAsync([ArraySegment[byte]]::new($auth), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).GetAwaiter().GetResult()
-                $buf = New-Object byte[] 8192
-                $r = $ws.ReceiveAsync([ArraySegment[byte]]::new($buf), $cts.Token).GetAwaiter().GetResult()
-                if ($r.MessageType -ne [System.Net.WebSockets.WebSocketMessageType]::Text) { return $false }
-                return ((ConvertFrom-Json ([Text.Encoding]::UTF8.GetString($buf, 0, $r.Count))).type -eq 'hello')
-            } catch { return $false }
-        } finally {
-            $ws.Dispose(); $cts.Dispose()
+function Write-RotationMarker {
+    # An empty admin-only file: "a rotation started and is not confirmed".
+    Remove-TreeNoFollow $RotationMarker
+    New-Item -ItemType File -Path $RotationMarker -ErrorAction Stop | Out-Null
+    Set-ProtectedAcl -Path $RotationMarker
+}
+
+function Wait-KitHiperfListening([int]$TimeoutSec = 60) {
+    # After a start: waits (the agent dry-runs ffmpeg before it listens)
+    # until the kit's own agent (the venv pythonw running $AgentPath) is up
+    # AND is the process listening on $ListenPort. A port held by any other
+    # process throws, naming it. Nothing connects to the agent.
+    $kitPids = @()
+    foreach ($round in 1..([Math]::Max(1, [int]($TimeoutSec / 2)))) {
+        $kitPids = @(Select-KitHiperf -Processes @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pythonw.exe'" -ErrorAction Stop) -PythonwExe $venvPythonw -AgentPath $AgentPath | ForEach-Object { [int]$_.ProcessId })
+        $owners = @(Get-NetTCPConnection -State Listen -LocalPort $ListenPort -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.OwningProcess } | Select-Object -Unique)
+        foreach ($o in $owners) {
+            if ($kitPids -notcontains $o) {
+                $path = [string](@(Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$o" -ErrorAction SilentlyContinue) | Select-Object -First 1).ExecutablePath
+                if (-not $path) { $path = '(unknown path)' }
+                throw "Port $ListenPort is held by $path (PID $o), not the HD agent. End that process, then re-run."
+            }
         }
+        if ($owners.Count -gt 0) { return }
+        Start-Sleep -Seconds 2
     }
-    return $false
+    if ($kitPids.Count -eq 0) { throw "The HD agent ($venvPythonw $AgentPath) did not start. See $LogFile, start $TaskName from Task Scheduler, then re-run." }
+    throw "The HD agent (PID $($kitPids -join ', ')) is not listening on port $ListenPort after $TimeoutSec s. See $LogFile, then re-run."
 }
 
-function Invoke-TokenRotation([bool]$Rotated, [string]$Token, [string]$Address) {
-    # Only for a new token. The running agent holds the token it read at
-    # start, so: stop it and confirm it is gone, write the new token, start
-    # it, and confirm it accepts the new token before anything reports
-    # success. Returns $false (and does nothing) when the token was reused.
-    if (-not $Rotated) { return $false }
+function Invoke-TokenRotation([bool]$Rotate, [string]$Token) {
+    # The running agent holds the token it read at start, so: mark the
+    # rotation pending, stop the agent and confirm it is gone, write the
+    # token, start it, and confirm the kit's own agent owns the port. The
+    # token is never sent anywhere. The marker goes only once that is
+    # confirmed, so a failed run rotates again next time. Returns $false
+    # (and does nothing) when there is nothing to rotate.
+    if (-not $Rotate) { return $false }
+    Write-RotationMarker
     Stop-KitHiperf
     Write-HiperfToken $Token
     Start-KitHiperf
-    if (-not (Test-HiperfAcceptsToken -Token $Token -Address $Address -Port $ListenPort)) {
-        throw "The HD agent did not accept the new token; restart it from Task Scheduler ($TaskName) and re-run."
-    }
-    Write-Step "The HD agent on ${Address}:$ListenPort accepts the new token"
+    Wait-KitHiperfListening
+    Remove-TreeNoFollow $RotationMarker
+    Write-Step 'The new HD token is in place. Reconnect the HD viewer with the token below to confirm.'
     return $true
 }
 
@@ -797,9 +801,12 @@ $settings = New-ScheduledTaskSettingsSet `
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 
-# A new token: stop the running agent, write it, start, and confirm the agent
-# accepts it (throws otherwise, before the token is printed below).
-if (-not (Invoke-TokenRotation -Rotated $tokenInfo.New -Token $token -Address (Get-HiperfProbeHost $Bind))) {
+# A new token, or an earlier rotation left unconfirmed: stop the running
+# agent, write the token, start, and confirm the kit's agent owns the port
+# (throws otherwise, before the token is printed below).
+$markerPresent = [bool](Get-Item -LiteralPath $RotationMarker -Force -ErrorAction SilentlyContinue)
+$rotate = (Get-RotationAction -NewToken $tokenInfo.New -MarkerPresent $markerPresent) -eq 'rotate'
+if (-not (Invoke-TokenRotation -Rotate $rotate -Token $token)) {
     try {
         Start-KitHiperf
     } catch {

@@ -103,8 +103,11 @@ is new in this one.
     on loopback only, or stops; another program on :5900 is named, not killed.
     TightVNC's registry key is locked before the password is written, and an
     HD token whose original permissions let other accounts read or change it
-    is replaced; the kit's HD task is restarted on the new token and setup
-    confirms the running agent accepts it before printing it.
+    is replaced; the kit's HD task is restarted on the new token, and setup
+    confirms the kit's own agent is running and holds the HD port before
+    printing it (the token is never sent anywhere; a rotation-pending marker
+    makes a re-run finish an interrupted rotation). Reconnect the HD viewer
+    with the new token to confirm.
     **Computer viewer:** one check parses each address once (ws/wss, or
     http(s) mapped to them; nothing else, no credentials in the URL, plaintext
     only to a private host), and the connection uses that checked address, for
