@@ -81,7 +81,7 @@ def client_identity(peer, forwarded):
 def welcome(bot, workspace, audience):
     """The installer's welcome DM. `audience` is the honest who-can-talk line."""
     lines = ('You can DM me here, or @mention me in a channel.',
-             'Who can talk to me: ' + audience,
+             audience,
              "Whatever my tools can do, I do for anyone who can talk to me, with my own access. "
              "Change who can talk to me in my Slack window in Hermes.")
     text = f"👋 Hi, I'm {bot}, the bot you added to {workspace}.\n" + '\n'.join('• ' + line for line in lines)
@@ -92,12 +92,14 @@ def welcome(bot, workspace, audience):
 
 
 class Relay:
-    def __init__(self, root, hermes_python, helper, *, base_url, upstream, slack=None, writer=None, notifier=None):
+    def __init__(self, root, hermes_python, helper, *, base_url, upstream, slack=None, writer=None, notifier=None,
+                 scope_reader=None):
         self.root = Path(root)
         self.data = self.root / 'slack-connect'
         self.hermes_python, self.helper = str(hermes_python), str(helper)
         self.base_url, self.upstream = base_url.rstrip('/'), upstream.rstrip('/')
         self.slack, self.writer, self.notifier = slack, writer, notifier
+        self.scope_reader = scope_reader
         self.buckets = {}
 
     def _tokens(self, ident, now):
@@ -160,87 +162,121 @@ class Relay:
         headers = {'Authorization': 'Bearer ' + token} if token else {}
         async with ClientSession(timeout=ClientTimeout(total=10)) as session:
             async with session.post('https://slack.com/api/' + method, data=data, headers=headers) as response:
-                result = await response.json(content_type=None)
-                if response.status != 200 or not result.get('ok'):
-                    raise RuntimeError('Slack request failed')
+                try:
+                    result = await response.json(content_type=None)
+                except (ValueError, ClientError):
+                    result = {}
+                if response.status == 429:
+                    raise access_module.SlackReadError('ratelimited', response.headers.get('Retry-After'))
+                if response.status != 200 or not isinstance(result, dict) or not result.get('ok'):
+                    raise access_module.SlackReadError((result or {}).get('error') if isinstance(result, dict) else None)
                 return result
 
     async def workspace_members(self, token, team_id):
         """Full members of the workspace (not guests, not Slack Connect users,
-        not bots) from users.list; raises when Slack cannot be read."""
+        not bots) from users.list. All pages or nothing: any failed page
+        raises SlackReadError and no partial list is ever returned."""
         users, cursor = [], ''
         for _ in range(MEMBER_PAGES_MAX):
             values = {'limit': '200'}
             if cursor:
                 values['cursor'] = cursor
             result = await self.slack_call('users.list', values, token)
+            if not isinstance(result, dict) or not result.get('ok'):
+                raise access_module.SlackReadError((result or {}).get('error') if isinstance(result, dict) else None)
             users.extend(result.get('members') or [])
             cursor = ((result.get('response_metadata') or {}).get('next_cursor') or '').strip()
             if not cursor:
                 break
         else:
-            raise RuntimeError('workspace too large to list')
-        members = access_module.full_members(users, team_id)
-        if len(members) > access_module.MAX_MEMBERS:
-            raise RuntimeError('workspace too large')
-        return members
+            raise access_module.SlackReadError('workspace_too_large')
+        return access_module.full_members(users, team_id)
 
     def profile_home(self, profile):
         return self.root / 'profiles' / profile
 
-    def audience(self, profile, record, chosen, synced=True):
-        env = dict(self.profile_env(profile))
-        root_env = dict(dotenv_values(self.root / '.env')) if (self.root / '.env').is_file() else {}
-        eff = access_module.effective(env, access_module.pairing_approved(self.profile_home(profile)), root_env)
-        mode = access_module.mode_of(record.get('access'))
-        text = access_module.describe(mode, chosen, eff, env.get('SLACK_TEAM_NAME') or 'the workspace')
-        if mode == 'members' and not synced and not eff['open']:
-            text = "Only you for now: Slack's member list could not be read yet (the relay retries every 15 minutes)."
-        return {'mode': mode, 'text': text, 'open': eff['open'], 'count': len(eff['ids']),
-                'extra_grants': access_module.extra_grants(chosen, eff, profile), 'synced': bool(synced)}
+    async def gate_scope(self, profile):
+        """The profile's gate keys as Hermes reads them, from the helper run
+        with Hermes's own Python. If that fails, the profile .env alone
+        (marked incomplete)."""
+        if self.scope_reader:
+            return await self.scope_reader(profile)
+        home = self.profile_home(profile)
+        try:
+            env = dict(os.environ, HERMES_HOME=str(home))
+            proc = await asyncio.create_subprocess_exec(self.hermes_python, '-I', self.helper, '--gate-scope', str(home),
+                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, env=env)
+            out, _ = await asyncio.wait_for(proc.communicate(), 30)
+            scope = json.loads(out) if proc.returncode == 0 else None
+            keys = scope.get('keys') if isinstance(scope, dict) else None
+            if isinstance(keys, dict) and set(keys) <= set(access_module.GATE_KEYS) and all(
+                    isinstance(v, dict) and isinstance(v.get('value'), str) and isinstance(v.get('source'), str) for v in keys.values()):
+                return {'keys': keys, 'complete': scope.get('complete') is True}
+        except (OSError, ValueError, asyncio.TimeoutError):
+            pass
+        LOG.warning('Hermes gate settings could not be read; counting only the bot .env')
+        return access_module.scope_from_env(access_module.read_env_file(home / '.env'), f'{home}/.env', complete=False)
 
-    async def allowlist_for(self, record, owner, token, team_id):
-        """(SLACK_ALLOWED_USERS ids, synced) for the chosen audience."""
-        mode = access_module.mode_of(record.get('access'))
-        if mode == 'members':
-            try:
-                return access_module.chosen_ids(mode, owner, await self.workspace_members(token, team_id)), True
-            except Exception:
-                LOG.warning('Slack member list could not be read; allowing only the installer for now')
-                return access_module.chosen_ids('owner', owner), False
-        named = access_module.parse_ids(record.get('allowed') or '') if mode == 'list' else ()
-        return access_module.chosen_ids(mode, owner, named=named), True
+    async def effective(self, key):
+        """The one effective-access result for app `key` (current record)."""
+        record = self.record(key) or {}
+        profile = record['profile']
+        env = self.profile_env(profile)
+        return access_module.effective_access(await self.gate_scope(profile),
+            access_module.pairing_approved(self.profile_home(profile)), record,
+            team_name=env.get('SLACK_TEAM_NAME') or 'the workspace')
+
+    async def publish(self, key, expect, ids, fields, env_extra=None):
+        """publish_allowlist with the lock held across the profile write: the
+        locked section runs in a thread and hands the write back to the loop."""
+        loop = asyncio.get_running_loop()
+        def write(values):
+            asyncio.run_coroutine_threadsafe(self.write_profile(expect['profile'], values), loop).result(120)
+        return await asyncio.to_thread(access_module.publish_allowlist, self.data, key, expect, ids, write,
+                                       fields=fields, env_extra=env_extra)
+
+    async def sync_app(self, key, now=None):
+        """Refresh one "full members" bot's SLACK_ALLOWED_USERS. True when a
+        result (success or failure) was recorded."""
+        record = self.record(key)
+        if record is None or access_module.mode_of(record.get('access')) != 'members':
+            return False   # owner and list need no sync; legacy is never rewritten
+        if _read_json(self.data / 'pending' / (key + '.json'), {}).get('phase') != 'installed':
+            return False
+        now = int(time.time() if now is None else now)
+        wait = record.get('retry_after')
+        if type(wait) is int and now < wait:
+            return False   # Slack asked us to wait
+        expect = access_module.expect_of(record)
+        try:
+            env = self.profile_env(record['profile'])
+        except ValueError:
+            return False
+        token = env.get('SLACK_BOT_TOKEN') or ''
+        if not token or env.get('SLACK_APP_ID') != record.get('app_id'):
+            return False
+        owner = access_module.owner_of(record)
+        try:
+            members = await self.workspace_members(token, record.get('team_id'))
+            ids, fields = access_module.sync_success(owner, members, now)
+        except Exception as exc:
+            exc = exc if isinstance(exc, access_module.SlackReadError) else access_module.SlackReadError()
+            LOG.warning('Slack member list could not be read for one bot: %s', exc.error)
+            ids, fields = access_module.sync_failure(record, owner, exc, now)
+        return await self.publish(key, expect, ids, fields)
 
     async def sync_members_once(self):
-        """Refresh every "full members" bot's SLACK_ALLOWED_USERS from Slack.
-        A failed read keeps the current list (never widens it, never empties it)."""
-        changed = 0
-        for key, record in _read_json(self.data / 'apps.json', {}).items():
-            if not isinstance(record, dict) or access_module.mode_of(record.get('access')) != 'members':
-                continue
-            if self.record(key) is None:
-                continue
-            pending = _read_json(self.data / 'pending' / (key + '.json'), {})
-            owner = pending.get('owner')
-            if pending.get('phase') != 'installed' or not isinstance(owner, str):
-                continue
-            profile = record['profile']
+        """Refresh every "full members" bot. A failed read keeps the current
+        list unless it is older than a day (then the verified installer, or
+        nobody); a sync never overwrites an audience changed meanwhile."""
+        done = 0
+        for key in list(_read_json(self.data / 'apps.json', {})):
             try:
-                env = self.profile_env(profile)
-                token = env.get('SLACK_BOT_TOKEN') or ''
-                if not token or env.get('SLACK_APP_ID') != record.get('app_id'):
-                    continue
-                ids = access_module.chosen_ids('members', owner, await self.workspace_members(token, record.get('team_id')))
+                done += bool(await self.sync_app(key))
             except Exception:
-                LOG.warning('Slack member sync skipped for one bot (Slack could not be read)')
-                continue
-            value = ','.join(ids)
-            if value != (env.get('SLACK_ALLOWED_USERS') or ''):
-                await self.write_profile(profile, {'SLACK_ALLOWED_USERS': value})
-                changed += 1
-            self.pending(key, 'installed', **{k: v for k, v in pending.items() if k not in ('phase', 'at', 'audience', 'chosen')},
-                         chosen=ids, audience=self.audience(profile, record, ids))
-        return changed
+                LOG.warning('Slack member sync failed for one bot')
+        return done
 
     async def member_sync_loop(self):
         while True:
@@ -311,20 +347,41 @@ class Relay:
             team_name = safe_team_name((result.get('team') or {}).get('name')) or 'Slack'
             if not all(isinstance(x, str) and x for x in (owner, token, team_name)):
                 raise ValueError('incomplete authorization')
-            # The chosen audience (default: the workspace's full members) goes
-            # into SLACK_ALLOWED_USERS; then the effective audience, from every
-            # grant Hermes honours, is what the person is told.
-            ids, synced = await self.allowlist_for(record, owner, token, state['team_id'])
-            await self.write_profile(profile, {'SLACK_BOT_TOKEN': token, 'SLACK_TEAM_ID': state['team_id'], 'SLACK_TEAM_NAME': team_name, 'SLACK_ALLOWED_USERS': ','.join(ids)})
+            # The chosen audience (default: the workspace's verified full
+            # members) goes into SLACK_ALLOWED_USERS together with the token,
+            # through the one locked write path. A first member read that
+            # fails publishes NOBODY (nobody is verified yet) and says why.
+            mode = access_module.mode_of(record.get('access'))
+            if mode == access_module.LEGACY:
+                mode = 'owner'   # an in-flight connect from an earlier release
+            fields = {'owner': owner, 'access': mode, 'access_rev': max(1, access_module.rev_of(record))}
+            if mode == 'members':
+                try:
+                    ids, synced = access_module.sync_success(owner, await self.workspace_members(token, state['team_id']), time.time())
+                except Exception as exc:
+                    exc = exc if isinstance(exc, access_module.SlackReadError) else access_module.SlackReadError()
+                    LOG.warning('Slack member list could not be read at Connect: %s', exc.error)
+                    ids, failed = access_module.sync_failure({}, owner, exc, time.time())
+                    ids, synced = ids or [], {'synced_at': None, 'last_members_owner_ok': False, 'retry_after': None, **failed}
+                fields.update(synced)
+            else:
+                named = access_module.parse_ids(record.get('allowed') or '') if mode == 'list' else ()
+                ids = access_module.allowlist(mode, owner, named=named)
+            creds = {'SLACK_BOT_TOKEN': token, 'SLACK_TEAM_ID': state['team_id'], 'SLACK_TEAM_NAME': team_name}
+            if not await self.publish(key, access_module.expect_of(record), ids, fields, env_extra=creds):
+                raise ValueError('the app record changed')
             await self.notify(profile)
-            audience = self.audience(profile, record, ids, synced)
-            payload = welcome(record.get('bot_name') or 'Hermes', team_name, audience['text'])
+            audience = await self.effective(key)
+            lines = [audience['text']] + ([audience['sync']['text']] if audience['sync']['text'] else [])
+            payload = welcome(record.get('bot_name') or 'Hermes', team_name, ' '.join(lines))
             payload['channel'] = owner
             await self.slack_call('chat.postMessage', {'channel': owner, 'text': payload['text'], 'blocks': json.dumps(payload['blocks'])}, token)
-            self.pending(key, 'installed', team_name=team_name, bot_user_id=result.get('bot_user_id') or '', owner=owner, chosen=ids, audience=audience)
-            extra = ''.join(f"<li>{html.escape(g['grant'])}: {html.escape(g['who'])}</li>" for g in audience['extra_grants'])
-            extra_html = f"<p>Other settings let more people in:</p><ul>{extra}</ul><p>Fix them in the bot's Slack window in Hermes.</p>" if extra else ''
-            return web.Response(text=f"<p>{html.escape(record.get('bot_name') or 'Hermes')} is in {html.escape(team_name)}.</p><p>Who can talk to it: {html.escape(audience['text'])}</p>{extra_html}<p>You can close this tab and go back to Hermes.</p>", content_type='text/html')
+            self.pending(key, 'installed', team_name=team_name, bot_user_id=result.get('bot_user_id') or '')
+            grants = ''.join(f"<li>{html.escape(g['what'])} ({html.escape(g['source'])}): {html.escape(g['how_to_change'])}</li>"
+                             for g in audience['grants'])
+            grants_html = f"<p>Other settings let people in:</p><ul>{grants}</ul>" if grants else ''
+            sync_html = f"<p>{html.escape(audience['sync']['text'])}</p>" if audience['sync']['text'] else ''
+            return web.Response(text=f"<p>{html.escape(record.get('bot_name') or 'Hermes')} is in {html.escape(team_name)}.</p><p>{html.escape(audience['text'])}</p>{sync_html}{grants_html}<p>You can close this tab and go back to Hermes.</p>", content_type='text/html')
         except Exception:
             self.pending(key, 'error')
             LOG.error('Slack authorization could not be completed')

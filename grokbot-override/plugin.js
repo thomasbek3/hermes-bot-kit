@@ -47891,21 +47891,27 @@ function providerModels(provider) {
 function usableProviders(options) {
   return (options?.providers || []).filter((p) => p && p.slug);
 }
-function skillIdentity(row) {
-  for (const key of ["identifier", "id", "name"]) {
-    const value = row && typeof row[key] === "string" ? row[key].trim() : "";
-    if (value) return value;
-  }
-  return "";
+function skillQualifiedId(row) {
+  const id = row && typeof row.identifier === "string" ? row.identifier.trim() : "";
+  return id.includes("/") ? id : "";
 }
 function skillSource(row) {
   const parts = [row?.source, row?.trust || row?.trust_level].map((v) => typeof v === "string" ? v.trim() : "").filter(Boolean);
   return parts.join(", ");
 }
-function skillAmbiguous(rows, row) {
-  const name = String(row?.name || "").trim();
-  if (!name || skillIdentity(row) !== name) return false;
-  return (Array.isArray(rows) ? rows : []).filter((r) => String(r?.name || "").trim() === name).length > 1;
+function shellQuote2(value) {
+  const text3 = String(value ?? "").trim();
+  if (!text3 || text3.startsWith("-") || /['\u0000-\u001f\u007f]/.test(text3)) return "";
+  return `'${text3}'`;
+}
+var SKILL_BARE_NOTE = "The hub gave only a name, so Hermes picks the entry itself. Check which one first with hermes skills search <name>, which lists each entry's source and full identifier.";
+function skillRowAction(row, profile) {
+  const identifier = skillQualifiedId(row);
+  if (identifier) return { kind: "install", identifier };
+  const p = shellQuote2(profile);
+  const n = shellQuote2(row?.name);
+  if (!p || !n) return { kind: "none", note: "This name can't be shown as a safe command; install it from Hermes's own Skills page." };
+  return { kind: "command", command: `hermes -p ${p} skills install ${n}`, note: SKILL_BARE_NOTE };
 }
 
 // src/core/profileOps.js
@@ -57348,15 +57354,22 @@ function accessBody(mode, listText) {
   if (bad.length) return { error: `Not a Slack member ID: ${bad.slice(0, 3).join(", ")}` };
   return { body: { access, allowed: ids.join(",") } };
 }
+function accessChoices(ownerKnown = true) {
+  return ACCESS_CHOICES.filter((c2) => c2.id !== "owner" || ownerKnown);
+}
 function audienceView(status) {
   const a2 = status?.audience;
   if (!a2 || typeof a2 !== "object" || typeof a2.text !== "string") return null;
-  const extras = Array.isArray(a2.extra_grants) ? a2.extra_grants.filter((g) => g && typeof g.grant === "string") : [];
+  const grants = Array.isArray(a2.grants) ? a2.grants.filter((g) => g && typeof g.what === "string") : [];
+  const legacy = status?.legacy && typeof status.legacy === "object" ? status.legacy : null;
   return {
     text: a2.text,
     open: a2.open === true,
-    extras: extras.map((g) => ({ grant: g.grant, who: String(g.who || ""), how: String(g.how || ""), fixable: g.fixable === true })),
-    fixable: extras.some((g) => g.fixable === true)
+    sync: typeof a2.sync?.text === "string" ? a2.sync.text : "",
+    stale: a2.sync?.stale === true || typeof a2.sync?.error === "string",
+    grants: grants.map((g) => ({ what: g.what, source: String(g.source || ""), how: String(g.how_to_change || "") })),
+    legacy: legacy ? { text: String(legacy.text || ""), ids: Array.isArray(legacy.ids) ? legacy.ids.filter((x) => MEMBER_ID.test(x)) : [] } : null,
+    ownerKnown: status?.owner_known !== false
   };
 }
 
@@ -58878,6 +58891,7 @@ function SkillsHub({ bot, onInstalled }) {
   const [results, setResults] = React16.useState(null);
   const [busy, setBusy] = React16.useState(null);
   const [error, setError] = React16.useState(null);
+  const [copied, setCopied] = React16.useState(null);
   return /* @__PURE__ */ jsxs16("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
     /* @__PURE__ */ jsxs16(
       "form",
@@ -58888,6 +58902,7 @@ function SkillsHub({ bot, onInstalled }) {
           if (!query.trim() || busy) return;
           setBusy("search");
           setError(null);
+          setCopied(null);
           try {
             setResults(await searchSkills(query));
           } catch (err2) {
@@ -58905,38 +58920,59 @@ function SkillsHub({ bot, onInstalled }) {
     ),
     error ? /* @__PURE__ */ jsx17("div", { className: "gbo-form-error", children: error }) : null,
     results && !results.length ? /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint", children: "No skills found." }) : null,
-    (results || []).slice(0, 8).map((r, index) => /* @__PURE__ */ jsxs16("div", { className: "gbo-check", style: { cursor: "default" }, children: [
-      /* @__PURE__ */ jsxs16("span", { className: "gbo-check-text", title: r.description || r.name, children: [
-        r.name,
-        skillSource(r) ? /* @__PURE__ */ jsxs16("span", { className: "gbo-field-hint", children: [
-          " · ",
-          skillSource(r)
-        ] }) : null,
-        skillAmbiguous(results, r) ? /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint gbo-skill-ambiguous", children: " · Several hub entries share this name and the hub does not say which is which; install it from Hermes's own Skills page." }) : null
-      ] }),
-      /* @__PURE__ */ jsx17(
-        "button",
-        {
-          type: "button",
-          className: "gbo-btn is-small",
-          disabled: Boolean(busy) || skillAmbiguous(results, r),
-          onClick: async () => {
-            setBusy(r.name);
-            setError(null);
-            try {
-              await installSkill(bot, skillIdentity(r));
-              onInstalled(r.name);
-            } catch (err2) {
-              setError(String(err2?.message || err2));
-            } finally {
-              setBusy(null);
+    (results || []).slice(0, 8).map((r, index) => {
+      const action = skillRowAction(r, cliProfile(bot));
+      return /* @__PURE__ */ jsxs16("div", { className: "gbo-check gbo-skill-row", style: { cursor: "default", flexWrap: "wrap" }, children: [
+        /* @__PURE__ */ jsxs16("span", { className: "gbo-check-text", title: r.description || r.name, children: [
+          r.name,
+          skillSource(r) ? /* @__PURE__ */ jsxs16("span", { className: "gbo-field-hint", children: [
+            " · ",
+            skillSource(r)
+          ] }) : null
+        ] }),
+        action.kind === "install" ? /* @__PURE__ */ jsx17(
+          "button",
+          {
+            type: "button",
+            className: "gbo-btn is-small",
+            disabled: Boolean(busy),
+            onClick: async () => {
+              setBusy(action.identifier);
+              setError(null);
+              try {
+                await installSkill(bot, action.identifier);
+                onInstalled(r.name);
+              } catch (err2) {
+                setError(String(err2?.message || err2));
+              } finally {
+                setBusy(null);
+              }
+            },
+            children: busy === action.identifier ? "Installing…" : "Install"
+          }
+        ) : null,
+        action.kind === "command" ? /* @__PURE__ */ jsxs16("span", { style: { display: "flex", alignItems: "center", gap: 6, flexBasis: "100%", minWidth: 0 }, children: [
+          /* @__PURE__ */ jsx17("code", { className: "gbo-skill-cmd", style: { minWidth: 0, overflowWrap: "anywhere", userSelect: "all" }, children: action.command }),
+          /* @__PURE__ */ jsx17(
+            "button",
+            {
+              type: "button",
+              className: "gbo-btn is-small",
+              onClick: () => {
+                void copyText(action.command).then((ok) => setCopied(ok ? index : null));
+              },
+              children: copied === index ? "Copied" : "Copy"
             }
-          },
-          children: busy === r.name ? "Installing…" : "Install"
-        }
-      )
-    ] }, `${index}:${skillIdentity(r)}`))
+          )
+        ] }) : null,
+        action.kind !== "install" ? /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint", style: { flexBasis: "100%" }, children: action.note }) : null
+      ] }, `${index}:${r.name}`);
+    })
   ] });
+}
+function cliProfile(bot) {
+  const scope = backendScope(bot);
+  return typeof scope === "string" ? scope : scope.profile || bot.name;
 }
 function backendScope(bot) {
   const route = resolveBotConnectionRoute(bot).route;
@@ -59154,7 +59190,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
   const [timedOut, setTimedOut] = React17.useState(false);
   const [testResult, setTestResult] = React17.useState("");
   const [needsBootstrap, setNeedsBootstrap] = React17.useState(Boolean(initial.bootstrap));
-  const [access, setAccess] = React17.useState(initial.status?.access || "members");
+  const [access, setAccess] = React17.useState(ACCESS_CHOICES.some((c2) => c2.id === initial.status?.access) ? initial.status.access : "members");
   const [allowed, setAllowed] = React17.useState("");
   const [audience, setAudience] = React17.useState(audienceView(initial.status));
   const [changing, setChanging] = React17.useState(false);
@@ -59191,6 +59227,17 @@ function SlackConnect({ bot, name, initial, onClose }) {
       stopped = true;
       clearTimeout(timer);
     };
+  }, [bot, phase]);
+  React17.useEffect(() => {
+    if (phase !== "connected") return;
+    const timer = setInterval(async () => {
+      try {
+        const view = audienceView(await slackProvisioning(bot, "status"));
+        if (view && alive.current) setAudience(view);
+      } catch {
+      }
+    }, 2e4);
+    return () => clearInterval(timer);
   }, [bot, phase]);
   const failure = (err2, secrets = []) => slackError(err2, "Slack connection failed", secrets).message;
   const add2 = async () => {
@@ -59264,9 +59311,9 @@ function SlackConnect({ bot, name, initial, onClose }) {
     if (["created", "denied", "error"].includes(phaseRef.current)) void remove(true);
     else onClose();
   };
-  const applyAccess = async () => {
+  const applyAccess = async (mode = access, list = allowed) => {
     if (busy) return;
-    const who = accessBody(access, allowed);
+    const who = accessBody(mode, list);
     if (who.error) {
       setError(who.error);
       return;
@@ -59284,26 +59331,13 @@ function SlackConnect({ bot, name, initial, onClose }) {
       if (alive.current) setBusy(false);
     }
   };
-  const fixAccess = async () => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const status = await slackProvisioning(bot, "access/fix", "POST", {});
-      if (alive.current) setAudience(audienceView(status));
-    } catch (err2) {
-      if (alive.current) setError(failure(err2));
-    } finally {
-      if (alive.current) setBusy(false);
-    }
-  };
   const accessPicker = /* @__PURE__ */ jsxs17("fieldset", { className: "gbo-slack-access", children: [
     /* @__PURE__ */ jsxs17("legend", { className: "gbo-sheet-text", children: [
       "Who can talk to ",
       name,
       " in Slack"
     ] }),
-    ACCESS_CHOICES.map((c2) => /* @__PURE__ */ jsxs17("label", { className: "gbo-sheet-choice", title: c2.hint, children: [
+    accessChoices(audience?.ownerKnown ?? true).map((c2) => /* @__PURE__ */ jsxs17("label", { className: "gbo-sheet-choice", title: c2.hint, children: [
       /* @__PURE__ */ jsx18("input", { className: "gbo-slack-access-choice", type: "radio", name: "slack-access", checked: access === c2.id, onChange: () => setAccess(c2.id) }),
       /* @__PURE__ */ jsxs17("span", { children: [
         c2.label,
@@ -59323,17 +59357,22 @@ function SlackConnect({ bot, name, initial, onClose }) {
       " can ask it to use its tools, and it acts with its own access. Give it only the tools you are happy for all of them to use."
     ] })
   ] });
-  const audienceBlock = audience ? /* @__PURE__ */ jsxs17("div", { className: `gbo-sheet-note gbo-slack-audience${audience.open || audience.extras.length ? " is-warning" : ""}`, role: "status", children: [
-    /* @__PURE__ */ jsxs17("div", { children: [
-      "Who can talk to it: ",
-      audience.text
-    ] }),
-    audience.extras.length ? /* @__PURE__ */ jsx18("ul", { className: "gbo-slack-extra-grants", children: audience.extras.map((g) => /* @__PURE__ */ jsxs17("li", { children: [
-      g.grant,
-      ": ",
-      g.who,
-      g.fixable ? "" : ` (${g.how})`
-    ] }, g.grant)) }) : null
+  const audienceBlock = audience ? /* @__PURE__ */ jsxs17("div", { className: `gbo-sheet-note gbo-slack-audience${audience.open || audience.grants.length || audience.stale ? " is-warning" : ""}`, role: "status", children: [
+    audience.legacy ? /* @__PURE__ */ jsx18("div", { className: "gbo-slack-legacy", children: audience.legacy.text }) : null,
+    /* @__PURE__ */ jsx18("div", { children: audience.text }),
+    audience.sync ? /* @__PURE__ */ jsx18("div", { className: "gbo-field-hint gbo-slack-sync", children: audience.sync }) : null,
+    audience.grants.length ? /* @__PURE__ */ jsx18("ul", { className: "gbo-slack-extra-grants", children: audience.grants.map((g) => /* @__PURE__ */ jsxs17("li", { children: [
+      g.what,
+      " (",
+      g.source,
+      "). To change: ",
+      g.how
+    ] }, g.what + g.source)) }) : null
+  ] }) : null;
+  const legacyChoices = audience?.legacy ? /* @__PURE__ */ jsxs17("div", { className: "gbo-slack-legacy-choices", children: [
+    audience.legacy.ids.length ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-legacy-keep", disabled: busy, onClick: () => void applyAccess("list", audience.legacy.ids.join(",")), children: "Keep these people" }) : null,
+    /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-legacy-members", disabled: busy, onClick: () => void applyAccess("members", ""), children: "Everyone in the workspace" }),
+    audience.ownerKnown ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-legacy-owner", disabled: busy, onClick: () => void applyAccess("owner", ""), children: "Only me" }) : null
   ] }) : null;
   const testConnection = async () => {
     if (busy) return;
@@ -59378,7 +59417,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
         " Slack. It’ll respond with the same plugins, context, and memories it uses here."
       ] }),
       audienceBlock,
-      audience?.fixable ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-access-fix", disabled: busy, onClick: () => void fixAccess(), children: "Remove the extra access" }) : null,
+      legacyChoices,
       changing ? /* @__PURE__ */ jsxs17(Fragment11, { children: [
         accessPicker,
         /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary is-small gbo-slack-access-apply", disabled: busy, onClick: () => void applyAccess(), children: "Apply" })

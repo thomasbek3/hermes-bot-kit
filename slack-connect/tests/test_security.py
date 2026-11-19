@@ -42,7 +42,7 @@ def prepare(tmp_path):
     (data / 'apps.json').write_text(json.dumps({KEY: {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Test Bot'}}))
     profile = tmp_path / 'profiles' / 'test-profile'
     profile.mkdir(parents=True)
-    (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\n')
+    (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\nSLACK_APP_ID=A1\n')
     return data
 
 

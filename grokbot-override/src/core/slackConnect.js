@@ -83,16 +83,29 @@ export function accessBody(mode, listText) {
   if (bad.length) return { error: `Not a Slack member ID: ${bad.slice(0, 3).join(', ')}` }
   return { body: { access, allowed: ids.join(',') } }
 }
-/** The truthful audience from the add-on's status: one line, plus any extra grants. */
+/** The access choices a bot can offer: "Only me" needs a known installer. */
+export function accessChoices(ownerKnown = true) {
+  return ACCESS_CHOICES.filter(c => c.id !== 'owner' || ownerKnown)
+}
+/**
+ * The effective audience from the add-on's status (access.effective_access):
+ * one line, the member-list health as a separate line, each extra grant with
+ * its source and how to change it, and the legacy state of a bot connected
+ * before team access.
+ */
 export function audienceView(status) {
   const a = status?.audience
   if (!a || typeof a !== 'object' || typeof a.text !== 'string') return null
-  const extras = Array.isArray(a.extra_grants) ? a.extra_grants.filter(g => g && typeof g.grant === 'string') : []
+  const grants = Array.isArray(a.grants) ? a.grants.filter(g => g && typeof g.what === 'string') : []
+  const legacy = status?.legacy && typeof status.legacy === 'object' ? status.legacy : null
   return {
     text: a.text,
     open: a.open === true,
-    extras: extras.map(g => ({ grant: g.grant, who: String(g.who || ''), how: String(g.how || ''), fixable: g.fixable === true })),
-    fixable: extras.some(g => g.fixable === true)
+    sync: typeof a.sync?.text === 'string' ? a.sync.text : '',
+    stale: a.sync?.stale === true || typeof a.sync?.error === 'string',
+    grants: grants.map(g => ({ what: g.what, source: String(g.source || ''), how: String(g.how_to_change || '') })),
+    legacy: legacy ? { text: String(legacy.text || ''), ids: Array.isArray(legacy.ids) ? legacy.ids.filter(x => MEMBER_ID.test(x)) : [] } : null,
+    ownerKnown: status?.owner_known !== false
   }
 }
 

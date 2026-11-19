@@ -29,10 +29,11 @@ def prepare(tmp_path):
     pending = data / 'pending'
     pending.mkdir(parents=True)
     (data / 'state.key').write_bytes(b'k' * 32)
-    (data / 'apps.json').write_text(json.dumps({KEY: {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Test Bot'}}))
+    (data / 'apps.json').write_text(json.dumps({KEY: {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Test Bot',
+                                                      'access': 'members', 'access_rev': 1}}))
     profile = tmp_path / 'profiles' / 'test-profile'
     profile.mkdir(parents=True)
-    (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\n')
+    (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\nSLACK_APP_ID=A1\n')
     return data
 
 
@@ -108,6 +109,8 @@ def test_oauth_success_denial_and_single_use(tmp_path):
             calls.append((method, values, token))
             if method == 'oauth.v2.access':
                 return {'ok': True, 'app_id':'A1', 'team':{'id':'T1','name':'Test Team'}, 'authed_user':{'id':'U1'}, 'access_token':'fake-bot', 'bot_user_id':'B1'}
+            if method == 'users.list':
+                return {'ok': True, 'members': [{'id': 'U1', 'team_id': 'T1'}]}
             return {'ok': True}
         async def writer(profile, values):
             writes.append((profile, values))
@@ -120,8 +123,8 @@ def test_oauth_success_denial_and_single_use(tmp_path):
             state = issue_state(b'k' * 32, 'test-profile', KEY, 'T1')
             response = await client.get('/oauth/callback', params={'state':state, 'code':'fake-code'})
             assert response.status == 200
-            # Default audience: the workspace's full members (users.list); the
-            # fake answers with no other members, so only the installer.
+            # Default audience: the workspace's verified full members
+            # (users.list); the fake lists only the installer.
             assert writes[0][0] == 'test-profile' and writes[0][1]['SLACK_ALLOWED_USERS'] == 'U1'
             assert notifications == ['test-profile']
             assert calls[1][0] == 'users.list'

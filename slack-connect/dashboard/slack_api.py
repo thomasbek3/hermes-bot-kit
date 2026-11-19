@@ -4,10 +4,12 @@ import json
 import logging
 import re
 import secrets
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlencode
 
+from common.access import SlackReadError
 from common.token_store import request_rotation
 
 LOG = logging.getLogger(__name__)
@@ -37,20 +39,29 @@ class SlackAPI:
                          {'app_id': app_id, 'manifest': json.dumps(data, separators=(',', ':'))})
 
     def users_list(self, token, pages=100):
-        """Every user of the bot's workspace (users.list, paginated)."""
+        """Every user of the bot's workspace (users.list, paginated). All
+        pages or nothing: any failed page raises SlackReadError (with Slack's
+        error code, and Retry-After when Slack rate-limits)."""
         users, cursor = [], ''
         for _ in range(pages):
             values = {'limit': '200'}
             if cursor:
                 values['cursor'] = cursor
-            result = self.post('users.list', token, values)
-            if not result.get('ok'):
-                raise RuntimeError('Slack could not list the workspace members')
+            try:
+                result = self.post('users.list', token, values)
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429:
+                    raise SlackReadError('ratelimited', exc.headers.get('Retry-After')) from None
+                raise SlackReadError() from None
+            except Exception:
+                raise SlackReadError() from None
+            if not isinstance(result, dict) or not result.get('ok'):
+                raise SlackReadError(result.get('error') if isinstance(result, dict) else None)
             users.extend(result.get('members') or [])
             cursor = ((result.get('response_metadata') or {}).get('next_cursor') or '').strip()
             if not cursor:
                 return users
-        raise RuntimeError('workspace too large to list')
+        raise SlackReadError('workspace_too_large')
 
     def delete(self, token, app_id):
         return self.post('apps.manifest.delete', token, {'app_id':app_id})

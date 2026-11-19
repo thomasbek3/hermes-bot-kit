@@ -151,14 +151,7 @@ def make_service():
     return service_module.Service(root, home.name, slack,
         load_env, save, remove, lambda: notify_multiplexer_profiles_changed(home.name), lambda: slack_module.profile_icon(home), live, lifecycle,
         lambda: check_profile_idle(root, home.name), lambda: recycle_profile(root, home.name),
-        SlackSwitch(home, root), lambda uid: revoke_slack_pairing(home.name, uid))
-
-
-def revoke_slack_pairing(profile, user_id):
-    """One Slack pairing approval removed through Hermes's own pairing store
-    (the same store `hermes -p <profile> pairing revoke slack <id>` uses)."""
-    from gateway.pairing import PairingStore
-    PairingStore(profile=profile).revoke('slack', user_id)
+        SlackSwitch(home, root))
 
 
 def homes():
@@ -247,13 +240,6 @@ async def set_access(request: Request):
     if not isinstance(access, str) or not isinstance(allowed, (str, list)):
         raise HTTPException(status_code=400, detail='Invalid Slack access request')
     return await run_in_threadpool(lambda: handle(lambda service: service.set_access(access, allowed)))
-
-
-@router.post('/access/fix')
-async def fix_access(request: Request):
-    """Remove the bot-level grants that let in more than the chosen audience."""
-    await request_object(request)
-    return await run_in_threadpool(lambda: handle(lambda service: service.fix_access()))
 
 
 _infrastructure_cache = {}

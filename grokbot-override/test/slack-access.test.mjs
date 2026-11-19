@@ -4,22 +4,23 @@ import { READY, waitFor } from './loader-boot.mjs'
 import { buttonWithText } from './loader-surfaces.mjs'
 import { bootPanel, sheetEl, slackBackends } from './slack-fakes.mjs'
 
-test('Slack window sends the chosen audience and shows the effective one with a fix', { skip: !READY && 'dev dependencies not installed' }, async t => {
+test('Slack window sends the chosen audience and shows the effective one, its grants and legacy choices', { skip: !READY && 'dev dependencies not installed' }, async t => {
   const key = 'home-server::scholar'
   const backend = slackBackends({ [key]: {} })
   let phase = 'none'
-  let audience = { text: 'Full members of Example (12 people; not guests or Slack Connect users).', open: false, extra_grants: [] }
+  let audience = { text: '12 people can talk to this bot: the 12 full members of Example.', open: false, grants: [], sync: { text: '' } }
+  let legacy = null
+  let ownerKnown = true
   const bodies = []
   const original = backend.api
   backend.api = async req => {
     if (!req.path.startsWith('/api/plugins/slack-connect/')) return original(req)
     const route = req.path.split('/slack-connect/')[1]
     if (route === 'workspaces') return [{ team_id: 'T1', team_name: 'Example' }]
-    if (route === 'status') return { mode: 'http', phase, team_name: 'Example', access: 'members', audience, readiness: { infrastructure_ready: true } }
+    if (route === 'status') return { mode: 'http', phase, team_name: 'Example', access: legacy ? 'legacy' : 'members', owner_known: ownerKnown, audience, ...(legacy ? { legacy } : {}), readiness: { infrastructure_ready: true } }
     if (route === 'connect' && req.method === 'POST') { bodies.push(['connect', req.body]); phase = 'created'; return { authorize_url: 'https://slack.com/oauth/v2/authorize?fake=1', app_id: 'A1' } }
     if (route === 'connect' && req.method === 'DELETE') { phase = 'none'; return { ok: true } }
-    if (route === 'access') { bodies.push(['access', req.body]); audience = { text: 'Only you.', open: false, extra_grants: [] }; return { phase, audience } }
-    if (route === 'access/fix') { bodies.push(['fix', req.body]); audience = { text: 'Only you.', open: false, extra_grants: [] }; return { phase, audience } }
+    if (route === 'access') { bodies.push(['access', req.body]); legacy = null; audience = { text: 'Only you can talk to this bot.', open: false, grants: [], sync: { text: '' } }; return { phase, owner_known: ownerKnown, audience } }
     throw new Error('unexpected ' + route)
   }
   const { panelNow, internals } = await bootPanel(t, backend)
@@ -37,22 +38,38 @@ test('Slack window sends the chosen audience and shows the effective one with a 
   await waitFor(() => sheet.textContent.includes('Finish in Slack'), 'authorization step')
   buttonWithText(sheet, 'Cancel').click()
   await waitFor(() => !sheetEl(), 'closed')
-  // Connected, with an extra grant: it is named, and can be removed.
+  // Connected, with an extra grant: it is named with its source and how to change it. No fix button.
   phase = 'connected'
-  audience = { text: 'Anyone who can message the bot in Slack can talk to it, including guests (SLACK_ALLOW_ALL_USERS=true).', open: true,
-    extra_grants: [{ grant: 'SLACK_ALLOW_ALL_USERS=true', who: 'anyone who can message the bot, including guests', fixable: true, how: 'remove it' }] }
+  audience = { text: 'Anyone in Slack who can message this bot, including guests (SLACK_ALLOW_ALL_USERS=true in /h/.env).', open: true,
+    grants: [{ source: '/h/.env', what: 'SLACK_ALLOW_ALL_USERS=true', ids: null, how_to_change: 'remove SLACK_ALLOW_ALL_USERS from /h/.env' }],
+    sync: { text: 'Member list stale since 2026-11-18 10:00 UTC: the app lacks the users:read permission.', stale: true } }
   const bot = internals.app.roster.get().rows.find(r => r.name === 'scholar')
   internals.openDialog({ kind: 'slack-status', bot })
   sheet = await waitFor(() => sheetEl()?.querySelector('.gbo-slack-audience') ? sheetEl() : null, 'audience shown')
-  assert.ok(sheet.querySelector('.gbo-slack-audience').textContent.includes('including guests'))
-  assert.ok(sheet.textContent.includes('SLACK_ALLOW_ALL_USERS=true'))
-  buttonWithText(sheet, 'Remove the extra access').click()
-  await waitFor(() => sheet.querySelector('.gbo-slack-audience')?.textContent.includes('Only you.'), 'fixed')
-  assert.equal(bodies.at(-1)[0], 'fix')
+  const block = sheet.querySelector('.gbo-slack-audience')
+  assert.ok(block.textContent.includes('including guests'))
+  assert.ok(block.textContent.includes('SLACK_ALLOW_ALL_USERS=true (/h/.env). To change: remove SLACK_ALLOW_ALL_USERS from /h/.env'))
+  assert.ok(block.querySelector('.gbo-slack-sync').textContent.includes('users:read'), 'sync health is its own line')
+  assert.ok(!sheet.textContent.includes('Remove the extra access'), 'the fix button is gone')
   buttonWithText(sheet, 'Change who can talk to it').click()
   const owner = await waitFor(() => sheet.querySelectorAll('.gbo-slack-access-choice')[1], 'choices')
   owner.click()
   buttonWithText(sheet, 'Apply').click()
   await waitFor(() => bodies.at(-1)[0] === 'access', 'access change sent')
   assert.deepEqual(bodies.at(-1)[1], { access: 'owner' })
+  await waitFor(() => sheet.querySelector('.gbo-slack-audience')?.textContent.includes('Only you can talk to this bot.'), 'changed')
+  buttonWithText(sheet, 'Done').click()
+  await waitFor(() => !sheetEl(), 'closed again')
+  // Connected before team access, installer unknown: shown as it is, with an explicit choice and no "Only me".
+  legacy = { ids: ['U0LEGACY1'], text: 'Connected before team access: it allows U0LEGACY1.' }
+  ownerKnown = false
+  audience = { text: '1 person can talk to this bot: the 1 person in SLACK_ALLOWED_USERS.', open: false, grants: [], sync: { text: '' } }
+  internals.openDialog({ kind: 'slack-status', bot })
+  sheet = await waitFor(() => sheetEl()?.querySelector('.gbo-slack-legacy') ? sheetEl() : null, 'legacy shown')
+  assert.ok(sheet.querySelector('.gbo-slack-legacy').textContent.includes('Connected before team access: it allows U0LEGACY1.'))
+  assert.ok(!sheet.querySelector('.gbo-slack-legacy-owner'), 'no Only me without a known installer')
+  assert.ok(sheet.querySelector('.gbo-slack-legacy-members'))
+  buttonWithText(sheet, 'Keep these people').click()
+  await waitFor(() => bodies.at(-1)[1]?.access === 'list', 'keep sent')
+  assert.deepEqual(bodies.at(-1)[1], { access: 'list', allowed: 'U0LEGACY1' })
 })

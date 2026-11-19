@@ -66,7 +66,9 @@ def context(tmp_path, monkeypatch):
     def remove(keys):
         for key in keys: env.pop(key, None)
     lifecycle = SimpleNamespace(install=lambda: None, remove=lambda: None)
-    service = api.service_module.Service(tmp_path, 'test-profile', slack, lambda: dict(env), save, remove, lambda: notifications.append(True), lambda: b'fake-png', lifecycle=lifecycle)
+    home_env = f'{tmp_path}/profiles/test-profile/.env'
+    service = api.service_module.Service(tmp_path, 'test-profile', slack, lambda: dict(env), save, remove, lambda: notifications.append(True), lambda: b'fake-png', lifecycle=lifecycle,
+                                         gate_scope=lambda: api.service_module.access_module.scope_from_env(dict(env), home_env))
     monkeypatch.setattr(api, 'make_service', lambda: service)
     monkeypatch.setattr(api, 'homes', lambda: (tmp_path, tmp_path / 'profiles/test-profile'))
     app = FastAPI()
@@ -562,12 +564,19 @@ def test_slack_switch_script_reads_only_explicit_false(tmp_path):
     assert get('platforms:\n  slack:\n    enabled: "false"\n') == 3
 
 
-def _installed(data, env, chosen, access='members'):
+def _installed(data, env, ids, access='members', owner='U1', **record):
     key = 'c' * 32
     (data / 'pending').mkdir(exist_ok=True)
-    (data / 'apps.json').write_text(json.dumps({key: {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Helper', 'access': access}}))
-    (data / 'pending' / (key + '.json')).write_text(json.dumps({'phase': 'installed', 'at': 1, 'owner': 'U1', 'chosen': chosen}))
-    env.update({'SLACK_BOT_TOKEN': 'fake-bot', 'SLACK_TEAM_NAME': 'Acme', 'SLACK_ALLOWED_USERS': ','.join(chosen)})
+    item = {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Helper', 'access': access,
+            'access_rev': 1, 'owner': owner, **record}
+    (data / 'apps.json').write_text(json.dumps({key: {k: v for k, v in item.items() if v is not None}}))
+    (data / 'pending' / (key + '.json')).write_text(json.dumps({'phase': 'installed', 'at': 1}))
+    env.update({'SLACK_APP_ID': 'A1', 'SLACK_BOT_TOKEN': 'fake-bot', 'SLACK_TEAM_NAME': 'Acme', 'SLACK_ALLOWED_USERS': ','.join(ids)})
+    return key
+
+
+def _record(data):
+    return json.loads((data / 'apps.json').read_text())['c' * 32]
 
 
 def test_connect_rejects_unknown_access_and_empty_list(context):
@@ -577,48 +586,76 @@ def test_connect_rejects_unknown_access_and_empty_list(context):
     assert client.post('/connect', json={'team_id': 'T1', 'access': 'list', 'allowed': 'bad id'}).status_code == 400
 
 
-def test_status_tells_the_effective_audience_and_extra_grants(context, tmp_path):
+def test_connect_stores_the_access_explicitly(context):
     client, slack, vault, env, data, _ = context
-    _installed(data, env, ['U1', 'U2'])
+    assert client.post('/connect', json={'team_id': 'T1'}).status_code == 200
+    item = next(iter(json.loads((data / 'apps.json').read_text()).values()))
+    assert item['access'] == 'members' and item['access_rev'] == 1 and item['synced_at'] is None
+
+
+def test_status_tells_the_effective_audience_and_every_grant(context, tmp_path):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1', 'U2'], synced_at=int(time.time()))
     body = client.get('/status').json()
-    assert body['access'] == 'members'
-    assert body['audience']['text'].startswith('Full members of Acme (2 people')
-    assert body['audience']['extra_grants'] == []
+    assert body['access'] == 'members' and body['owner_known'] is True and 'legacy' not in body
+    assert body['audience']['text'] == '2 people can talk to this bot: the 2 full members of Acme.'
+    assert body['audience']['people'] == 2 and 'ids' not in body['audience']
+    assert body['audience']['grants'] == [] and body['audience']['sync']['text'].startswith('Member list read ')
     env['SLACK_ALLOW_ALL_USERS'] = 'true'
     pairing = tmp_path / 'profiles' / 'test-profile' / 'platforms' / 'pairing'
     pairing.mkdir(parents=True)
     (pairing / 'slack-approved.json').write_text(json.dumps({'U9': {}}))
     body = client.get('/status').json()
     assert body['audience']['open'] is True and 'including guests' in body['audience']['text']
-    assert {g['grant'] for g in body['audience']['extra_grants']} == {'SLACK_ALLOW_ALL_USERS=true', 'pairing approvals'}
+    grants = {g['what']: g for g in body['audience']['grants']}
+    assert set(grants) == {'SLACK_ALLOW_ALL_USERS=true', 'Slack pairing approvals'}
+    assert grants['Slack pairing approvals']['how_to_change'].startswith('hermes -p test-profile pairing revoke slack')
+    assert grants['SLACK_ALLOW_ALL_USERS=true']['source'] == f'{tmp_path}/profiles/test-profile/.env'
 
 
-def test_set_access_owner_and_members(context):
+def test_there_is_no_remove_the_extra_access_route(context):
+    client, *_ = context
+    assert client.post('/access/fix', json={}).status_code in (404, 405)
+
+
+def test_set_access_owner_list_and_members(context):
     client, slack, vault, env, data, _ = context
     _installed(data, env, ['U1', 'U2'])
     body = client.post('/access', json={'access': 'owner'}).json()
-    assert env['SLACK_ALLOWED_USERS'] == 'U1' and body['audience']['text'] == 'Only you.'
+    assert env['SLACK_ALLOWED_USERS'] == 'U1' and body['audience']['text'] == 'Only you can talk to this bot.'
+    assert _record(data)['access_rev'] == 2
     slack.users_list = lambda token: [{'id': 'U1', 'team_id': 'T1'}, {'id': 'U3', 'team_id': 'T1'},
                                       {'id': 'U4', 'team_id': 'T1', 'is_restricted': True}]
     body = client.post('/access', json={'access': 'members'}).json()
     assert env['SLACK_ALLOWED_USERS'] == 'U1,U3' and body['access'] == 'members'
+    assert _record(data)['last_members_owner_ok'] is True and _record(data)['access_rev'] == 3
     body = client.post('/access', json={'access': 'list', 'allowed': 'U7, U8'}).json()
-    assert env['SLACK_ALLOWED_USERS'] == 'U1,U7,U8' and 'The 3 people you named' in body['audience']['text']
+    assert env['SLACK_ALLOWED_USERS'] == 'U1,U7,U8' and 'the 3 people you named' in body['audience']['text']
 
 
-def test_fix_access_removes_bot_level_extra_grants(context, tmp_path):
+def test_set_access_members_when_slack_fails(context):
     client, slack, vault, env, data, _ = context
-    _installed(data, env, ['U1'], access='owner')
-    env['SLACK_ALLOW_ALL_USERS'] = 'true'
-    pairing = tmp_path / 'profiles' / 'test-profile' / 'platforms' / 'pairing'
-    pairing.mkdir(parents=True)
-    (pairing / 'slack-approved.json').write_text(json.dumps({'U9': {}}))
-    revoked = []
-    def revoke(uid):
-        revoked.append(uid)
-        (pairing / 'slack-approved.json').write_text('{}')
-    service = api.make_service()
-    service.revoke_pairing = revoke
-    body = client.post('/access/fix', json={}).json()
-    assert 'SLACK_ALLOW_ALL_USERS' not in env and revoked == ['U9']
-    assert body['audience']['open'] is False and body['audience']['text'] == 'Only you.'
+    _installed(data, env, ['U1', 'U2'], access='list', allowed='U2', last_members_owner_ok=True)
+    def refused(token):
+        raise api.service_module.access_module.SlackReadError('missing_scope')
+    slack.users_list = refused
+    body = client.post('/access', json={'access': 'members'}).json()
+    # No verified list yet: only the installer, because Slack last said they are a member.
+    assert env['SLACK_ALLOWED_USERS'] == 'U1'
+    assert body['audience']['sync']['error'] == 'the app lacks the users:read permission'
+    assert body['audience']['sync']['text'].startswith('Member list never read')
+
+
+def test_legacy_record_is_shown_and_kept_until_the_owner_chooses(context):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1'], access=None, access_rev=None, owner=None)
+    body = client.get('/status').json()
+    assert body['access'] == 'legacy' and body['owner_known'] is False
+    assert body['legacy']['ids'] == ['U1']
+    assert body['legacy']['text'] == 'Connected before team access: it allows U1.'
+    assert body['audience']['text'] == '1 person can talk to this bot: the 1 person in SLACK_ALLOWED_USERS.'
+    assert env['SLACK_ALLOWED_USERS'] == 'U1', 'nothing rewrote it'
+    assert client.post('/access', json={'access': 'owner'}).status_code == 409, 'Only me needs a known installer'
+    body = client.post('/access', json={'access': 'list', 'allowed': 'U1'}).json()   # Keep these people
+    assert body['access'] == 'list' and env['SLACK_ALLOWED_USERS'] == 'U1'
+    assert _record(data)['access'] == 'list' and _record(data)['access_rev'] == 1

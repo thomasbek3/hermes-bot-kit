@@ -35,28 +35,66 @@ with **Change who can talk to it**:
 
 | Choice | Who |
 |---|---|
-| **Everyone in the workspace** (default) | Full members; not guests, not Slack Connect users |
+| **Everyone in the workspace** (default) | Full members that Slack's member list confirms; not guests, not Slack Connect users |
 | **Only me** | Only the person who added the bot |
 | **Only these people** | Slack member IDs you list (Slack: profile → ⋮ → *Copy member ID*); you are always included |
 
+**Only verified members.** With **Everyone in the workspace**, the bot's
+allowlist is exactly the full members in Slack's member list (`users.list`,
+read in full: one failed page fails the whole read, and nothing is written from
+a partial list). You, the person who added the bot, are in it only because
+Slack lists you as a full member. If you become a guest, the next refresh
+removes you too.
+
+**When Slack can't be read.** A failed refresh keeps the current list and the
+window says why (for example *the app lacks the users:read permission*). If
+Slack asks the relay to wait (`ratelimited`, with a `Retry-After`), the relay
+skips that bot until then. A list is trusted for **24 hours**: when the last
+good read is older than that (or there never was one) and Slack still can't be
+read, the bot falls back to **only you**, if Slack last said you are a full
+member, and otherwise to **nobody**. Nobody is written as
+`SLACK_ALLOWED_USERS=NOBODY`, a value that matches no Slack ID; an empty value
+would make Hermes fall through to other settings. A new Connect whose first
+member read fails starts at nobody, because nobody is verified yet; the relay
+tries again at its next refresh. The window shows the member list's health on
+its own line: *Member list read …*, or *Member list stale since …* /
+*Member list never read*.
+
 **What the window shows is the truth.** After Connect, the window, Slack's
-confirmation page and the welcome DM show **who can actually talk to the
-bot**. That is worked out from every setting Hermes honours for that bot:
-`SLACK_ALLOWED_USERS`, `SLACK_ALLOW_ALL_USERS`, `GATEWAY_ALLOWED_USERS` and the
-people approved through Hermes's first-DM pairing. If any of them lets in more
-people than you chose, the window names each one. **Remove the extra access**
-clears the ones that belong to that bot alone: `SLACK_ALLOW_ALL_USERS`, a `*`
-in `SLACK_ALLOWED_USERS`, and pairing approvals. `GATEWAY_ALLOWED_USERS`
-applies to every messaging platform of the bot, so the window tells you to
-edit it rather than changing it for you.
+confirmation page and the welcome DM show **how many people can actually talk
+to the bot**, for example *12 people can talk to this bot: the 11 full members
+of Acme, plus 1 from GATEWAY_ALLOWED_USERS (`<profile home>/.env`).* That is
+worked out from every setting Hermes honours for that bot, read the way Hermes
+reads them for the profile (its own `.env`, external secret sources, the
+administrator-managed env; never the root `.env`): `SLACK_ALLOWED_USERS`,
+`SLACK_ALLOW_ALL_USERS`, `GATEWAY_ALLOWED_USERS`, `GATEWAY_ALLOW_ALL_USERS`
+(which counts only when no allowlist is set) and the people approved through
+Hermes's first-DM pairing. The window keeps it current while it is open.
+
+Any other setting that lets people in is listed with **where it is set and how
+to change it**. The kit changes none of them for you: the only value it ever
+writes is `SLACK_ALLOWED_USERS` in the `.env` of the bot whose `SLACK_APP_ID`
+is the app it created.
+
+| Grant | How to change it |
+|---|---|
+| `SLACK_ALLOW_ALL_USERS=true` | Remove it from the file the window names (usually `<profile home>/.env`) |
+| `GATEWAY_ALLOWED_USERS` | Edit it where the window says; it applies to every messaging platform of the bot |
+| `GATEWAY_ALLOW_ALL_USERS=true` with no allowlist | Remove it where the window says |
+| A Slack pairing approval | `hermes -p <profile> pairing revoke slack <member id>` |
+| A value from the administrator-managed env or an external secret source | Change it there; the bot's `.env` cannot override it |
+
+**Bots connected before team access** (an earlier release of the kit) keep
+their list. Nothing rewrites it on upgrade, and the relay never refreshes it.
+The window says *Connected before team access: it allows …* and offers
+**Keep these people**, **Everyone in the workspace**, or **Only me** (only
+when the kit knows who added the bot).
 
 How the kit does it: Hermes has no "full members only" switch.
 `SLACK_ALLOW_ALL_USERS=true` would also let guests in (Hermes refuses only
-other companies' DMs). So the kit writes the member list into the bot's
-`SLACK_ALLOWED_USERS` (Slack's `users.list`, filtered to full members of this
-workspace) and the relay keeps it current. If Slack's member list can't be
-read at Connect, only you are allowed until the next refresh, and the window
-says so.
+other companies' DMs). So the kit writes the verified member list into the
+bot's `SLACK_ALLOWED_USERS` and the relay keeps it current. A change of
+audience in the window always wins over a refresh that was already running.
 
 ## Pick a way
 
@@ -132,21 +170,18 @@ clone of this repository.
    publishes only the `/slack` path, and it refuses if that would expose other
    paths. It never restarts Hermes: tell the person to reload plugins or restart
    Hermes Desktop so the dashboard loads the add-on.
-2. **Agent:** check it is ready (exits non-zero and names what is missing
-   otherwise):
-
-   ```bash
-   python3 -I -B slack-connect/install.py --check
-   ```
-
-   Until a workspace configuration token is added (step 4), it reports that
-   one as missing. That is expected at this point.
-3. **HUMAN, once per workspace:** on
+2. **HUMAN, once per workspace:** on
    [api.slack.com/apps](https://api.slack.com/apps), under *Your App
    Configuration Tokens*, click **Generate Token** for the workspace. Copy the
    **Refresh token** (`xoxe-…`) into the bot's Slack window (**Connect another
    workspace**). Hermes keeps the rotating pair owner-only on the host
    (`slack-connect/config-tokens.json`) and refreshes it before each use.
+3. **Agent:** check it is ready. It prints **Ready** and exits 0, or exits
+   non-zero and names what is missing:
+
+   ```bash
+   python3 -I -B slack-connect/install.py --check
+   ```
 4. **HUMAN:** in the window, check **Who can talk to it** (the default is
    everyone in the workspace; see above), pick the workspace and click
    **Connect**. Slack's page opens; click **Allow**. Every app the kit creates
@@ -159,10 +194,12 @@ clone of this repository.
    welcome DM that says the same.
 6. **Optional, recommended:** install **slack-check** so the Slack card's
    **Test connection** asks Slack itself. Run it **after** Connect, so the bot's
-   profile already has its token, and name the profile:
+   profile already has its token. Put the bot's profile name in `PROFILE`
+   first:
 
    ```bash
-   bash slack-check/install.sh --profile <bot profile name> --dry-run && bash slack-check/install.sh --profile <bot profile name>
+   PROFILE='my-bot'   # the bot's profile name
+   bash slack-check/install.sh --profile "$PROFILE" --dry-run && bash slack-check/install.sh --profile "$PROFILE"
    ```
 7. **Verify:** see [Check it works](#check-it-works).
 
@@ -206,9 +243,12 @@ profile had before.
 |---|---|
 | The Slack window shows the paste-tokens dialog, though you installed slack-connect | Run `python3 -I -B slack-connect/install.py --check` on the host. It names the missing piece (config, relay, public URL, the add-on's route). |
 | "Slack setup token expired, add a new one" | **HUMAN:** generate a new configuration token on api.slack.com/apps and add the workspace again. |
-| A teammate gets no answer | Look at **Who can talk to it** in the bot's Slack window. A guest or a Slack Connect user is not included by design. A new member is included at the next refresh (up to 15 minutes). |
+| A teammate gets no answer | Look at who can talk to it in the bot's Slack window. A guest or a Slack Connect user is not included by design. A new member is included at the next refresh (up to 15 minutes). |
+| "the app lacks the users:read permission" (member list) | The kit's apps are created with `users:read`; it was removed later. **HUMAN:** on the app's page on api.slack.com/apps, *OAuth & Permissions → Bot Token Scopes*, add `users:read`, then **Reinstall** and **Allow**. The [scope repair](../slack-connect/README.md#missing-permissions-on-an-existing-app) (`scope_repair.py check` / `repair --profile "$PROFILE"`) adds only the scopes it lists as required, which today is `reactions:write`. |
+| "Member list stale since …" or "never read", and fewer people can talk to the bot | Slack's member list could not be read for over 24 hours (or never), so the bot fell back to only you, or to nobody. Fix the reason shown on the same line; the relay retries every 15 minutes, or choose **Everyone in the workspace** again to read it now. |
+| "Slack asked to wait" | Slack rate-limited the member list. The relay waits the time Slack asked for, then retries. Nothing to do. |
 | No 👀, but the bot answers | `reactions:write` is missing: see the acknowledgement setting above. |
-| The bot never answers in Slack | **Test connection**; then `install.py --check`; then the relay log (`~/Library/Logs/hermes-slack-ingress.log` on macOS, `~/.local/state/hermes-slack-ingress.log` on Linux); then the bot's `logs/gateway.log`. |
+| The bot never answers in Slack | Check that the window doesn't say *Nobody can talk to this bot*. Then **Test connection**; then `install.py --check`; then the relay log (`~/Library/Logs/hermes-slack-ingress.log` on macOS, `~/.local/state/hermes-slack-ingress.log` on Linux); then the bot's `logs/gateway.log`. |
 | "Your URL didn't respond" on the app's Event Subscriptions page | Known Slack label for apps created from a manifest. Ignore it if the bot answers DMs. |
 | Port 8655 is taken | Re-run the install block with `--relay-port <port>` and point the proxy there. |
 

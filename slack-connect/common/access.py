@@ -4,32 +4,86 @@ The kit's default is the workspace's full members: everyone who is not a guest
 (single- or multi-channel), not a Slack Connect (external org) user, not a bot
 and not deactivated. Hermes has no native "members only" switch:
 SLACK_ALLOW_ALL_USERS admits guests too (Hermes refuses only external-org DMs).
-So the kit writes the member list into SLACK_ALLOWED_USERS and the relay keeps it
-in step with the workspace. "owner" (only the installer) and "list" (named
-member IDs) are the explicit restrictions.
+So the kit writes the verified member list into SLACK_ALLOWED_USERS and the
+relay keeps it in step with the workspace. "owner" (only the installer) and
+"list" (named member IDs) are the explicit restrictions. A record without an
+`access` key was connected by an earlier release ("legacy"): nothing rewrites
+its allowlist until the owner chooses.
+
+State lives in one record per app in apps.json: access, allowed, access_rev,
+owner, synced_at, sync_error, retry_after, last_members_owner_ok. Every write of
+an allowlist goes through publish_allowlist(), which re-checks that record and
+the profile's SLACK_APP_ID under the apps.lock, so a member sync that started
+before a change of audience can never overwrite it.
 
 Effective access is what Hermes actually honours for the profile
-(gateway/authz_mixin.py _principal_authorized): SLACK_ALLOW_ALL_USERS, the
-union of SLACK_ALLOWED_USERS and GATEWAY_ALLOWED_USERS ("*" = everyone), the
-profile's Slack pairing approvals, and GATEWAY_ALLOW_ALL_USERS when no
-allowlist is set. Anything that admits more than the chosen audience is an
-extra grant and is named, never hidden.
+(gateway/authz_mixin.py _principal_authorized, reading the profile's secret
+scope only, never the root .env): SLACK_ALLOW_ALL_USERS, the profile's Slack
+pairing approvals, the union of SLACK_ALLOWED_USERS and GATEWAY_ALLOWED_USERS
+("*" = everyone), and GATEWAY_ALLOW_ALL_USERS when no allowlist is set.
+Anything beyond the kit's own list is a grant, named with its source and how to
+change it.
 """
 import json
 import re
+import time
 from pathlib import Path
 
+from .core import LockedFile, _atomic_json, _read_json
+
 MODES = ('members', 'owner', 'list')
+LEGACY = 'legacy'
 DEFAULT_MODE = 'members'
 USER_ID = re.compile(r'^[UW][A-Z0-9]{1,31}$')
 TRUTHY = {'true', '1', 'yes'}
 # A workspace this size keeps SLACK_ALLOWED_USERS a single sane .env line.
 MAX_MEMBERS = 20000
+# An empty SLACK_ALLOWED_USERS means "no allowlist" to Hermes (it falls through
+# to GATEWAY_ALLOW_ALL_USERS), so nobody is written as this value instead.
+# Slack IDs start with U, W or B, so it matches no one.
+NOBODY = 'NOBODY'
+# A members list older than this is not trusted when Slack cannot be read.
+STALE_SECONDS = 86400
+GATE_KEYS = ('SLACK_ALLOWED_USERS', 'SLACK_ALLOW_ALL_USERS', 'GATEWAY_ALLOWED_USERS', 'GATEWAY_ALLOW_ALL_USERS')
+SOURCES = ('administrator-managed env', 'external secret source', 'config.yaml allow_all_users')
+EXPECT_KEYS = ('app_id', 'profile', 'access', 'access_rev')
+MISSING_USERS_READ = 'the app lacks the users:read permission'
+
+
+class SlackReadError(Exception):
+    """Slack's member list could not be read. `error` is Slack's error code (or
+    a short word), `retry_after` the seconds Slack asked to wait, if any."""
+
+    def __init__(self, error='request_failed', retry_after=None):
+        self.error = error if isinstance(error, str) and re.fullmatch(r'[a-z_]{1,80}', error) else 'request_failed'
+        self.retry_after = retry_after
+        super().__init__(self.error)
 
 
 def mode_of(value):
+    """The record's audience; no (or an unknown) value is a legacy record."""
     value = str(value or '').strip().lower()
-    return value if value in MODES else DEFAULT_MODE
+    return value if value in MODES else LEGACY
+
+
+def rev_of(item):
+    rev = (item or {}).get('access_rev')
+    return rev if type(rev) is int else 0
+
+
+def expect_of(item):
+    """What publish_allowlist must find unchanged."""
+    item = item or {}
+    return {'app_id': item.get('app_id'), 'profile': item.get('profile'),
+            'access': item.get('access'), 'access_rev': rev_of(item)}
+
+
+def owner_of(item, pending=None):
+    """The installer's member ID, if known."""
+    for value in ((item or {}).get('owner'), (pending or {}).get('owner')):
+        if isinstance(value, str) and USER_ID.fullmatch(value):
+            return value
+    return None
 
 
 def parse_ids(text):
@@ -63,29 +117,174 @@ def full_members(users, team_id):
         if team_id and user.get('team_id') != team_id:
             continue  # Slack Connect: another organisation's user
         ids.add(uid)
+    if len(ids) > MAX_MEMBERS:
+        raise SlackReadError('workspace_too_large')
     return sorted(ids)
 
 
-def chosen_ids(mode, owner, members=(), named=()):
-    """The SLACK_ALLOWED_USERS the chosen audience needs. The installer is
-    always included so they can reach their own bot."""
+def allowlist(mode, owner, members=(), named=()):
+    """SLACK_ALLOWED_USERS ids for an audience. Members mode is the verified
+    member list only; "owner" and "list" always include the installer."""
     mode = mode_of(mode)
-    ids = set()
-    if owner:
-        ids.add(owner)
     if mode == 'members':
-        ids |= set(members)
-    elif mode == 'list':
+        return sorted(set(members))
+    ids = {owner} if owner else set()
+    if mode == 'list':
         ids |= set(named)
     return sorted(ids)
 
 
+def env_value(ids):
+    """The .env value for a list of ids; never empty (empty means everyone)."""
+    ids = [x for x in ids if x and x != NOBODY]
+    return ','.join(ids) if ids else NOBODY
+
+
 def _ids(value):
-    return {x.strip() for x in str(value or '').split(',') if x.strip()}
+    return {x.strip() for x in str(value or '').split(',') if x.strip()} - {NOBODY}
 
 
 def _truthy(value):
     return str(value or '').strip().lower() in TRUTHY
+
+
+def read_env_file(path):
+    """KEY=value pairs of a .env file (the plain shapes Hermes writes)."""
+    values = {}
+    try:
+        text = Path(path).read_text(encoding='utf-8-sig', errors='replace')
+    except OSError:
+        return values
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith('export '):
+            line = line[7:].lstrip()
+        key, sep, value = line.partition('=')
+        if not sep or not key.strip() or key.lstrip().startswith('#'):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1]
+        values[key.strip()] = value
+    return values
+
+
+# ---- the one write path -------------------------------------------------
+
+def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, fields=None, env_extra=None):
+    """Write SLACK_ALLOWED_USERS (and the record `fields`) for app `key`, only
+    if the record still matches `expect` and the profile's .env SLACK_APP_ID is
+    that app. `ids=None` updates the record only. `env_extra` are values the
+    connect flow writes in the same .env write. Returns False, writing nothing,
+    on any mismatch. Both checks and the write happen under apps.lock."""
+    data = Path(data_dir)
+    profile = expect.get('profile')
+    if not isinstance(profile, str) or not expect.get('app_id'):
+        return False
+    with LockedFile(data / 'apps.lock'):
+        apps = _read_json(data / 'apps.json', {})
+        item = apps.get(key)
+        if not isinstance(item, dict) or expect_of(item) != {k: expect.get(k) for k in EXPECT_KEYS}:
+            return False
+        env = read_env() if read_env else read_env_file(data.parent / 'profiles' / profile / '.env')
+        if env.get('SLACK_APP_ID') != expect['app_id']:
+            return False
+        values = dict(env_extra or {})
+        if ids is not None and (values or (env.get('SLACK_ALLOWED_USERS') or '') != env_value(ids)):
+            values['SLACK_ALLOWED_USERS'] = env_value(ids)
+        if values:
+            write_env(values)
+        item.update(fields or {})
+        _atomic_json(data / 'apps.json', apps)
+    return True
+
+
+def sync_success(owner, members, now):
+    """(ids, record fields) after a complete, successful member read."""
+    return list(members), {'synced_at': int(now), 'sync_error': None, 'retry_after': None,
+                           'last_members_owner_ok': bool(owner) and owner in members}
+
+
+def sync_failure(item, owner, exc, now):
+    """(ids or None to keep the current list, record fields) after a failed
+    member read. A list older than STALE_SECONDS (or never read) is not kept:
+    the installer stays only if Slack last said they are a full member."""
+    error = exc.error if isinstance(exc, SlackReadError) else 'request_failed'
+    fields = {'sync_error': sync_error_text(error)}
+    wait = getattr(exc, 'retry_after', None)
+    if error == 'ratelimited' or wait is not None:
+        try:
+            wait = int(float(wait))
+        except (TypeError, ValueError):
+            wait = 60
+        fields['retry_after'] = int(now) + min(max(wait, 1), STALE_SECONDS)
+    if not is_stale(item, now):
+        return None, fields
+    if owner and item.get('last_members_owner_ok') is True:
+        return [owner], fields
+    return [], fields
+
+
+def sync_error_text(error):
+    if error == 'missing_scope':
+        return MISSING_USERS_READ
+    if error == 'ratelimited':
+        return 'Slack is rate-limiting the member list'
+    if error == 'workspace_too_large':
+        return f'the workspace has more than {MAX_MEMBERS} members'
+    return f"Slack's member list could not be read ({error})"
+
+
+def is_stale(item, now):
+    synced = (item or {}).get('synced_at')
+    return type(synced) is not int or now - synced > STALE_SECONDS
+
+
+# ---- the profile's gate settings, as Hermes reads them -------------------
+
+def scope_from_env(env, label, complete=True):
+    """Gate scope from one .env mapping: only the four gate keys, each with its source."""
+    scope = {k: {'value': str(env[k]).strip(), 'source': label} for k in GATE_KEYS
+             if isinstance(env.get(k), str) and env[k].strip()}
+    return {'keys': scope, 'complete': complete}
+
+
+def gate_scope(home):
+    """The four gate keys of a profile exactly as Hermes's platform_gate_env
+    reads them under multiplexing: build_profile_secret_scope(home), i.e. the
+    profile .env, external secret sources, the default profile's bridged
+    config.yaml allow_all_users and the administrator-managed env (which
+    overrides). Never the root .env. Each value carries its source. Without
+    Hermes (tests, the relay's own interpreter) only the profile .env is read
+    and `complete` is False."""
+    home = Path(home)
+    label = f'{home}/.env'
+    try:
+        from agent.secret_scope import build_profile_secret_scope, load_env_file
+    except Exception:
+        return scope_from_env(read_env_file(home / '.env'), label, complete=False)
+    try:
+        from hermes_cli.env_loader import hydrate_profile_secret_sources, get_secret_source_values
+        hydrate_profile_secret_sources(home)
+        external = get_secret_source_values(home)
+    except Exception:
+        external = {}
+    try:
+        from hermes_cli.managed_scope import load_managed_env
+        managed = load_managed_env()
+    except Exception:
+        managed = {}
+    scope = build_profile_secret_scope(home)
+    dotenv = load_env_file(home / '.env')
+    keys = {}
+    for name in GATE_KEYS:
+        value = scope.get(name)
+        if value is None or not str(value).strip():
+            continue
+        source = (SOURCES[0] if name in managed else SOURCES[1] if name in external
+                  else label if name in dotenv else SOURCES[2])
+        keys[name] = {'value': str(value).strip(), 'source': source}
+    return {'keys': keys, 'complete': True}
 
 
 def pairing_approved(profile_home):
@@ -103,72 +302,136 @@ def pairing_approved(profile_home):
     return found
 
 
-def effective(env, pairing=(), gateway_env=None):
-    """Who Hermes lets talk to the bot, from the profile's settings.
+# ---- the one effective-access result --------------------------------------
 
-    `env` is the profile's .env; `gateway_env` the values the gateway may also
-    see from elsewhere (the root .env, config.yaml's allow_all_users)."""
-    other = gateway_env or {}
-    slack_ids = _ids(env.get('SLACK_ALLOWED_USERS'))
-    gateway_ids = _ids(env.get('GATEWAY_ALLOWED_USERS')) | _ids(other.get('GATEWAY_ALLOWED_USERS'))
-    any_list = bool(slack_ids or gateway_ids)
-    open_reasons = []
-    if _truthy(env.get('SLACK_ALLOW_ALL_USERS')) or _truthy(other.get('SLACK_ALLOW_ALL_USERS')):
-        open_reasons.append('SLACK_ALLOW_ALL_USERS=true')
-    if '*' in slack_ids:
-        open_reasons.append('SLACK_ALLOWED_USERS contains *')
-    if '*' in gateway_ids:
-        open_reasons.append('GATEWAY_ALLOWED_USERS contains *')
-    if not any_list and (_truthy(env.get('GATEWAY_ALLOW_ALL_USERS')) or _truthy(other.get('GATEWAY_ALLOW_ALL_USERS'))):
-        open_reasons.append('GATEWAY_ALLOW_ALL_USERS=true with no allowlist')
-    return {
-        'open': bool(open_reasons),
-        'open_reasons': open_reasons,
-        'slack_allowed': sorted(slack_ids - {'*'}),
-        'gateway_allowed': sorted(gateway_ids - {'*'}),
-        'pairing': sorted(set(pairing)),
-        'ids': sorted((slack_ids | gateway_ids | set(pairing)) - {'*'}),
-    }
+def _when(epoch):
+    return time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(epoch))
 
 
-def extra_grants(chosen, eff, profile='<profile>'):
-    """Grants that admit more people than the chosen audience, each with how
-    to remove it. `fixable` ones the kit can remove from the profile itself."""
-    chosen = set(chosen)
-    extras = []
-    for reason in eff['open_reasons']:
-        key = reason.split('=')[0].split(' ')[0]
-        extras.append({
-            'grant': reason,
-            'who': 'anyone who can message the bot, including guests',
-            'fixable': key in ('SLACK_ALLOW_ALL_USERS', 'SLACK_ALLOWED_USERS'),
-            'how': f"remove {key} from this bot's .env" if key != 'GATEWAY_ALLOWED_USERS' else
-                   'remove * from GATEWAY_ALLOWED_USERS (it applies to every messaging platform of this bot)',
-        })
-    gw_extra = sorted(set(eff['gateway_allowed']) - chosen)
-    if gw_extra:
-        extras.append({'grant': 'GATEWAY_ALLOWED_USERS', 'who': ', '.join(gw_extra), 'ids': gw_extra, 'fixable': False,
-                       'how': 'edit GATEWAY_ALLOWED_USERS (it applies to every messaging platform of this bot)'})
-    pair_extra = sorted(set(eff['pairing']) - chosen)
-    if pair_extra:
-        extras.append({'grant': 'pairing approvals', 'who': ', '.join(pair_extra), 'ids': pair_extra, 'fixable': True,
-                       'how': f'hermes -p {profile} pairing revoke slack <member id>'})
-    return extras
+def _people(n):
+    return f'{n} person' if n == 1 else f'{n} people'
 
 
-def describe(mode, chosen, eff, team_name='the workspace'):
-    """One honest sentence about who can talk to the bot."""
-    mode = mode_of(mode)
-    if eff['open']:
-        return ('Anyone who can message the bot in Slack can talk to it, including guests '
-                '(' + '; '.join(eff['open_reasons']) + ').')
-    count = len(eff['ids'])
-    extra = len(set(eff['ids']) - set(chosen))
-    base = {
-        'members': f'Full members of {team_name} ({len(chosen)} people; not guests or Slack Connect users)',
-        'owner': 'Only you',
-        'list': f'The {len(chosen)} people you named',
-    }[mode]
-    if extra:
-        return f'{base}, plus {extra} more allowed by other settings ({count} people in all).'
-    return base + '.'
+def sync_view(record, now):
+    """Member-list health, a separate line from who can talk to the bot."""
+    record = record or {}
+    if mode_of(record.get('access')) != 'members':
+        return {'ok_at': None, 'error': None, 'stale': False, 'text': ''}
+    ok_at = record.get('synced_at') if type(record.get('synced_at')) is int else None
+    error = record.get('sync_error') if isinstance(record.get('sync_error'), str) else None
+    stale = is_stale(record, now)
+    if stale:
+        text = f'Member list stale since {_when(ok_at)}' if ok_at else 'Member list never read'
+    else:
+        text = f'Member list read {_when(ok_at)}'
+    text += f': {error}.' if error else '.'
+    wait = record.get('retry_after')
+    if type(wait) is int and wait > now:
+        text += f' Slack asked to wait; next try after {_when(wait)}.'
+    elif error or stale:
+        text += ' The relay retries every 15 minutes.'
+    return {'ok_at': ok_at, 'error': error, 'stale': stale, 'text': text}
+
+
+def effective_access(scope, pairing_ids, record, now=None, team_name='the workspace'):
+    """Who Hermes lets talk to the bot, in one result. `scope` is gate_scope()'s
+    output; `record` the app's apps.json record (its `profile`, `access`,
+    `owner`). Returns {people, ids, open, grants, text, sync}."""
+    now = time.time() if now is None else now
+    record = record or {}
+    keys = (scope or {}).get('keys') or {}
+    home_env = next((v['source'] for v in keys.values() if v['source'].endswith('/.env')), '<profile home>/.env')
+    profile = record.get('profile') or '<profile>'
+    owner = owner_of(record)
+    mode = mode_of(record.get('access'))
+
+    def value(name):
+        return (keys.get(name) or {}).get('value') or ''
+
+    def source(name):
+        return (keys.get(name) or {}).get('source') or home_env
+
+    def how(name, what):
+        where = source(name)
+        if where == SOURCES[0]:
+            return f'{what} is set by the administrator-managed env; change it there'
+        if where == SOURCES[1]:
+            return f"{what} comes from an external secret source; change it in that source (the bot's .env cannot override it)"
+        if where == SOURCES[2]:
+            return "set allow_all_users to false in the default profile's config.yaml"
+        return f'remove {what} from {where}'
+
+    grants, open_ = [], False
+    if _truthy(value('SLACK_ALLOW_ALL_USERS')):
+        open_ = True
+        grants.append({'source': source('SLACK_ALLOW_ALL_USERS'), 'what': 'SLACK_ALLOW_ALL_USERS=true', 'ids': None,
+                       'how_to_change': how('SLACK_ALLOW_ALL_USERS', 'SLACK_ALLOW_ALL_USERS')})
+    slack_raw, gateway_raw = _ids(value('SLACK_ALLOWED_USERS')), _ids(value('GATEWAY_ALLOWED_USERS'))
+    slack_kit = source('SLACK_ALLOWED_USERS') == home_env
+    if '*' in slack_raw:
+        open_ = True
+        grants.append({'source': source('SLACK_ALLOWED_USERS'), 'what': 'SLACK_ALLOWED_USERS=*', 'ids': None,
+                       'how_to_change': (f"choose who can talk to it in this bot's Slack window (that replaces the *)"
+                                         if slack_kit else how('SLACK_ALLOWED_USERS', 'the *'))})
+    if '*' in gateway_raw:
+        open_ = True
+        grants.append({'source': source('GATEWAY_ALLOWED_USERS'), 'what': 'GATEWAY_ALLOWED_USERS=*', 'ids': None,
+                       'how_to_change': how('GATEWAY_ALLOWED_USERS', 'the * in GATEWAY_ALLOWED_USERS') +
+                       ' (it applies to every messaging platform of this bot)'})
+    # Hermes reads "is an allowlist set" from the raw values: NOBODY counts.
+    if not (value('SLACK_ALLOWED_USERS') or value('GATEWAY_ALLOWED_USERS')) and _truthy(value('GATEWAY_ALLOW_ALL_USERS')):
+        open_ = True
+        grants.append({'source': source('GATEWAY_ALLOW_ALL_USERS'), 'what': 'GATEWAY_ALLOW_ALL_USERS=true with no allowlist',
+                       'ids': None, 'how_to_change': how('GATEWAY_ALLOW_ALL_USERS', 'GATEWAY_ALLOW_ALL_USERS')})
+
+    base = sorted(slack_raw - {'*'})
+    seen = set(base)
+    added = []   # (count, label) for "plus N from X"
+    if not slack_kit and base:
+        # The kit writes only the bot's .env; a value from elsewhere wins over it.
+        grants.append({'source': source('SLACK_ALLOWED_USERS'), 'what': 'SLACK_ALLOWED_USERS', 'ids': base,
+                       'how_to_change': how('SLACK_ALLOWED_USERS', 'SLACK_ALLOWED_USERS')})
+    gw = sorted(gateway_raw - {'*'} - seen)
+    if gw:
+        seen |= set(gw)
+        added.append((len(gw), f"GATEWAY_ALLOWED_USERS ({source('GATEWAY_ALLOWED_USERS')})"))
+        grants.append({'source': source('GATEWAY_ALLOWED_USERS'), 'what': 'GATEWAY_ALLOWED_USERS', 'ids': gw,
+                       'how_to_change': how('GATEWAY_ALLOWED_USERS', 'these IDs from GATEWAY_ALLOWED_USERS') +
+                       ' (it applies to every messaging platform of this bot)'})
+    pair = sorted(set(pairing_ids or ()) - seen)
+    if pair:
+        seen |= set(pair)
+        added.append((len(pair), 'Slack pairing approvals'))
+        grants.append({'source': 'Hermes pairing store', 'what': 'Slack pairing approvals', 'ids': pair,
+                       'how_to_change': f'hermes -p {profile} pairing revoke slack <member id>, for each of them'})
+    ids = sorted(seen)
+    people = len(ids)
+
+    if open_:
+        reasons = '; '.join(f"{g['what']} in {g['source']}" for g in grants if g['ids'] is None)
+        text = f'Anyone in Slack who can message this bot, including guests ({reasons}).'
+    elif people == 0:
+        text = 'Nobody can talk to this bot in Slack.'
+    elif people == 1 and ids == [owner]:
+        text = 'Only you can talk to this bot.'
+    else:
+        n = len(base)
+        if not base:
+            what = ''
+        elif not slack_kit:
+            what = f"the {_people(n)} in SLACK_ALLOWED_USERS ({source('SLACK_ALLOWED_USERS')})"
+        elif mode == 'members':
+            what = f"the {n} full member{'s' if n != 1 else ''} of {team_name}"
+        elif mode == 'owner' and base == [owner]:
+            what = 'you'
+        elif mode == 'list':
+            what = f'the {_people(n)} you named'
+        else:
+            what = f'the {_people(n)} in SLACK_ALLOWED_USERS'
+        parts = [what] if what else []
+        parts += [f'{"plus " if parts or i else ""}{c} from {label}' for i, (c, label) in enumerate(added)]
+        text = f'{_people(people)} can talk to this bot: ' + ', '.join(parts) + '.'
+    if not (scope or {}).get('complete', True):
+        text += " (Hermes's own settings could not be read, so only the bot's .env was counted.)"
+    return {'people': people, 'ids': ids, 'open': open_, 'grants': grants, 'text': text,
+            'sync': sync_view(record, now)}

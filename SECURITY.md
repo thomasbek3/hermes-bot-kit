@@ -47,6 +47,10 @@ within a few days.
 - HD mode tokens and session-API bearer tokens are stored locally by design
   (`.env` / plugin storage, `0600`). They are never transmitted anywhere
   except to the endpoint you configure.
+- A Slack bot connected with one-click Add to Slack answers every full member
+  of the workspace by default, and its tools act with the bot's own access
+  for anyone who can message it. The bot's Slack window shows who can, and
+  where each grant comes from; `docs/SLACK.md` says how to restrict it.
 - Social-engineering reports ("the AI told me to run...") are out of scope
   here — file them with Hermes Agent core.
 
@@ -87,7 +91,8 @@ for HD's ffmpeg too), the UltraVNC config (now locked down before the password
 is written, verified, and fail-closed), the Windows state and driver folders
 (another account's tree is refused, not adopted), the legacy "This Mac"
 endpoint (now also cleared for upgraders), preview pages (two leads: Send
-always needs your click, on the text shown), and ambiguous skills-hub names (Install is disabled). The other
+always needs your click, on the text shown), and skills-hub Install (one-click only for a source-qualified
+result, which today is none; a command to copy instead). The other
 seven (the macOS Screen Sharing docs, the Computer pane's remote-cua session
 on switch, the Gmail thread on a reply card, `/email-drafts` from a messaging
 platform, bot-named SVG images, Slack first-DM approval, texting-style's debug

@@ -124,7 +124,7 @@ test('readiness picks one-click, add-a-workspace or the paste-tokens dialog', as
 })
 
 test('access choice: the whole team by default, restrictions validated', async () => {
-  const { accessBody, audienceView, ACCESS_CHOICES } = await import('../src/core/slackConnect.js')
+  const { accessBody, accessChoices, audienceView, ACCESS_CHOICES } = await import('../src/core/slackConnect.js')
   assert.equal(ACCESS_CHOICES[0].id, 'members', 'the team is the default')
   assert.match(ACCESS_CHOICES[0].hint, /not guests/)
   assert.deepEqual(accessBody('members', ''), { body: { access: 'members' } })
@@ -134,9 +134,17 @@ test('access choice: the whole team by default, restrictions validated', async (
   assert.ok(accessBody('list', 'U1, bob').error)
   assert.deepEqual(accessBody('nonsense'), { body: { access: 'members' } })
   assert.equal(audienceView({}), null)
-  const view = audienceView({ audience: { text: 'Anyone …', open: true, extra_grants: [{ grant: 'SLACK_ALLOW_ALL_USERS=true', who: 'anyone', fixable: true }, { grant: 'GATEWAY_ALLOWED_USERS', who: 'U9', how: 'edit it', fixable: false }] } })
+  const view = audienceView({ owner_known: false, legacy: { ids: ['U1', 'bad'], text: 'Connected before team access: it allows U1.' },
+    audience: { text: 'Anyone …', open: true, sync: { text: 'Member list never read.', stale: true },
+      grants: [{ what: 'SLACK_ALLOW_ALL_USERS=true', source: '/h/.env', ids: null, how_to_change: 'remove it' }, { what: 'GATEWAY_ALLOWED_USERS', source: 'external secret source', ids: ['U9'], how_to_change: 'edit it' }] } })
   assert.equal(view.open, true)
-  assert.equal(view.fixable, true)
-  assert.equal(view.extras.length, 2)
+  assert.equal(view.stale, true)
+  assert.equal(view.sync, 'Member list never read.')
+  assert.deepEqual(view.grants[1], { what: 'GATEWAY_ALLOWED_USERS', source: 'external secret source', how: 'edit it' })
+  assert.deepEqual(view.legacy.ids, ['U1'])
+  assert.equal(view.ownerKnown, false)
+  assert.equal('fixable' in view, false, 'nothing is offered as a one-click fix')
+  assert.deepEqual(accessChoices(false).map(c => c.id), ['members', 'list'])
+  assert.deepEqual(accessChoices(true).map(c => c.id), ['members', 'owner', 'list'])
 })
 

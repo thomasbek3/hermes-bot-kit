@@ -56,23 +56,49 @@ is new in this one.
     restored; the VNC password file's ACL is replaced and verified, never
     best-effort; a new or replaced password is applied to the running TightVNC
     server and read back before it is printed, and is no longer passed to
-    msiexec. **Computer viewer:** the legacy auto-connecting "This Mac" entry
+    msiexec; it is rotated when the old one was readable by other accounts (in
+    its file or in TightVNC's registry key, which is now locked to
+    Administrators and SYSTEM); `UseVncAuthentication`, `AllowLoopback` and
+    `LoopbackOnly` are written and read back every run, and any failure stops
+    setup. The HD venv is reused only if it was built on the checked machine
+    Python and nobody else could change it; otherwise it is rebuilt (links
+    deleted as links, never followed). If UltraVNC has to be backed out, setup
+    confirms it stopped and that TightVNC is on loopback only, or stops.
+    **Computer viewer:** one check parses each address once (ws/wss, or
+    http(s) mapped to them; nothing else, no credentials in the URL, plaintext
+    only to a private host), and the connection uses that checked address, for
+    a saved computer and a session-API reply alike; the legacy auto-connecting "This Mac" entry
     is unselected and stops auto-connecting for upgraders too (once; you can
     delete it). **Preview pages** never send on their own: Send always needs
-    your click and sends the text shown. **Skills hub:** when two results share
-    a name, Install is disabled for them, because the bot's backend installs by
-    name only.
+    your click and sends the text shown. **Skills hub:** one-click Install is
+    offered only for a result with a source-qualified identifier. Hermes's hub
+    search returns names only, so today that is none: each result shows its
+    name, its source and a copyable, safely quoted
+    `hermes -p '<profile>' skills install '<name>'`, with a pointer to
+    `hermes skills search` to check the source first.
 - **Slack: your team can talk to the bot (2026-11-19).** One-click Add to
   Slack now lets every **full member** of the workspace DM and @mention the bot
   by default; guests and Slack Connect users are left out. Hermes has no
   members-only switch (`SLACK_ALLOW_ALL_USERS` would admit guests), so the kit
   writes the member list into the bot's `SLACK_ALLOWED_USERS` and the relay
-  refreshes it every 15 minutes. **Only me** and **Only these people** are
-  explicit choices, before Connect or later. The Slack window, Slack's
-  confirmation page and the welcome DM state who can actually talk to the bot,
-  worked out from `SLACK_ALLOWED_USERS`, `SLACK_ALLOW_ALL_USERS`,
-  `GATEWAY_ALLOWED_USERS` and pairing approvals; extra grants are named, and
-  **Remove the extra access** clears the ones that belong to that bot.
+  refreshes it every 15 minutes. Only people Slack lists as full members are
+  in it (the installer too); a failed read keeps the last list for at most 24
+  hours, then falls back to the installer (if Slack last listed them as a full
+  member) or to nobody, and the window says the list is stale. Slack's
+  `Retry-After` is honoured and a missing `users:read` permission is named.
+  Nobody is written as `NOBODY`, never as an empty value (Hermes reads an empty
+  allowlist as "no allowlist"). **Only me** and **Only these people** are
+  explicit choices, before Connect or later. Every change carries a revision,
+  and a refresh that started before your change is discarded, so it can't
+  undo **Only me**. The Slack window (which refreshes itself), Slack's
+  confirmation page and the welcome DM show one result: who can actually talk
+  to the bot, worked out the way a multiplexed Hermes gateway reads that
+  profile (`SLACK_ALLOWED_USERS`, `SLACK_ALLOW_ALL_USERS`,
+  `GATEWAY_ALLOWED_USERS`, `GATEWAY_ALLOW_ALL_USERS` and pairing approvals),
+  with every extra grant named with its source and how to change it. The kit
+  changes only that bot's `SLACK_ALLOWED_USERS`. Bots connected by an earlier
+  release keep their list until you pick **Keep these people**, **Everyone in
+  the workspace** or **Only me**.
   `slack-connect/install.py --check` exits non-zero until the add-on is
   ready. Anyone who can message a bot uses it with the bot's own access:
   `docs/SLACK.md` says so and how to restrict it.
