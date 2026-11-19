@@ -89,6 +89,25 @@ if awk '$2 == "computer-viewer/vendor/novnc-rfb.mjs" { found=1 } END { exit foun
 fi
 echo "OK  happy path"
 
+# The syntax check parses the plugins as ES modules even when Node's default is
+# CommonJS (older Node, or ESM detection switched off): the install succeeds.
+if node -e 0 >/dev/null 2>&1; then
+  cjs_env=(NODE_OPTIONS=--no-experimental-detect-module)
+  if ! NODE_OPTIONS=--no-experimental-detect-module node -e 0 >/dev/null 2>&1; then
+    # This Node lacks the flag: a fake node that refuses ESM unless told.
+    cjs_node=$(mktemp -d)
+    real_node=$(command -v node)
+    printf '#!/usr/bin/env bash\ncase " $* " in *" --input-type=module "*) exec "%s" "$@" ;; *" --check "*) echo "fake node: CommonJS parse" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "${real_node}" "${real_node}" > "${cjs_node}/node"
+    chmod +x "${cjs_node}/node"
+    cjs_env=(PATH="${cjs_node}:${PATH}")
+  fi
+  cjs_home=$(new_home)
+  env "${cjs_env[@]}" HERMES_HOME="${cjs_home}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}" >/dev/null 2>&1 \
+    || fail "install failed with Node's CommonJS default (${cjs_env[*]})"
+  assert_plugin "${cjs_home}" "computer-viewer/plugin.js"
+  echo "OK  syntax check under Node's CommonJS default"
+fi
+
 # Grokbot Override: the committed plugin.js, switched on by default.
 assert_plugin "${home}" "grokbot-override/plugin.js"
 grep -qx 'var DEFAULT_ON = true;' "${home}/desktop-plugins/grokbot-override/plugin.js" || fail "installed Grokbot Override does not start on"
@@ -467,5 +486,26 @@ if FAKE_ROOT="${empty}" remote_install ok "${log}" "${ehome}" v2026.11.16 >/dev/
 fi
 [ ! -e "${ehome}/desktop-plugins" ] || fail "an empty manifest installed files"
 echo "OK  empty manifest installs nothing"
+
+# A fetched-alone install.sh in a shared temp dir never installs plugin files
+# someone else planted beside it (no checkout signal: no .git you own).
+sha256_file() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'; else sha256sum "$1" | awk '{print $1}'; fi; }
+planted=$(mktemp -d)
+CLEANUP+=("${planted}")
+cp "${INSTALLER}" "${planted}/install.sh"
+mkdir -p "${planted}/computer-viewer" "${planted}/grokbot-override"
+printf 'export default { id: "computer-viewer", planted: true }\n' > "${planted}/computer-viewer/plugin.js"
+printf 'export default { id: "grokbot-override", planted: true }\n' > "${planted}/grokbot-override/plugin.js"
+( cd "${planted}" && for f in computer-viewer/plugin.js grokbot-override/plugin.js; do printf '%s  %s\n' "$(sha256_file "$f")" "$f"; done ) > "${planted}/MANIFEST.sha256"
+log=$(mktemp)
+CLEANUP+=("${log}")
+phome=$(new_home)
+env -i PATH="${fake}:/usr/bin:/bin" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR}" FAKE_API=ok FAKE_LOG="${log}" FAKE_ROOT="${ROOT}" \
+  HERMES_HOME="${phome}" bash "${planted}/install.sh" >/dev/null 2>&1 || fail "fetched-alone install beside a planted tree failed"
+if grep -q planted "${phome}/desktop-plugins/computer-viewer/plugin.js" "${phome}/desktop-plugins/grokbot-override/plugin.js" 2>/dev/null; then
+  fail "install.sh installed plugin files planted beside it"
+fi
+[ -s "${log}" ] || fail "the fetched-alone install did not download the release"
+echo "OK  planted files beside a fetched-alone install.sh are never used"
 
 echo "test-install.sh: all passed"

@@ -77,8 +77,8 @@ that fixes it:
 From a clone: `bash install.sh --doctor` (or `bash scripts/doctor.sh`). It
 ends with a summary between two `--- doctor summary ---` lines; paste that
 into a [not-working issue](https://github.com/thomasbek3/hermes-bot-kit/issues/new/choose).
-It shows `~` for your home folder and `<user>` for your username, and holds
-no tokens.
+It holds no paths, names or tokens: only versions, plugin names, a home
+category and OK/FIX/INFO per check.
 
 | What you see | Why, and the fix |
 |---|---|
@@ -92,8 +92,8 @@ no tokens.
 | `install.sh: sha256 mismatch for …` | A download was not the released file (proxy, cut-off download). Nothing was installed. Run it again. |
 | Bubble Mode, Task Dock or Bot Sections still installed | Retired in 2026-11. Run the installer with `KIT_REMOVE_RETIRED=1` in front of `bash` (it moves them aside; nothing is deleted). |
 | Hermes Desktop older than 0.23.0 | Not supported (see [Requirements](#requirements)): update Hermes Desktop. The doctor prints your version. |
-| Hermes Desktop on Windows | The installer is a bash script for macOS and Linux. Desktop on Windows reads `%LOCALAPPDATA%\hermes\desktop-plugins` (an older `~/.hermes` only when that doesn't exist): copy the `grokbot-override` and `computer-viewer` folders there from the release's source zip (folder names exactly as shown, `plugin.js` one level down), then reload. |
-| Hermes Desktop for Windows with the installer run in WSL | Different homes: WSL's `~/.hermes` is not Desktop's `%LOCALAPPDATA%\hermes`. Copy the two folders into that one's `desktop-plugins`. |
+| Hermes Desktop on Windows | The installer is a bash script for macOS and Linux. Desktop on Windows reads `HERMES_HOME`, else `%LOCALAPPDATA%\hermes` (an older `%USERPROFILE%\.hermes` only when that doesn't exist). From the release's source zip, copy the `grokbot-override` and `computer-viewer` folders and `MANIFEST.sha256` into its `desktop-plugins\` (folder names exactly as shown, `plugin.js` one level down), then reload. To verify in PowerShell: `$d="$env:LOCALAPPDATA\hermes\desktop-plugins"; foreach ($l in Get-Content "$d\MANIFEST.sha256") { $h,$p = $l -split '\s+',2; if ($p -like 'computer-viewer/*' -or $p -eq 'grokbot-override/plugin.js') { if (!(Test-Path "$d\$p") -or (Get-FileHash "$d\$p").Hash -ne $h) { "FIX: copy $p again" } } }; "checked"`. Each `FIX:` line names a file to copy again from the zip. |
+| Hermes Desktop for Windows with the installer run in WSL | Different homes: WSL's `~/.hermes` is not Desktop's `%LOCALAPPDATA%\hermes`. Copy the folders and `MANIFEST.sha256` into that one's `desktop-plugins` as above. The doctor run in WSL checks your Windows home when it can see it (through `cmd.exe`); when it can't, it marks the home unverified and exits 2. |
 
 Still stuck? [Open a not-working issue](https://github.com/thomasbek3/hermes-bot-kit/issues/new/choose)
 with the doctor summary. Agents installing the kit: [AGENTS.md](AGENTS.md)

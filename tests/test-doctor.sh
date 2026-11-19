@@ -79,7 +79,8 @@ ${OUT}"
 hasnt "FIX" "good install"
 has "OK    Hermes Desktop 0.23.2" "good install"
 has "OK    grokbot-override: plugin.js matches MANIFEST.sha256" "good install"
-has "OK    computer-viewer: plugin.js matches MANIFEST.sha256" "good install"
+CV_OTHERS=$(( $(grep -c ' computer-viewer/' "${ROOT}/MANIFEST.sha256") - 1 ))
+has "OK    computer-viewer: plugin.js and its ${CV_OTHERS} other files match MANIFEST.sha256" "good install"
 has "Reload desktop plugins" "good install"
 [ "$(summary | grep -c '^--- doctor summary ---$')" = 2 ] || fail "good install: the summary is not fenced by two marker lines"
 GOOD_OUT="${OUT}"
@@ -188,34 +189,65 @@ doctor "${U}" DOCTOR_GUI_HERMES_HOME="${U}/elsewhere"
 has "FIX   Hermes Desktop opened from the Dock or Finder uses ${U}/elsewhere" "gui home"
 ok "old app and Dock-home mismatch: FIX"
 
-# 8. The summary: $HOME -> ~, the username -> <user>, no token-shaped strings.
+# 8. The summary holds only closed-set values: no path, no name, no token, no
+# text from any file, even with token-shaped folder names, a token-shaped
+# release in the install record and a Windows path with a username in it.
+SUMMARY_LINE='^(--- doctor summary ---|os: (mac|linux|wsl|windows|other) [A-Za-z0-9_.-]+ [A-Za-z0-9_.+-]+ ([0-9]+(\.[0-9]+){0,3}|[a-z0-9._-]{1,32} [A-Za-z0-9._-]{0,32}|unknown|none)|hermes desktop: ([0-9]+(\.[0-9]+){1,3}|not-found|unknown)|kit release: (v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{1,3})?|local|none|unknown)|kit plugins: (none|(computer-viewer|grokbot-override)( (computer-viewer|grokbot-override))*)|hermes home: (default-home|HERMES_HOME|profile-scoped|wsl|windows-localappdata|windows-legacy|other)|check [a-z0-9-]{1,40} (OK|FIX|INFO))$'
+PLANTED="xoxb-1234.5678-FAKE xoxe.xoxp-1-FAKE sk-FAKEFAKEFAKEFAKE SomeName doctortest"
+check_summary() {
+  # check_summary <label>: the summary is fenced, every line is allowlisted,
+  # and nothing planted, no path and no username is in it.
+  local S w
+  S=$(summary)
+  [ "$(printf '%s\n' "${S}" | grep -c '^--- doctor summary ---$')" = 2 ] || fail "$1: no fenced summary:
+${OUT}"
+  if printf '%s\n' "${S}" | grep -Evx -- "${SUMMARY_LINE}" | grep -q .; then
+    fail "$1: summary lines outside the allowlist:
+$(printf '%s\n' "${S}" | grep -Evx -- "${SUMMARY_LINE}")"
+  fi
+  printf '%s\n' "${S}" | grep -q / && fail "$1: a path is in the summary:
+${S}"
+  for w in ${PLANTED} "${NAME}" "$(id -un)"; do
+    printf '%s\n' "${S}" | grep -qiF -- "${w}" && fail "$1: '${w}' is in the summary:
+${S}"
+  done
+  return 0
+}
 U=$(new_user)
 NAME=$(basename -- "${U}")
 install_into "${U}/.hermes"
-printf 'SLACK_BOT_TOKEN=xoxb-FAKE-000000-doctortest\nOPENAI_API_KEY=sk-FAKEFAKEFAKEFAKE\n' > "${U}/.hermes/.env"
-# A misnamed folder whose name looks like a token: its FIX line must be redacted.
-mv "${U}/.hermes/desktop-plugins/grokbot-override" "${U}/.hermes/desktop-plugins/grokbot-override-xoxb-FAKE-111"
+printf 'SLACK_BOT_TOKEN=xoxb-1234.5678-FAKE\nSLACK_USER_TOKEN=xoxe.xoxp-1-FAKE\nOPENAI_API_KEY=sk-FAKEFAKEFAKEFAKE\nX=doctortest\n' > "${U}/.hermes/.env"
+D="${U}/.hermes/desktop-plugins"
+# Token-shaped folder names: a misnamed plugin folder and a nested one.
+mv "${D}/grokbot-override" "${D}/grokbot-override-xoxe.xoxp-1-FAKE"
+mkdir -p "${D}/xoxb-1234.5678-FAKE/sk-FAKEFAKEFAKEFAKE"
+cp "${D}/computer-viewer/plugin.js" "${D}/xoxb-1234.5678-FAKE/sk-FAKEFAKEFAKEFAKE/plugin.js"
+printf 'release=xoxb-1234.5678-FAKE\nplugins=computer-viewer grokbot-override\n' > "${D}/.hermes-bot-kit-install"
 # A home outside $HOME with the username in it.
 OTHER="${WORK}/srv/${NAME}/hermes"
 mkdir -p "$(dirname -- "${OTHER}")"
 cp -R "${U}/.hermes" "${OTHER}"
 doctor "${U}" HERMES_HOME="${OTHER}" DOCTOR_GUI_HERMES_HOME="${OTHER}"
-S=$(summary)
-[ -n "${S}" ] || fail "redaction: no summary"
-printf '%s\n' "${S}" | grep -qF "grokbot-override-<redacted>" || fail "redaction: the token-shaped folder name was not redacted:
-${S}"
-printf '%s\n' "${S}" | grep -qF "<user>" || fail "redaction: the username was not replaced:
-${S}"
-printf '%s\n' "${S}" | grep -qE 'xox[a-z]-|sk-FAKE|FAKE-000000' && fail "redaction: a token-shaped string is in the summary:
-${S}"
-printf '%s\n' "${S}" | grep -qF "${U}" && fail "redaction: \$HOME is in the summary"
-printf '%s\n' "${S}" | grep -qw "${NAME}" && fail "redaction: the username is in the summary"
-REAL=$(id -un)
-printf '%s\n' "${S}" | grep -qw "${REAL}" && fail "redaction: the account name is in the summary"
+has "grokbot-override-xoxe.xoxp-1-FAKE" "privacy (the local output still names the folder)"
+check_summary "privacy, HERMES_HOME"
+summary | grep -qx 'kit release: unknown' || fail "privacy: a token-shaped release was not replaced"
+summary | grep -qx 'hermes home: HERMES_HOME' || fail "privacy: no HERMES_HOME category"
+summary | grep -qx 'check grokbot-override-place FIX' || fail "privacy: no check id for the misnamed folder"
 printf '%s\n' "${OUT}" | grep -qF "doctortest" && fail "the doctor printed something from .env"
+# WSL with the Windows side visible: a Windows path with a username.
+MNT="${WORK}/mnt"
+WIN_USER=SomeName
+WINHOME="${MNT}/c/Users/${WIN_USER}/AppData/Local/hermes"
+mkdir -p "$(dirname -- "${WINHOME}")"
+cp -R "${U}/.hermes" "${WINHOME}"
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" 'DOCTOR_WIN_VARS=%HERMES_HOME%?C:\Users\SomeName\AppData\Local?C:\Users\SomeName'
+has "Hermes home: ${WINHOME}" "privacy, WSL (the local output names the Windows home)"
+check_summary "privacy, WSL"
+summary | grep -qx 'hermes home: windows-localappdata' || fail "privacy: no windows-localappdata category"
 doctor "${U}"
-summary | grep -qF "hermes home: ~/.hermes" || fail "redaction: the home is not shown as ~/.hermes"
-ok "summary: ~ and <user>, no tokens, nothing from .env"
+check_summary "privacy, default home"
+summary | grep -qx 'hermes home: default-home' || fail "privacy: no default-home category"
+ok "summary: only allowlisted closed-set lines; no path, name, token or file text"
 
 # 9. install.sh --doctor from a clone runs the same checks.
 U=$(new_user)
@@ -272,5 +304,133 @@ remote_doctor "${bad}" "${U}"
 has "sha256 mismatch for scripts/doctor.sh" "tampered doctor"
 hasnt "TAMPERED" "tampered doctor"
 ok "install.sh --doctor fetched alone: verified against the manifest, tamper refused"
+
+# 10b. A doctor.sh sitting beside a fetched-alone install.sh (a shared /tmp) is
+# never run, even with a manifest beside it that lists its digest: no .git, so
+# not a checkout. The release's doctor is downloaded and verified instead.
+mkdir -p "${alone}/scripts"
+printf '#!/usr/bin/env bash\ntouch "%s/PLANTED-RAN"\necho PLANTED\n' "${WORK}" > "${alone}/scripts/doctor.sh"
+{ shasum -a 256 "${alone}/scripts/doctor.sh" 2>/dev/null || sha256sum "${alone}/scripts/doctor.sh"; } | awk '{print $1 "  scripts/doctor.sh"}' > "${alone}/MANIFEST.sha256"
+mv "${WORK}/gone-alone" "${U}/.hermes/desktop-plugins/grokbot-override"
+: > "${WORK}/fake.log"
+remote_doctor "${ROOT}" "${U}"
+[ ! -e "${WORK}/PLANTED-RAN" ] || fail "install.sh --doctor ran the doctor.sh beside it"
+hasnt "PLANTED" "planted doctor"
+[ "${RC}" -eq 0 ] || fail "planted doctor: the release doctor did not run cleanly (exit ${RC}):
+${OUT}"
+[ "$(strip "${OUT}")" = "$(strip "${GOOD_OUT}")" ] || fail "planted doctor: not the release's checks:
+${OUT}"
+[ "$(sort -u "${WORK}/fake.log")" = "${fallback}" ] || fail "planted doctor: the release doctor was not downloaded"
+# A real checkout (a .git beside install.sh, doctor.sh matching its manifest)
+# runs its own doctor without downloading; an edited one is not run.
+co="${WORK}/checkout"
+mkdir -p "${co}/scripts" "${co}/.git"
+cp "${INSTALLER}" "${co}/install.sh"
+cp "${ROOT}/MANIFEST.sha256" "${co}/MANIFEST.sha256"
+cp "${DOCTOR}" "${co}/scripts/doctor.sh"
+: > "${WORK}/fake.log"
+set +e
+OUT=$(env -i PATH="${fake}:/usr/bin:/bin" HOME="${U}" USER=kitdoc TMPDIR="${WORK}" FAKE_ROOT="${ROOT}" FAKE_LOG="${WORK}/fake.log" \
+  DOCTOR_APP_PATH="${U}/Applications/Hermes.app" DOCTOR_GUI_HERMES_HOME= bash "${co}/install.sh" --doctor 2>&1)
+RC=$?
+set -e
+[ "${RC}" -eq 0 ] || fail "checkout doctor: exit ${RC}:
+${OUT}"
+[ ! -s "${WORK}/fake.log" ] || fail "checkout doctor: downloaded instead of running the checkout's copy"
+echo 'echo LOCAL-EDIT' >> "${co}/scripts/doctor.sh"
+set +e
+OUT=$(env -i PATH="${fake}:/usr/bin:/bin" HOME="${U}" USER=kitdoc TMPDIR="${WORK}" FAKE_ROOT="${ROOT}" FAKE_LOG="${WORK}/fake.log" \
+  DOCTOR_APP_PATH="${U}/Applications/Hermes.app" DOCTOR_GUI_HERMES_HOME= bash "${co}/install.sh" --doctor 2>&1)
+set -e
+hasnt "LOCAL-EDIT" "checkout doctor that does not match its manifest"
+[ -s "${WORK}/fake.log" ] || fail "checkout doctor (edited): the release doctor was not downloaded"
+ok "install.sh --doctor: a neighbouring doctor.sh runs only in a real checkout and only when it matches"
+
+# 11. Every runtime file of a plugin is checked against the manifest.
+U=$(new_user)
+install_into "${U}/.hermes"
+V="${U}/.hermes/desktop-plugins/computer-viewer/vendor/novnc-rfb.mjs"
+mv "${V}" "${WORK}/novnc.saved"
+doctor "${U}"
+[ "${RC}" -eq 1 ] || fail "missing runtime file: exit ${RC}, want 1"
+has "FIX   computer-viewer: vendor/novnc-rfb.mjs is missing" "missing runtime file"
+has "install.sh" "missing runtime file (the fix names the installer)"
+hasnt "Nothing to fix" "missing runtime file"
+mv "${WORK}/novnc.saved" "${V}"
+python3 -c 'import sys; p = sys.argv[1]; b = bytearray(open(p, "rb").read()); b[0] ^= 1; open(p, "wb").write(b)' "${V}"
+doctor "${U}"
+[ "${RC}" -eq 1 ] || fail "changed runtime file: exit ${RC}, want 1"
+has "FIX   computer-viewer: vendor/novnc-rfb.mjs does not match the installed MANIFEST.sha256" "changed runtime file"
+ok "runtime files: a missing or changed one is a FIX naming it"
+
+# 12. A backup copy nested inside a plugin folder is never loaded: no FIX, and
+# never a move of the working folder.
+U=$(new_user)
+install_into "${U}/.hermes"
+D="${U}/.hermes/desktop-plugins"
+mkdir -p "${D}/grokbot-override/backup"
+cp "${D}/grokbot-override/plugin.js" "${D}/grokbot-override/backup/plugin.js"
+doctor "${U}"
+[ "${RC}" -eq 0 ] || fail "nested backup: exit ${RC}, want 0:
+${OUT}"
+hasnt "FIX" "nested backup"
+hasnt "mv \"${D}/grokbot-override\"" "nested backup (no move of the working folder)"
+has "OK    grokbot-override: plugin.js matches MANIFEST.sha256" "nested backup"
+ok "nested backup copy: no FIX, exit 0"
+
+# 13. WSL: the Windows home is checked when the current Windows user's folder
+# can be seen; otherwise the home is unverified, never OK, and the exit is 2.
+U=$(new_user)
+MNT="${WORK}/mnt-wsl"
+WIN_USER="Win User"
+OTHER_ACCOUNT=Another
+WIN_LAD="${MNT}/c/Users/${WIN_USER}/AppData/Local"
+mkdir -p "${WIN_LAD}" "${MNT}/c/Users/${OTHER_ACCOUNT}/AppData/Local/hermes/desktop-plugins"
+install_into "${WIN_LAD}/hermes"
+WSL_VARS='DOCTOR_WIN_VARS=%HERMES_HOME%?C:\Users\Win User\AppData\Local?C:\Users\Win User'
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" "${WSL_VARS}"
+[ "${RC}" -eq 0 ] || fail "WSL with a Windows home: exit ${RC}:
+${OUT}"
+has "WSL: diagnosing Hermes Desktop for Windows" "WSL windows home"
+has "OK    Hermes home: ${WIN_LAD}/hermes (%LOCALAPPDATA%\\hermes, the Windows default)" "WSL windows home"
+has "OK    grokbot-override: plugin.js matches" "WSL windows home"
+hasnt "${OTHER_ACCOUNT}" "WSL (another account's folder listed)"
+# The Windows home without the kit: the fix is the Windows copy step.
+mv "${WIN_LAD}/hermes/desktop-plugins/grokbot-override" "${WORK}/gone-wsl"
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" "${WSL_VARS}"
+[ "${RC}" -eq 1 ] || fail "WSL, Windows home missing a plugin: exit ${RC}"
+has "fix: on Windows: copy the grokbot-override and computer-viewer folders and MANIFEST.sha256" "WSL fix text"
+# Windows side not visible, a good WSL-only install: unverified, exit 2.
+install_into "${U}/.hermes"
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WIN_VARS=
+[ "${RC}" -eq 2 ] || fail "WSL-only copy: exit ${RC}, want 2:
+${OUT}"
+has "INFO  Hermes home: ${U}/.hermes (WSL's; unverified: Windows Desktop reads its own home, not WSL's)" "WSL unverified"
+hasnt "OK    Hermes home" "WSL unverified"
+hasnt "Nothing to fix. If" "WSL unverified"
+summary | grep -qx 'hermes home: wsl' || fail "WSL unverified: no wsl category"
+ok "WSL: Windows home checked when visible; otherwise unverified, exit 2"
+
+# 14. Windows (Git Bash): Desktop's order. HERMES_HOME, then the registry
+# value, then %LOCALAPPDATA%\hermes, then a legacy ~/.hermes only when the
+# first is missing.
+U=$(new_user)
+mkdir -p "${U}/AppData/Local"
+install_into "${U}/.hermes"
+win() { doctor "${U}" DOCTOR_OS=windows LOCALAPPDATA="${U}/AppData/Local" USERPROFILE="${U}" "$@"; }
+win DOCTOR_WIN_REG_HOME=
+[ "${RC}" -eq 0 ] || fail "Windows legacy home: exit ${RC}:
+${OUT}"
+has "OK    Hermes home: ${U}/.hermes (the legacy %USERPROFILE%\\.hermes" "Windows legacy home"
+summary | grep -qx 'hermes home: windows-legacy' || fail "Windows legacy: no windows-legacy category"
+mkdir -p "${U}/AppData/Local/hermes"
+win DOCTOR_WIN_REG_HOME=
+has "OK    Hermes home: ${U}/AppData/Local/hermes (%LOCALAPPDATA%" "Windows LOCALAPPDATA home"
+has "fix: on Windows: copy the grokbot-override and computer-viewer folders" "Windows fix text"
+win DOCTOR_WIN_REG_HOME="%USERPROFILE%/.hermes"
+has "OK    Hermes home: ${U}/.hermes (from HERMES_HOME in the registry" "Windows registry home"
+win HERMES_HOME= DOCTOR_WIN_REG_HOME="${U}/.hermes"
+has "OK    Hermes home: ${U}/AppData/Local/hermes" "Windows: an empty HERMES_HOME skips the registry"
+ok "Windows: HERMES_HOME, registry, %LOCALAPPDATA%, legacy, in Desktop's order"
 
 echo "test-doctor.sh: all passed"

@@ -158,8 +158,9 @@ under `hermes.plugin.computer-viewer.*` and `hermes.plugin.grokbot-override.*`.
 **If it isn't working, run the doctor first:** the install command from step 2
 with `--doctor` after `bash "$f"`, or `bash install.sh --doctor` from a clone.
 It only reads, prints `OK` / `FIX` / `INFO` per check with the exact fix for
-each `FIX`, exits 1 when anything needs fixing, and ends with a
-`--- doctor summary ---` block (home folder as `~`, no tokens) to hand back to
+each `FIX`, exits 1 when anything needs fixing (2 when it can't see the
+Hermes home Desktop uses, e.g. from WSL), and ends with a
+`--- doctor summary ---` block (no paths, names or tokens: versions, plugin names, a home category and OK/FIX/INFO per check) to hand back to
 the person or paste into an issue.
 
 | Symptom | Cause and fix |

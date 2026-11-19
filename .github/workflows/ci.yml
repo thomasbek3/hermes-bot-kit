@@ -144,6 +144,30 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      # The README's Windows verify one-liner, against a source-zip copy (LF, as
+      # GitHub's zips are) in a throwaway %LOCALAPPDATA%.
+      - name: README Windows verify step
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'src.zip'
+          git -c core.autocrlf=false archive --format=zip -o $zip HEAD
+          $src = Join-Path $env:RUNNER_TEMP 'src'
+          Expand-Archive $zip $src
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'lad'
+          $d = "$env:LOCALAPPDATA\hermes\desktop-plugins"
+          New-Item -ItemType Directory -Force "$d\grokbot-override" | Out-Null
+          Copy-Item -Recurse "$src\computer-viewer" $d
+          Copy-Item "$src\grokbot-override\plugin.js" "$d\grokbot-override\"
+          Copy-Item "$src\MANIFEST.sha256" $d
+          $m = [regex]::Match((Get-Content README.md -Raw), 'To verify in PowerShell: `([^`]+)`')
+          if (-not $m.Success) { Write-Host 'no verify one-liner in README.md'; exit 1 }
+          $out = @(Invoke-Expression $m.Groups[1].Value)
+          if (($out -notcontains 'checked') -or ($out -match '^FIX')) { $out; exit 1 }
+          Remove-Item "$d\computer-viewer\vendor\novnc-rfb.mjs"
+          $out = @(Invoke-Expression $m.Groups[1].Value)
+          if (-not ($out -match 'FIX: copy computer-viewer/vendor/novnc-rfb.mjs again')) { $out; exit 1 }
+          Write-Host 'README Windows verify step OK'
+
       - name: Windows installer pure-function tests
         shell: pwsh
         run: pwsh -NoProfile -NonInteractive -File computer-viewer/tests/test-windows-pure.ps1

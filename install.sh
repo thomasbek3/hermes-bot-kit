@@ -81,9 +81,20 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
-# --doctor: read-only checks (scripts/doctor.sh), changes nothing. From a clone
-# it runs the checkout's copy. Fetched alone, it downloads doctor.sh from the
-# release this script came with (or KIT_REF) and runs it only if it matches
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -- "$1" | awk '{print $1}'
+  else
+    sha256sum -- "$1" | awk '{print $1}'
+  fi
+}
+
+# --doctor: read-only checks (scripts/doctor.sh), changes nothing. From a real
+# checkout (a .git beside this script, and the checkout's own doctor.sh owned
+# by you and matching its MANIFEST.sha256) it runs that copy. Otherwise (the
+# one-liner downloads this script alone into a temp dir, which can be a shared
+# /tmp) it never runs anything sitting beside it: it downloads doctor.sh from
+# the release this script came with (or KIT_REF) and runs it only if it matches
 # that release's MANIFEST.sha256.
 if [ "${1:-}" = "--doctor" ]; then
   shift
@@ -93,8 +104,11 @@ if [ "${1:-}" = "--doctor" ]; then
   elif [ -n "${BASH_SOURCE:-}" ] && [ -f "${BASH_SOURCE[0]:-}" ]; then
     doc_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
   fi
-  if [ -n "${doc_dir}" ] && [ -f "${doc_dir}/scripts/doctor.sh" ]; then
-    exec bash "${doc_dir}/scripts/doctor.sh" "$@"
+  if [ -n "${doc_dir}" ] && [ -e "${doc_dir}/.git" ] && [ -O "${doc_dir}/scripts/doctor.sh" ] && [ -O "${doc_dir}/MANIFEST.sha256" ]; then
+    doc_want=$(awk '$2 == "scripts/doctor.sh" { print $1; exit }' "${doc_dir}/MANIFEST.sha256")
+    if [ -n "${doc_want}" ] && [ "$(sha256_of "${doc_dir}/scripts/doctor.sh")" = "${doc_want}" ]; then
+      exec bash "${doc_dir}/scripts/doctor.sh" "$@"
+    fi
   fi
   doc_ref="${KIT_REF_FROM_USER:-${KIT_FALLBACK_REF}}"
   [ "${doc_ref}" = "latest" ] && doc_ref="${KIT_FALLBACK_REF}"
@@ -116,12 +130,7 @@ if [ "${1:-}" = "--doctor" ]; then
     echo "install.sh: could not download scripts/doctor.sh for ${doc_ref}" >&2
     exit 1
   }
-  if command -v shasum >/dev/null 2>&1; then
-    doc_got=$(shasum -a 256 -- "${doc_tmp}/doctor.sh" | awk '{print $1}')
-  else
-    doc_got=$(sha256sum -- "${doc_tmp}/doctor.sh" | awk '{print $1}')
-  fi
-  if [ "${doc_got}" != "${doc_want}" ]; then
+  if [ "$(sha256_of "${doc_tmp}/doctor.sh")" != "${doc_want}" ]; then
     echo "install.sh: sha256 mismatch for scripts/doctor.sh (${doc_ref}); not running it" >&2
     exit 1
   fi
@@ -223,7 +232,12 @@ fi
 SOURCE_DIR=""
 if [ -n "${KIT_SOURCE_DIR:-}" ]; then
   SOURCE_DIR=$(CDPATH= cd -- "${KIT_SOURCE_DIR}" && pwd)
-elif [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/computer-viewer/plugin.js" ]; then
+elif [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/computer-viewer/plugin.js" ] &&
+  [ -e "${SCRIPT_DIR}/.git" ] && [ -O "${SCRIPT_DIR}/.git" ] && [ -O "${SCRIPT_DIR}/MANIFEST.sha256" ]; then
+  # Only a real checkout you own copies from the files beside this script.
+  # The one-liner downloads install.sh alone into a temp dir, which can be a
+  # shared /tmp: plugin files someone else put next to it are never used
+  # (set KIT_SOURCE_DIR to copy from an unpacked zip on purpose).
   SOURCE_DIR="${SCRIPT_DIR}"
 fi
 
@@ -427,8 +441,10 @@ check_js() {
     echo "install.sh: downloaded ${label} does not look right; aborting" >&2
     exit 1
   }
+  # The plugins are ES modules: parse them as one whatever Node's default is
+  # (older Node, or NODE_OPTIONS=--no-experimental-detect-module).
   if command -v node >/dev/null 2>&1; then
-    node --check "${file}" || {
+    node --input-type=module --check < "${file}" || {
       echo "install.sh: ${label} failed syntax check; aborting" >&2
       exit 1
     }
@@ -589,7 +605,7 @@ else
         if [ -n "${marker}" ]; then
           check_js "${staged}" "${marker}" "${label}"
         elif command -v node >/dev/null 2>&1; then
-          node --check "${staged}" || {
+          node --input-type=module --check < "${staged}" || {
             echo "install.sh: ${rel} failed syntax check; aborting" >&2
             exit 1
           }

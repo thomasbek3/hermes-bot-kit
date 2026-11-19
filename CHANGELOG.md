@@ -43,7 +43,22 @@ is new in this one.
   ending in a paste-able summary with home paths, usernames and token-shaped
   strings redacted. README gains **Getting started** (what you should see at
   each step) and **Troubleshooting**; GitHub issue forms ask for the OS, the
-  Hermes version and the doctor summary.
+  Hermes version and the doctor summary. The doctor checks every file of each
+  plugin against the installed manifest; finds Hermes Desktop for Windows'
+  home in the order Desktop does (registry, `%LOCALAPPDATA%\hermes`, the
+  legacy `~/.hermes`), and from WSL checks that home when it can see it, else
+  says the home is unverified and exits 2; ignores a backup copy nested
+  inside a plugin folder (Desktop loads only one level down). Its issue
+  summary holds only versions, plugin names, a home category and
+  OK/FIX/INFO per check: no paths, usernames, tokens or file contents.
+  **Downloaded alone, `install.sh` never uses files beside it** (the
+  one-liner's temp dir can be a shared `/tmp`): it copies from a local tree
+  only in a git checkout you own (or with `KIT_SOURCE_DIR`), and
+  `--doctor` runs a local doctor only there, else it downloads and verifies
+  the release copy. The installer's syntax check parses the plugins as ES
+  modules, so it no longer aborts on older Node or with ESM detection off.
+  The Windows steps include copying `MANIFEST.sha256` and a one-line
+  PowerShell check.
 - **Security audit (2026-11-19), a partial pass.** A source-only audit with
   Cloudflare's security-audit skill (full-audit mode, stopped early after five
   waves). Two areas were **not reviewed**: the bot's terminal and file tools
@@ -88,7 +103,8 @@ is new in this one.
     on loopback only, or stops; another program on :5900 is named, not killed.
     TightVNC's registry key is locked before the password is written, and an
     HD token whose original permissions let other accounts read or change it
-    is replaced.
+    is replaced; the kit's HD task is restarted on the new token and setup
+    confirms the running agent accepts it before printing it.
     **Computer viewer:** one check parses each address once (ws/wss, or
     http(s) mapped to them; nothing else, no credentials in the URL, plaintext
     only to a private host), and the connection uses that checked address, for
@@ -123,7 +139,14 @@ is new in this one.
   with every extra grant named with its source and how to change it. The kit
   changes only that bot's `SLACK_ALLOWED_USERS`. Bots connected by an earlier
   release keep their list until you pick **Keep these people**, **Everyone in
-  the workspace** or **Only me**. Allowlists are read exactly as Hermes parses them: a JSON list such as
+  the workspace** or **Only me**. Bots connected by v2026.11.16.3 or an earlier
+  build of this release are recognised after the upgrade (by their app,
+  profile and installed credentials): their audience can be changed and
+  members bots are refreshed, with nothing changed until the owner chooses.
+  On a managed Hermes, or when an administrator pins `SLACK_ALLOWED_USERS`,
+  a change now fails with Hermes's own refusal instead of claiming
+  success: the kit reads the allowlist back the way Hermes does before it
+  records anything. Allowlists are read exactly as Hermes parses them: a JSON list such as
   `'["U1","U2"]'` works, and `*` in either form means anyone. Channel
   allowlists (`group_allowed_chats`) and `allow_bots` / `SLACK_ALLOW_BOTS`
   are named with their source too. `scripts/test-with-hermes.sh <checkout>`
