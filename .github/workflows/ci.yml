@@ -77,6 +77,9 @@ jobs:
       - name: Host-script bind tests
         run: bash computer-viewer/tests/test-bind.sh
 
+      - name: Linux X11 setup test (shimmed x11vnc/systemctl, no network)
+        run: bash computer-viewer/tests/test-linux-x11.sh
+
       - name: Retired-plugin remover tests
         run: bash computer-viewer/tests/test-remove-orgo-computer.sh
 

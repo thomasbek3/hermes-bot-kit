@@ -176,15 +176,34 @@ generate_password() {
   echo
 }
 
+# A stored password file is reused only when it is a plain file (not a
+# link) owned by this user, readable by nobody else, and holds one line of
+# 1-8 letters or digits. Anything else is replaced with a new password.
+vnc_password_file_ok() {
+  local f="$1" mode owner
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  owner="$(stat -c '%u' "$f" 2>/dev/null || stat -f '%u' "$f" 2>/dev/null || echo x)"
+  [ "$owner" = "$(id -u)" ] || return 1
+  mode="$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null || echo 777)"
+  case "$mode" in 600|400) ;; *) return 1 ;; esac
+  [ "$(wc -l < "$f" | tr -d ' ')" -le 1 ] || return 1
+  grep -Eqx '[A-Za-z0-9]{1,8}' "$f"
+}
+
 ensure_vnc_password() {
   local pw=""
-  if [ -f "${VNC_PWD_TEXT}" ]; then
+  if vnc_password_file_ok "${VNC_PWD_TEXT}"; then
     pw="$(tr -d '\n' < "${VNC_PWD_TEXT}")"
     echo "==> Reusing VNC password stored in ${VNC_PWD_TEXT}" >&2
   else
+    if [ -e "${VNC_PWD_TEXT}" ] || [ -L "${VNC_PWD_TEXT}" ]; then
+      echo "==> ${VNC_PWD_TEXT} is not a private 1-8 character password file; replacing it" >&2
+      rm -f "${VNC_PWD_TEXT}"
+    fi
     pw="$(generate_password)"
-    printf '%s\n' "$pw" > "${VNC_PWD_TEXT}"
+    ( umask 077; printf '%s\n' "$pw" > "${VNC_PWD_TEXT}" )
     chmod 600 "${VNC_PWD_TEXT}"
+    vnc_password_file_ok "${VNC_PWD_TEXT}" || { echo "Could not write a private password file at ${VNC_PWD_TEXT}" >&2; return 1; }
     echo "==> Generated 8-char VNC password (DES limit) -> ${VNC_PWD_TEXT}" >&2
   fi
   printf '%s' "$pw"
@@ -357,7 +376,9 @@ except Exception:
     echo "  ${pw}"
     echo "Stored at ${VNC_PWD_TEXT} (mode 600)."
   else
-    echo "Use the VNC password stored at ${VNC_PWD_TEXT}."
+    echo "VNC password: stored at ${VNC_PWD_TEXT} (mode 600, not printed here)."
+    echo "  Show it on this machine with:  cat ${VNC_PWD_TEXT}"
+    echo "  and paste it into the plugin's Password field."
   fi
   echo
   echo "LAN / Tailscale only. Do not port-forward ${VNC_PORT} or ${LISTEN_PORT}."
@@ -381,7 +402,7 @@ setup_x11() {
     exit 1
   fi
 
-  local ws_bin x11vnc_bin pw display
+  local ws_bin x11vnc_bin display
   ws_bin="$(ensure_websockify)"
   x11vnc_bin="$(command -v x11vnc)"
   # The password reaches x11vnc only through its 0600 file (-passwdfile),
@@ -419,7 +440,8 @@ EOF
     echo "      systemctl --user restart computer-viewer-x11vnc.service"
   fi
 
-  print_paste "$pw"
+  # The password stays in its file; print_paste "" points the user there.
+  print_paste ""
 }
 
 setup_wayvnc() {
