@@ -8,7 +8,7 @@
   "scripts": {
     "build": "node build.mjs",
     "check": "node build.mjs --check",
-    "test": "node --test test/*.test.mjs"
+    "test": "node test/run-tests.mjs"
   },
   "devDependencies": {
     "esbuild": "0.25.12",

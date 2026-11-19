@@ -12,13 +12,15 @@
 
 import { existsSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const ROOT = join(homedir(), '.hermes/hermes-agent')
+// Hermes's own markdown renderer, only from a checkout named on purpose
+// (never the real ~/.hermes): HERMES_TEST_CHECKOUT=/path/to/hermes-agent.
+const ROOT = process.env.HERMES_TEST_CHECKOUT || ''
 
 function streamdownEntry() {
+  if (!ROOT) return null
   const store = join(ROOT, 'node_modules/.pnpm')
   if (!existsSync(store)) return null
   const dir = readdirSync(store).find(name => name.startsWith('streamdown@'))

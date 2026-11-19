@@ -21,18 +21,21 @@
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
-const HERMES_ROOT = join(homedir(), '.hermes/hermes-agent')
+// A Hermes checkout to borrow React from, only when asked for (never the
+// real ~/.hermes): HERMES_TEST_CHECKOUT=/path/to/hermes-agent.
+const HERMES_ROOT = process.env.HERMES_TEST_CHECKOUT || ''
 
 /** require() rooted where React lives: Hermes's checkout first. */
 export function reactRequire() {
-  const hermes = join(HERMES_ROOT, 'node_modules/react/package.json')
-  const base = existsSync(hermes) ? join(HERMES_ROOT, 'package.json') : join(HERE, '../package.json')
-  return { require: createRequire(base), from: existsSync(hermes) ? 'hermes' : 'local' }
+  const hermes = HERMES_ROOT ? join(HERMES_ROOT, 'node_modules/react/package.json') : ''
+  const found = Boolean(hermes) && existsSync(hermes)
+  const base = found ? join(HERMES_ROOT, 'package.json') : join(HERE, '../package.json')
+  return { require: createRequire(base), from: found ? 'hermes' : 'local' }
 }
 
 /** rolldown's __toESM(mod, 1): getters for every own key, plus default. */

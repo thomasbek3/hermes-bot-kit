@@ -19,6 +19,22 @@ const SHORTCUT = /(⌘\s*⇧\s*P|cmd\s*\+\s*shift\s*\+\s*p|ctrl\s*\+\s*shift\s*\
 const NEGATION = /not a Hermes shortcut|no ⌘⇧P|does nothing|isn't a Hermes shortcut/i
 const OLD_SWITCH = /Settings\s*(→|->)\s*Plugins(?!\s*(→|->))/
 
+/** Matches of `re` that exist only when line breaks are joined (a match on a
+ *  single line is reported per line above). `except` skips negated mentions. */
+export function wrappedOnly(text, re, except) {
+  const g = new RegExp(re.source, re.flags.replace('g', '') + 'g')
+  const count = s => [...s.matchAll(g)].filter(m => !except || !except.test(s.slice(Math.max(0, m.index - 80), m.index + 120))).length
+  const perLine = text.split('\n').reduce((n, line) => n + count(line), 0)
+  return count(text.replace(/[ \t]*\n[ \t]*/g, ' ')) - perLine
+}
+
+test('a wrapped old instruction is caught', () => {
+  assert.equal(wrappedOnly('appears under Settings →\nPlugins.', OLD_SWITCH), 1)
+  assert.equal(wrappedOnly('press ⌘⇧P\nor not', SHORTCUT, NEGATION), 0)
+  assert.equal(wrappedOnly('press Cmd+Shift+\nP to reload', SHORTCUT, NEGATION), 1)
+  assert.equal(wrappedOnly('Settings → Plugins → Email\ndrafts', OLD_SWITCH), 0)
+})
+
 test('no tracked text points at the old palette shortcut or switch location', () => {
   const hits = []
   for (const rel of files) {
@@ -28,6 +44,9 @@ test('no tracked text points at the old palette shortcut or switch location', ()
       if (SHORTCUT.test(line) && !NEGATION.test(line)) hits.push(`${rel}:${i + 1}: shortcut`)
       if (OLD_SWITCH.test(line)) hits.push(`${rel}:${i + 1}: Settings -> Plugins`)
     })
+    // Also across a line break ("Settings →\nPlugins"), as wrapped prose has it.
+    if (wrappedOnly(text, OLD_SWITCH) > 0) hits.push(`${rel}: Settings -> Plugins (split across lines)`)
+    if (wrappedOnly(text, SHORTCUT, NEGATION) > 0) hits.push(`${rel}: shortcut (split across lines)`)
   }
   assert.deepEqual(hits, [])
 })
