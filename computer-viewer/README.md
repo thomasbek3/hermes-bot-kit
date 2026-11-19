@@ -74,7 +74,8 @@ viewed through the pane's noVNC connection.</em></p>
 
 ## Compatibility
 
-- **Requires Hermes Desktop ≥ 0.20.5 (2026.8.19).** The 2026-08 stock releases
+- **Requires Hermes Desktop ≥ 0.23.0** (verified on stable v0.23.0 and v0.23.2;
+  [docs/COMPATIBILITY.md](../docs/COMPATIBILITY.md)). The 2026-08 stock releases
   reworked the pane shell: `placement: 'right'` now means the collapsible ⌘J
   sidebar (hidden by default), and `host.paneVisibility` became read-only.
   This plugin docks with `placement: 'main'` + an enforced dock ON TOP of the
@@ -501,11 +502,12 @@ Then:
    edge of the workspace (like Bot Mode's Cronjobs tile).
    If it still does not appear, run **Reload desktop
    plugins**.
-2. Enable it in **Settings → Plugins**. The inventory name is **Computer**.
+2. It is on by default. If it was switched off, switch it on in
+   **Capabilities → Plugins** (the inventory name is **Computer**).
 3. A **Computer** pane docks on the right (320px). The status bar shows a
    Computer chip on the right.
 
-Disable the plugin from Settings → Plugins to tear down the pane, status-bar
+Switch the plugin off in Capabilities → Plugins to tear down the pane, status-bar
 item, palette commands, keybind, and any live RFB / iframe session.
 
 ## First-run setup

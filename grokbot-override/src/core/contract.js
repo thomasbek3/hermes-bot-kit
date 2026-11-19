@@ -177,6 +177,6 @@ export function contractNotice(result) {
   return {
     kind: 'info',
     title: 'Grokbot Override: Hermes changed',
-    message: `Some Hermes internals the override relies on were not found (${list}). It keeps working where it can; run "Grokbot Override: self-check" for details.`
+    message: `Some Hermes internals the override relies on were not found (${list}). It keeps working where it can; run "Grokbot Override: self-check" from the command palette (⌘K / Ctrl+K) for details.`
   }
 }

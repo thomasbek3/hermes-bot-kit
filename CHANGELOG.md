@@ -23,6 +23,27 @@ is new in this one.
   `docs/SLACK.md`: Socket Mode or one-click Add to Slack, with the steps only
   the human can do marked, where tokens live, who can talk to the bot, the 👀
   acknowledgement and the home channel.
+- **First run: works on stable Hermes, and says why when it doesn't
+  (2026-11-19).** The kit's instructions said **⌘⇧P → Reload plugins**, which
+  is not a Hermes shortcut: the palette is **⌘K** / **Ctrl+K** (or ⌘P), and the
+  command is **Reload desktop plugins**. Fixed in the installer's closing
+  lines, README, AGENTS.md and the plugin's own notices. Plugin switches are
+  under **Capabilities → Plugins**. Every Hermes surface the two desktop
+  plugins use (SDK names, host and context members, 91 gateway methods and
+  events, REST routes, the desktop bridge, DOM anchors) was checked against
+  stable **v0.23.2** and **v0.23.0**: all present, with the same params, so no
+  fallback was needed. The minimum is now stated honestly as **0.23.0** (it
+  said 0.20.5; v0.22.7 and v0.21.7 fail the check).
+  `scripts/check-hermes-compat.py` now covers Grokbot Override too, and CI
+  checks stable v0.23.2 and main. New **doctor** (`install.sh --doctor`, or
+  `scripts/doctor.sh` from a clone): read-only, one OK/FIX/INFO line per check
+  (Hermes Desktop version, the Hermes home Desktop uses, folder names and
+  places, profile-scoped copies, checksums against the installed release,
+  retired plugins, WSL and second-install traps), each FIX with its command,
+  ending in a paste-able summary with home paths, usernames and token-shaped
+  strings redacted. README gains **Getting started** (what you should see at
+  each step) and **Troubleshooting**; GitHub issue forms ask for the OS, the
+  Hermes version and the doctor summary.
 - **Security audit (2026-11-19), a partial pass.** A source-only audit with
   Cloudflare's security-audit skill (full-audit mode, stopped early after five
   waves). Two areas were **not reviewed**: the bot's terminal and file tools

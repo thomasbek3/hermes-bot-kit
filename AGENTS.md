@@ -24,9 +24,10 @@ It is written to be run unattended on **macOS and Linux**.
 ( set -e; for c in bash curl grep awk sed mktemp; do command -v "$c" >/dev/null || { echo "missing: $c" >&2; exit 1; }; done; command -v shasum >/dev/null || command -v sha256sum >/dev/null || { echo "missing: shasum or sha256sum" >&2; exit 1; }; test -d "${HERMES_HOME:-$HOME/.hermes}" || { echo "No Hermes home at ${HERMES_HOME:-$HOME/.hermes}: install and open Hermes Desktop first (https://github.com/NousResearch/hermes-agent)" >&2; exit 1; }; echo "prerequisites OK" )
 ```
 
-- **Hermes Desktop 0.20.5 or newer is required.** On older builds the Computer
-  pane has zero size. Ask the person to check *About* in Hermes Desktop if you
-  can't.
+- **Hermes Desktop 0.23.0 or newer is required** (verified on stable v0.23.0
+  and v0.23.2; see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)). Ask the
+  person to check *About* in Hermes Desktop if you can't; the doctor
+  (`bash install.sh --doctor`) prints it too.
 - `node` is optional. When it is present the installer also syntax-checks the
   plugins.
 - Do **not** point `HERMES_HOME` at `~/.hermes/profiles/<name>`. Desktop plugins
@@ -83,17 +84,17 @@ because they are the plugin ids.
 Hermes Desktop loads disk plugins at start and on reload. Ask the person to do
 one of these:
 
-- Hermes Desktop: **⌘⇧P** (macOS) or **Ctrl+Shift+P** → **Reload plugins**, or
+- Hermes Desktop: **⌘K** (macOS) or **Ctrl+K** (Linux) → **Reload desktop plugins**, or
 - quit and reopen Hermes Desktop.
 
 Then tell them what they will see:
 
 - **Grokbot Override** is on. The Bots tab is now the chat-app screen.
-  **⌘⇧P → Grokbot Override: toggle** switches back to stock Bot Mode and on
+  **⌘K → Grokbot Override: toggle** switches back to stock Bot Mode and on
   again. Someone who switched it off before keeps it off. It is a preview: if
   Bot Mode misbehaves, switch it off rather than editing files.
-- **Computer viewer**: enable **Computer** once in **Settings → Plugins**, then
-  add a computer in the pane. Setting up the machine to view is interactive; see
+- **Computer viewer**: on by default (if it was switched off: **Capabilities →
+  Plugins → Computer**); add a computer in the pane. Setting up the machine to view is interactive; see
   [computer-viewer/README.md](computer-viewer/README.md).
 
 ## 5. Optional add-ons
@@ -154,6 +155,13 @@ under `hermes.plugin.computer-viewer.*` and `hermes.plugin.grokbot-override.*`.
 
 ## Troubleshooting
 
+**If it isn't working, run the doctor first:** the install command from step 2
+with `--doctor` after `bash "$f"`, or `bash install.sh --doctor` from a clone.
+It only reads, prints `OK` / `FIX` / `INFO` per check with the exact fix for
+each `FIX`, exits 1 when anything needs fixing, and ends with a
+`--- doctor summary ---` block (home folder as `~`, no tokens) to hand back to
+the person or paste into an issue.
+
 | Symptom | Cause and fix |
 |---|---|
 | `install.sh: sha256 mismatch for …` | A downloaded file is not the released one (proxy, partial download). Nothing was installed. Re-run; if it repeats, report it and do not use `KIT_SKIP_VERIFY`. |
@@ -161,8 +169,8 @@ under `hermes.plugin.computer-viewer.*` and `hermes.plugin.grokbot-override.*`.
 | `… predates Grokbot Override; skipping it` | You pinned an old release with `KIT_REF`. Drop `KIT_REF`. |
 | `MANIFEST.sha256 for … does not list …; it is incomplete` | That release's manifest lacks a file it should have. Nothing was installed. Report it; don't use `KIT_SKIP_VERIFY`. |
 | `Release -- vX is installed, newer than vY; keeping it` | The automatic choice would have gone backwards (a stale API answer or the fallback). Nothing changed. To go back on purpose, set `KIT_REF=vY`. |
-| The Bots tab looks unchanged after reload | The override was switched off earlier: **⌘⇧P → Grokbot Override: toggle**. |
-| The Computer pane is zero-size | Hermes Desktop is older than 0.20.5. Update the app. |
+| The Bots tab looks unchanged after reload | The override was switched off earlier: **⌘K → Grokbot Override: toggle**. |
+| The Computer pane is zero-size, or a feature is missing | Hermes Desktop is older than 0.23.0. Update the app. |
 | A plugin change "doesn't take" | Bot Chats are served by long-lived per-profile `hermes --profile <name> serve` processes that survive app restarts. Check which process it is and restart only that one gracefully. |
 | `Retired plugins still installed: …` | Old kit folders; harmless. `KIT_REMOVE_RETIRED=1` moves exactly those (marker-checked) to `desktop-plugins-retired-<date>/`. |
 | `Retired agent plugin still installed: …` (the retired `orgo-computer`) | Run the printed `remove-orgo-computer.sh` command: a dry run first, then `--yes`. Nothing is deleted. |

@@ -93,6 +93,10 @@ jobs:
       - name: Installer tests
         run: bash tests/test-install.sh
 
+      # Throwaway Hermes homes and a fake app; never the runner's own.
+      - name: Doctor tests
+        run: bash tests/test-doctor.sh
+
       # The runbook blocks run under bash and zsh (macOS's default shell).
       - name: AGENTS.md runbook commands (offline, fake curl; bash and zsh)
         run: |

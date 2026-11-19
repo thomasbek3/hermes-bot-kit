@@ -35,3 +35,4 @@ remote-cua/dashboard/manifest.json
 remote-cua/dashboard/plugin_api.py
 remote-cua/dashboard/dist/index.js
 remote-cua/install.sh
+scripts/doctor.sh

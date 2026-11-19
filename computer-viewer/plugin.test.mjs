@@ -950,7 +950,10 @@ test('no Orgo strings are left in the kit (history and the remover excepted)', a
     'computer-viewer/tests/test-remove-orgo-computer.sh',
     'computer-viewer/plugin.test.mjs',
     'install.sh',
-    'tests/test-install.sh'
+    'tests/test-install.sh',
+    // The doctor reports a retired orgo-computer still installed, as install.sh does.
+    'scripts/doctor.sh',
+    'tests/test-doctor.sh'
   ])
   const hits = []
   for (const rel of files) {

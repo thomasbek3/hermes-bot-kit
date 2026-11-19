@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/thomasbek3/hermes-bot-kit#troubleshooting
+    about: The common fixes, and the doctor command that tells you what is wrong.

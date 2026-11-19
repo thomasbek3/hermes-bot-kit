@@ -116,7 +116,7 @@ export default {
   defaultEnabled: true,
   description:
     'A chat-app Bot Mode screen (roster, Bot Chat, profile panel) on the same chats and gateway as Hermes Bot Mode. ' +
-    'Palette: "Grokbot Override: toggle" switches back to stock Bot Mode instantly.',
+    'Command palette (⌘K / Ctrl+K): "Grokbot Override: toggle" switches back to stock Bot Mode instantly.',
   register(ctx: any) {
     // Each pane renders inside the override's own boundary: an error stays in
     // the pane (inline, with "Turn override off"), never Hermes's root.

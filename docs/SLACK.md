@@ -126,7 +126,7 @@ Both ways use the Grokbot Override's **Slack** card in the bot's profile panel
 
 ## A. Socket Mode
 
-1. **Agent:** check that Hermes Desktop is at least 0.20.5 and the kit is
+1. **Agent:** check that Hermes Desktop is at least 0.23.0 and the kit is
    installed (see [AGENTS.md](../AGENTS.md)). Tell the person to open the bot in
    the Bots tab, open its profile panel and click **Add to Slack** on the Slack
    card. Without slack-connect this opens the four-step Socket Mode window.

@@ -49,6 +49,8 @@ Install the Hermes Bot Kit desktop plugins.
 
 or from a clone:  bash install.sh
 
+Not working?  bash install.sh --doctor   (read-only checks; changes nothing)
+
 Installs the newest GitHub release (falls back to v2026.11.16.3 when the
 GitHub API cannot be reached) and checks every file against that release's
 MANIFEST.sha256 before copying anything.
@@ -77,6 +79,55 @@ EOF
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   usage
   exit 0
+fi
+
+# --doctor: read-only checks (scripts/doctor.sh), changes nothing. From a clone
+# it runs the checkout's copy. Fetched alone, it downloads doctor.sh from the
+# release this script came with (or KIT_REF) and runs it only if it matches
+# that release's MANIFEST.sha256.
+if [ "${1:-}" = "--doctor" ]; then
+  shift
+  doc_dir=""
+  if [ -n "${KIT_SOURCE_DIR:-}" ]; then
+    doc_dir=$(CDPATH= cd -- "${KIT_SOURCE_DIR}" && pwd)
+  elif [ -n "${BASH_SOURCE:-}" ] && [ -f "${BASH_SOURCE[0]:-}" ]; then
+    doc_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+  fi
+  if [ -n "${doc_dir}" ] && [ -f "${doc_dir}/scripts/doctor.sh" ]; then
+    exec bash "${doc_dir}/scripts/doctor.sh" "$@"
+  fi
+  doc_ref="${KIT_REF_FROM_USER:-${KIT_FALLBACK_REF}}"
+  [ "${doc_ref}" = "latest" ] && doc_ref="${KIT_FALLBACK_REF}"
+  doc_tmp=$(mktemp -d)
+  trap 'rm -rf "${doc_tmp}"' EXIT
+  doc_base="https://raw.githubusercontent.com/${KIT_REPO}/${doc_ref}"
+  curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 2 --max-filesize 1048576 \
+    "${doc_base}/MANIFEST.sha256" -o "${doc_tmp}/MANIFEST.sha256" || {
+    echo "install.sh: could not download MANIFEST.sha256 for ${doc_ref}" >&2
+    exit 1
+  }
+  doc_want=$(awk '$2 == "scripts/doctor.sh" { print $1; exit }' "${doc_tmp}/MANIFEST.sha256")
+  if [ -z "${doc_want}" ]; then
+    echo "install.sh: release ${doc_ref} has no doctor; run it from a newer release: KIT_REF=<tag> bash install.sh --doctor" >&2
+    exit 1
+  fi
+  curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 2 --max-filesize 1048576 \
+    "${doc_base}/scripts/doctor.sh" -o "${doc_tmp}/doctor.sh" || {
+    echo "install.sh: could not download scripts/doctor.sh for ${doc_ref}" >&2
+    exit 1
+  }
+  if command -v shasum >/dev/null 2>&1; then
+    doc_got=$(shasum -a 256 -- "${doc_tmp}/doctor.sh" | awk '{print $1}')
+  else
+    doc_got=$(sha256sum -- "${doc_tmp}/doctor.sh" | awk '{print $1}')
+  fi
+  if [ "${doc_got}" != "${doc_want}" ]; then
+    echo "install.sh: sha256 mismatch for scripts/doctor.sh (${doc_ref}); not running it" >&2
+    exit 1
+  fi
+  doc_rc=0
+  DOCTOR_KIT_REF="${doc_ref}" bash "${doc_tmp}/doctor.sh" "$@" || doc_rc=$?
+  exit "${doc_rc}"
 fi
 
 # vYYYY.MM.DD or vYYYY.MM.DD.N: the only shape a release tag has.
@@ -638,13 +689,14 @@ retired_report
 retired_agent_report
 
 echo
-echo "Finish: in Hermes Desktop press Cmd+Shift+P -> 'Reload plugins' (or restart the app)."
+echo "Finish: in Hermes Desktop press Cmd+K (Ctrl+K on Linux) -> 'Reload desktop plugins', or quit and reopen the app."
+echo "Not working? Run the same install command with --doctor after it (see the README's Troubleshooting): it says what to fix."
 if [ "${GROKBOT_INSTALLED:-0}" = "1" ]; then
-  echo "Grokbot Override is on: Cmd+Shift+P -> 'Grokbot Override: toggle' switches back to stock Bot Mode (and on again)."
-  echo "Sections: Bots roster + -> 'New section'. Work rows: Cmd+Shift+P -> 'Grokbot Override: show work rows'."
+  echo "Grokbot Override is on: Cmd+K -> 'Grokbot Override: toggle' switches back to stock Bot Mode (and on again)."
+  echo "Sections: Bots roster + -> 'New section'. Work rows: Cmd+K -> 'Grokbot Override: show work rows'."
 fi
 if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
-  echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."
+  echo "Computer pane: on by default (Capabilities -> Plugins -> Computer if you switched it off); add a computer in the pane."
 fi
 if [ "${CARDS_INSTALLED:-0}" = "1" ]; then
   echo "Cards skill: new chats load it; a chat started before keeps its old mode until its session restarts."

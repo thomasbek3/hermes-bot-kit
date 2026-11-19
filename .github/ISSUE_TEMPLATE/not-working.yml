@@ -1,0 +1,70 @@
+name: Not working
+description: A kit plugin doesn't show up or doesn't work. Run the doctor first and paste its summary.
+title: "Not working: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please run the doctor first. It only reads, changes nothing, and often names the fix:
+
+        ```bash
+        ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/master/install.sh -o "$f"; test -s "$f"; bash "$f" --doctor )
+        ```
+
+        From a clone: `bash install.sh --doctor`. If it prints `FIX` lines, try those first.
+        Its summary shows `~` for your home folder and `<user>` for your username, and contains no tokens.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Windows with WSL
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: hermes-version
+    attributes:
+      label: Hermes Desktop version
+      description: Settings → About in Hermes Desktop.
+      placeholder: "0.23.2"
+    validations:
+      required: true
+  - type: input
+    id: kit-release
+    attributes:
+      label: Kit release
+      description: The `kit release:` line of the doctor summary, or the `Release ->` line the installer printed.
+      placeholder: "v2026.11.19"
+    validations:
+      required: true
+  - type: textarea
+    id: doctor-summary
+    attributes:
+      label: Doctor summary
+      description: Everything between the two `--- doctor summary ---` lines.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What you did and what you saw
+      description: The steps you took, what you expected, and what happened instead (an error message word for word helps most).
+      placeholder: |
+        1. Ran the install one-liner
+        2. Pressed ⌘K → Reload desktop plugins
+        3. Expected the chat-app Bots tab; saw ...
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (optional)
+      description: Drag images here. Crop out anything private (names, messages, tokens).
+    validations:
+      required: false

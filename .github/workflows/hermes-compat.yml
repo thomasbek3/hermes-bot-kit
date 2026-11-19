@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ref: [v0.23.0, main]
+        ref: [v0.23.2, main]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -27,8 +27,13 @@ jobs:
           repository: NousResearch/hermes-agent
           ref: ${{ matrix.ref }}
           path: upstream
+          # The paths check-hermes-compat.py reads (its docstring lists them).
           sparse-checkout: |
             apps/desktop/src
+            apps/desktop/electron/preload.ts
+            tui_gateway
+            gateway
+            hermes_cli/web_routers
             /hermes_cli/plugins*.py
             tools/bot_mode_probe.py
           sparse-checkout-cone-mode: false

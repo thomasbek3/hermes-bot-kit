@@ -6,7 +6,7 @@
 
 A chat-app Bot Mode screen + a live window into your bots' computers.
 
-[![Hermes Desktop](https://img.shields.io/badge/Hermes_Desktop-%E2%89%A5%200.20.5-8b5cf6?style=flat-square)](https://github.com/NousResearch/hermes-agent)
+[![Hermes Desktop](https://img.shields.io/badge/Hermes_Desktop-%E2%89%A5%200.23.0%20%C2%B7%20verified%200.23.2-8b5cf6?style=flat-square)](docs/COMPATIBILITY.md)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-444?style=flat-square)](#install)
 [![GitHub stars](https://img.shields.io/github/stars/thomasbek3/hermes-bot-kit?style=flat-square&color=e3b341)](https://github.com/thomasbek3/hermes-bot-kit/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/thomasbek3/hermes-bot-kit?style=flat-square)](https://github.com/thomasbek3/hermes-bot-kit/commits/master)
@@ -25,7 +25,79 @@ A chat-app Bot Mode screen + a live window into your bots' computers.
 > **Quick start**
 > 1. Tell your AI agent: **"Install https://github.com/thomasbek3/hermes-bot-kit (follow its AGENTS.md)."**
 > 2. Or yourself: `( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f"; test -s "$f"; bash "$f" )`
-> 3. Then **⌘⇧P → Reload plugins** in Hermes Desktop: the Bots tab becomes the chat-app screen, and **Computer** appears under Settings → Plugins.
+> 3. Then **⌘K → Reload desktop plugins** in Hermes Desktop (Ctrl+K on Windows and Linux): the Bots tab becomes the chat-app screen.
+> 4. Not working? `bash install.sh --doctor` (or the one-liner with `--doctor` after `bash "$f"`) tells you why. See [Troubleshooting](#troubleshooting).
+
+## Getting started
+
+1. **Install.** Run the one-liner above (or `bash install.sh` in a clone).
+   **You should see** the release on the first line and, near the end:
+   ```
+   Release          -> v2026.11.16.3 (newest GitHub release)
+   ...
+   Computer viewer  -> ~/.hermes/desktop-plugins/computer-viewer/plugin.js (+ helper scripts)
+   Grokbot Override -> ~/.hermes/desktop-plugins/grokbot-override/plugin.js (switched on unless you turned it off before)
+   ```
+   (The real path is your Hermes home; the release can be newer.) An error
+   line means nothing was installed: see [Troubleshooting](#troubleshooting).
+2. **Reload plugins.** In Hermes Desktop open the command palette with
+   **⌘K** (macOS) or **Ctrl+K** (Windows, Linux) (**⌘P** / **Ctrl+P** work
+   too), type `reload`, and pick **Reload desktop plugins**. Or quit and
+   reopen Hermes Desktop. **You should see** no message; the screen changes
+   in the next step. (Hermes has no ⌘⇧P shortcut, so that one does nothing.)
+3. **Open the Bots tab.** It is the **BOTS** tab next to **SESSIONS** at the
+   top of the left sidebar. **You should see** the chat-app roster instead of
+   the stock Bot Mode list.
+4. **What it looks like.** Your bots on the left with pinned bots on top, the
+   open chat in the middle in the bot's colour, and the bot's profile on the
+   right, in light or dark with Hermes's theme:
+
+   <p align="center">
+     <img src="grokbot-override/screenshots/light.png" alt="Grokbot Override in light mode: pinned bots, the roster, the open chat and the profile panel" width="420">
+     <img src="grokbot-override/screenshots/dark.png" alt="Grokbot Override in dark mode: the same screen" width="420">
+   </p>
+
+   The **Computer** pane is on by default; its switch, and Grokbot
+   Override's, is in **Capabilities → Plugins** (Capabilities is in the
+   sidebar, or **⌘K → Capabilities**).
+5. **Switch back any time.** **⌘K → Grokbot Override: toggle** brings back
+   stock Bot Mode instantly, and the same command turns the override on
+   again. Your choice is kept across updates.
+
+## Troubleshooting
+
+**Run the doctor first.** It only reads, changes nothing, and prints one
+line per check (`OK`, `FIX` or `INFO`), each `FIX` with the exact command
+that fixes it:
+
+```bash
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f"; test -s "$f"; bash "$f" --doctor )
+```
+
+From a clone: `bash install.sh --doctor` (or `bash scripts/doctor.sh`). It
+ends with a summary between two `--- doctor summary ---` lines; paste that
+into a [not-working issue](https://github.com/thomasbek3/hermes-bot-kit/issues/new/choose).
+It shows `~` for your home folder and `<user>` for your username, and holds
+no tokens.
+
+| What you see | Why, and the fix |
+|---|---|
+| Nothing changed after installing | Plugins were not reloaded: **⌘K → Reload desktop plugins** (Ctrl+K on Windows and Linux) or restart the app. ⌘⇧P is not a Hermes shortcut. |
+| The Bots tab still looks stock | The override is switched off: **⌘K → Grokbot Override: toggle**. |
+| Installed, but Hermes doesn't load it | It went into another Hermes home. Hermes Desktop reads `~/.hermes/desktop-plugins` (or `HERMES_HOME`). A `HERMES_HOME` set only in your shell profile does not reach an app opened from the Dock. The doctor names the home Desktop uses. |
+| You copied the folder by hand or unzipped the repo | The folders must be exactly `desktop-plugins/grokbot-override` and `desktop-plugins/computer-viewer`, one level down. Hermes doesn't load `desktop-plugins/hermes-bot-kit-main/grokbot-override`. The doctor prints the `mv` command. |
+| Plugins under `profiles/<name>/desktop-plugins` | Desktop plugins belong to the app, not a profile. Hermes moves them up by itself when it next scans its plugins, unless a copy is already there; the doctor prints the move. |
+| `duplicate id "grokbot-override"` in Capabilities → Plugins | Two copies of one plugin. Move the extra one out (the doctor names it). |
+| `plugin.js exceeds this shell's 512 KiB read limit` | Hermes Desktop is too old for the override's file size. Update Hermes Desktop. |
+| `install.sh: sha256 mismatch for …` | A download was not the released file (proxy, cut-off download). Nothing was installed. Run it again. |
+| Bubble Mode, Task Dock or Bot Sections still installed | Retired in 2026-11. Run the installer with `KIT_REMOVE_RETIRED=1` in front of `bash` (it moves them aside; nothing is deleted). |
+| Hermes Desktop older than 0.23.0 | Not supported (see [Requirements](#requirements)): update Hermes Desktop. The doctor prints your version. |
+| Hermes Desktop on Windows | The installer is a bash script for macOS and Linux. Desktop on Windows reads `%LOCALAPPDATA%\hermes\desktop-plugins` (an older `~/.hermes` only when that doesn't exist): copy the `grokbot-override` and `computer-viewer` folders there from the release's source zip (folder names exactly as shown, `plugin.js` one level down), then reload. |
+| Hermes Desktop for Windows with the installer run in WSL | Different homes: WSL's `~/.hermes` is not Desktop's `%LOCALAPPDATA%\hermes`. Copy the two folders into that one's `desktop-plugins`. |
+
+Still stuck? [Open a not-working issue](https://github.com/thomasbek3/hermes-bot-kit/issues/new/choose)
+with the doctor summary. Agents installing the kit: [AGENTS.md](AGENTS.md)
+has more.
 
 ---
 
@@ -37,7 +109,7 @@ Desktop plugins plus an optional agent plugin, one install:
 
 | Plugin | What it does |
 |---|---|
-| 🤖 **[Grokbot Override](grokbot-override/)** *(preview, the kit's main plugin, installed switched on)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots and **your own named sections**, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘⇧P → Grokbot Override: toggle** switches back to stock instantly (and on again). See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
+| 🤖 **[Grokbot Override](grokbot-override/)** *(preview, the kit's main plugin, installed switched on)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots and **your own named sections**, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘K → Grokbot Override: toggle** switches back to stock instantly (and on again). See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
 | 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — VPS and Docker boxes, spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Opens the moment your bot calls Hermes's own `computer_use` or browser tools** on its bound machine, so you watch it work, and **Take over / Hand back** for Macs the bot drives over SSH. Optional H.264 HD mode and per-bot computer bindings. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 | ✉️ **[email-drafts](email-drafts/)** | An **agent plugin**: bots write email as **drafts** that appear as Grok-Bot-style cards in the override's chat (editable To, Cc and body, your signature, attachments). Nothing leaves until you click **Send** (through Composio by default, using the `composio` CLI logged in on the bot's machine; or Gmail through Hermes's own OAuth sign-in, or SMTP), unless you allowed every recipient. Per-bot rules: allow recipient, needs approval, drafts off. Per-profile install. |
@@ -63,14 +135,14 @@ a failed or empty download stops with an error instead of doing nothing.)
 
 It installs the newest release (it asks GitHub, and falls back to the release
 it came with) and checks every file against that release's `MANIFEST.sha256`
-before copying anything. Then in Hermes Desktop: **⌘⇧P → Reload plugins** (or
-restart the app).
+before copying anything. Then in Hermes Desktop: **⌘K → Reload desktop
+plugins** (Ctrl+K on Windows and Linux), or restart the app.
 
 - Grokbot Override is installed **switched on**: its Bots tab replaces the
-  stock one. **⌘⇧P → Grokbot Override: toggle** switches back to stock Bot
+  stock one. **⌘K → Grokbot Override: toggle** switches back to stock Bot
   Mode (and on again); a choice you made before is kept on upgrade.
-- The Computer pane: enable **Computer** in **Settings → Plugins**, then add a
-  computer — see the [computer-viewer README](computer-viewer/README.md) for
+- The Computer pane is on by default (its switch is in **Capabilities →
+  Plugins**); add a computer in it — see the [computer-viewer README](computer-viewer/README.md) for
   connecting cloud boxes, spare Macs/PCs, HD mode, and giving bots hands.
 
 The bots' **agent-cards skill** (approval, task and email-draft cards in the
@@ -144,7 +216,7 @@ What you get:
   header to rename, move or delete it, click it to collapse; right-click a
   bot → **Move to section**.
 - **Hidden work rows.** Thinking and tool rows stay out of the chat by default.
-  **⌘⇧P → Grokbot Override: show work rows** brings them back.
+  **⌘K → Grokbot Override: show work rows** brings them back.
 
 <p align="center">
   <img src="grokbot-override/screenshots/slack-strip.png" alt="Add to Slack in three steps: Connect, Connected to Acme Team Slack, and the Slack card reading Connected" width="860">
@@ -156,9 +228,12 @@ built on, not live-qualified on every Hermes version (see the
 
 ## Requirements
 
-- **Hermes Desktop ≥ 0.20.5**. Source contracts re-checked against stable
-  **v0.23.0** (`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`, 2026-11-07).
-  See [compatibility and verification limits](docs/COMPATIBILITY.md).
+- **Hermes Desktop ≥ 0.23.0.** Source contracts checked on 2026-11-19 against
+  stable **v0.23.2** (`ae2a81cc`, 2026-11-16), **v0.23.0** (`2bd378ed`) and
+  upstream main; v0.23.1 was not checked on its own. Older releases are not
+  supported: v0.22.7 has no group-chat Continue, and v0.21.x lacks several
+  APIs the plugins use. See
+  [compatibility and verification limits](docs/COMPATIBILITY.md).
 - The desktop plugins are single-file disk plugins: no build step, no core
   patches, hot-reloadable, and they fail safe (if a Hermes update renames
   internal hooks, they render stock instead of breaking).
@@ -166,7 +241,8 @@ built on, not live-qualified on every Hermes version (see the
 ## Repository layout
 
 ```
-install.sh          one-command installer for the desktop plugins
+install.sh          one-command installer for the desktop plugins (--doctor: checks)
+scripts/doctor.sh   read-only checks for "it isn't working", with a paste-able summary
 grokbot-override/   Grokbot Override: src/, the built plugin.js, tests, docs
 slack-check/        optional backend plugin: the Slack card's Test connection
 slack-connect/      optional Add to Slack add-on (with slack-relay/, slack-http/)
