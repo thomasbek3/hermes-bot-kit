@@ -293,6 +293,16 @@ function Test-WritableByNonAdmins([string]$Path) {
     return $false
 }
 
+function Test-OwnedByUsOrTrusted([string]$Path) {
+    # True when $Path is owned by Administrators, SYSTEM, TrustedInstaller or
+    # the account running this installer (not by some other local account
+    # that could have created it first under C:\ProgramData).
+    $owner = (Get-Acl -LiteralPath $Path).GetOwner([System.Security.Principal.SecurityIdentifier])
+    if (-not $owner) { return $false }
+    if ($TrustedOwnerSids -contains $owner.Value) { return $true }
+    return ($owner.Value -eq [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+}
+
 function Protect-HiperfState {
     # The state folder: Administrators and SYSTEM, the install user may only
     # list it. The hiperf tree (agent + venv): the install user reads and runs
@@ -337,9 +347,21 @@ if (-not (Test-PythonWorks $python)) {
 }
 Write-Step "Using Python: $python"
 
+# Content another account put here before the first install (a standard user
+# may create folders in C:\ProgramData) is never trusted: re-owning it below
+# would keep the files. Checked before the tree is re-owned.
+$planted = $false
+foreach ($p in @($StateDir, $HiperfDir, $VenvDir, $TokenFile)) {
+    if ((Test-Path -LiteralPath $p) -and ((Test-IsLink $p) -or -not (Test-OwnedByUsOrTrusted $p))) { $planted = $true }
+}
 New-Item -ItemType Directory -Force -Path $HiperfDir | Out-Null
 # Locked down before the venv, the agent and the token are written into it.
 Protect-HiperfState
+if ($planted) {
+    Write-Warning "$StateDir held files this installer did not create; recreating the venv and the HD token."
+    if (Test-Path -LiteralPath $VenvDir) { Remove-Item -LiteralPath $VenvDir -Recurse -Force }
+    if (Test-Path -LiteralPath $TokenFile) { Remove-Item -LiteralPath $TokenFile -Force }
+}
 $token = Get-OrCreateToken
 
 $venvPython = Join-Path $VenvDir 'Scripts\python.exe'

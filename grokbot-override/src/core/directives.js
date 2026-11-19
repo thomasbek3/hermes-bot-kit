@@ -229,6 +229,8 @@ export const INTENT_THROTTLE_MS = 1000
 /** How recent the user's own step into a frame must be for its intent to go
  *  out without asking (the parent saw its window blur onto that frame). */
 export const PREVIEW_GESTURE_MS = 3000
+/** A click on Send within this long after the waiting text changed is ignored. */
+export const PREVIEW_SWAP_GRACE_MS = 1000
 /** No network from a preview: inline script and style, data:/blob: images,
  *  fonts and media only. Previews must be self-contained pages. */
 export const PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:"

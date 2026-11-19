@@ -42826,6 +42826,12 @@ function extractMedia(text3) {
   });
   return { text: out.replace(/\n{3,}/g, "\n\n").trim(), media };
 }
+function isOpenableImageUrl(url) {
+  return /^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,/i.test(String(url || ""));
+}
+function isDataUrl(url) {
+  return /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+[;,]/i.test(String(url || ""));
+}
 function remoteImageHost(url) {
   try {
     return new URL(String(url)).host;
@@ -43153,6 +43159,7 @@ var PREVIEW_MAX_HEIGHT = 1200;
 var PREVIEW_DEFAULT_HEIGHT = 280;
 var INTENT_THROTTLE_MS = 1e3;
 var PREVIEW_GESTURE_MS = 3e3;
+var PREVIEW_SWAP_GRACE_MS = 1e3;
 var PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:";
 var SIZE_TYPE = "hermes-inline-preview-size";
 var INTENT_TYPE = "hermes-inline-preview-intent";
@@ -47888,6 +47895,17 @@ function providerModels(provider) {
 function usableProviders(options) {
   return (options?.providers || []).filter((p) => p && p.slug);
 }
+function skillIdentity(row) {
+  for (const key of ["identifier", "id", "name"]) {
+    const value = row && typeof row[key] === "string" ? row[key].trim() : "";
+    if (value) return value;
+  }
+  return "";
+}
+function skillSource(row) {
+  const parts = [row?.source, row?.trust || row?.trust_level].map((v) => typeof v === "string" ? v.trim() : "").filter(Boolean);
+  return parts.join(", ");
+}
 
 // src/core/profileOps.js
 var NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -51805,6 +51823,10 @@ function readHistory(bot, sessionId, { limit, offset }) {
 }
 var mediaCache = /* @__PURE__ */ new Map();
 var MEDIA_CACHE_MAX = 60;
+function dataUrlOnly(url, path) {
+  if (!isDataUrl(url)) throw new Error(`Could not read ${path}`);
+  return url;
+}
 function readBotMedia(bot, path) {
   let scope;
   try {
@@ -51822,11 +51844,11 @@ function readBotMedia(bot, path) {
     if (local && typeof desktop?.readFileDataUrl === "function") {
       const result2 = await desktop.readFileDataUrl(filePath(path));
       if (result2 && typeof result2 === "object") throw new Error(result2.message || `Could not read ${path}`);
-      return String(result2 || "");
+      return dataUrlOnly(String(result2 || ""), path);
     }
     if (typeof desktop?.api !== "function") throw new Error("This Hermes build cannot read files");
     const result = await desktop.api(mediaReadRequest(path, scope));
-    return typeof result === "string" ? result : String(result?.dataUrl || "");
+    return dataUrlOnly(typeof result === "string" ? result : String(result?.dataUrl || ""), path);
   })();
   mediaCache.set(key, read);
   read.catch(() => mediaCache.delete(key));
@@ -54095,9 +54117,13 @@ function inReplyText(reply) {
   if (!reply || typeof reply !== "object") return "";
   const subject = String(reply.subject || "").trim();
   const from = String(reply.from || "").trim();
-  if (subject && from) return `“${subject}” from ${from}`;
-  if (subject) return `“${subject}”`;
-  return from ? `from ${from}` : String(reply.message_id || "");
+  const thread = String(reply.thread_id || "").trim();
+  let text3;
+  if (subject && from) text3 = `“${subject}” from ${from}`;
+  else if (subject) text3 = `“${subject}”`;
+  else text3 = from ? `from ${from}` : String(reply.message_id || "");
+  if (!thread) return text3;
+  return text3 ? `${text3} · Gmail thread ${thread}` : `Gmail thread ${thread}`;
 }
 var toMs = (seconds) => Number.isFinite(Number(seconds)) && Number(seconds) > 0 ? Math.round(Number(seconds) * 1e3) : 0;
 function draftState(draft, clock2 = (ms) => new Date(ms).toLocaleTimeString()) {
@@ -55605,6 +55631,9 @@ function PreviewFrame({ html, name, startHeight, scope }) {
   const [height, setHeight] = React7.useState(startHeight);
   const lastIntent = React7.useRef(0);
   const lastUser = React7.useRef(0);
+  const pointerOver = React7.useRef(false);
+  const stepUsed = React7.useRef(false);
+  const changedAt = React7.useRef(0);
   const [pending, setPending] = React7.useState(null);
   const pendingRef = React7.useRef(null);
   const sendFromFrame = React7.useCallback(
@@ -55624,6 +55653,7 @@ function PreviewFrame({ html, name, startHeight, scope }) {
     [token]
   );
   const hold = (next) => {
+    if (next && pendingRef.current) changedAt.current = Date.now();
     pendingRef.current = next;
     setPending(next);
   };
@@ -55631,16 +55661,31 @@ function PreviewFrame({ html, name, startHeight, scope }) {
     const win = globalThis.window;
     if (!win?.addEventListener) return void 0;
     const seen = () => {
-      const el = frame.current;
-      if (el && win.document?.activeElement === el) lastUser.current = Date.now();
+      const el2 = frame.current;
+      if (stepUsed.current) return;
+      if (el2 && pointerOver.current && win.document?.activeElement === el2) lastUser.current = Date.now();
     };
+    const el = frame.current;
+    const enter = () => {
+      pointerOver.current = true;
+    };
+    const leave = () => {
+      pointerOver.current = false;
+    };
+    el?.addEventListener?.("mouseenter", enter);
+    el?.addEventListener?.("mouseleave", leave);
     const onBlur = () => {
+      stepUsed.current = false;
       seen();
       timers().setTimeout(seen, 0);
     };
     win.addEventListener("blur", onBlur);
-    return () => win.removeEventListener("blur", onBlur);
-  }, []);
+    return () => {
+      win.removeEventListener("blur", onBlur);
+      el?.removeEventListener?.("mouseenter", enter);
+      el?.removeEventListener?.("mouseleave", leave);
+    };
+  }, [doc]);
   React7.useLayoutEffect(() => {
     const theme = themeFor(wrap.current, scope.theme);
     setDoc(previewDocument(html, token, previewPrelude(theme.vars, theme.font, theme.scheme)));
@@ -55664,7 +55709,11 @@ function PreviewFrame({ html, name, startHeight, scope }) {
       if (decision.kind === "reject") return reply(decision.ack);
       const now = Date.now();
       lastIntent.current = now;
-      if (previewIntentRoute(now, lastUser.current) === "send") return sendFromFrame(decision.prompt, reply);
+      if (previewIntentRoute(now, lastUser.current) === "send") {
+        lastUser.current = 0;
+        stepUsed.current = true;
+        return sendFromFrame(decision.prompt, reply);
+      }
       const older = pendingRef.current;
       if (older) replyTo(older.id, { ok: false, error: "replaced" });
       hold({ id: decision.id, prompt: decision.prompt });
@@ -55672,9 +55721,10 @@ function PreviewFrame({ html, name, startHeight, scope }) {
     win.addEventListener("message", onMessage);
     return () => win.removeEventListener("message", onMessage);
   }, [token, sendFromFrame, replyTo]);
-  const send = () => {
+  const send = (shownId) => {
     const ask = pendingRef.current;
-    if (!ask) return;
+    if (!ask || ask.id !== shownId) return;
+    if (Date.now() - changedAt.current < PREVIEW_SWAP_GRACE_MS) return;
     hold(null);
     sendFromFrame(ask.prompt, (ack) => replyTo(ask.id, ack));
   };
@@ -55692,7 +55742,7 @@ function PreviewFrame({ html, name, startHeight, scope }) {
         /* @__PURE__ */ jsx8("span", { className: "gbo-preview-ask-prompt", children: pending.prompt })
       ] }),
       /* @__PURE__ */ jsxs7("div", { className: "gbo-preview-ask-actions", children: [
-        /* @__PURE__ */ jsx8("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: send, children: "Send" }),
+        /* @__PURE__ */ jsx8("button", { type: "button", className: "gbo-pill-btn is-primary", onClick: () => send(pending.id), children: "Send" }),
         /* @__PURE__ */ jsx8("button", { type: "button", className: "gbo-pill-btn", onClick: dismiss, children: "Dismiss" })
       ] })
     ] }) : null
@@ -57778,7 +57828,7 @@ function OwnerMedia({ bot, item }) {
       ": not available"
     ] });
     const box = mediaBox(ready?.width, ready?.height);
-    return src ? /* @__PURE__ */ jsx14("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: /* @__PURE__ */ jsx14(
+    const img = src ? /* @__PURE__ */ jsx14(
       "img",
       {
         alt: item.name,
@@ -57786,7 +57836,8 @@ function OwnerMedia({ bot, item }) {
         loading: "lazy",
         ...box ? { width: box.width, height: box.height, style: { aspectRatio: `${box.width} / ${box.height}` } } : {}
       }
-    ) }) : /* @__PURE__ */ jsx14("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
+    ) : null;
+    return src ? isOpenableImageUrl(src) ? /* @__PURE__ */ jsx14("a", { className: "gbo-media-image", href: src, target: "_blank", rel: "noopener noreferrer", title: item.name, children: img }) : /* @__PURE__ */ jsx14("span", { className: "gbo-media-image", title: item.name, children: img }) : /* @__PURE__ */ jsx14("span", { className: "gbo-media-image is-loading", "aria-label": `Loading ${item.name}` });
   }
   if (item.kind === "audio" || item.kind === "video") {
     if (src) {
@@ -58126,7 +58177,9 @@ function EmailDraftCard({ item, bot, controller: controller2 }) {
     }
   });
   const entries = [
-    { label: "Allow recipient", checked: rules.mode === "allow", disabled: !draft || busy, onSelect: () => act("allow", { id: draftId }) },
+    // Bound to what is on screen: the shown rev and To list. Unsaved To edits
+    // would allow an address that is not the one you see, so it waits for them.
+    { label: "Allow recipient", checked: rules.mode === "allow", disabled: !draft || busy || isDirty(fields, draft) || !toParsed.list.length, onSelect: () => act("allow", { id: draftId, rev: draft?.rev, addresses: toParsed.list }) },
     { label: "Needs approval", checked: rules.mode === "approval", disabled: !draft || busy, onSelect: () => act("set_mode", { mode: "approval" }) },
     { label: `Disable drafts for ${botName}`, checked: rules.mode === "disabled", disabled: !draft || busy, onSelect: () => act("set_mode", { mode: "disabled" }) },
     "sep",
@@ -58863,7 +58916,13 @@ function SkillsHub({ bot, onInstalled }) {
     error ? /* @__PURE__ */ jsx17("div", { className: "gbo-form-error", children: error }) : null,
     results && !results.length ? /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint", children: "No skills found." }) : null,
     (results || []).slice(0, 8).map((r) => /* @__PURE__ */ jsxs16("div", { className: "gbo-check", style: { cursor: "default" }, children: [
-      /* @__PURE__ */ jsx17("span", { className: "gbo-check-text", title: r.description || r.name, children: r.name }),
+      /* @__PURE__ */ jsxs16("span", { className: "gbo-check-text", title: r.description || r.name, children: [
+        r.name,
+        skillSource(r) ? /* @__PURE__ */ jsxs16("span", { className: "gbo-field-hint", children: [
+          " · ",
+          skillSource(r)
+        ] }) : null
+      ] }),
       /* @__PURE__ */ jsx17(
         "button",
         {
@@ -58874,7 +58933,7 @@ function SkillsHub({ bot, onInstalled }) {
             setBusy(r.name);
             setError(null);
             try {
-              await installSkill(bot, r.name);
+              await installSkill(bot, skillIdentity(r));
               onInstalled(r.name);
             } catch (err2) {
               setError(String(err2?.message || err2));
@@ -58885,7 +58944,7 @@ function SkillsHub({ bot, onInstalled }) {
           children: busy === r.name ? "Installing…" : "Install"
         }
       )
-    ] }, r.name))
+    ] }, skillIdentity(r)))
   ] });
 }
 function backendScope(bot) {
@@ -59684,9 +59743,20 @@ function LegacySlackDialog({ bot, initial, onClose }) {
         note
       ] }) : /* @__PURE__ */ jsx19("div", { className: "gbo-slack-ok", children: slackConnectedText(name, { hotServed: true }) }),
       /* @__PURE__ */ jsxs18("div", { className: "gbo-slack-pairing", "aria-label": "First DM", children: [
-        /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-hint", children: pending.length ? "Someone sent a first DM. Approve it so they can chat:" : polling ? `Waiting for your first DM to ${name}…` : approved.length ? "Approved. They can chat now." : `When someone DMs ${name} for the first time, approve them in Hermes’s Messaging settings.` }),
+        /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-hint", children: pending.length ? "Someone sent a first DM. Check the Slack member ID is yours (Slack: your profile → ⋮ → Copy member ID) before you approve:" : polling ? `Waiting for your first DM to ${name}…` : approved.length ? "Approved. They can chat now." : `When someone DMs ${name} for the first time, approve them in Hermes’s Messaging settings.` }),
         pending.map((row) => /* @__PURE__ */ jsxs18("div", { className: "gbo-sheet-choice", children: [
-          /* @__PURE__ */ jsx19("span", { title: String(row.user_id || ""), children: String(row.user_name || row.user_id || "Slack user") }),
+          /* @__PURE__ */ jsxs18("span", { title: String(row.user_id || ""), children: [
+            String(row.user_name || "Slack user"),
+            row.user_id ? /* @__PURE__ */ jsxs18("span", { className: "gbo-sheet-hint", children: [
+              " · member ID ",
+              String(row.user_id)
+            ] }) : null,
+            Number.isFinite(Number(row.age_minutes)) ? /* @__PURE__ */ jsxs18("span", { className: "gbo-sheet-hint", children: [
+              " · ",
+              Math.round(Number(row.age_minutes)),
+              " min ago"
+            ] }) : null
+          ] }),
           /* @__PURE__ */ jsx19("button", { type: "button", className: "gbo-sheet-primary is-small", disabled: approving === row.request_id, onClick: () => void approve(row), children: approving === row.request_id ? "Approving…" : "Approve" })
         ] }, row.request_id))
       ] })

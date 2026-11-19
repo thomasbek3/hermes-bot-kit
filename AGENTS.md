@@ -111,7 +111,7 @@ existing eternal sessions whose frozen prompt predates the plugin) — but the
 NEW PLUGIN CODE only loads when the agent process restarts: after
 install/update, restart Hermes Desktop or gracefully restart the exact per-profile serve process after verifying
 its ownership (do not use broad process-name kills). Debug: `TS_DEBUG=1` logs hook decisions to
-`/tmp/texting-style-debug.log`. Uninstall: remove
+`<HERMES_HOME>/logs/texting-style-debug.log`. Uninstall: remove
 `<profile-home>/plugins/texting-style` and its `plugins.enabled` entry.
 
 ## Optional: remote-cua (agent plugin, per bot profile)

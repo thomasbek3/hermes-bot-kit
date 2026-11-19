@@ -32,9 +32,14 @@ SETTING_KEYS = (
     "sender", "from_address", "from_name", "signature", "attachment_dirs",
     "smtp_host", "smtp_port", "smtp_security", "smtp_username", "composio_account", "composio_cli",
 )
-# Surfaces where a slash command may change a draft: anything but the plain
-# CLI (a bot's terminal tool could start `hermes chat -q "/email-drafts ..."`).
-REFUSED_WRITE_PLATFORMS = {"cli"}
+# Surfaces where the slash command may change a draft: only the owner's own
+# Hermes Desktop / TUI (the draft card's fallback path). Never the plain CLI (a
+# bot's terminal tool could start `hermes chat -q "/email-drafts ..."`), never a
+# messaging platform (anyone allowed to message the bot could otherwise send or
+# allow), and never an unknown or missing platform.
+WRITE_PLATFORMS = {"desktop", "tui"}
+# Surfaces that may read drafts (bodies, recipients) through the slash command.
+READ_PLATFORMS = WRITE_PLATFORMS | {"cli"}
 
 
 def _data_dir() -> Path:
@@ -92,6 +97,9 @@ def slash_handler(engine: Engine):
     def run(raw_args: str, platform: str | None = None, **kwargs: Any) -> str:
         text = (raw_args or "").strip()
         verb, _, rest = text.partition(" ")
+        where = str(platform or "").lower()
+        if where not in READ_PLATFORMS:
+            return "Email drafts are handled on their card in Hermes Desktop."
         if verb in ("", "list"):
             listing = engine.list({})
             rules = listing["rules"]
@@ -104,7 +112,7 @@ def slash_handler(engine: Engine):
                 params = json.loads(payload) if payload.strip() else {}
             except ValueError:
                 return json.dumps({"ok": False, "error": "params must be JSON"})
-            if op in WRITE_OPS and str(platform or "").lower() in REFUSED_WRITE_PLATFORMS:
+            if op in WRITE_OPS and where not in WRITE_PLATFORMS:
                 return json.dumps({"ok": False, "error": "Send and rule changes happen on the draft card in Hermes Desktop."})
             surface = f"slash:{platform or 'unknown'}"
             return json.dumps(handle(engine, op, params, surface=surface), ensure_ascii=False)

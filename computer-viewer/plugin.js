@@ -295,7 +295,8 @@ function isPrivateWsHost(hostName) {
 }
 
 function isInsecurePublicWs(wsUrl) {
-  if (!wsUrl || !String(wsUrl).startsWith('ws://')) return false
+  // Scheme compared case-insensitively: WS://public-host is still plaintext.
+  if (!wsUrl || !/^ws:\/\//i.test(String(wsUrl).trim())) return false
   try {
     return !isPrivateWsHost(new URL(wsUrl).hostname)
   } catch {
@@ -870,21 +871,9 @@ function rememberLastFrame(endpointId, rfb) {
 }
 
 function loadSettingsFrom(ctx) {
-  // First-run convenience seed (demo machines only): if this machine has
-  // never saved any endpoint, offer the local bridge so the pane works out
-  // of the box. Skipped entirely once the user has stored anything.
-  const existing = ctx.storage.get('endpoints', [])
-  if (!Array.isArray(existing) || existing.length === 0) {
-    const seeded = [normalizeEndpoint({
-      id: 'local-mac',
-      name: 'This Mac',
-      mode: 'websocket',
-      wsUrl: 'ws://127.0.0.1:6081/websockify',
-      password: 'Hermes26'
-    })]
-    ctx.storage.set('endpoints', seeded)
-    ctx.storage.set('globalEndpointId', 'local-mac')
-  }
+  // No seeded computer: the pane starts empty until the user adds one (an
+  // auto-connecting default on an unclaimed loopback port with a fixed
+  // password would hand the user's input to whatever process listened there).
   const endpoints = ctx.storage.get('endpoints', [])
   const list = Array.isArray(endpoints) ? endpoints.map(normalizeEndpoint).filter(Boolean) : []
   const globalEndpointId = ctx.storage.get('globalEndpointId', null)
@@ -1684,6 +1673,11 @@ async function connectIframe(endpoint, gen) {
 
 async function connect(endpoint) {
   rememberLastFrame(engine.currentEndpointId)
+  // Moving to another computer ends the old session now, not only once the
+  // new one opens: the input gate follows the selected computer, so a live
+  // session to the previous one (kept by an early error return below) could
+  // otherwise take input while its bot holds control.
+  if (engine.rfb && engine.currentEndpointId !== (endpoint ? endpoint.id : null)) teardownRfb()
   const gen = bumpGen()
   engine.intentionalDisconnect = false
   engine.authLock = false

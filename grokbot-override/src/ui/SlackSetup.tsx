@@ -544,7 +544,7 @@ function LegacySlackDialog({ bot, initial, onClose }: { bot: any; initial?: Slac
         <div className="gbo-slack-pairing" aria-label="First DM">
           <div className="gbo-sheet-hint">
             {pending.length
-              ? 'Someone sent a first DM. Approve it so they can chat:'
+              ? 'Someone sent a first DM. Check the Slack member ID is yours (Slack: your profile → ⋮ → Copy member ID) before you approve:'
               : polling
                 ? `Waiting for your first DM to ${name}…`
                 : approved.length
@@ -553,7 +553,11 @@ function LegacySlackDialog({ bot, initial, onClose }: { bot: any; initial?: Slac
           </div>
           {pending.map(row => (
             <div key={row.request_id} className="gbo-sheet-choice">
-              <span title={String(row.user_id || '')}>{String(row.user_name || row.user_id || 'Slack user')}</span>
+              <span title={String(row.user_id || '')}>
+                {String(row.user_name || 'Slack user')}
+                {row.user_id ? <span className="gbo-sheet-hint"> · member ID {String(row.user_id)}</span> : null}
+                {Number.isFinite(Number(row.age_minutes)) ? <span className="gbo-sheet-hint"> · {Math.round(Number(row.age_minutes))} min ago</span> : null}
+              </span>
               <button type="button" className="gbo-sheet-primary is-small" disabled={approving === row.request_id} onClick={() => void approve(row)}>
                 {approving === row.request_id ? 'Approving…' : 'Approve'}
               </button>

@@ -20,7 +20,7 @@ import {
 } from '../core/roster.js'
 import { botRestScope, botRouteProblem, botWorkspaceOwnerKey, createBotRequester, isLocalBot, resolveBotConnectionRoute, retainBotRoute, stockOpenTarget } from '../core/routing.js'
 import { cronListParams, cronToggleParams, jobActive, sortJobs } from '../core/cron.js'
-import { filePath, mediaReadRequest } from '../core/media.js'
+import { filePath, isDataUrl, mediaReadRequest } from '../core/media.js'
 import { workspaceReadRequest } from '../core/directives.js'
 import { transcribeRequest } from '../core/voice.js'
 import { createChatController, IDLE_REFRESH_MS, seedFromState } from '../core/session.js'
@@ -668,6 +668,13 @@ function readHistory(bot: any, sessionId: string, { limit, offset }: { limit: nu
 const mediaCache = new Map<string, Promise<string>>()
 const MEDIA_CACHE_MAX = 60
 
+// A file read must come back as a data: URL; anything else (a javascript: or
+// http: URL from a misbehaving backend) is refused rather than rendered.
+function dataUrlOnly(url: string, path: string): string {
+  if (!isDataUrl(url)) throw new Error(`Could not read ${path}`)
+  return url
+}
+
 export function readBotMedia(bot: any, path: string): Promise<string> {
   let scope: { connectionId?: string; profile: string }
   try {
@@ -685,11 +692,11 @@ export function readBotMedia(bot: any, path: string): Promise<string> {
     if (local && typeof desktop?.readFileDataUrl === 'function') {
       const result = await desktop.readFileDataUrl(filePath(path))
       if (result && typeof result === 'object') throw new Error(result.message || `Could not read ${path}`)
-      return String(result || '')
+      return dataUrlOnly(String(result || ''), path)
     }
     if (typeof desktop?.api !== 'function') throw new Error('This Hermes build cannot read files')
     const result = await desktop.api(mediaReadRequest(path, scope))
-    return typeof result === 'string' ? result : String(result?.dataUrl || '')
+    return dataUrlOnly(typeof result === 'string' ? result : String(result?.dataUrl || ''), path)
   })()
   mediaCache.set(key, read)
   read.catch(() => mediaCache.delete(key))

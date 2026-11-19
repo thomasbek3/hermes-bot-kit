@@ -250,7 +250,9 @@ export function EmailDraftCard({ item, bot, controller }: { item: any; bot: any;
     })
 
   const entries: MenuEntry[] = [
-    { label: 'Allow recipient', checked: rules.mode === 'allow', disabled: !draft || busy, onSelect: () => act('allow', { id: draftId }) },
+    // Bound to what is on screen: the shown rev and To list. Unsaved To edits
+    // would allow an address that is not the one you see, so it waits for them.
+    { label: 'Allow recipient', checked: rules.mode === 'allow', disabled: !draft || busy || isDirty(fields, draft) || !toParsed.list.length, onSelect: () => act('allow', { id: draftId, rev: draft?.rev, addresses: toParsed.list }) },
     { label: 'Needs approval', checked: rules.mode === 'approval', disabled: !draft || busy, onSelect: () => act('set_mode', { mode: 'approval' }) },
     { label: `Disable drafts for ${botName}`, checked: rules.mode === 'disabled', disabled: !draft || busy, onSelect: () => act('set_mode', { mode: 'disabled' }) },
     'sep',

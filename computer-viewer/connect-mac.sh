@@ -32,7 +32,7 @@ TAHOE_PATCHED='26.6.1'
 
 echo "Computer viewer - Mac Screen Sharing bridge"
 echo "websockify ${WEBSOCKIFY_PIN}, pinned in ${VENV_DIR}"
-echo "LAN / Tailscale only - VNC stays on localhost:5900; websocket bind is chosen below."
+echo "LAN / Tailscale only. The websocket bind is chosen below; macOS Screen Sharing (5900) itself listens on every interface."
 echo
 
 xml_escape() {
@@ -353,6 +353,9 @@ echo "  Username  ${MAC_USER}   (your Mac login, Advanced -> Username)"
 echo "  Password  the 8-char VNC password you set in Screen Sharing"
 echo
 echo "LAN / Tailscale only. Do not port-forward 5900 or ${LISTEN_PORT}."
-echo "VNC stays on localhost:5900. websockify is bound to ${BIND}:${LISTEN_PORT}."
+echo "websockify is bound to ${BIND}:${LISTEN_PORT}."
+echo "Note: macOS Screen Sharing (5900) listens on every interface, not only loopback."
+echo "  Anyone on this network can reach it with the VNC password: use a strong one,"
+echo "  turn on the macOS firewall, and stay on networks you trust."
 echo "Logs: ${LOG_PATH}"
 echo "===================================================================="

@@ -31,6 +31,7 @@ import {
   previewIntentRoute,
   previewPrelude,
   previewStartHeight,
+  PREVIEW_SWAP_GRACE_MS,
   splitDirectives,
   workspaceRelPath
 } from '../core/directives.js'
@@ -324,9 +325,16 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
   })
   const [height, setHeight] = React.useState(startHeight)
   const lastIntent = React.useRef(0)
-  // When this window last saw the user step into THIS frame (its blur while
-  // the frame is the focused element). The page cannot set it.
+  // When this window last saw the user step into THIS frame: its blur while
+  // the frame is the focused element AND the pointer is over the frame (a
+  // page script moving focus into itself does not move the pointer). One
+  // step-in lets one intent go at once; it is used up by that send.
   const lastUser = React.useRef(0)
+  const pointerOver = React.useRef(false)
+  const stepUsed = React.useRef(false)
+  // When the waiting text last changed under a visible Send button; a click
+  // right after a swap is ignored so the person sees what they send.
+  const changedAt = React.useRef(0)
   // The one intent waiting for the user (a newer one replaces it).
   const [pending, setPending] = React.useState<{ id: number | null; prompt: string } | null>(null)
   const pendingRef = React.useRef<typeof pending>(null)
@@ -347,6 +355,7 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
     [token]
   )
   const hold = (next: { id: number | null; prompt: string } | null) => {
+    if (next && pendingRef.current) changedAt.current = Date.now()
     pendingRef.current = next
     setPending(next)
   }
@@ -355,16 +364,27 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
     if (!win?.addEventListener) return undefined
     const seen = () => {
       const el = frame.current
-      if (el && win.document?.activeElement === el) lastUser.current = Date.now()
+      if (stepUsed.current) return
+      if (el && pointerOver.current && win.document?.activeElement === el) lastUser.current = Date.now()
     }
+    const el = frame.current
+    const enter = () => { pointerOver.current = true }
+    const leave = () => { pointerOver.current = false }
+    el?.addEventListener?.('mouseenter', enter)
+    el?.addEventListener?.('mouseleave', leave)
     const onBlur = () => {
+      stepUsed.current = false
       seen()
       // Some engines move focus onto the frame just after the blur.
       timers().setTimeout(seen, 0)
     }
     win.addEventListener('blur', onBlur)
-    return () => win.removeEventListener('blur', onBlur)
-  }, [])
+    return () => {
+      win.removeEventListener('blur', onBlur)
+      el?.removeEventListener?.('mouseenter', enter)
+      el?.removeEventListener?.('mouseleave', leave)
+    }
+  }, [doc])
   React.useLayoutEffect(() => {
     const theme = themeFor(wrap.current, scope.theme)
     setDoc(previewDocument(html, token, previewPrelude(theme.vars, theme.font, theme.scheme)))
@@ -388,7 +408,11 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
       if (decision.kind === 'reject') return reply(decision.ack)
       const now = Date.now()
       lastIntent.current = now
-      if (previewIntentRoute(now, lastUser.current) === 'send') return sendFromFrame(decision.prompt, reply)
+      if (previewIntentRoute(now, lastUser.current) === 'send') {
+        lastUser.current = 0
+        stepUsed.current = true
+        return sendFromFrame(decision.prompt, reply)
+      }
       const older = pendingRef.current
       if (older) replyTo(older.id, { ok: false, error: 'replaced' })
       hold({ id: decision.id, prompt: decision.prompt })
@@ -396,9 +420,10 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
     win.addEventListener('message', onMessage)
     return () => win.removeEventListener('message', onMessage)
   }, [token, sendFromFrame, replyTo])
-  const send = () => {
+  const send = (shownId: number | null) => {
     const ask = pendingRef.current
-    if (!ask) return
+    if (!ask || ask.id !== shownId) return
+    if (Date.now() - changedAt.current < PREVIEW_SWAP_GRACE_MS) return
     hold(null)
     sendFromFrame(ask.prompt, ack => replyTo(ask.id, ack))
   }
@@ -420,7 +445,7 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
             <span className="gbo-preview-ask-prompt">{pending.prompt}</span>
           </div>
           <div className="gbo-preview-ask-actions">
-            <button type="button" className="gbo-pill-btn is-primary" onClick={send}>
+            <button type="button" className="gbo-pill-btn is-primary" onClick={() => send(pending.id)}>
               Send
             </button>
             <button type="button" className="gbo-pill-btn" onClick={dismiss}>

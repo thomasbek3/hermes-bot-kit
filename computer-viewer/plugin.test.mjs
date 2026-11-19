@@ -2164,3 +2164,15 @@ function createClientFor(sent) {
     return { ok: true, lease: AGENT_LEASE }
   })
 }
+
+test('moving to another computer ends the old session even when the new one fails to open', async () => {
+  const server = fakeRemoteCua()
+  const { t, instances } = await remoteSetup(server)
+  await t.takeOver()
+  assert.ok(t.engine.rfb, 'the remote-cua machine is live')
+  const broken = t.normalizeEndpoint({ id: 'ep-broken', name: 'Broken', mode: 'session-json', sessionUrl: '' })
+  await t.connect(broken)
+  await settle()
+  assert.equal(t.engine.rfb, null, 'no session to the previous machine stays open (it could take input)')
+  assert.equal(instances.length, 1)
+})

@@ -164,14 +164,20 @@ export const addressText = list => (Array.isArray(list) ? list.join(', ') : '')
 export const MODE_LABELS = { approval: 'Needs approval', allow: 'Allow recipient', disabled: 'Drafts off' }
 export const modeLabel = mode => MODE_LABELS[mode] || MODE_LABELS.approval
 
-/** "“Subject” from Name <addr>" for the In reply to row, or ''. */
+/** "“Subject” from Name <addr>" for the In reply to row, or ''. A Gmail
+ *  thread id is always shown: it picks the thread the reply goes into (and
+ *  that thread's subject and quoted text), so the person must see it. */
 export function inReplyText(reply) {
   if (!reply || typeof reply !== 'object') return ''
   const subject = String(reply.subject || '').trim()
   const from = String(reply.from || '').trim()
-  if (subject && from) return `“${subject}” from ${from}`
-  if (subject) return `“${subject}”`
-  return from ? `from ${from}` : String(reply.message_id || '')
+  const thread = String(reply.thread_id || '').trim()
+  let text
+  if (subject && from) text = `“${subject}” from ${from}`
+  else if (subject) text = `“${subject}”`
+  else text = from ? `from ${from}` : String(reply.message_id || '')
+  if (!thread) return text
+  return text ? `${text} · Gmail thread ${thread}` : `Gmail thread ${thread}`
 }
 
 const toMs = seconds => (Number.isFinite(Number(seconds)) && Number(seconds) > 0 ? Math.round(Number(seconds) * 1000) : 0)

@@ -113,6 +113,17 @@ export function extractMedia(text) {
 
 /** The host a remote image would be fetched from, as the user should see it
  *  before choosing to load it ('' when the URL does not parse). */
+/** A data: URL for a raster picture (png, jpeg, gif, webp, avif, bmp) that is
+ * safe to open full size in its own window. SVG and every other type is not. */
+export function isOpenableImageUrl(url) {
+  return /^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,/i.test(String(url || ''))
+}
+
+/** A file read must come back as a data: URL; anything else is refused. */
+export function isDataUrl(url) {
+  return /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+[;,]/i.test(String(url || ''))
+}
+
 export function remoteImageHost(url) {
   try {
     return new URL(String(url)).host

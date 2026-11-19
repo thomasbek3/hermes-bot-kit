@@ -78,15 +78,42 @@ test('loader-faithful: a preview page cannot send on its own; the user sees the 
   ;[...chatEl.querySelectorAll('.gbo-preview-ask button')].find(b => b.textContent === 'Dismiss').click()
   assert.equal(submits().length, 1)
 
-  // The user steps into THIS frame (this window blurs onto it): the next
-  // intent within 3 s goes at once.
+  // Focus moving into the frame without the pointer over it (a page script
+  // calling focus()) is not the user's step: still asks.
   await new Promise(resolve => setTimeout(resolve, 1050))
   Object.defineProperty(document, 'activeElement', { configurable: true, get: () => frame })
   t.after(() => delete document.activeElement)
   window.dispatchEvent(new window.Event('blur'))
-  fromFrame(5, 'more please')
+  fromFrame(5, 'scripted focus')
+  await waitFor(() => chatEl.querySelector('.gbo-preview-ask'), 'asks after a scripted focus')
+  ;[...chatEl.querySelectorAll('.gbo-preview-ask button')].find(b => b.textContent === 'Dismiss').click()
+  assert.equal(submits().length, 1)
+
+  // The user steps into THIS frame (pointer over it, this window blurs onto
+  // it): the next intent within 3 s goes at once, and only that one.
+  await new Promise(resolve => setTimeout(resolve, 1050))
+  frame.dispatchEvent(new window.MouseEvent('mouseenter'))
+  window.dispatchEvent(new window.Event('blur'))
+  fromFrame(6, 'more please')
   await waitFor(() => submits().length === 2, 'sent at once after the user step')
   assert.equal(submits()[1].params.text, 'more please')
   assert.equal(chatEl.querySelector('.gbo-preview-ask'), null, 'no row needed')
+  await new Promise(resolve => setTimeout(resolve, 1050))
+  fromFrame(7, 'and again')
+  await waitFor(() => chatEl.querySelector('.gbo-preview-ask'), 'the step-in was used up: asks again')
+  assert.equal(submits().length, 2)
+
+  // A swap of the waiting text right before the click: that click sends
+  // nothing; a click after the person has seen the new text sends it.
+  await new Promise(resolve => setTimeout(resolve, 1050))
+  fromFrame(8, 'swapped text')
+  await waitFor(() => chatEl.querySelector('.gbo-preview-ask-prompt')?.textContent === 'swapped text', 'the swap shown')
+  ;[...chatEl.querySelectorAll('.gbo-preview-ask button')].find(b => b.textContent === 'Send').click()
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(submits().length, 2, 'a click right after a swap sends nothing')
+  await new Promise(resolve => setTimeout(resolve, 1050))
+  ;[...chatEl.querySelectorAll('.gbo-preview-ask button')].find(b => b.textContent === 'Send').click()
+  await waitFor(() => submits().length === 3, 'sent after a second look')
+  assert.equal(submits()[2].params.text, 'swapped text')
   assert.deepEqual(errors, [])
 })

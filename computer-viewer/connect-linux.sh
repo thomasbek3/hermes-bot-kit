@@ -14,7 +14,6 @@ if [ "$(uname -s)" = "Darwin" ]; then
 fi
 
 HERMES_CV="${HOME}/.hermes-cv"
-VNC_PWD_FILE="${HERMES_CV}/vncpwd"
 VNC_PWD_TEXT="${HERMES_CV}/vnc-password.txt"
 WAYVNC_CONF="${HERMES_CV}/wayvnc.conf"
 WAYVNC_RSA="${HERMES_CV}/wayvnc-rsa.pem"
@@ -385,12 +384,10 @@ setup_x11() {
   local ws_bin x11vnc_bin pw display
   ws_bin="$(ensure_websockify)"
   x11vnc_bin="$(command -v x11vnc)"
-  pw="$(ensure_vnc_password)"
+  # The password reaches x11vnc only through its 0600 file (-passwdfile),
+  # never on a command line, where other local users could read it in ps.
+  ensure_vnc_password >/dev/null
   display="${DISPLAY:-:0}"
-
-  echo "==> Writing x11vnc password file ${VNC_PWD_FILE}"
-  x11vnc -storepasswd "$pw" "${VNC_PWD_FILE}" >/dev/null
-  chmod 600 "${VNC_PWD_FILE}"
 
   echo "==> Writing systemd user units"
   cat > "${X11VNC_UNIT}" <<EOF
@@ -402,7 +399,7 @@ After=graphical-session.target
 Type=simple
 Environment=DISPLAY=${display}
 Environment=XAUTHORITY=${XAUTHORITY:-%h/.Xauthority}
-ExecStart=${x11vnc_bin} -localhost -forever -shared -noxdamage -rfbauth ${VNC_PWD_FILE} -rfbport ${VNC_PORT}
+ExecStart=${x11vnc_bin} -localhost -forever -shared -noxdamage -passwdfile ${VNC_PWD_TEXT} -rfbport ${VNC_PORT}
 Restart=always
 RestartSec=3
 

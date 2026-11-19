@@ -1,2 +1,11 @@
 __pycache__/
 *.pyc
+# Local secrets and state: never commit these.
+.env
+.env.*
+*.pem
+*.key
+config-tokens.json
+hiperf-token.txt
+vnc-password.txt
+.DS_Store

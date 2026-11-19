@@ -112,7 +112,9 @@ The plugin talks to two kinds of computer:
   Docker desktop box, a rotating session API). Detection is automatic; you do not
   pick a mode.
 - **Local** — a Mac, Windows PC, or Linux box on your LAN or Tailscale. Run
-  the one-paste script **on that machine**. VNC stays on localhost:5900.
+  the one-paste script **on that machine**. VNC stays on localhost:5900 on
+  Windows and Linux; on a Mac, Screen Sharing itself listens on every interface
+  (see Security).
   websockify (:6080) and the HD agent (:6090) bind the Tailscale IPv4 when
   Tailscale is up, otherwise loopback. `CV_BIND=0.0.0.0` (Windows: `-Bind
   0.0.0.0`) exposes them on every interface — trusted LAN only. Paste the
@@ -395,7 +397,10 @@ stream), paste the printed token, turn on HD.
 ## Security
 
 - **Never expose VNC or the websocket ports to the internet.** VNC (`:5900`)
-  is loopback-only. websockify (`:6080`) and the HD agent (`:6090`) are
+  is loopback-only on Windows and Linux. **On macOS, Screen Sharing listens on
+  every interface**: the VNC password guards it from anyone on the same
+  network, so use a strong one, turn on the macOS firewall, and stay on trusted
+  networks. websockify (`:6080`) and the HD agent (`:6090`) are
   network listeners: Tailscale IPv4 when present, otherwise loopback.
   `CV_BIND=0.0.0.0` binds every interface and is supported only on a
   trusted LAN. No router port-forward, no public IP. Transport is
@@ -641,10 +646,11 @@ curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.
 Branches on `$XDG_SESSION_TYPE`:
 
 - **X11** - installs `x11vnc` + `websockify` (apt/dnf/pacman; `novnc`
-  optional), stores a VNC password with `x11vnc -storepasswd` in
-  `~/.hermes-cv/vncpwd`, and enables systemd **user** units
+  optional), keeps the VNC password in `~/.hermes-cv/vnc-password.txt`
+  (mode 0600; x11vnc reads it with `-passwdfile`, so it is never on a command
+  line), and enables systemd **user** units
   `computer-viewer-x11vnc.service` (`x11vnc -localhost -forever -shared
-  -noxdamage -rfbauth ... -rfbport 5900`) and
+  -noxdamage -passwdfile ... -rfbport 5900`) and
   `computer-viewer-websockify.service` (`<bind>:6080 -> localhost:5900`,
   `Restart=always`). `loginctl enable-linger` keeps them up without a login.
 - **wlroots Wayland** (Sway, Hyprland, ...) - `wayvnc` on localhost with

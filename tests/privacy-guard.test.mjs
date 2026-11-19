@@ -31,7 +31,10 @@ const FORBIDDEN = new Set([
   '3c84095a486f8d3c4f46', 'b3c5ba93f77bffcffc7b', 'ec534e27e6d4d58bce03', 'ea1fc024705933d98404',
   '837dbfe793d67b893ca2', '475f9fd3d326cd0903ef', '739e72f2db16302b3d58', '4f7cc4847130c6e7896e',
   'a3587249db361ec4b575', 'a82d92c43ec805af130d', '739de437a01cb18fdfa2', '003d3ef1d10a3a582268',
-  '6711529767e00efa85a3', '335a5e95e9a849cbd08b', '97d56ced0b40767d75cc', 'bec25236577b724f2ebe'
+  '6711529767e00efa85a3', '335a5e95e9a849cbd08b', '97d56ced0b40767d75cc', 'bec25236577b724f2ebe',
+  'd2913e2ad2b74483bca5', 'cb59e3b40801ee4cbcc8', 'e6a6b5ab86c72ad9b0d1', 'aec07e8fb7a0db030056',
+  '382a803dcc0de9618b14', 'cabdac9b4fcd72fd4d4a', '845b39e96452f543e41b', 'e45244b2db4d8d09c4db',
+  'e5f00a2832fcaddfeac0', '37bec6aecbf2e0951d1b', '42495434657ae9a82d30'
 ])
 const MAX_WORDS = 3
 
@@ -47,10 +50,12 @@ const HOME_OK = new Set(['you', 'me', 'user', 'username', 'example', 'runner', '
 // Email addresses: only reserved example domains and GitHub's no-reply.
 const EMAIL = /[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})/g
 const EMAIL_OK = /(?:^|\.)(?:example\.(?:com|org|net)|example|test|invalid|localhost|users\.noreply\.github\.com|anthropic\.com)$/i
+// A VNC password in TightVNC/UltraVNC obfuscated form (fixed public key, so
+// reversible): 16 hex digits, or 18 with UltraVNC's checksum, in backticks or
+// after passwd=.
+const VNC_BLOB = /(?:`|passwd=)[0-9A-Fa-f]{16}(?:[0-9A-Fa-f]{2})?(?![0-9A-Fa-f])/g
 // Third-party code shipped verbatim (its own authors' notices stay as they are).
 const VENDORED = new Set(['computer-viewer/vendor/novnc-rfb.mjs', 'grokbot-override/package-lock.json'])
-// The Slack pieces' own guard spells its values in split pieces.
-const GUARDS = new Set(['slack-connect/tests/test_no_hardcoded_values.py'])
 
 function trackedTextFiles() {
   const out = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }).toString('utf8')
@@ -74,7 +79,7 @@ export function scan(text, rel = '', seen = new Map()) {
   const hits = []
   const lines = text.split('\n')
   lines.forEach((line, index) => {
-    const w = GUARDS.has(rel) ? [] : words(line)
+    const w = words(line)
     for (let i = 0; i < w.length; i += 1) {
       let gram = ''
       for (let n = 1; n <= MAX_WORDS && i + n <= w.length; n += 1) {
@@ -92,6 +97,9 @@ export function scan(text, rel = '', seen = new Map()) {
     }
     if (line.includes('/Users/') || line.includes('/home/')) {
       for (const m of line.matchAll(HOME_DIR)) if (!HOME_OK.has(m[1].toLowerCase())) hits.push({ line: index + 1, kind: `home folder of "${m[1]}"` })
+    }
+    if (!VENDORED.has(rel)) {
+      for (const m of line.matchAll(VNC_BLOB)) hits.push({ line: index + 1, kind: `VNC password blob (${m[0].length - 1} chars)` })
     }
     if (line.includes('@') && !VENDORED.has(rel)) {
       for (const m of line.matchAll(EMAIL)) if (!EMAIL_OK.test(m[1])) hits.push({ line: index + 1, kind: `email at ${m[1]}` })
@@ -116,14 +124,19 @@ if (process.argv.includes('--hash')) {
   })
 
   test('the guard catches each kind it checks', () => {
-    // Assembled at run time so the planted values are not literal here.
+    // Synthetic values only: a made-up word whose hash is added for this test,
+    // and a made-up tailnet address assembled at run time.
+    const word = ['zzplanted', 'privateword'].join('')
+    FORBIDDEN.add(hash(word))
     const planted = [
-      `see ${['paver', 'turf'].join('')} docs`,
-      `host ${['100', '86', '1', '2'].join('.')}`,
+      `see ${word} docs`,
+      `host ${['100', '100', '1', '2'].join('.')}`,
       `path ${'/Us' + 'ers/'}somebody/x`,
-      `mail ${'a' + '@'}company.io`
+      `mail ${'a' + '@'}company.io`,
+      `ini passwd=${'0123456789ABCDEF'}00`
     ].join('\n')
-    assert.deepEqual(scan(planted).map(hit => hit.line), [1, 2, 3, 4])
+    assert.deepEqual(scan(planted, '', new Map()).map(hit => hit.line), [1, 2, 3, 4, 5])
+    FORBIDDEN.delete(hash(word))
     assert.deepEqual(scan('/Users/you/x 100.64.0.9 a@example.com u@users.noreply.github.com'), [])
   })
 }

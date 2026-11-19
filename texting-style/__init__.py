@@ -21,6 +21,28 @@ import sqlite3
 import time
 from pathlib import Path
 
+
+def _debug_log_path() -> Path:
+    """TS_DEBUG log: <HERMES_HOME or ~/.hermes>/logs/texting-style-debug.log,
+    never a shared /tmp path another local user could pre-create."""
+    home = os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")
+    return Path(home) / "logs" / "texting-style-debug.log"
+
+
+def _append_debug_line(msg: str) -> None:
+    path = _debug_log_path()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        st = os.fstat(fd)
+        import stat as _stat
+        if not _stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_nlink != 1:
+            return
+        os.write(fd, (msg + "\n").encode("utf-8", "replace"))
+    finally:
+        os.close(fd)
+
 # Must match tools/bot_mode_probe.py BOT_CHAT_TITLE (the desktop's
 # createCanonicalChat title and the `-c "Bot Chat"` resume target).
 BOT_CHAT_TITLE = "Bot Chat"
@@ -215,8 +237,7 @@ def register(ctx) -> None:
         if not os.environ.get("TS_DEBUG"):
             return
         try:
-            with open("/tmp/texting-style-debug.log", "a") as fh:
-                fh.write(msg + "\n")
+            _append_debug_line(msg)
         except Exception:
             pass
 

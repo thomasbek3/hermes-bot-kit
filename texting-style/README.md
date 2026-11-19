@@ -65,7 +65,7 @@ every profile's DB — some Hermes builds mis-resolve the active profile home).
 Any lookup failure fails safe to stock behavior.
 
 Debugging: run the agent with `TS_DEBUG=1` and the hook logs each decision
-(`INJECTING` / `blocked: …`) to `/tmp/texting-style-debug.log`.
+(`INJECTING` / `blocked: …`) to `<HERMES_HOME>/logs/texting-style-debug.log` (mode 0600).
 
 Uninstall: remove `plugins/texting-style` from the profile home and drop
 `texting-style` from `plugins.enabled` in its `config.yaml`.

@@ -9,6 +9,7 @@ import { boundedFetch, mcpNeedsSetup, modelOptionsParams, providerMatches, provi
 import { resolveBotConnectionRoute } from '../core/routing.js'
 import { Check, Field, Select } from './kit'
 import { installSkill, loadProfileConfig, request, searchSkills } from './rosterActions'
+import { skillIdentity, skillSource } from '../core/profileConfig.js'
 import { host, sdk } from './sdk'
 
 /** The model catalogue (model.options) for the app session: one per
@@ -220,9 +221,10 @@ function SkillsHub({ bot, onInstalled }: { bot: any; onInstalled: (name: string)
       {error ? <div className="gbo-form-error">{error}</div> : null}
       {results && !results.length ? <span className="gbo-field-hint">No skills found.</span> : null}
       {(results || []).slice(0, 8).map((r: any) => (
-        <div key={r.name} className="gbo-check" style={{ cursor: 'default' }}>
+        <div key={skillIdentity(r)} className="gbo-check" style={{ cursor: 'default' }}>
           <span className="gbo-check-text" title={r.description || r.name}>
             {r.name}
+            {skillSource(r) ? <span className="gbo-field-hint"> · {skillSource(r)}</span> : null}
           </span>
           <button
             type="button"
@@ -232,7 +234,9 @@ function SkillsHub({ bot, onInstalled }: { bot: any; onInstalled: (name: string)
               setBusy(r.name)
               setError(null)
               try {
-                await installSkill(bot, r.name)
+                // Install exactly the entry shown: its full hub identifier
+                // when the hub gives one, not just the short name.
+                await installSkill(bot, skillIdentity(r))
                 onInstalled(r.name)
               } catch (err: any) {
                 setError(String(err?.message || err))

@@ -179,3 +179,20 @@ export function skillsSearchParams(query) {
 export function skillsInstallParams(bot, name) {
   return { action: 'install', query: String(name || ''), profile: bot.name }
 }
+
+/** The hub entry a skills search row names: its source-qualified identifier
+ *  when the hub gives one (so Install gets exactly that entry), else its name. */
+export function skillIdentity(row) {
+  for (const key of ['identifier', 'id', 'name']) {
+    const value = row && typeof row[key] === 'string' ? row[key].trim() : ''
+    if (value) return value
+  }
+  return ''
+}
+
+/** Where a skills search row comes from (hub source or trust), shown next to
+ *  its name so two entries with the same name can be told apart. */
+export function skillSource(row) {
+  const parts = [row?.source, row?.trust || row?.trust_level].map(v => (typeof v === 'string' ? v.trim() : '')).filter(Boolean)
+  return parts.join(', ')
+}

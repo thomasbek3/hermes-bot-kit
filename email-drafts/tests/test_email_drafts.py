@@ -291,6 +291,18 @@ class Rules(unittest.TestCase):
         audit = [a for a in self.engine.store.audit_lines() if a["event"] == "sent"]
         self.assertEqual(audit[-1]["actor"], "allow-rule")
 
+    def test_allow_is_bound_to_the_shown_rev_and_addresses(self):
+        draft = self.rig.create()["email_draft"]
+        with self.assertRaises(Exception):
+            self.engine.allow({"id": draft["id"], "rev": draft["rev"], "addresses": [LEE]}, surface="rpc")
+        self.engine.update({"id": draft["id"], "to": [LEE]})
+        with self.assertRaises(Exception):
+            self.engine.allow({"id": draft["id"], "rev": draft["rev"], "addresses": [SAM]}, surface="rpc")
+        self.assertEqual(self.engine.rules({})["rules"]["allowed"], [])
+        fresh = self.engine.get({"id": draft["id"]})["draft"]
+        rules = self.engine.allow({"id": draft["id"], "rev": fresh["rev"], "addresses": [LEE]}, surface="rpc")["rules"]
+        self.assertEqual(rules["allowed"], [LEE])
+
     def test_mixed_recipients_wait_for_approval(self):
         self.engine.allow({"addresses": [SAM]}, surface="rpc")
         for extra in ({"to": [SAM, LEE]}, {"cc": [LEE]}, {"bcc": [LEE]}):
@@ -566,6 +578,16 @@ class CardApi(unittest.TestCase):
         self.assertEqual(self.rig.sent, [])
         read = json.loads(self.slash(f'api get {{"id": "{self.draft_id}"}}', platform="cli"))
         self.assertTrue(read["ok"])
+
+    def test_slash_refused_from_messaging_and_unknown_platforms(self):
+        for platform in ("telegram", "slack", "discord", None, ""):
+            out = self.slash(f'api send {{"id": "{self.draft_id}"}}', platform=platform)
+            self.assertNotIn('"sent"', out, platform)
+            self.assertNotIn(self.draft_id, self.slash("", platform=platform), platform)
+            self.assertNotIn(self.draft_id, self.slash(f'api get {{"id": "{self.draft_id}"}}', platform=platform), platform)
+            self.assertNotIn(SAM, self.slash('api allow {"addresses": ["%s"]}' % SAM, platform=platform), platform)
+        self.assertEqual(self.rig.sent, [])
+        self.assertEqual(self.rig.engine.rules({})["rules"]["mode"], "approval")
 
     def test_slash_list_for_people(self):
         text = self.slash("", platform="desktop")

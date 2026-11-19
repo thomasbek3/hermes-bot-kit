@@ -390,8 +390,20 @@ class Engine:
         the allowed list and the mode becomes allow. The draft itself still
         waits for Send: the rule applies to future drafts."""
         addresses = params.get("addresses")
-        if addresses is None and params.get("id"):
-            addresses = self.store.load(valid_id(params.get("id"))).get("to", [])
+        if params.get("id"):
+            # Bound to the draft the person was looking at: the card sends the
+            # rev it showed and the To addresses on screen. A bot update in
+            # between, or unsaved To edits, refuse instead of allowing an
+            # address nobody saw.
+            draft = self.store.load(valid_id(params.get("id")))
+            expect = params.get("rev")
+            if expect is not None and int(expect) != int(draft.get("rev", 1)):
+                raise DraftError("The bot changed this draft; look at it again before allowing")
+            stored = draft.get("to", [])
+            if addresses is None:
+                addresses = stored
+            elif sorted(a.lower() for a in normalize_addresses(addresses, "addresses")) != sorted(a.lower() for a in stored):
+                raise DraftError("Save the To field first (send the draft or undo your edits), then allow")
         found = normalize_addresses(addresses, "addresses")
         if not found:
             raise DraftError("No address to allow")

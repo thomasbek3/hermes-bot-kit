@@ -23,7 +23,12 @@ within a few days.
 
 ## Scope notes
 
-- The VNC server itself (port 5900) is loopback-only. The websockify
+- The VNC server (port 5900) is loopback-only on Windows (TightVNC/UltraVNC
+  `LoopbackOnly=1`) and Linux (`x11vnc -localhost`, wayvnc on 127.0.0.1).
+  **On macOS it is not:** Screen Sharing is Apple's service and listens on
+  every interface, so on a Mac the VNC password is a real boundary for
+  anyone on the same network. Turn on the macOS firewall (System Settings →
+  Network → Firewall) or keep the Mac on networks you trust. The websockify
   bridge (6080) and HD agent (6090) are network listeners. Default bind:
   the Tailscale interface when Tailscale is up, otherwise loopback.
   `CV_BIND=0.0.0.0` exposes them on every interface and is supported only

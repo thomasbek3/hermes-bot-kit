@@ -116,6 +116,8 @@ test('addresses, states and labels', () => {
   assert.deepEqual(draftState({ status: 'pending' }).actions, ['discard', 'send'])
   assert.equal(draftState({ status: 'discarded' }).editable, false)
   assert.equal(inReplyText({ subject: 'Pricing?', from: 'Sam <sam@example.com>' }), '“Pricing?” from Sam <sam@example.com>')
+  assert.equal(inReplyText({ subject: 'Pricing?', thread_id: 't-9' }), '“Pricing?” · Gmail thread t-9', 'the thread a reply goes into is shown')
+  assert.equal(inReplyText({ thread_id: 't-9' }), 'Gmail thread t-9', 'a thread-only reply still shows a row')
   const draft = { to: ['sam@example.com'], cc: [], subject: 'S', body: 'B' }
   assert.equal(isDirty({ to: 'sam@example.com', cc: '', subject: 'S', body: 'B' }, draft), false)
   assert.equal(isDirty({ to: 'sam@example.com', cc: 'x@example.net', subject: 'S', body: 'B' }, draft), true)

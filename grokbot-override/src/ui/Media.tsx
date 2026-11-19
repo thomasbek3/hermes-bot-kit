@@ -10,7 +10,7 @@
 import * as React from 'react'
 
 import { splitFences } from '../core/fences.js'
-import { dataUrlBytes, extractMedia, fileIconKind, formatBytes, middleTruncate, remoteImageHost } from '../core/media.js'
+import { dataUrlBytes, extractMedia, fileIconKind, formatBytes, isOpenableImageUrl, middleTruncate, remoteImageHost } from '../core/media.js'
 import { rowKey } from '../core/roster.js'
 import { readBotMedia } from './app'
 import { CodeBlock } from './CodeBlock'
@@ -140,15 +140,23 @@ export function OwnerMedia({ bot, item }: { bot: any; item: { path: string; kind
   if (item.kind === 'image') {
     if (error) return <span className="gbo-media-file is-error" title={error}>{item.name}: not available</span>
     const box = mediaBox(ready?.width, ready?.height)
+    const img = src ? (
+      <img
+        alt={item.name}
+        src={src}
+        loading="lazy"
+        {...(box ? { width: box.width, height: box.height, style: { aspectRatio: `${box.width} / ${box.height}` } } : {})}
+      />
+    ) : null
+    // Only a plain raster picture is offered as a link to open full size. An
+    // SVG (or anything else) the bot names stays an <img>, where its scripts
+    // never run, and is never opened as its own window.
     return src ? (
-      <a className="gbo-media-image" href={src} target="_blank" rel="noopener noreferrer" title={item.name}>
-        <img
-          alt={item.name}
-          src={src}
-          loading="lazy"
-          {...(box ? { width: box.width, height: box.height, style: { aspectRatio: `${box.width} / ${box.height}` } } : {})}
-        />
-      </a>
+      isOpenableImageUrl(src) ? (
+        <a className="gbo-media-image" href={src} target="_blank" rel="noopener noreferrer" title={item.name}>{img}</a>
+      ) : (
+        <span className="gbo-media-image" title={item.name}>{img}</span>
+      )
     ) : (
       <span className="gbo-media-image is-loading" aria-label={`Loading ${item.name}`} />
     )

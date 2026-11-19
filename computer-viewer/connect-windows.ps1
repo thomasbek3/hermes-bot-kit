@@ -153,6 +153,31 @@ function Test-TrustedOwner([string]$Path) {
     return ($owner -and ($TrustedOwnerSids -contains $owner.Value))
 }
 
+function Test-OwnedByUsOrTrusted([string]$Path) {
+    # True when $Path is owned by Administrators, SYSTEM, TrustedInstaller or
+    # the account running this installer (not by some other local account
+    # that could have created it first under C:\ProgramData).
+    $owner = (Get-Acl -LiteralPath $Path).GetOwner([System.Security.Principal.SecurityIdentifier])
+    if (-not $owner) { return $false }
+    if ($TrustedOwnerSids -contains $owner.Value) { return $true }
+    return ($owner.Value -eq [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+}
+
+function Test-WritableByNonAdmins([string]$Path) {
+    # True when anyone other than Administrators, SYSTEM or TrustedInstaller
+    # owns $Path or may write, delete or re-permission it.
+    $acl = Get-Acl -LiteralPath $Path
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if (-not $owner -or -not ($TrustedOwnerSids -contains $owner.Value)) { return $true }
+    $writeMask = [long](0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+    foreach ($ace in @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        if ($ace.AccessControlType -ne 'Allow') { continue }
+        if ($TrustedOwnerSids -contains $ace.IdentityReference.Value) { continue }
+        if (([long]$ace.FileSystemRights -band $writeMask) -ne 0) { return $true }
+    }
+    return $false
+}
+
 function Reset-ChildAcls([string]$Dir, [System.Security.Principal.SecurityIdentifier]$Owner) {
     # Every item below $Dir: owner $Owner, explicit entries removed, only what
     # it inherits. These trees are the installer's own and hold no links, so a
@@ -280,23 +305,7 @@ function New-VncPassword8 {
     return -join ($bytes | ForEach-Object { $alphabet[$_ % $alphabet.Length] })
 }
 
-function Get-OrCreateVncPassword {
-    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-    # The state folder: Administrators and SYSTEM only, whoever created it.
-    # (The hiperf installer protects its own files inside it separately.)
-    Set-ProtectedAcl -Path $StateDir
-    if (Test-Path -LiteralPath $PasswordFile) {
-        $existing = (Get-Content -LiteralPath $PasswordFile -Raw -ErrorAction SilentlyContinue)
-        if ($existing) {
-            $existing = $existing.Trim()
-            if ($existing.Length -ge 1) {
-                Write-Step "Reusing VNC password stored in $PasswordFile"
-                return $existing.Substring(0, [Math]::Min(8, $existing.Length))
-            }
-        }
-    }
-    $pw = New-VncPassword8
-    Set-Content -LiteralPath $PasswordFile -Value $pw -Encoding ASCII
+function Protect-PasswordFile {
     try {
         $acl = Get-Acl -LiteralPath $PasswordFile
         $acl.SetAccessRuleProtection($true, $false)
@@ -310,6 +319,36 @@ function Get-OrCreateVncPassword {
     } catch {
         # Best-effort ACL harden; the file still exists.
     }
+}
+
+function Get-OrCreateVncPassword {
+    # A password file another account created first (a standard user may
+    # create folders in C:\ProgramData) is never reused: that account would
+    # know the password. Checked before the folder is re-owned below.
+    $reuseOk = $false
+    if ((Test-Path -LiteralPath $PasswordFile) -and -not (Test-IsLink $PasswordFile) -and -not (Test-IsLink $StateDir)) {
+        $reuseOk = (Test-OwnedByUsOrTrusted $StateDir) -and (Test-OwnedByUsOrTrusted $PasswordFile)
+        if (-not $reuseOk) { Write-Warning "$PasswordFile was not created by this installer; making a new VNC password." }
+    }
+    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+    # The state folder: Administrators and SYSTEM only, whoever created it.
+    # (The hiperf installer protects its own files inside it separately.)
+    Set-ProtectedAcl -Path $StateDir
+    if ($reuseOk) {
+        $existing = (Get-Content -LiteralPath $PasswordFile -Raw -ErrorAction SilentlyContinue)
+        if ($existing) {
+            $existing = $existing.Trim()
+            if ($existing.Length -ge 1) {
+                Protect-PasswordFile
+                Write-Step "Reusing VNC password stored in $PasswordFile"
+                return $existing.Substring(0, [Math]::Min(8, $existing.Length))
+            }
+        }
+    }
+    if (Test-Path -LiteralPath $PasswordFile) { Remove-Item -LiteralPath $PasswordFile -Force }
+    $pw = New-VncPassword8
+    Set-Content -LiteralPath $PasswordFile -Value $pw -Encoding ASCII
+    Protect-PasswordFile
     Write-Step "Generated 8-char VNC password (DES limit) -> $PasswordFile"
     return $pw
 }
@@ -502,7 +541,17 @@ function Install-UsbmmiddVirtualDisplay {
             return $false
         }
         $srcDir = $installer.Directory.FullName
-        New-Item -ItemType Directory -Force -Path $UsbmmiddDir | Out-Null
+        if (-not (Test-Path -LiteralPath $UsbmmiddDir)) {
+            # Exclusive create: if another account made the folder after the
+            # owner check above (during the download), this fails instead of
+            # adopting it.
+            try {
+                New-Item -ItemType Directory -Path $UsbmmiddDir -ErrorAction Stop | Out-Null
+            } catch {
+                Write-Warning "$UsbmmiddDir appeared while installing; not adopting it. Delete it from an Administrator prompt and re-run."
+                return $false
+            }
+        }
         # Protected before the files land and again after: Administrators and
         # SYSTEM only, inheritance removed, owner Administrators.
         try {
@@ -740,10 +789,21 @@ rdpmode=0
         $UltraVncDir
     )
     if ($env:APPDATA) { $iniDirs += (Join-Path $env:APPDATA 'UltraVNC') }
+    $machineDirs = @((Join-Path $env:ProgramData 'UltraVNC'), $UltraVncDir)
     foreach ($d in $iniDirs) {
         try {
+            $machineWide = $machineDirs -contains $d
+            # The ini holds the VNC password (reversible obfuscation) and the
+            # service's AuthRequired/LoopbackOnly settings: a machine-wide
+            # folder another account created first is not used, and ours is
+            # Administrators/SYSTEM only.
+            if ($machineWide -and (Test-Path -LiteralPath $d) -and ((Test-IsLink $d) -or -not (Test-OwnedByUsOrTrusted $d))) {
+                Write-Warning "$d was not created by an administrator; not writing ultravnc.ini there."
+                continue
+            }
             New-Item -ItemType Directory -Force -Path $d | Out-Null
             Set-Content -LiteralPath (Join-Path $d 'ultravnc.ini') -Value $ini -Encoding ASCII
+            if ($machineWide) { Set-ProtectedAcl -Path $d -Recurse -ErrorAction Stop }
         } catch {
             Write-Warning "Could not write ultravnc.ini in $d : $_"
         }
@@ -862,6 +922,14 @@ if (-not (Test-PythonWorks $python)) {
 }
 
 Write-Step "Using Python: $python"
+# The SYSTEM task runs this interpreter at every boot: a standard user must not
+# be able to change it, its folder or its site-packages.
+$pyDir = Split-Path -Parent $python
+foreach ($p in @($python, $pyDir, (Join-Path $pyDir 'Lib'), (Join-Path $pyDir 'Lib\site-packages'))) {
+    if ((Test-Path -LiteralPath $p) -and ((Test-IsLink $p) -or (Test-WritableByNonAdmins $p))) {
+        throw "$p can be changed by non-administrators, and the SYSTEM task would run it. Install Python for all users (winget install -e --id Python.Python.3.12 --scope machine), then re-run."
+    }
+}
 if ($python -match '\\Users\\') {
     Write-Warning "Python looks like a per-user install. The SYSTEM scheduled task may not see it. Prefer: winget install -e --id Python.Python.3.12 --scope machine"
 }
