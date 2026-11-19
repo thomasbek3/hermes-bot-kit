@@ -360,7 +360,7 @@ function storageSet(key: string, value: unknown) {
 
 // ── roster ───────────────────────────────────────────────────────────────
 
-function activeConnectionId(): null | string {
+export function activeConnectionId(): null | string {
   try {
     return host?.state?.connectionId?.get?.() ?? host?.activeConnectionId?.() ?? null
   } catch {

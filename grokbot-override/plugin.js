@@ -50593,6 +50593,20 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
 .panel-row--link > svg:last-child { width: 12px; height: 12px; flex: none; opacity: 0.56; }
 .panel-row--link > .panel-row__title { flex: 1 1 0; min-width: 0; }
 .gbo-status-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--color-text-quaternary); }
+/* The Computer card (Grok Bot's): title and status left, a 64x40 pt
+   thumbnail right. The z's sit inside the thumbnail's top-right corner; a
+   still fills it; awake with no still yet shows a quiet screen glyph. */
+.gbo-computer-card { padding-right: 6px; }
+.gbo-computer-card .panel-row__text { gap: 1px; }
+.gbo-computer-thumb .computer-thumb__z1 { left: auto; right: 12px; top: 6px; }
+.gbo-computer-thumb .computer-thumb__z2 { left: auto; right: 7px; top: 2px; }
+.gbo-computer-thumb.is-glyph { color: var(--color-text-tertiary); }
+.gbo-computer-thumb.is-glyph svg { width: 18px; height: 18px; opacity: 0.7; }
+.gbo-computer-thumb.has-shot { box-shadow: var(--color-border-tertiary) 0 0 0 0.5px; }
+.gbo-computer-thumb.has-shot img { display: block; }
+/* The sleeping face follows the theme: a soft ink disc, eyes in the pane's colour. */
+.gbo-computer-thumb .computer-thumb__face { background: color-mix(in srgb, var(--color-ink) 30%, transparent); }
+.gbo-computer-thumb .computer-thumb__face i { background: var(--color-bg-pane); }
 .gbo-status-dot.is-on { background: var(--color-success); }
 /* A job: the row opens its details; run, edit and delete float over its
    right side on hover or focus; the switch is the reference's toggle. */
@@ -51083,7 +51097,7 @@ var ROSTER_CSS = (
    and scaled to fit, and one white control pill centred just under it (Grok
    Bot's viewer). The stage takes the display's aspect ratio, so the pill sits
    on the image's bottom edge rather than the pane's. */
-.gbo-screen { display: flex; flex-direction: column; background: #141414; color: #f5f5f5; }
+.gbo-screen { position: relative; display: flex; flex-direction: column; background: #141414; color: #f5f5f5; }
 .gbo-screen-view { position: relative; flex: 1; min-height: 0; container-type: size; }
 .gbo-screen-fit { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 48px 28px 36px; }
 .gbo-screen-stage {
@@ -51097,6 +51111,10 @@ var ROSTER_CSS = (
 .gbo-screen-stage.is-held { box-shadow: 0 0 0 1.5px var(--gbo-ring), 0 0 0 5px color-mix(in srgb, var(--gbo-ring) 16%, transparent); }
 .gbo-screen-stage.is-asleep { background: #1b1b1b; box-shadow: inset 0 0 0 1px #ffffff0d; }
 .gbo-screen-canvas { position: absolute; inset: 0; }
+/* Watching: the Mac's own pointer over the desk image. noVNC writes the
+   remote cursor (or "none" until the server sends one) as the canvas's inline
+   cursor; only a held control uses it (with showDotCursor for an empty one). */
+.gbo-screen-stage:not(.is-held) .gbo-screen-canvas canvas { cursor: default !important; }
 /* waking / reconnecting / lost: one calm line (and a quieter one) centred on
    the stage, under a small ring spinner in the pill's own grey. */
 .gbo-screen-note {
@@ -51122,7 +51140,7 @@ var ROSTER_CSS = (
 .gbo-screen-asleep { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
 .gbo-screen-asleep strong { font: 500 15px/22px var(--gbo-font); color: #f5f5f5; }
 .gbo-screen-asleep span { max-width: 380px; font: 13px/18px var(--gbo-font); color: #ffffff94; }
-.gbo-screen-corner { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 2px; }
+.gbo-screen-corner { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; gap: 2px; }
 .gbo-screen-icon-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;
   border: 0; border-radius: 8px; background: transparent; color: #ffffff8c; cursor: pointer;
@@ -58372,6 +58390,117 @@ function useStickToBottom(dep, mine, latest = "") {
 // src/ui/Profile.tsx
 import * as React23 from "react";
 
+// src/core/screenThumb.js
+var THUMB_STORAGE_KEY = "screen-thumbs";
+var THUMB_MAX_BYTES = 2e4;
+var THUMB_MAX_ENTRIES = 50;
+var THUMB_CAPTURE_MS = 2e4;
+var THUMB_SIZE = Object.freeze({ width: 128, height: 80 });
+function thumbKey(bot, activeConnectionId2 = null) {
+  const resolved = resolveBotConnectionRoute(bot);
+  if (resolved.route) return botRouteKey(resolved.route);
+  return `${activeConnectionId2 || "local"}::${String(bot?.name || "default")}`;
+}
+function computerStatus(status) {
+  if (status == null) return { state: "loading", label: "…" };
+  if (status.error || status.supported === false) return { state: "unavailable", label: "Unavailable" };
+  return status.running ? { state: "awake", label: "Awake" } : { state: "asleep", label: "Asleep" };
+}
+function computerCard(status, frame) {
+  const { state, label } = computerStatus(status);
+  if (state === "awake") return frame ? { state, label, thumb: "shot", src: frame } : { state, label, thumb: "glyph", src: null };
+  if (state === "loading") return { state, label, thumb: "blank", src: null };
+  return { state, label, thumb: "sleep", src: null };
+}
+function acceptableFrame(url, maxBytes = THUMB_MAX_BYTES) {
+  return typeof url === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(url) && url.length <= maxBytes;
+}
+function readAll(storage) {
+  try {
+    const raw = storage?.get?.(THUMB_STORAGE_KEY, null);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const out = {};
+    for (const [key, entry] of Object.entries(raw)) {
+      if (entry && acceptableFrame(entry.url) && Number.isFinite(entry.at)) out[key] = { url: entry.url, at: entry.at };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+function createThumbCache({ storage = null, maxEntries = THUMB_MAX_ENTRIES, maxBytes = THUMB_MAX_BYTES, now = Date.now } = {}) {
+  let entries = null;
+  const listeners = /* @__PURE__ */ new Set();
+  const load = () => entries ??= readAll(storage);
+  const persist = () => {
+    try {
+      storage?.set?.(THUMB_STORAGE_KEY, entries);
+    } catch {
+    }
+  };
+  const emit = () => {
+    for (const fn of [...listeners]) fn();
+  };
+  return {
+    get(key) {
+      return load()[key]?.url ?? null;
+    },
+    put(key, url) {
+      if (!key || !acceptableFrame(url, maxBytes)) return false;
+      const all = load();
+      if (all[key]?.url === url) return true;
+      all[key] = { url, at: now() };
+      const keys2 = Object.keys(all);
+      if (keys2.length > maxEntries) {
+        keys2.sort((a2, b2) => all[a2].at - all[b2].at);
+        for (const old of keys2.slice(0, keys2.length - maxEntries)) delete all[old];
+      }
+      persist();
+      emit();
+      return true;
+    },
+    size() {
+      return Object.keys(load()).length;
+    },
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    /** Point at another storage (read on the next get); listeners are not
+     *  called, so it is safe during a render. */
+    reset(nextStorage) {
+      storage = nextStorage ?? storage;
+      entries = null;
+    }
+  };
+}
+function snapshotCanvas(source, { doc = globalThis.document, maxBytes = THUMB_MAX_BYTES, size = THUMB_SIZE } = {}) {
+  try {
+    const sw = Number(source?.width) || 0;
+    const sh = Number(source?.height) || 0;
+    if (!doc || sw < 2 || sh < 2) return null;
+    const out = doc.createElement("canvas");
+    out.width = size.width;
+    out.height = size.height;
+    const ctx = out.getContext("2d");
+    if (!ctx) return null;
+    const want = size.width / size.height;
+    let cw = sw;
+    let ch = sh;
+    if (sw / sh > want) cw = sh * want;
+    else ch = sw / want;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(source, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, size.width, size.height);
+    for (const quality of [0.72, 0.5]) {
+      const url = out.toDataURL("image/jpeg", quality);
+      if (acceptableFrame(url, maxBytes)) return url;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // src/ui/BotDialogs.tsx
 import * as React19 from "react";
 
@@ -60979,6 +61108,28 @@ function screenStore(bot) {
 function useScreenState(store) {
   return React21.useSyncExternalStore(store.subscribe, store.get, store.get);
 }
+var thumbCache = null;
+var thumbStorage = null;
+function screenThumbs() {
+  const storage = app.ctx?.storage ?? null;
+  if (!thumbCache) {
+    thumbCache = createThumbCache({ storage });
+    thumbStorage = storage;
+  } else if (storage && storage !== thumbStorage) {
+    thumbCache.reset(storage);
+    thumbStorage = storage;
+  }
+  return thumbCache;
+}
+function screenThumbKey(bot) {
+  return thumbKey(bot, activeConnectionId());
+}
+function useScreenThumb(bot) {
+  const cache = screenThumbs();
+  const key = screenThumbKey(bot);
+  const read = React21.useCallback(() => cache.get(key), [cache, key]);
+  return React21.useSyncExternalStore(cache.subscribe, read, read);
+}
 async function loadRfb() {
   const mod = await init_novnc_rfb().then(() => novnc_rfb_exports);
   return mod.default;
@@ -61039,6 +61190,9 @@ var PILL_ICONS = {
   power: () => /* @__PURE__ */ jsx23("svg", { ...pillIcon, children: /* @__PURE__ */ jsx23("path", { d: "M12 3.5v7.5M6.6 7a7.5 7.5 0 1 0 10.8 0" }) }),
   spinner: () => /* @__PURE__ */ jsx23("svg", { ...pillIcon, className: "gbo-screen-spin", children: /* @__PURE__ */ jsx23("path", { d: "M20 12a8 8 0 1 1-8-8" }) })
 };
+function IconCollapse() {
+  return /* @__PURE__ */ jsx23("svg", { ...pillIcon, children: /* @__PURE__ */ jsx23("path", { d: "M14 10l6.5-6.5M14 4.5V10h5.5M10 14l-6.5 6.5M10 19.5V14H4.5" }) });
+}
 function StageNote({ text: text3, spinner = true, sub }) {
   return /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-note", role: "status", "aria-live": "polite", children: [
     spinner ? /* @__PURE__ */ jsx23("span", { className: "gbo-screen-note-spin", "aria-hidden": "true" }) : null,
@@ -61055,7 +61209,7 @@ function ControlPill({ pill, title, run }) {
     pill.actions.map((action) => /* @__PURE__ */ jsx23("button", { type: "button", className: `gbo-screen-pill-btn is-${action.kind}`, disabled: action.disabled, title: action.title, onClick: () => run(action.id), children: action.label }, action.id))
   ] });
 }
-function BotScreen({ bot, initialWake }) {
+function BotScreen({ bot, initialWake, onExit }) {
   const store = screenStore(bot);
   const state = useScreenState(store);
   const status = state.status;
@@ -61073,6 +61227,13 @@ function BotScreen({ bot, initialWake }) {
     installRetention.current = null;
   }, []);
   const pasteCleanup = React21.useRef(null);
+  const liveCanvas = React21.useRef(null);
+  const captureThumb = React21.useCallback(() => {
+    const canvas = liveCanvas.current;
+    if (!canvas) return;
+    const still = snapshotCanvas(canvas);
+    if (still) screenThumbs().put(screenThumbKey(bot), still);
+  }, [rowKey(bot)]);
   const generation2 = React21.useRef(0);
   const dialedAt = React21.useRef(0);
   const evictions = React21.useRef(0);
@@ -61112,7 +61273,10 @@ function BotScreen({ bot, initialWake }) {
     }),
     []
   );
-  const visible2 = useViewerVisibility(`plugin-workspace:${screenWorkspaceId(bot)}`, (shown) => waker.setVisible(shown));
+  const visible2 = useViewerVisibility(`plugin-workspace:${screenWorkspaceId(bot)}`, (shown) => {
+    if (!shown) captureThumb();
+    waker.setVisible(shown);
+  });
   React21.useEffect(() => {
     const machine = createScreenWaker({
       readStatus,
@@ -61158,6 +61322,8 @@ function BotScreen({ bot, initialWake }) {
     };
   }, [refresh, releaseInstall, rowKey(bot)]);
   const detach = React21.useCallback((handBack2 = false) => {
+    captureThumb();
+    liveCanvas.current = null;
     generation2.current += 1;
     if (handBack2) socket.current?.close(1e3);
     try {
@@ -61171,7 +61337,7 @@ function BotScreen({ bot, initialWake }) {
     retention.current = null;
     pasteCleanup.current?.();
     pasteCleanup.current = null;
-  }, []);
+  }, [captureThumb]);
   const attach = React21.useCallback(
     async (auto = false) => {
       if (!auto) evictions.current = 0;
@@ -61213,8 +61379,10 @@ function BotScreen({ bot, initialWake }) {
         client.background = "transparent";
         client.qualityLevel = 7;
         client.viewOnly = !leaseHeldBy(observe.lease, minted);
+        client.showDotCursor = true;
         client.addEventListener("connect", () => {
           if (mine === generation2.current) {
+            liveCanvas.current = canvasHost.current?.querySelector("canvas") ?? null;
             setEvicted(false);
             setError(null);
             waker.connected();
@@ -61223,6 +61391,8 @@ function BotScreen({ bot, initialWake }) {
         client.addEventListener("disconnect", (event) => {
           if (rfb.current === client) rfb.current = null;
           if (mine !== generation2.current) return;
+          captureThumb();
+          liveCanvas.current = null;
           const reason = event?.detail?.reason ?? "";
           if (closeCode === CLOSE_CONTROL_TAKEN || String(reason).includes("control-taken")) {
             const next = nextEviction(evictions.current, dialedAt.current);
@@ -61275,6 +61445,17 @@ function BotScreen({ bot, initialWake }) {
       detach(true);
     };
   }, [detach, releaseInstall]);
+  React21.useEffect(() => {
+    if (wake.mode !== "live") return;
+    const first = setTimeout(captureThumb, 1500);
+    const every = setInterval(() => {
+      if (visible2.current) captureThumb();
+    }, THUMB_CAPTURE_MS);
+    return () => {
+      clearTimeout(first);
+      clearInterval(every);
+    };
+  }, [wake.mode, captureThumb]);
   React21.useEffect(() => {
     if (rfb.current) {
       rfb.current.viewOnly = !iHold;
@@ -61331,6 +61512,7 @@ function BotScreen({ bot, initialWake }) {
     error ? /* @__PURE__ */ jsx23("div", { className: "gbo-card-error", children: error }) : null
   ] });
   let content;
+  let reconnect = null;
   if (phase === "unavailable") {
     content = center("No screen on this Hermes", isManagedBackend(bot) ? "Bot Screen has not reached this managed Hermes release yet." : `${who}’s Hermes predates Bot Screen; update Hermes on that machine.`);
   } else if (phase === "loading" && !waking) {
@@ -61381,19 +61563,25 @@ function BotScreen({ bot, initialWake }) {
         /* @__PURE__ */ jsx23("span", { children: status?.blocker ?? "Start it to watch the bot work, or to take over." })
       ] });
     const lostWords = link === "error" || link === "reconnecting" ? wake.error || error : null;
-    content = /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-view", children: [
-      running ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-corner", children: /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-screen-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: settling, onClick: wakeAgain, children: /* @__PURE__ */ jsx23(IconRefresh, {}) }) }) : null,
-      /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-fit", children: [
-        /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}${running && link === "live" ? "" : " is-asleep"}`, style: ratio, children: [
-          /* @__PURE__ */ jsx23("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
-          evicted ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
-          note
-        ] }),
-        /* @__PURE__ */ jsx23(ControlPill, { pill, title: screenPillTitle(who, status, lease, lostWords), run })
-      ] })
-    ] });
+    if (running)
+      reconnect = /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-screen-icon-btn", "aria-label": "Reconnect", title: "Reconnect", disabled: settling, onClick: wakeAgain, children: /* @__PURE__ */ jsx23(IconRefresh, {}) });
+    content = /* @__PURE__ */ jsx23("div", { className: "gbo-screen-view", children: /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-fit", children: [
+      /* @__PURE__ */ jsxs21("div", { className: `gbo-screen-stage${iHold ? " is-held" : ""}${running && link === "live" ? "" : " is-asleep"}`, style: ratio, children: [
+        /* @__PURE__ */ jsx23("div", { className: "gbo-screen-canvas", "data-remote-screen": "", "data-terminal": "", ref: canvasHost }),
+        evicted ? /* @__PURE__ */ jsx23("div", { className: "gbo-screen-banner is-top", children: "Someone else took control; watching again." }) : null,
+        note
+      ] }),
+      /* @__PURE__ */ jsx23(ControlPill, { pill, title: screenPillTitle(who, status, lease, lostWords), run })
+    ] }) });
   }
-  return /* @__PURE__ */ jsx23("div", { "data-gbo-root": "", "data-gbo-theme": "dark", className: "gbo-screen", children: content });
+  const corner = reconnect || onExit ? /* @__PURE__ */ jsxs21("div", { className: "gbo-screen-corner", children: [
+    reconnect,
+    onExit ? /* @__PURE__ */ jsx23("button", { type: "button", className: "gbo-screen-icon-btn gbo-screen-exit", "aria-label": "Close", title: "Close", onClick: onExit, children: /* @__PURE__ */ jsx23(IconCollapse, {}) }) : null
+  ] }) : null;
+  return /* @__PURE__ */ jsxs21("div", { "data-gbo-root": "", "data-gbo-theme": "dark", className: "gbo-screen", children: [
+    content,
+    corner
+  ] });
 }
 var openScreens = /* @__PURE__ */ new Map();
 function screenWorkspaceId(bot) {
@@ -61416,10 +61604,20 @@ function openBotScreen(bot) {
     title: `${displayName(bot, metaFor(bot))} · Computer`,
     minWidth: "24rem",
     dock: { pane: "workspace", pos: "center" },
-    render: () => /* @__PURE__ */ jsx23(OverrideBoundary, { area: "screen", children: /* @__PURE__ */ jsx23(BotScreen, { bot }) }),
+    render: () => /* @__PURE__ */ jsx23(OverrideBoundary, { area: "screen", children: /* @__PURE__ */ jsx23(BotScreen, { bot, onExit: () => closeBotScreen(bot) }) }),
     onClose: () => openScreens.delete(id)
   });
   openScreens.set(id, typeof close === "function" ? close : () => void 0);
+}
+function closeBotScreen(bot) {
+  const close = openScreens.get(screenWorkspaceId(bot));
+  if (!close) return false;
+  try {
+    close();
+  } catch {
+  }
+  openScreens.delete(screenWorkspaceId(bot));
+  return true;
 }
 function closeAllScreens() {
   for (const close of openScreens.values()) {
@@ -61579,6 +61777,44 @@ function ModelCard({ bot }) {
     ] })
   ] }) }) });
 }
+function ComputerThumb({ card }) {
+  if (card.thumb === "shot")
+    return /* @__PURE__ */ jsx25("span", { className: "computer-thumb has-shot gbo-computer-thumb", "data-thumb": "shot", children: /* @__PURE__ */ jsx25("img", { src: card.src, alt: "", draggable: false }) });
+  if (card.thumb === "glyph")
+    return /* @__PURE__ */ jsx25("span", { className: "computer-thumb gbo-computer-thumb is-glyph", "data-thumb": "glyph", "aria-hidden": "true", children: /* @__PURE__ */ jsx25(IconScreen, {}) });
+  if (card.thumb === "sleep")
+    return /* @__PURE__ */ jsxs23("span", { className: "computer-thumb gbo-computer-thumb is-sleep", "data-thumb": "sleep", "aria-hidden": "true", children: [
+      /* @__PURE__ */ jsxs23("span", { className: "computer-thumb__face", children: [
+        /* @__PURE__ */ jsx25("i", {}),
+        /* @__PURE__ */ jsx25("i", {})
+      ] }),
+      /* @__PURE__ */ jsx25("span", { className: "computer-thumb__z1", children: "z" }),
+      /* @__PURE__ */ jsx25("span", { className: "computer-thumb__z2", children: "z" })
+    ] });
+  return /* @__PURE__ */ jsx25("span", { className: "computer-thumb gbo-computer-thumb is-blank", "data-thumb": "blank", "aria-hidden": "true" });
+}
+function ComputerCard({ bot, status }) {
+  const frame = useScreenThumb(bot);
+  const card = computerCard(status, frame);
+  return /* @__PURE__ */ jsx25("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs23(
+    "button",
+    {
+      type: "button",
+      className: "panel-row panel-row--computer gbo-computer-card",
+      "data-state": card.state,
+      title: `Bot’s computer · ${card.label}`,
+      "aria-label": `Bot’s computer: ${card.label}. Open it`,
+      onClick: () => openBotScreen(bot),
+      children: [
+        /* @__PURE__ */ jsxs23("span", { className: "panel-row__text", children: [
+          /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: "Bot’s computer" }),
+          /* @__PURE__ */ jsx25("span", { className: "panel-row__sub", children: card.label })
+        ] }),
+        /* @__PURE__ */ jsx25(ComputerThumb, { card })
+      ]
+    }
+  ) });
+}
 function ProfilePanel({ bot, onClose }) {
   const cron = useStore(app.cron);
   const screen = useStore(app.screen);
@@ -61603,7 +61839,6 @@ function ProfilePanel({ bot, onClose }) {
   const loading = !mine || cron.loading;
   const cronError = mine ? cron.error : null;
   const status = screen.key === rowKey(bot) ? screen.status : null;
-  const computerText = `Bot’s computer · ${status == null ? "…" : status.error || status.supported === false ? "Unavailable" : status.running ? "Running" : "Asleep"}`;
   return /* @__PURE__ */ jsxs23(OverlayScroll, { as: "aside", wrapClassName: "details__scroll gbo-panel-scroll", className: "details__body gbo-panel", "aria-label": `${name} profile`, children: [
     /* @__PURE__ */ jsx25("div", { className: "details__top", children: onClose ? /* @__PURE__ */ jsx25("button", { type: "button", className: "icon-btn icon-btn--bordered gbo-panel-close", title: "Close profile", "aria-label": "Close profile", onClick: onClose, children: /* @__PURE__ */ jsx25(IconX, {}) }) : null }),
     /* @__PURE__ */ jsxs23("div", { className: "details__identity gbo-panel-hero", children: [
@@ -61667,21 +61902,15 @@ function ProfilePanel({ bot, onClose }) {
       /* @__PURE__ */ jsx25(SlackStatusCard, { bot }),
       /* @__PURE__ */ jsxs23("section", { className: "gbo-panel-section", children: [
         /* @__PURE__ */ jsx25("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx25("span", { children: "Computer" }) }),
-        /* @__PURE__ */ jsxs23("div", { className: "panel-card gbo-panel-box", children: [
-          /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: computerText, onClick: () => openBotScreen(bot), children: [
-            /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconScreen, {}) }),
-            /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: computerText }),
-            /* @__PURE__ */ jsx25("span", { className: `gbo-status-dot${status?.running ? " is-on" : ""}` })
+        /* @__PURE__ */ jsx25(ComputerCard, { bot, status }),
+        cv.present ? /* @__PURE__ */ jsx25("div", { className: "panel-card gbo-panel-box", children: /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Computer viewer · ${cv.visible ? "Showing" : "Hidden"}`, onClick: openComputerViewer, children: [
+          /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconScreen, {}) }),
+          /* @__PURE__ */ jsxs23("span", { className: "panel-row__title", children: [
+            "Computer viewer · ",
+            cv.visible ? "Showing" : "Hidden"
           ] }),
-          cv.present ? /* @__PURE__ */ jsxs23("button", { type: "button", className: "panel-row panel-row--link gbo-panel-link", title: `Computer viewer · ${cv.visible ? "Showing" : "Hidden"}`, onClick: openComputerViewer, children: [
-            /* @__PURE__ */ jsx25("span", { className: "panel-row__glyph", children: /* @__PURE__ */ jsx25(IconScreen, {}) }),
-            /* @__PURE__ */ jsxs23("span", { className: "panel-row__title", children: [
-              "Computer viewer · ",
-              cv.visible ? "Showing" : "Hidden"
-            ] }),
-            /* @__PURE__ */ jsx25("span", { className: `gbo-status-dot${cv.visible ? " is-on" : ""}` })
-          ] }) : null
-        ] })
+          /* @__PURE__ */ jsx25("span", { className: `gbo-status-dot${cv.visible ? " is-on" : ""}` })
+        ] }) }) : null
       ] }),
       /* @__PURE__ */ jsx25(ModelCard, { bot }),
       /* @__PURE__ */ jsxs23("section", { className: "gbo-panel-section", children: [

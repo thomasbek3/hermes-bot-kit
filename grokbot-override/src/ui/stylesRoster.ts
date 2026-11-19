@@ -247,7 +247,7 @@ export const ROSTER_CSS = /* css */ `
    and scaled to fit, and one white control pill centred just under it (Grok
    Bot's viewer). The stage takes the display's aspect ratio, so the pill sits
    on the image's bottom edge rather than the pane's. */
-.gbo-screen { display: flex; flex-direction: column; background: #141414; color: #f5f5f5; }
+.gbo-screen { position: relative; display: flex; flex-direction: column; background: #141414; color: #f5f5f5; }
 .gbo-screen-view { position: relative; flex: 1; min-height: 0; container-type: size; }
 .gbo-screen-fit { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 48px 28px 36px; }
 .gbo-screen-stage {
@@ -261,6 +261,10 @@ export const ROSTER_CSS = /* css */ `
 .gbo-screen-stage.is-held { box-shadow: 0 0 0 1.5px var(--gbo-ring), 0 0 0 5px color-mix(in srgb, var(--gbo-ring) 16%, transparent); }
 .gbo-screen-stage.is-asleep { background: #1b1b1b; box-shadow: inset 0 0 0 1px #ffffff0d; }
 .gbo-screen-canvas { position: absolute; inset: 0; }
+/* Watching: the Mac's own pointer over the desk image. noVNC writes the
+   remote cursor (or "none" until the server sends one) as the canvas's inline
+   cursor; only a held control uses it (with showDotCursor for an empty one). */
+.gbo-screen-stage:not(.is-held) .gbo-screen-canvas canvas { cursor: default !important; }
 /* waking / reconnecting / lost: one calm line (and a quieter one) centred on
    the stage, under a small ring spinner in the pill's own grey. */
 .gbo-screen-note {
@@ -286,7 +290,7 @@ export const ROSTER_CSS = /* css */ `
 .gbo-screen-asleep { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
 .gbo-screen-asleep strong { font: 500 15px/22px var(--gbo-font); color: #f5f5f5; }
 .gbo-screen-asleep span { max-width: 380px; font: 13px/18px var(--gbo-font); color: #ffffff94; }
-.gbo-screen-corner { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 2px; }
+.gbo-screen-corner { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; gap: 2px; }
 .gbo-screen-icon-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;
   border: 0; border-radius: 8px; background: transparent; color: #ffffff8c; cursor: pointer;

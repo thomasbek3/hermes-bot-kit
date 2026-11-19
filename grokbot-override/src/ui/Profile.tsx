@@ -10,6 +10,7 @@
 import * as React from 'react'
 
 import { isLegacyDelegatedRoutine, routineTitle } from '../core/cronOps.js'
+import { computerCard } from '../core/screenThumb.js'
 import { displayName, handleOf, rowKey } from '../core/roster.js'
 import { app, backToOverride, loadCron, metaFor, openComputerViewer, openRoom, toggleCron } from './app'
 import { BotAvatar } from './Avatar'
@@ -19,7 +20,7 @@ import { IconEdit, IconPlay, IconRefresh, IconSettings, IconTrash, IconUsers } f
 import { botFor, openNewGroupForm } from './Rooms'
 import { openDialog, roster2 } from './rosterStores'
 import { loadBotModel, loadBotModelSettings, runJob } from './rosterActions'
-import { openBotScreen } from './Screen'
+import { openBotScreen, useScreenThumb } from './Screen'
 import { SlackStatusCard, SuggestedSlack } from './SlackSetup'
 import { useStore } from './store'
 import { OverlayScroll } from './OverlayScroll'
@@ -65,6 +66,62 @@ function ModelCard({ bot }: { bot: any }) {
   )
 }
 
+/** The thumbnail on the Computer card's right: the sleeping face (asleep or
+ *  unavailable), the viewer's last still (awake), a screen glyph (awake, no
+ *  still yet) or an empty tile (status not read yet). */
+function ComputerThumb({ card }: { card: ReturnType<typeof computerCard> }) {
+  if (card.thumb === 'shot')
+    return (
+      <span className="computer-thumb has-shot gbo-computer-thumb" data-thumb="shot">
+        <img src={card.src!} alt="" draggable={false} />
+      </span>
+    )
+  if (card.thumb === 'glyph')
+    return (
+      <span className="computer-thumb gbo-computer-thumb is-glyph" data-thumb="glyph" aria-hidden="true">
+        <IconScreen />
+      </span>
+    )
+  if (card.thumb === 'sleep')
+    return (
+      <span className="computer-thumb gbo-computer-thumb is-sleep" data-thumb="sleep" aria-hidden="true">
+        <span className="computer-thumb__face">
+          <i />
+          <i />
+        </span>
+        <span className="computer-thumb__z1">z</span>
+        <span className="computer-thumb__z2">z</span>
+      </span>
+    )
+  return <span className="computer-thumb gbo-computer-thumb is-blank" data-thumb="blank" aria-hidden="true" />
+}
+
+/** Computer: one card, "Bot’s computer" over its status, the thumbnail on
+ *  the right (Grok Bot's Computer card); a click opens the viewer. The
+ *  card never asks the gateway for anything itself (core/screenThumb.js). */
+function ComputerCard({ bot, status }: { bot: any; status: any }) {
+  const frame = useScreenThumb(bot)
+  const card = computerCard(status, frame)
+  return (
+    <div className="panel-card gbo-panel-box">
+      <button
+        type="button"
+        className="panel-row panel-row--computer gbo-computer-card"
+        data-state={card.state}
+        title={`Bot’s computer · ${card.label}`}
+        aria-label={`Bot’s computer: ${card.label}. Open it`}
+        onClick={() => openBotScreen(bot)}
+      >
+        <span className="panel-row__text">
+          <span className="panel-row__title">Bot’s computer</span>
+          <span className="panel-row__sub">{card.label}</span>
+        </span>
+        <ComputerThumb card={card} />
+      </button>
+    </div>
+  )
+}
+
 /** `onClose` draws the panel's own round close button (top right); the
  *  narrow drawer brings its own instead. */
 export function ProfilePanel({ bot, onClose }: { bot: any; onClose?: () => void }) {
@@ -93,7 +150,6 @@ export function ProfilePanel({ bot, onClose }: { bot: any; onClose?: () => void 
   const loading = !mine || cron.loading
   const cronError = mine ? cron.error : null
   const status = screen.key === rowKey(bot) ? screen.status : null
-  const computerText = `Bot’s computer · ${status == null ? '…' : status.error || status.supported === false ? 'Unavailable' : status.running ? 'Running' : 'Asleep'}`
 
   return (
     <OverlayScroll as="aside" wrapClassName="details__scroll gbo-panel-scroll" className="details__body gbo-panel" aria-label={`${name} profile`}>
@@ -182,15 +238,11 @@ export function ProfilePanel({ bot, onClose }: { bot: any; onClose?: () => void 
         <div className="section-label gbo-panel-label">
           <span>Computer</span>
         </div>
-        <div className="panel-card gbo-panel-box">
-          <button type="button" className="panel-row panel-row--link gbo-panel-link" title={computerText} onClick={() => openBotScreen(bot)}>
-            <span className="panel-row__glyph">
-              <IconScreen />
-            </span>
-            <span className="panel-row__title">{computerText}</span>
-            <span className={`gbo-status-dot${status?.running ? ' is-on' : ''}`} />
-          </button>
-          {cv.present ? (
+        <ComputerCard bot={bot} status={status} />
+        {/* The kit's separate Computer viewer plugin (P5), when it is loaded:
+            its own card under the bot's computer. */}
+        {cv.present ? (
+          <div className="panel-card gbo-panel-box">
             <button type="button" className="panel-row panel-row--link gbo-panel-link" title={`Computer viewer · ${cv.visible ? 'Showing' : 'Hidden'}`} onClick={openComputerViewer}>
               <span className="panel-row__glyph">
                 <IconScreen />
@@ -198,8 +250,8 @@ export function ProfilePanel({ bot, onClose }: { bot: any; onClose?: () => void 
               <span className="panel-row__title">Computer viewer · {cv.visible ? 'Showing' : 'Hidden'}</span>
               <span className={`gbo-status-dot${cv.visible ? ' is-on' : ''}`} />
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </section>
 
       <ModelCard bot={bot} />

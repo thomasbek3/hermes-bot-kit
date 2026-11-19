@@ -20,7 +20,9 @@ import { primeBotModel } from '../src/ui/rosterActions'
 import { primeModelOptions } from '../src/ui/ProfileConfig'
 import { slack } from '../src/ui/slackActions'
 import { SlackConnect } from '../src/ui/SlackConnect'
-import { BotScreen, screenStore } from '../src/ui/Screen'
+import { BotScreen, screenStore, screenThumbKey, screenThumbs } from '../src/ui/Screen'
+import { ProfilePanel } from '../src/ui/Profile'
+import { deflateSync } from 'node:zlib'
 const avatarShapeForKey = (key: string) => avatarShapeFor(key).name
 
 /** Demo scheduled jobs per fixture bot (one paused, for the off switch). */
@@ -339,7 +341,7 @@ function findKeyFor(name: string): string {
 /** The bot's computer in one state, framed like its workspace tab (the
  *  control pill under the desk image). The desk image itself is a stand-in
  *  drawn by this page's CSS (no screen stream in a static render). */
-type ScreenPreviewState = 'watching' | 'in-control' | 'stale-hold' | 'not-running' | 'waking' | 'reconnecting' | 'gave-up'
+type ScreenPreviewState = 'watching' | 'in-control' | 'stale-hold' | 'not-running' | 'waking' | 'reconnecting' | 'gave-up' | 'not-installed' | 'no-screen'
 
 /** The wake machine's state for each preview (core/screenWake.js). */
 const PREVIEW_WAKE: Record<ScreenPreviewState, { mode: string; error: string | null; recovering: boolean }> = {
@@ -349,7 +351,11 @@ const PREVIEW_WAKE: Record<ScreenPreviewState, { mode: string; error: string | n
   'not-running': { mode: 'paused', error: null, recovering: false },
   waking: { mode: 'waking', error: null, recovering: false },
   reconnecting: { mode: 'retrying', error: 'The screen stream was lost.', recovering: true },
-  'gave-up': { mode: 'gave-up', error: 'this profile’s Bot Desktop is not running; call display.start first', recovering: true }
+  'gave-up': { mode: 'gave-up', error: 'this profile’s Bot Desktop is not running; call display.start first', recovering: true },
+  // The centred cards (no stage, no pill): an install card, and a Hermes
+  // with no Bot Screen.
+  'not-installed': { mode: 'blocked', error: null, recovering: false },
+  'no-screen': { mode: 'blocked', error: null, recovering: false }
 }
 
 export function renderScreenState(state: ScreenPreviewState, theme: 'light' | 'dark' = 'light') {
@@ -363,12 +369,13 @@ export function renderScreenState(state: ScreenPreviewState, theme: 'light' | 'd
       : state === 'stale-hold'
         ? { holder: 'human', viewer_hash: 'bbbbbbbbbbbb', epoch: 2, since: 0 }
         : { holder: 'agent', epoch: 1, since: 0 }
-  store.setStatus({ supported: true, installed: true, running, display: ':20', geometry: '1920x1200', profile_key: 'pk-travel', lease })
+  store.setStatus({ supported: true, installed: state !== 'not-installed', running: running && state !== 'not-installed', missing: state === 'not-installed' ? ['xvfb'] : undefined, display: ':20', geometry: '1920x1200', profile_key: 'pk-travel', lease })
   store.setLease(lease)
   store.setViewer(viewer)
+  if (state === 'no-screen') store.setUnavailable()
   const body = renderToStaticMarkup(
     <div className="preview-screen">
-      <BotScreen bot={bot} initialWake={PREVIEW_WAKE[state]} />
+      <BotScreen bot={bot} initialWake={PREVIEW_WAKE[state]} onExit={() => undefined} />
     </div>
   )
   const page = `
@@ -389,6 +396,90 @@ body { background: ${theme === 'dark' ? '#0a0a0a' : '#ffffff'}; font-family: -ap
   return `<!doctype html><html class="${theme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8"><style>${CSS}\n${page}</style></head><body>${body}</body></html>`
 }
 
+/** A made-up desk still (128x80 PNG: grey wallpaper, one light window, a
+ *  dark taskbar) standing in for the viewer's own snapshot. */
+export function sampleDeskStill(): string {
+  const w = 128
+  const h = 80
+  const rows: number[] = []
+  for (let y = 0; y < h; y += 1) {
+    rows.push(0)
+    for (let x = 0; x < w; x += 1) {
+      let v = Math.round(150 - 0.5 * x + 0.35 * y)
+      if (x >= 20 && x < 86 && y >= 12 && y < 58) v = y < 17 ? 214 : 238
+      if (y >= h - 5) v = 34
+      rows.push(v, v, Math.min(255, v + 4))
+    }
+  }
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    return c >>> 0
+  })
+  const crc = (buf: Uint8Array) => {
+    let c = 0xffffffff
+    for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8)
+    return (c ^ 0xffffffff) >>> 0
+  }
+  const chunk = (type: string, data: Uint8Array) => {
+    const out = new Uint8Array(12 + data.length)
+    const view = new DataView(out.buffer)
+    view.setUint32(0, data.length)
+    out.set(new TextEncoder().encode(type), 4)
+    out.set(data, 8)
+    view.setUint32(8 + data.length, crc(out.subarray(4, 8 + data.length)))
+    return out
+  }
+  const ihdr = new Uint8Array(13)
+  new DataView(ihdr.buffer).setUint32(0, w)
+  new DataView(ihdr.buffer).setUint32(4, h)
+  ihdr.set([8, 2, 0, 0, 0], 8)
+  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', new Uint8Array(deflateSync(Uint8Array.from(rows), { level: 9 }))), chunk('IEND', new Uint8Array())]
+  return `data:image/png;base64,${Buffer.concat(parts).toString('base64')}`
+}
+
+/** The profile panel's Computer card in one state, light and dark side by
+ *  side (the whole panel, as the reference shows it). */
+export type ComputerCardState = 'awake' | 'awake-no-still' | 'asleep' | 'unavailable'
+export function renderComputerCard(state: ComputerCardState, { hostCss = '' }: { hostCss?: string } = {}) {
+  const bot = ROSTER[0]
+  const status = state === 'unavailable' ? { error: true } : { supported: true, installed: true, running: state.startsWith('awake') }
+  app.screen.set({ key: rowKey(bot), status })
+  app.cron.set({ key: rowKey(bot), loading: false, error: null, busy: {}, jobs: JOBS[bot.name] || [] })
+  primeBotModel(bot, { provider: 'example', model: 'demo-large' })
+  // A still from an earlier viewing: shown only while awake.
+  if (state !== 'awake-no-still') screenThumbs().put(screenThumbKey(bot), sampleDeskStill())
+  else screenThumbs().reset(null)
+  const column = (theme: 'light' | 'dark') => (
+    <div className={theme === 'dark' ? 'dark preview-card-col' : 'preview-card-col'}>
+      <div data-gbo-root="" className="gbo-ws">
+        <div className="details gbo-panel-dock" style={{ width: 342 }}>
+          <ProfilePanel bot={bot} onClose={() => undefined} />
+        </div>
+      </div>
+    </div>
+  )
+  const body = renderToStaticMarkup(
+    <div className="preview-card-pair">
+      {column('light')}
+      {column('dark')}
+    </div>
+  )
+  const page = `
+html, body { margin: 0; }
+body { background: #808080; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.preview-card-pair { display: flex; gap: 0; width: max-content; }
+.preview-card-col { width: 342px; height: 980px; display: flex; }
+.preview-card-col > .gbo-ws { flex: 1; }
+.preview-card-col *, .preview-card-col *::before { animation: none !important; transition: none !important; }
+`
+  const host = hostCss ? `<link rel="stylesheet" href="${hostCss}">` : ''
+  return `<!doctype html><html><head><meta charset="utf-8">${host}<style>${CSS}
+${page}</style></head><body>${body}</body></html>`
+}
+
+export { screenThumbKey, screenThumbs }
+export * as screenThumbApi from '../src/core/screenThumb.js'
 export * as avatarShapesApi from '../src/ui/avatarShapes'
 export * as Avatar from '../src/ui/Avatar'
 export { refCss, REF_STYLES } from '../src/ui/styles-ref'

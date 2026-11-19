@@ -706,6 +706,20 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
 .panel-row--link > svg:last-child { width: 12px; height: 12px; flex: none; opacity: 0.56; }
 .panel-row--link > .panel-row__title { flex: 1 1 0; min-width: 0; }
 .gbo-status-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--color-text-quaternary); }
+/* The Computer card (Grok Bot's): title and status left, a 64x40 pt
+   thumbnail right. The z's sit inside the thumbnail's top-right corner; a
+   still fills it; awake with no still yet shows a quiet screen glyph. */
+.gbo-computer-card { padding-right: 6px; }
+.gbo-computer-card .panel-row__text { gap: 1px; }
+.gbo-computer-thumb .computer-thumb__z1 { left: auto; right: 12px; top: 6px; }
+.gbo-computer-thumb .computer-thumb__z2 { left: auto; right: 7px; top: 2px; }
+.gbo-computer-thumb.is-glyph { color: var(--color-text-tertiary); }
+.gbo-computer-thumb.is-glyph svg { width: 18px; height: 18px; opacity: 0.7; }
+.gbo-computer-thumb.has-shot { box-shadow: var(--color-border-tertiary) 0 0 0 0.5px; }
+.gbo-computer-thumb.has-shot img { display: block; }
+/* The sleeping face follows the theme: a soft ink disc, eyes in the pane's colour. */
+.gbo-computer-thumb .computer-thumb__face { background: color-mix(in srgb, var(--color-ink) 30%, transparent); }
+.gbo-computer-thumb .computer-thumb__face i { background: var(--color-bg-pane); }
 .gbo-status-dot.is-on { background: var(--color-success); }
 /* A job: the row opens its details; run, edit and delete float over its
    right side on hover or focus; the switch is the reference's toggle. */

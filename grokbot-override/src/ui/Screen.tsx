@@ -4,6 +4,10 @@
 // Opening (or showing) the viewer wakes a screen that is asleep and dials it;
 // a dropped stream recovers by itself with a bounded backoff
 // (core/screenWake.js), and only then shows "Connection lost" + Retry.
+// A quiet collapse icon in the top-right corner closes the viewer tab (the
+// tab's own close), in every state. While live it keeps a small still of its
+// canvas for the profile panel's Computer card (core/screenThumb.js; local
+// only, never a gateway call).
 // Behaviour is stock screen-pane.tsx (see core/screen.js for the citations);
 // the RFB client is the kit computer-viewer's vendored noVNC 1.7.0 (MPL-2.0,
 // ../../computer-viewer/vendor), loaded only when a screen attaches.
@@ -29,7 +33,8 @@ import {
 } from '../core/screen.js'
 import { screenLink, screenPill, screenPillTitle, screenRatio } from '../core/screenPill.js'
 import { createScreenWaker } from '../core/screenWake.js'
-import { app, metaFor } from './app'
+import { createThumbCache, snapshotCanvas, THUMB_CAPTURE_MS, thumbKey } from '../core/screenThumb.js'
+import { activeConnectionId, app, metaFor } from './app'
 import { IconEye, IconRefresh, IconWarn } from './iconsRoster'
 import { onRosterParityStop } from './rosterActions'
 import { setScreenOpener } from './RosterMenus'
@@ -46,6 +51,34 @@ export function screenStore(bot: any) {
 
 function useScreenState(store: ReturnType<typeof createScreenStore>) {
   return React.useSyncExternalStore(store.subscribe as any, store.get, store.get)
+}
+
+// The last still each viewer showed, for the profile panel's Computer card:
+// memory, mirrored to this plugin's storage (core/screenThumb.js).
+let thumbCache: null | ReturnType<typeof createThumbCache> = null
+let thumbStorage: any = null
+export function screenThumbs() {
+  const storage = app.ctx?.storage ?? null
+  if (!thumbCache) {
+    thumbCache = createThumbCache({ storage })
+    thumbStorage = storage
+  } else if (storage && storage !== thumbStorage) {
+    thumbCache.reset(storage)
+    thumbStorage = storage
+  }
+  return thumbCache
+}
+
+export function screenThumbKey(bot: any) {
+  return thumbKey(bot, activeConnectionId())
+}
+
+/** The cached still for a bot (null when none); re-renders when it changes. */
+export function useScreenThumb(bot: any): null | string {
+  const cache = screenThumbs()
+  const key = screenThumbKey(bot)
+  const read = React.useCallback(() => cache.get(key), [cache, key])
+  return React.useSyncExternalStore(cache.subscribe as any, read, read)
 }
 
 async function loadRfb(): Promise<any> {
@@ -129,6 +162,15 @@ const PILL_ICONS: Record<string, () => React.ReactNode> = {
   )
 }
 
+/** Collapse: two arrows pointing inward (top-right and bottom-left). */
+function IconCollapse() {
+  return (
+    <svg {...pillIcon}>
+      <path d="M14 10l6.5-6.5M14 4.5V10h5.5M10 14l-6.5 6.5M10 19.5V14H4.5" />
+    </svg>
+  )
+}
+
 /** The calm progress mark on the dark stage: a small spinner and one line. */
 function StageNote({ text, spinner = true, sub }: { text?: string; spinner?: boolean; sub?: string }) {
   return (
@@ -160,8 +202,9 @@ function ControlPill({ pill, title, run }: { pill: NonNullable<ReturnType<typeof
 type WakeState = { mode: string; error: string | null; recovering: boolean }
 
 /** `initialWake` is a preview seam (dev/preview-entry.tsx renders one state
- *  statically); the live tab never passes it. */
-export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeState }) {
+ *  statically); the live tab never passes it. `onExit` leaves the viewer:
+ *  the workspace tab's own close (openBotScreen). */
+export function BotScreen({ bot, initialWake, onExit }: { bot: any; initialWake?: WakeState; onExit?: () => void }) {
   const store = screenStore(bot)
   const state = useScreenState(store)
   const status = state.status
@@ -183,6 +226,15 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
     installRetention.current = null
   }, [])
   const pasteCleanup = React.useRef<null | (() => void)>(null)
+  // The canvas of a stream that reached 'connect' (cleared when it closes):
+  // the only source of the panel card's still.
+  const liveCanvas = React.useRef<HTMLCanvasElement | null>(null)
+  const captureThumb = React.useCallback(() => {
+    const canvas = liveCanvas.current
+    if (!canvas) return
+    const still = snapshotCanvas(canvas)
+    if (still) screenThumbs().put(screenThumbKey(bot), still)
+  }, [rowKey(bot)])
   const generation = React.useRef(0)
   const dialedAt = React.useRef(0)
   const evictions = React.useRef(0)
@@ -230,7 +282,10 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
     }),
     []
   )
-  const visible = useViewerVisibility(`plugin-workspace:${screenWorkspaceId(bot)}`, shown => waker.setVisible(shown))
+  const visible = useViewerVisibility(`plugin-workspace:${screenWorkspaceId(bot)}`, shown => {
+    if (!shown) captureThumb()
+    waker.setVisible(shown)
+  })
 
   React.useEffect(() => {
     const machine = createScreenWaker({
@@ -282,6 +337,8 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
   }, [refresh, releaseInstall, rowKey(bot)])
 
   const detach = React.useCallback((handBack = false) => {
+    captureThumb()
+    liveCanvas.current = null
     generation.current += 1
     if (handBack) socket.current?.close(1000)
     try {
@@ -296,7 +353,7 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
     retention.current = null
     pasteCleanup.current?.()
     pasteCleanup.current = null
-  }, [])
+  }, [captureThumb])
 
   // Dials the stream; throws when it cannot (the wake machine backs off and
   // tries again). Its connect / disconnect events report to the machine.
@@ -341,8 +398,14 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
         client.background = 'transparent'
         client.qualityLevel = 7
         client.viewOnly = !leaseHeldBy(observe.lease, minted)
+        // In control the remote cursor is the pointer (noVNC draws its shape
+        // as the canvas cursor); when that shape is empty or not sent yet,
+        // noVNC's documented dot cursor shows instead of nothing. Watching
+        // keeps the local pointer (stylesRoster.ts, .gbo-screen-stage rule).
+        client.showDotCursor = true
         client.addEventListener('connect', () => {
           if (mine === generation.current) {
+            liveCanvas.current = canvasHost.current?.querySelector('canvas') ?? null
             setEvicted(false)
             setError(null)
             waker.connected()
@@ -351,6 +414,8 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
         client.addEventListener('disconnect', (event: any) => {
           if (rfb.current === client) rfb.current = null
           if (mine !== generation.current) return
+          captureThumb()
+          liveCanvas.current = null
           const reason = event?.detail?.reason ?? ''
           if (closeCode === CLOSE_CONTROL_TAKEN || String(reason).includes('control-taken')) {
             const next = nextEviction(evictions.current, dialedAt.current)
@@ -408,6 +473,19 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
       detach(true)
     }
   }, [detach, releaseInstall])
+  // While live and on screen: a fresh still for the panel card now and then
+  // (a local canvas copy; nothing is sent anywhere).
+  React.useEffect(() => {
+    if (wake.mode !== 'live') return
+    const first = setTimeout(captureThumb, 1500)
+    const every = setInterval(() => {
+      if (visible.current) captureThumb()
+    }, THUMB_CAPTURE_MS)
+    return () => {
+      clearTimeout(first)
+      clearInterval(every)
+    }
+  }, [wake.mode, captureThumb])
   React.useEffect(() => {
     if (rfb.current) {
       rfb.current.viewOnly = !iHold
@@ -475,6 +553,7 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
   )
 
   let content: React.ReactNode
+  let reconnect: React.ReactNode = null
   if (phase === 'unavailable') {
     content = center('No screen on this Hermes', isManagedBackend(bot) ? 'Bot Screen has not reached this managed Hermes release yet.' : `${who}’s Hermes predates Bot Screen; update Hermes on that machine.`)
   } else if (phase === 'loading' && !waking) {
@@ -539,15 +618,14 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
         </div>
       )
     const lostWords = link === 'error' || link === 'reconnecting' ? wake.error || error : null
+    if (running)
+      reconnect = (
+        <button type="button" className="gbo-screen-icon-btn" aria-label="Reconnect" title="Reconnect" disabled={settling} onClick={wakeAgain}>
+          <IconRefresh />
+        </button>
+      )
     content = (
       <div className="gbo-screen-view">
-        {running ? (
-          <div className="gbo-screen-corner">
-            <button type="button" className="gbo-screen-icon-btn" aria-label="Reconnect" title="Reconnect" disabled={settling} onClick={wakeAgain}>
-              <IconRefresh />
-            </button>
-          </div>
-        ) : null}
         <div className="gbo-screen-fit">
           <div className={`gbo-screen-stage${iHold ? ' is-held' : ''}${running && link === 'live' ? '' : ' is-asleep'}`} style={ratio}>
             <div className="gbo-screen-canvas" data-remote-screen="" data-terminal="" ref={canvasHost} />
@@ -559,9 +637,23 @@ export function BotScreen({ bot, initialWake }: { bot: any; initialWake?: WakeSt
       </div>
     )
   }
+  // The corner, in every state: Reconnect while running, then Close (the
+  // collapse arrows) at the far right.
+  const corner =
+    reconnect || onExit ? (
+      <div className="gbo-screen-corner">
+        {reconnect}
+        {onExit ? (
+          <button type="button" className="gbo-screen-icon-btn gbo-screen-exit" aria-label="Close" title="Close" onClick={onExit}>
+            <IconCollapse />
+          </button>
+        ) : null}
+      </div>
+    ) : null
   return (
     <div data-gbo-root="" data-gbo-theme="dark" className="gbo-screen">
       {content}
+      {corner}
     </div>
   )
 }
@@ -595,12 +687,27 @@ export function openBotScreen(bot: any) {
     dock: { pane: 'workspace', pos: 'center' },
     render: () => (
       <OverrideBoundary area="screen">
-        <BotScreen bot={bot} />
+        <BotScreen bot={bot} onExit={() => closeBotScreen(bot)} />
       </OverrideBoundary>
     ),
     onClose: () => openScreens.delete(id)
   })
   openScreens.set(id, typeof close === 'function' ? close : () => undefined)
+}
+
+/** Leave the bot's viewer: the close openWorkspace handed back, the same
+ *  teardown as the tab's own Close (the tab goes, the zone shows its
+ *  neighbour again). */
+export function closeBotScreen(bot: any) {
+  const close = openScreens.get(screenWorkspaceId(bot))
+  if (!close) return false
+  try {
+    close()
+  } catch {
+    /* already closed */
+  }
+  openScreens.delete(screenWorkspaceId(bot))
+  return true
 }
 
 export function closeAllScreens() {
