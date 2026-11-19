@@ -2,18 +2,19 @@
 // while an unread row (Hermes's dot in its unread state) is scrolled out of
 // view, on the side it lies (top: arrow up; bottom: arrow down), and a click
 // (or a key) scrolls the roster to the nearest such row and focuses it.
-// Scrolling itself reads no layout and scans nothing: the side comes from the
-// observer's own entries. jsdom has no layout and no
-// IntersectionObserver: rows get rects from their order and the scroller's
-// scrollTop, and the observer is a fake the test reports through, as
-// Chromium would after a scroll: a target is reported when first observed
-// and then only when it crosses a threshold , never on every call.
+// Scrolling itself reads no layout and scans nothing: the side comes from
+// offsets measured on structure / layout changes. jsdom has no layout and no
+// IntersectionObserver (test/fixtures/pill-env.mjs): rows get rects from
+// their order and the scroller's scrollTop, and the observer is a fake the
+// test reports through, as Chromium would after a scroll: a target is
+// reported when first observed and then only when it crosses a threshold.
 // One visibility rule: a row less than half in view gets a pill that can
 // reach it; a jump past the view (no crossing) still turns the pill.
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { installLayout, installObserver } from './fixtures/pill-env.mjs'
 import { bootPlugin, READY, waitFor } from './loader-boot.mjs'
 
 const ROW_H = 60
@@ -28,74 +29,6 @@ const row = (name, i) => ({
   route: { connectionId: 'local', mode: 'local', profile: name, targetProfile: name },
   canonical_session: { id: `${name}-root`, preview: `${name} preview`, last_active: 1762560000 - i }
 })
-
-/** A fake IntersectionObserver with Chromium's notification rule: a target
- *  is reported when first observed, then only when its intersecting state
- *  or threshold bucket changes. `report()` evaluates the fake layout. */
-function installObserver() {
-  const observers = new Set()
-  class FakeIO {
-    constructor(callback, options) {
-      this.callback = callback
-      this.options = options
-      this.targets = new Map() // target -> last state key ('' = not reported yet)
-      observers.add(this)
-    }
-    observe(el) {
-      this.targets.set(el, '')
-    }
-    unobserve(el) {
-      this.targets.delete(el)
-    }
-    disconnect() {
-      this.targets.clear()
-      observers.delete(this)
-    }
-  }
-  globalThis.IntersectionObserver = FakeIO
-  return {
-    observers,
-    observed: () => [...observers].flatMap(o => [...o.targets.keys()]),
-    report() {
-      for (const o of observers) {
-        const root = o.options.root.getBoundingClientRect()
-        const thresholds = o.options.threshold
-        const entries = []
-        for (const [target, last] of o.targets) {
-          const r = target.getBoundingClientRect()
-          const overlap = Math.max(0, Math.min(r.bottom, root.bottom) - Math.max(r.top, root.top))
-          const ratio = overlap / (r.bottom - r.top)
-          const isIntersecting = overlap > 0
-          const bucket = thresholds.filter(x => ratio >= x && (x > 0 || isIntersecting)).length
-          const key = `${isIntersecting}:${bucket}`
-          if (key === last) continue
-          o.targets.set(target, key)
-          entries.push({ target, isIntersecting, intersectionRatio: ratio, boundingClientRect: r, rootBounds: root })
-        }
-        if (entries.length) o.callback(entries, o)
-      }
-    }
-  }
-}
-
-/** Layout: the scroller is VIEW_H tall at y 0; rows stack ROW_H apart. */
-function installLayout(rosterEl) {
-  const scroller = () => rosterEl.querySelector('.gbo-roster-list')
-  const proto = window.Element.prototype
-  const saved = proto.getBoundingClientRect
-  proto.getBoundingClientRect = function () {
-    const el = this
-    const s = scroller()
-    if (el === s) return { top: 0, bottom: VIEW_H, left: 0, right: 280, width: 280, height: VIEW_H }
-    if (el.classList?.contains('gbo-row-wrap') && s) {
-      const i = [...s.querySelectorAll('.gbo-row-wrap')].indexOf(el)
-      const top = i * ROW_H - s.scrollTop
-      return { top, bottom: top + ROW_H, left: 0, right: 280, width: 280, height: ROW_H }
-    }
-    return saved.call(el)
-  }
-  return () => (proto.getBoundingClientRect = saved)
-}
 
 test('loader-faithful unread look: "More unreads" shows only while an unread row is off screen, on its side, and scrolls to it', { skip: !READY && 'dev dependencies not installed' }, async t => {
   const unread = new Set(['hotel-root'])
@@ -119,9 +52,9 @@ test('loader-faithful unread look: "More unreads" shows only while an unread row
     delete globalThis.__fakeDot
     delete globalThis.IntersectionObserver
   })
+  // The layout exists before the roster mounts, as in the app.
+  t.after(installLayout({ view: { height: VIEW_H }, rowHeight: ROW_H }))
   const rosterEl = mount(panes.find(p => p.id === 'roster').render)
-  const restore = installLayout(rosterEl)
-  t.after(restore)
   const scroller = () => rosterEl.querySelector('.gbo-roster-list')
   const pill = side => rosterEl.querySelector(`.gbo-unread-pill.is-${side}`)
   const rowEl = name => [...rosterEl.querySelectorAll('.gbo-row-wrap')].find(w => w.textContent.includes(name))
@@ -130,13 +63,11 @@ test('loader-faithful unread look: "More unreads" shows only while an unread row
   await waitFor(() => rosterEl.querySelectorAll('.gbo-row-wrap').length === NAMES.length, 'every row')
   await waitFor(() => io.observed().includes(rowEl('Hotel')), 'the unread row under the observer')
   assert.ok(io.observed().length === 1 && io.observed()[0] === rowEl('Hotel'), 'only unread rows are observed')
-  await settle()
-  assert.ok(!(pill('up')), 'no report yet: no pill')
-  assert.ok(!(pill('down')))
-
-  // Hotel (the 8th row, y 420-480) is below the 300px view.
-  io.report()
+  // Hotel (the 8th row, y 420-480) is below the 300px view: measured when
+  // it joined, so the pill shows without waiting for an observer entry.
   await waitFor(() => pill('down'), 'the pill at the bottom')
+  io.report()
+  await settle()
   assert.ok(!(pill('up')), 'nothing unread above')
   assert.match(pill('down').textContent, /More unreads/)
   assert.ok(pill('down').querySelector('svg'), 'with its arrow')

@@ -402,7 +402,8 @@ export function RosterPane() {
         className="sidebar__scroll gbo-roster-list"
         role="list"
         scrollRef={scrollRef}
-        overlay={<UnreadPills sides={unreadPill.sides} jump={unreadPill.jump} />}
+        // Before the rows in tab order; placed over the scroll area by CSS.
+        before={<UnreadPills sides={unreadPill.sides} jump={unreadPill.jump} />}
       >
         {pinned?.shown.length ? (
           <div className={`pinned gbo-pins is-${pinned.shown.length}`} role="group" aria-label="Pinned bots">

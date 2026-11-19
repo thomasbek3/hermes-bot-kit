@@ -61687,7 +61687,7 @@ function thumbGeometry(scrollTop, scrollHeight, clientHeight) {
   const offset = range > 0 ? Math.round(Math.min(Math.max(scrollTop, 0), range) / range * travel) : 0;
   return { size, offset, travel, range };
 }
-function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, onReaderInput, children, ...rest }) {
+function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, before, onReaderInput, children, ...rest }) {
   const scroller = React22.useRef(null);
   const thumb = React22.useRef(null);
   const [dragging, setDragging] = React22.useState(false);
@@ -61771,6 +61771,7 @@ function OverlayScroll({ as = "div", wrapClassName, scrollRef, className, onScro
     target.addEventListener("pointercancel", end);
   };
   return /* @__PURE__ */ jsxs22("div", { className: `gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ""}${dragging ? " is-dragging" : ""}`, children: [
+    before,
     React22.createElement(
       as,
       {
@@ -63032,8 +63033,15 @@ function scrollTopFor2(rect, view, scrollTop) {
 import { Fragment as Fragment16, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
 var ITEM_SELECTOR = ".gbo-row-wrap, .gbo-pin-wrap";
 var ITEM_BUTTON = "button.gbo-row, button.gbo-pin";
-function entrySide(entry) {
-  return sideOf(entry?.boundingClientRect, entry?.rootBounds);
+function touchesMembership(record) {
+  if (record.type === "childList") return elementsIn(record);
+  const target = record.target;
+  return Boolean(target && typeof target.closest === "function" && target.closest(".gbo-unread-dot"));
+}
+function elementsIn(record) {
+  if (record.type !== "childList") return false;
+  for (const node of [...Array.from(record.addedNodes || []), ...Array.from(record.removedNodes || [])]) if (node?.nodeType === 1) return true;
+  return false;
 }
 function useUnreadPill(scrollerRef) {
   const [sides, setSides] = React28.useState({ up: false, down: false });
@@ -63042,6 +63050,7 @@ function useUnreadPill(scrollerRef) {
     const scroller = scrollerRef.current;
     const IO = globalThis.IntersectionObserver;
     const MO = globalThis.MutationObserver;
+    const RO = globalThis.ResizeObserver;
     if (!scroller || typeof IO !== "function" || typeof MO !== "function") return void 0;
     const raf2 = globalThis.requestAnimationFrame;
     const caf = globalThis.cancelAnimationFrame;
@@ -63049,6 +63058,7 @@ function useUnreadPill(scrollerRef) {
     let viewHeight = 0;
     let collectFrame = null;
     let scrollFrame = null;
+    let pendingStructure = false;
     let alive = true;
     const publish = () => {
       let up = false;
@@ -63059,29 +63069,39 @@ function useUnreadPill(scrollerRef) {
       }
       setSides((prev) => prev.up === up && prev.down === down ? prev : { up, down });
     };
+    function measure(rows) {
+      const box = scroller.getBoundingClientRect();
+      const top = scroller.scrollTop;
+      viewHeight = Math.max(0, box.bottom - box.top);
+      for (const el of rows) {
+        const watch = watched.get(el);
+        if (!watch) continue;
+        const rect = el.getBoundingClientRect();
+        watch.offset = rect.top - box.top + top;
+        watch.height = Math.max(0, rect.bottom - rect.top);
+      }
+    }
+    function reside() {
+      scrollFrame = null;
+      if (!alive) return;
+      const top = scroller.scrollTop;
+      const view = { top: 0, bottom: viewHeight };
+      for (const watch of watched.values()) {
+        watch.side = viewHeight > 0 && watch.offset !== null ? sideOf({ top: watch.offset - top, bottom: watch.offset - top + watch.height }, view) : null;
+      }
+      publish();
+    }
     const io = new IO(
       (entries) => {
-        if (!alive) return;
-        const top = scroller.scrollTop;
-        for (const entry of entries) {
-          const watch = watched.get(entry.target);
-          if (!watch) continue;
-          const rect = entry.boundingClientRect;
-          const root = entry.rootBounds;
-          watch.side = entrySide(entry);
-          if (rect && root) {
-            watch.offset = rect.top - root.top + top;
-            watch.height = rect.bottom - rect.top;
-            viewHeight = root.bottom - root.top;
-          }
-        }
-        publish();
+        if (alive && entries.some((entry) => watched.has(entry.target))) reside();
       },
       { root: scroller, threshold: [0, IN_VIEW_RATIO, 1] }
     );
     function collect() {
       collectFrame = null;
       if (!alive) return;
+      const structure = pendingStructure;
+      pendingStructure = false;
       const rows = /* @__PURE__ */ new Set();
       for (const dot of Array.from(scroller.querySelectorAll(UNREAD_DOT_SELECTOR))) {
         const row = dot.closest(ITEM_SELECTOR);
@@ -63092,40 +63112,34 @@ function useUnreadPill(scrollerRef) {
         io.unobserve(el);
         watched.delete(el);
       }
+      const joined = [];
       for (const el of rows) {
-        if (watched.has(el)) io.unobserve(el);
-        else watched.set(el, { side: null, offset: null, height: 0 });
+        if (watched.has(el)) continue;
+        watched.set(el, { side: null, offset: null, height: 0 });
         io.observe(el);
+        joined.push(el);
       }
-      publish();
-    }
-    function reside() {
-      scrollFrame = null;
-      if (!alive || !(viewHeight > 0)) return;
-      const top = scroller.scrollTop;
-      let changed = false;
-      for (const watch of watched.values()) {
-        if (watch.side === null || watch.offset === null) continue;
-        const side = sideOf({ top: watch.offset - top, bottom: watch.offset - top + watch.height }, { top: 0, bottom: viewHeight });
-        if (side && side !== watch.side) {
-          watch.side = side;
-          changed = true;
-        }
-      }
-      if (changed) publish();
+      measure(structure ? watched.keys() : joined);
+      reside();
     }
     const frameOf = (fn) => typeof raf2 === "function" ? raf2(fn) : (fn(), null);
-    function schedule() {
-      if (!alive || collectFrame !== null) return;
-      collectFrame = frameOf(collect);
+    function schedule(structure) {
+      if (!alive) return;
+      if (structure) pendingStructure = true;
+      if (collectFrame === null) collectFrame = frameOf(collect);
     }
     function onScroll() {
       if (!alive || scrollFrame !== null) return;
       scrollFrame = frameOf(reside);
     }
-    const mo = new MO(schedule);
+    const mo = new MO((records) => {
+      if (records.some(touchesMembership)) schedule(records.some(elementsIn));
+    });
     mo.observe(scroller, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "role"] });
+    const ro = typeof RO === "function" ? new RO(() => schedule(true)) : null;
+    ro?.observe(scroller);
     scroller.addEventListener("scroll", onScroll, { passive: true });
+    pendingStructure = true;
     collect();
     jumpRef.current = (direction) => {
       const box = scroller.getBoundingClientRect();
@@ -63133,7 +63147,7 @@ function useUnreadPill(scrollerRef) {
       const target = nearestUnread(direction, candidates2, box);
       if (!target) return;
       const top = scrollTopFor2(target.rect, box, scroller.scrollTop);
-      if (typeof scroller.scrollTo === "function") scroller.scrollTo({ top, behavior: "smooth" });
+      if (typeof scroller.scrollTo === "function") scroller.scrollTo({ top, behavior: reducedMotion() ? "auto" : "smooth" });
       else scroller.scrollTop = top;
       const button = target.el.querySelector(ITEM_BUTTON);
       try {
@@ -63151,6 +63165,7 @@ function useUnreadPill(scrollerRef) {
       }
       io.disconnect();
       mo.disconnect();
+      ro?.disconnect();
       scroller.removeEventListener("scroll", onScroll);
     };
   }, [scrollerRef]);
@@ -63470,7 +63485,7 @@ function RosterPane() {
         className: "sidebar__scroll gbo-roster-list",
         role: "list",
         scrollRef,
-        overlay: /* @__PURE__ */ jsx31(UnreadPills, { sides: unreadPill.sides, jump: unreadPill.jump }),
+        before: /* @__PURE__ */ jsx31(UnreadPills, { sides: unreadPill.sides, jump: unreadPill.jump }),
         children: [
           pinned?.shown.length ? /* @__PURE__ */ jsx31("div", { className: `pinned gbo-pins is-${pinned.shown.length}`, role: "group", "aria-label": "Pinned bots", children: pinned.shown.map((bot) => {
             const key = rowKey(bot);

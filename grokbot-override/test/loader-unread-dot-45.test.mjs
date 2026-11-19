@@ -45,6 +45,17 @@ test('loader-faithful unread look: the dot at the row\'s right edge, on a pinned
   assert.ok(Boolean(dot) && rowOf('Security').lastElementChild === dot, 'at the row\'s right edge (the row\'s last child, after the text)')
   assert.ok(!(rowOf('Security').querySelector('.gbo-row-face .gbo-unread-dot')), 'no badge on the avatar')
   assert.ok(rowOf('Security').querySelector('.gbo-row-face .gbo-run-dot'), 'the avatar keeps the running cue\'s place')
+  // Computed (the plugin's stylesheet): the row lays out left to right and
+  // the dot keeps its place last: no flex order moves it, the row is not
+  // reversed; and the dot itself is visible and sized.
+  const cs = el => getComputedStyle(el)
+  assert.ok(!/reverse/.test(cs(rowOf('Security')).flexDirection), 'the row is not reversed')
+  const orderOf = el => Number(cs(el).order || 0)
+  const items = [...rowOf('Security').children]
+  assert.ok(items.every(item => item === dot || orderOf(item) <= orderOf(dot)), 'L-3: computed: nothing comes after the dot (flex order)')
+  const inner = dot.querySelector('[role="status"]')
+  assert.ok(cs(dot).display !== 'none' && cs(inner).display !== 'none' && cs(inner).visibility !== 'hidden', 'the dot is visible')
+  assert.ok(cs(inner).width !== '0px' && cs(inner).height !== '0px', 'and sized')
 
   // A pinned bot: the dot on its avatar.
   unread.add('o-root')
@@ -52,6 +63,9 @@ test('loader-faithful unread look: the dot at the row\'s right edge, on a pinned
   const pin = await waitFor(() => rosterEl.querySelector('button.gbo-pin'), 'the pinned tile')
   await waitFor(() => dotOf(pin), 'the pinned dot')
   assert.ok(pin.querySelector('.pinned__avatar .gbo-unread-dot [role="status"]'), 'on the pinned avatar')
+  const pinDot = pin.querySelector('.pinned__avatar .gbo-unread-dot')
+  assert.equal(getComputedStyle(pinDot).position, 'absolute', 'L-3: computed: the pinned dot is placed on the avatar (absolute)')
+  assert.notEqual(getComputedStyle(pinDot).display, 'none')
 
   // Opening clears it (the existing ack on open).
   rowOf('Security').click()

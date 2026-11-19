@@ -7,10 +7,14 @@
   restyled, so Hermes's unread store stays the only record; marking and the ack on open are unchanged). Hermes's
   running cue (working, stalled, background) keeps its own dot on the avatar. A blue "More unreads" pill (#1366D6,
   white text at 5.4:1; hover #0B59BE) floats at the top or bottom of the roster while an unread row is less than half
-  in view that way; a click scrolls to the nearest one and moves focus to it. The pill follows a MutationObserver and an
-  IntersectionObserver, turns correctly after a large scroll jump, and reads no layout while scrolling. Remote and SSH
-  bots have no dot yet. New `src/core/unreadPill.js`, `src/ui/UnreadPill.tsx`; tests `test/unread-look-45.test.mjs`,
-  `test/loader-unread-dot-45.test.mjs`, `test/loader-unread-pill-45.test.mjs`, `test/loader-unread-running-45.test.mjs`.
+  in view that way; a click (or a key: the pills are buttons named "More unreads above" / "below" and come before the
+  rows in tab order) scrolls to the nearest one, instantly with Reduce Motion, and moves focus to it. Row offsets and the
+  view height are measured together on structure or layout changes (MutationObserver, ResizeObserver), so a resized
+  roster, a late observer entry or a large scroll jump never turns the pill the wrong way; scrolling reads no layout and
+  selecting a row re-registers nothing. Remote and SSH bots have no dot yet. New `src/core/unreadPill.js`,
+  `src/ui/UnreadPill.tsx`; tests `test/unread-look-45.test.mjs`, `test/loader-unread-dot-45.test.mjs`,
+  `test/loader-unread-pill-45.test.mjs`, `test/loader-unread-pill-geometry-45.test.mjs`,
+  `test/loader-unread-running-45.test.mjs`.
 - **grokbot-override: T3 Code links get the T3 Code logo (2026-11-16)**: a source link to `t3.codes` (e.g. `app.t3.codes/threads/…`) draws with T3 Code's own favicon, inlined as a data: PNG, instead of the neutral globe; lookalike hosts such as `t3.codes.evil.io` stay a globe.
 - **grokbot-override: the "delivery unknown" composer note clears itself (2026-11-16)**: after a send whose answer
   was lost (e.g. the connection was torn down and respawned mid-send), the line under the composer now follows the
