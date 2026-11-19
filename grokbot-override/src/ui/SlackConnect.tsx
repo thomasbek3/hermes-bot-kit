@@ -28,9 +28,15 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
   const [allowed, setAllowed] = React.useState('')
   const [audience, setAudience] = React.useState<any>(audienceView(initial.status))
   const [changing, setChanging] = React.useState(false)
+  // The profile has a bot token: Cancel or close never deletes the app then;
+  // only Remove from Slack (with its confirmation) does.
+  const [tokenInstalled, setTokenInstalled] = React.useState(initial.status?.token_installed === true)
   const phaseRef = React.useRef(phase)
+  const tokenRef = React.useRef(tokenInstalled)
   const alive = React.useRef(true)
   phaseRef.current = phase
+  tokenRef.current = tokenInstalled
+  const noteToken = (status: any) => { if (typeof status?.token_installed === 'boolean') setTokenInstalled(status.token_installed) }
   React.useEffect(() => () => { alive.current = false }, [])
   React.useEffect(() => {
     if (phase !== 'created' && phase !== 'installed') return
@@ -43,6 +49,7 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
         const status: any = await slackProvisioning(bot, 'status')
         if (stopped) return
         if (status?.team_name) setTeamName(status.team_name)
+        noteToken(status)
         const view = audienceView(status)
         if (view) setAudience(view)
         if (['created', 'installed', 'connected', 'denied', 'error'].includes(status?.phase)) setPhase(status.phase)
@@ -96,20 +103,23 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
     } catch (err) { if (alive.current) setError(failure(err)) }
     finally { if (alive.current) setBusy(false) }
   }
-  const remove = async (close = false) => {
+  // confirmed: the explicit Remove from Slack. Otherwise a cancel, which the
+  // server refuses for an app whose bot token is installed.
+  const remove = async (close = false, confirmed = false) => {
     if (busy) return
     setBusy(true); setError('')
     try {
-      await slackProvisioning(bot, 'connect', 'DELETE')
+      if (confirmed) await slackProvisioning(bot, 'remove', 'POST', { confirm: true })
+      else await slackProvisioning(bot, 'connect', 'DELETE')
       if (!alive.current) return
-      setAuthorize(''); setPhase('none'); setConfirm(false); void loadSlackState(bot)
+      setAuthorize(''); setPhase('none'); setConfirm(false); setTokenInstalled(false); void loadSlackState(bot)
       if (close) onClose()
     } catch (err) { if (alive.current) setError(failure(err)) }
     finally { if (alive.current) setBusy(false) }
   }
   const close = () => {
     setRefresh('')
-    if (['created', 'denied', 'error'].includes(phaseRef.current)) void remove(true)
+    if (['created', 'denied', 'error'].includes(phaseRef.current) && !tokenRef.current) void remove(true)
     else onClose()
   }
   const applyAccess = async (mode = access, list = allowed) => {
@@ -134,6 +144,7 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
         </label>
       ))}
       {access === 'list' ? <label className="gbo-sheet-field"><span>Member IDs</span><input className="gbo-input gbo-slack-access-list" spellCheck={false} value={allowed} onChange={e => setAllowed(e.target.value)} placeholder="U0123ABCD, U0456EFGH" /></label> : null}
+      {audience && !audience.ownerKnown ? <p className="gbo-field-hint gbo-slack-reconnect-hint">To choose Only me, reconnect the bot.</p> : null}
       <p className="gbo-field-hint">Anyone who can talk to {name} can ask it to use its tools, and it acts with its own access. Give it only the tools you are happy for all of them to use.</p>
     </fieldset>
   )
@@ -151,7 +162,7 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
     <div className="gbo-slack-legacy-choices">
       {audience.legacy.ids.length ? <button type="button" className="gbo-link-btn gbo-slack-legacy-keep" disabled={busy} onClick={() => void applyAccess('list', audience.legacy.ids.join(','))}>Keep these people</button> : null}
       <button type="button" className="gbo-link-btn gbo-slack-legacy-members" disabled={busy} onClick={() => void applyAccess('members', '')}>Everyone in the workspace</button>
-      {audience.ownerKnown ? <button type="button" className="gbo-link-btn gbo-slack-legacy-owner" disabled={busy} onClick={() => void applyAccess('owner', '')}>Only me</button> : null}
+      {audience.ownerKnown ? <button type="button" className="gbo-link-btn gbo-slack-legacy-owner" disabled={busy} onClick={() => void applyAccess('owner', '')}>Only me</button> : <p className="gbo-field-hint gbo-slack-reconnect-hint">To choose Only me, reconnect the bot.</p>}
     </div>
   ) : null
   const testConnection = async () => {
@@ -160,6 +171,7 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
     try {
       const status: any = await slackProvisioning(bot, 'status')
       if (!alive.current) return
+      noteToken(status)
       setTestResult(status?.phase === 'connected'
         ? 'Slack authentication and the bot’s events endpoint are working.'
         : 'Slack could not confirm the bot’s connection. Try again shortly.')
@@ -176,7 +188,7 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
   let footer: React.ReactNode
   if (confirm) {
     body = <p className="gbo-sheet-text">This deletes the app from the Slack workspace. Teammates can no longer reach {name} from Slack until it is added again.</p>
-    footer = <>{cancel}<button type="button" className="gbo-sheet-primary gbo-slack-remove-primary" disabled={busy} onClick={() => void remove()}>Remove</button></>
+    footer = <>{cancel}<button type="button" className="gbo-sheet-primary gbo-slack-remove-primary" disabled={busy} onClick={() => void remove(false, true)}>Remove</button></>
   } else if (connected) {
     body = <><p className="gbo-sheet-text">You can DM or @mention {name} in {workspace} Slack. It’ll respond with the same plugins, context, and memories it uses here.</p>{audienceBlock}{legacyChoices}{changing ? <>{accessPicker}<button type="button" className="gbo-sheet-primary is-small gbo-slack-access-apply" disabled={busy} onClick={() => void applyAccess()}>Apply</button></> : <button type="button" className="gbo-link-btn gbo-slack-access-change" disabled={busy} onClick={() => setChanging(true)}>Change who can talk to it</button>}{testResult ? <div className="gbo-sheet-note" role="status">{testResult}</div> : null}</>
     footer = <><button type="button" className="gbo-sheet-cancel" disabled={busy} onClick={() => void testConnection()}>{busy ? 'Testing…' : 'Test connection'}</button><button type="button" className="gbo-sheet-cancel gbo-slack-remove" disabled={busy} onClick={() => setConfirm(true)}>Remove from Slack</button><button type="button" className="gbo-sheet-primary" disabled={busy} onClick={onClose}>Done</button></>
@@ -184,8 +196,10 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
     body = <><div className="gbo-sheet-note">{phase === 'installed' ? 'Slack is installed. Waiting for the bot connection…' : 'Finish in Slack… Allow the bot in the browser tab that just opened.'}{timedOut ? ' The connection timed out. Select Cancel to remove the incomplete app.' : ''}</div>{phase === 'installed' ? audienceBlock : null}</>
     footer = <>{cancel}{phase === 'installed' ? <button type="button" className="gbo-sheet-cancel gbo-slack-remove" onClick={() => setConfirm(true)}>Remove from Slack</button> : authorize ? <button type="button" className="gbo-sheet-primary" onClick={() => openExternalLink(authorize)}>Open again ↗</button> : null}</>
   } else if (phase === 'denied' || phase === 'error') {
-    body = <div className="gbo-sheet-note">{phase === 'denied' ? 'Slack install was cancelled.' : 'Slack setup needs attention.'} Remove the incomplete app before trying again.</div>
-    footer = <>{cancel}<button type="button" className="gbo-sheet-primary" disabled={busy} onClick={() => void remove()}>Remove and try again</button></>
+    body = <div className="gbo-sheet-note">{phase === 'denied' ? 'Slack install was cancelled.' : 'Slack setup needs attention.'} {tokenInstalled ? 'The bot’s Slack token is installed, so Cancel keeps the app. Remove from Slack deletes it.' : 'Remove the incomplete app before trying again.'}</div>
+    footer = <>{cancel}{tokenInstalled
+      ? <button type="button" className="gbo-sheet-primary gbo-slack-remove" disabled={busy} onClick={() => setConfirm(true)}>Remove from Slack</button>
+      : <button type="button" className="gbo-sheet-primary" disabled={busy} onClick={() => void remove()}>Remove and try again</button>}</>
   } else if (adding) {
     body = <div className="gbo-sheet-form"><p className="gbo-sheet-text gbo-slack-howto">On api.slack.com/apps, scroll to Your App Configuration Tokens and click Generate Token for your workspace.<br />Paste the Refresh token (it starts with xoxe-) below. Hermes keeps it on the bot’s server.</p><button type="button" className="gbo-link-btn" onClick={() => openExternalLink('https://api.slack.com/apps')}>Open Slack app settings ↗</button><label className="gbo-sheet-field"><span>Refresh token</span><input className="gbo-input" type="password" autoComplete="off" spellCheck={false} value={refresh} onChange={e => setRefresh(e.target.value)} /></label></div>
     footer = <>{cancel}<button type="button" className="gbo-sheet-primary" disabled={busy || Boolean(refreshTokenError(refresh))} onClick={() => void add()}>Add</button></>

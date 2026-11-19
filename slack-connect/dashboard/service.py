@@ -33,9 +33,13 @@ class SlackRefused(Conflict):
     pass
 
 
+INSTALLED = 'This Slack app is installed; use Remove from Slack'
+NO_OWNER = 'The installer of this bot is not known. To choose Only me, reconnect the bot.'
+
+
 class Service:
     def __init__(self, root, profile, slack, read_env, save_env, remove_env, notify, icon, live=None, lifecycle=None,
-                 check_idle=None, recycle_profile=None, slack_switch=None, gate_scope=None):
+                 check_idle=None, recycle_profile=None, slack_switch=None, gate_scope=None, auth_test=None):
         self.root, self.profile = Path(root), profile
         if not PROFILE.fullmatch(profile) or profile == 'default':
             raise ValueError('a named profile is required')
@@ -50,6 +54,8 @@ class Service:
         self.slack_switch = slack_switch
         # The profile's gate keys as Hermes reads them (see access.gate_scope).
         self.gate_scope = gate_scope or (lambda: access_module.gate_scope(self.root / 'profiles' / self.profile))
+        # Slack's auth.test for a bot token (scopes.check_token): {ok, team_id, ...}.
+        self.auth_test = auth_test
         self.base = None
         self.tokens = TokenStore(self.data / 'config-tokens.json')
 
@@ -166,7 +172,8 @@ class Service:
             apps[key] = {'profile': self.profile, 'team_id': team, 'bot_name': bot_name,
                          'prior_allowed_users': env.get('SLACK_ALLOWED_USERS'),
                          'access': access, 'allowed': ','.join(named), 'access_rev': 1,
-                         'synced_at': None, 'sync_error': None, 'retry_after': None}
+                         'synced_at': None, 'sync_error': None, 'retry_after': None,
+                         'kit_format': access_module.KIT_FORMAT}
             _atomic_json(apps_path, apps)
             _atomic_json(pending_path, {'phase':'pending', 'at':int(time.time())})
         app_id = None
@@ -294,7 +301,7 @@ class Service:
             raise Conflict('Connect the bot to Slack first')
         owner = access_module.owner_of(item, pending)
         if access == 'owner' and not owner:
-            raise Conflict('The installer of this bot is not known; name the people instead')
+            raise Conflict(NO_OWNER)
         expect = access_module.expect_of(item)
         fields = {'access': access, 'allowed': ','.join(named), 'access_rev': access_module.rev_of(item) + 1,
                   'synced_at': None, 'sync_error': None, 'retry_after': None, **({'owner': owner} if owner else {})}
@@ -326,11 +333,13 @@ class Service:
             return {'phase':'none', 'mode':'socket'}
         for key, item in _read_json(self.data / 'apps.json', {}).items():
             if isinstance(item, dict) and item.get('profile') == self.profile:
+                pending = _read_json(self.data / 'pending' / (key + '.json'), {})
+                if live and pending.get('phase') != 'installed':
+                    pending = self._reconcile(key, item, env, pending)
+                phase = pending.get('phase', 'error')
                 # First sight of a connection from an earlier release migrates it.
                 if not access_module.committed(item):
                     item = access_module.adopt(self.data, key, self.profile, lambda: env) or item
-                pending = _read_json(self.data / 'pending' / (key + '.json'), {})
-                phase = pending.get('phase', 'error')
                 scope_fields = {}
                 if phase == 'installed' and live:
                     try:
@@ -357,17 +366,43 @@ class Service:
                     ids = sorted(x for x in access_module.coerce_allow_set(env.get('SLACK_ALLOWED_USERS'))
                                  if access_module.USER_ID.fullmatch(x))
                     audience['legacy'] = {'ids': ids,
-                        'text': 'Connected before team access: it allows ' + (', '.join(ids) if ids else 'no listed member IDs') + '.'}
+                        'text': 'Allowed now: ' + (', '.join(ids) if ids else 'no listed member IDs') + ' (from the earlier version)'}
                 return {'phase':phase, 'team_name':public_text(pending.get('team_name')),
                         'bot':public_text(item.get('bot_name')), 'mode':'http',
                         'access': mode, 'owner_known': owner_known,
+                        # Cancel never removes an app with a bot token; only Remove does.
+                        'token_installed': bool(env.get('SLACK_BOT_TOKEN')),
                         'icon_result':item.get('icon_result'),
                         **({'welcome': 'failed', 'welcome_error': public_text(item.get('welcome_error') or 'unknown')}
                            if item.get('welcome') == 'failed' else {}),
                         'manifest_update_result':item.get('manifest_update_result'), **scope_fields, **audience}
         return {'phase':'none', 'mode':'http'}
 
-    def delete(self):
+    def _reconcile(self, key, item, env, pending):
+        """An earlier release's connection whose Connect did not end
+        'installed' although its token was saved (that release wrote the
+        phase only after the welcome DM): one live auth.test with that token,
+        on the window's live status only. If it passes for this team, the
+        connection reads as installed and is migrated; otherwise nothing
+        changes. Returns the pending state to show."""
+        token = env.get('SLACK_BOT_TOKEN')
+        if (self.auth_test is None or 'kit_format' in item or access_module.committed(item) or
+                not token or not item.get('app_id') or env.get('SLACK_APP_ID') != item['app_id']):
+            return pending
+        try:
+            answer = self.auth_test(token)
+        except Exception:
+            return pending
+        if not isinstance(answer, dict) or answer.get('ok') is not True or answer.get('team_id') != item.get('team_id'):
+            return pending
+        pending = {**pending, 'phase': 'installed', 'at': int(time.time()),
+                   'team_name': pending.get('team_name') or env.get('SLACK_TEAM_NAME') or ''}
+        _atomic_json(self.data / 'pending' / (key + '.json'), pending)
+        return pending
+
+    def delete(self, confirm=False):
+        """Delete this bot's Slack app. Without `confirm` (Cancel, a rollback)
+        an app whose bot token is installed is never deleted."""
         env = self.read_env()
         if env.get('SLACK_APP_TOKEN'):
             raise Conflict('Socket Mode apps cannot be removed here')
@@ -375,6 +410,8 @@ class Service:
         with LockedFile(self.data / 'apps.lock'):
             apps = _read_json(path, {})
             found = [(key, item) for key, item in apps.items() if isinstance(item, dict) and item.get('profile') == self.profile]
+            if found and env.get('SLACK_BOT_TOKEN') and confirm is not True:
+                raise Conflict(INSTALLED)
             if not found:
                 # A rollback that could not switch Slack back off left its marker.
                 self._restore_slack_switch(strict=True)

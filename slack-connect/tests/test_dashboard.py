@@ -183,10 +183,10 @@ def test_removal_recycles_live_profile_and_retries_after_failure(context):
         if calls.count('recycle') == 1:
             raise api.platform_module.GatewayReloadError('retry')
     service.recycle_profile = recycle
-    assert client.delete('/connect').status_code == 503
+    assert client.post('/remove', json={'confirm': True}).status_code == 503
     assert list(json.loads((data / 'apps.json').read_text()).values())[0]['recycle_pending'] is True
     slack.delete_result = {'ok':False, 'error':'app_not_found'}
-    assert client.delete('/connect').status_code == 200
+    assert client.post('/remove', json={'confirm': True}).status_code == 200
     assert calls == ['idle', 'recycle', 'idle', 'recycle']
     assert json.loads((data / 'apps.json').read_text()) == {}
 
@@ -199,7 +199,7 @@ def test_busy_bot_is_not_removed(context):
     def busy():
         raise api.platform_module.GatewayReloadError('Wait for this bot to finish its work')
     service.check_idle = busy
-    assert client.delete('/connect').status_code == 503
+    assert client.post('/remove', json={'confirm': True}).status_code == 503
     assert ('delete', 'A1') not in slack.calls and 'SLACK_APP_ID' in env
 
 
@@ -654,11 +654,11 @@ def test_legacy_record_is_shown_and_kept_until_the_owner_chooses(context):
     body = client.get('/status').json()
     assert body['access'] == 'legacy' and body['owner_known'] is False
     assert body['legacy']['ids'] == ['U1', 'U2']
-    assert body['legacy']['text'] == 'Connected before team access: it allows U1, U2.'
+    assert body['legacy']['text'] == 'Allowed now: U1, U2 (from the earlier version)'
     assert body['audience']['text'] == '2 people can talk to this bot: the 2 people in SLACK_ALLOWED_USERS.'
     assert env['SLACK_ALLOWED_USERS'] == 'U1,U2', 'nothing rewrote it'
     assert client.post('/access', json={'access': 'owner'}).json()['detail'] == (
-        'The installer of this bot is not known; name the people instead'), 'Only me needs a known installer'
+        'The installer of this bot is not known. To choose Only me, reconnect the bot.'), 'Only me needs a known installer'
     body = client.post('/access', json={'access': 'list', 'allowed': 'U1,U2'}).json()   # Keep these people
     assert body['access'] == 'list' and env['SLACK_ALLOWED_USERS'] == 'U1,U2'
     assert _record(data)['access'] == 'list' and _record(data)['access_rev'] == 1
@@ -692,17 +692,22 @@ def test_a_published_release_connection_is_migrated_and_its_audience_can_change(
     _published(data, env)
     body = client.get('/status').json()
     assert body['phase'] == 'installed' and body['access'] == 'legacy'
-    assert body['owner_known'] is True, 'that release wrote only the installer: Only me is offered'
-    assert body['legacy']['text'] == 'Connected before team access: it allows U1.'
+    # Round 6: a single ID is never taken as the installer.
+    assert body['owner_known'] is False, 'no owner recorded by a Connect: Only me is not offered'
+    assert body['legacy']['text'] == 'Allowed now: U1 (from the earlier version)'
     rec = _record(data)
-    assert type(rec['installed_at']) is int and rec['migrated'] is True and rec['owner'] == 'U1'
+    assert type(rec['installed_at']) is int and rec['migrated'] is True and 'owner' not in rec
     assert 'access' not in rec and 'access_rev' not in rec, 'migration never chooses an audience'
     assert env['SLACK_ALLOWED_USERS'] == 'U1'
     response = client.post('/access', json={'access': 'owner'})
-    assert response.status_code == 200 and response.json()['audience']['text'] == 'Only you can talk to this bot.'
-    assert (_record(data)['access'], _record(data)['access_rev']) == ('owner', 1)
+    assert response.status_code == 409 and response.json()['detail'] == (
+        'The installer of this bot is not known. To choose Only me, reconnect the bot.')
+    assert env['SLACK_ALLOWED_USERS'] == 'U1' and 'access' not in _record(data), 'the list unchanged'
+    response = client.post('/access', json={'access': 'list', 'allowed': 'U1'})   # Keep these people
+    assert response.status_code == 200 and env['SLACK_ALLOWED_USERS'] == 'U1', 'exactly that ID kept'
+    assert (_record(data)['access'], _record(data)['allowed'], _record(data)['access_rev']) == ('list', 'U1', 1)
     response = client.post('/access', json={'access': 'list', 'allowed': 'U2'})
-    assert response.status_code == 200 and env['SLACK_ALLOWED_USERS'] == 'U1,U2', 'the allowlist changed'
+    assert response.status_code == 200 and env['SLACK_ALLOWED_USERS'] == 'U2', 'the allowlist changed'
 
 
 def test_a_record_of_another_app_is_not_a_connection(context):
@@ -777,3 +782,91 @@ def test_audience_route_is_local_only_and_status_stays_live(context):
     assert body['phase'] == 'installed' and 'readiness' not in body
     assert (body['welcome'], body['welcome_error']) == ('failed', 'channel_not_found')
     assert client.get('/status').json()['phase'] == 'connected' and live_checks == [1], 'open and Test connection stay live'
+
+
+# ---- round 6: Cancel never deletes an installed app; read-back is authoritative
+
+@pytest.mark.parametrize('phase', ['installed', 'error', 'created', 'denied'])
+def test_cancel_never_deletes_an_upgraded_app_with_an_installed_token(context, phase):
+    client, slack, vault, env, data, _ = context
+    _published(data, env)
+    (data / 'pending' / ('c' * 32 + '.json')).write_text(json.dumps({**PUBLISHED_PENDING, 'phase': phase}))
+    assert client.get('/status').json()['token_installed'] is True
+    response = client.delete('/connect')
+    assert response.status_code == 409 and response.json()['detail'] == 'This Slack app is installed; use Remove from Slack'
+    assert not any(isinstance(c, tuple) and c[0] == 'delete' for c in slack.calls), 'no delete call'
+    assert env['SLACK_BOT_TOKEN'] == 'xoxb-FAKE-bot' and 'c' * 32 in json.loads((data / 'apps.json').read_text())
+
+
+def test_remove_needs_an_explicit_confirm(context):
+    client, slack, vault, env, data, notifications = context
+    _installed(data, env, ['U1'])
+    for body in ({}, {'confirm': False}, {'confirm': 'yes'}):
+        response = client.post('/remove', json=body)
+        assert response.status_code == 409 and response.json()['detail'] == 'Confirm removing this Slack app'
+    assert ('delete', 'A1') not in slack.calls and 'SLACK_BOT_TOKEN' in env
+    assert client.post('/remove', json={'confirm': True}).json() == {'ok': True}
+    assert ('delete', 'A1') in slack.calls and 'SLACK_BOT_TOKEN' not in env
+    assert json.loads((data / 'apps.json').read_text()) == {}
+
+
+def test_a_stale_error_record_with_a_working_token_reads_as_installed(context):
+    client, slack, vault, env, data, _ = context
+    _published(data, env)
+    pending_path = data / 'pending' / ('c' * 32 + '.json')
+    pending_path.write_text(json.dumps({'phase': 'error', 'at': 1763300000}))   # the welcome DM failed
+    checks = []
+    api.make_service().auth_test = lambda token: checks.append(token) or {'ok': True, 'team_id': 'T1'}
+    assert client.get('/audience').json()['phase'] == 'error' and checks == [], 'never on the 20 s poll'
+    assert 'installed_at' not in _record(data)
+    body = client.get('/status').json()
+    assert checks == ['xoxb-FAKE-bot'] and body['phase'] == 'installed' and body['team_name'] == 'Acme'
+    assert type(_record(data)['installed_at']) is int and _record(data)['migrated'] is True
+    assert json.loads(pending_path.read_text())['phase'] == 'installed'
+    client.get('/status')
+    assert checks == ['xoxb-FAKE-bot'], 'once: it is installed now'
+
+
+@pytest.mark.parametrize('answer', [{'ok': False, 'error': 'invalid_auth'}, {'ok': True, 'team_id': 'T9'}, RuntimeError()])
+def test_a_stale_error_record_whose_token_fails_auth_test_is_not_adopted(context, answer):
+    client, slack, vault, env, data, _ = context
+    _published(data, env)
+    pending_path = data / 'pending' / ('c' * 32 + '.json')
+    pending_path.write_text(json.dumps({'phase': 'error', 'at': 1763300000}))
+    def auth_test(_token):
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    api.make_service().auth_test = auth_test
+    body = client.get('/status').json()
+    assert body['phase'] == 'error' and body['token_installed'] is True
+    assert _record(data) == PUBLISHED_RECORD and json.loads(pending_path.read_text())['phase'] == 'error'
+
+
+def test_a_current_failed_connect_is_not_adopted_or_reconciled(context):
+    client, slack, vault, env, data, _ = context
+    assert client.post('/connect', json={'team_id': 'T1'}).status_code == 200
+    key, item = next(iter(json.loads((data / 'apps.json').read_text()).items()))
+    assert item['kit_format'] == 2
+    env.update({'SLACK_BOT_TOKEN': 'xoxb-FAKE-bot', 'SLACK_TEAM_NAME': 'Acme'})   # the token landed, the commit did not
+    (data / 'pending' / (key + '.json')).write_text(json.dumps({'phase': 'error', 'at': 1}))
+    api.make_service().auth_test = lambda _token: pytest.fail('a current record is never reconciled')
+    assert client.get('/status').json()['phase'] == 'error'
+    assert client.post('/access', json={'access': 'members'}).json()['detail'] == 'Connect the bot to Slack first'
+    assert 'installed_at' not in json.loads((data / 'apps.json').read_text())[key]
+
+
+@pytest.mark.parametrize('scope', ['raises', 'incomplete'])
+def test_an_access_change_hermes_could_not_confirm_is_not_recorded(context, scope):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1', 'U2'])
+    before = _record(data)
+    def unconfirmed():
+        if scope == 'raises':
+            raise RuntimeError('the Hermes scope helper failed')
+        return api.service_module.access_module.scope_from_env(dict(env), '/h/.env', complete=False)
+    api.make_service().gate_scope = unconfirmed
+    response = client.post('/access', json={'access': 'list', 'allowed': 'U7'})
+    assert response.status_code == 409
+    assert response.json()['detail'] == "Couldn't confirm Hermes applied the change; nothing was recorded"
+    assert _record(data) == before

@@ -17,6 +17,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.core import issue_state
+from common import access
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -49,6 +50,14 @@ def prepare(tmp_path):
     profile.mkdir(parents=True)
     (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\nSLACK_APP_ID=A1\n')
     return data
+
+
+def env_scope(root):
+    """Test-only stand-in for Hermes's read-back: the profile .env, complete."""
+    async def read(profile):
+        home = root / 'profiles' / profile
+        return access.scope_from_env(access.read_env_file(home / '.env'), f'{home}/.env')
+    return read
 
 
 def signed(body, **extra):
@@ -91,7 +100,8 @@ def test_exhausted_bucket_never_blocks_signed_events_or_valid_callbacks(tmp_path
         async def notify(*_):
             return True
         relay = relay_module.Relay(tmp_path, 'python', 'helper', base_url='https://example.test/slack',
-                                   upstream=str(upstream.make_url('/')).rstrip('/'), slack=slack, writer=writer, notifier=notify)
+                                   upstream=str(upstream.make_url('/')).rstrip('/'), slack=slack, writer=writer, notifier=notify,
+                                   scope_reader=env_scope(tmp_path))
         client = TestClient(TestServer(relay.application()))
         await client.start_server()
         attacker = {'X-Forwarded-For': '198.51.100.1'}
@@ -194,7 +204,7 @@ def test_callback_writes_a_cleaned_team_name_and_refuses_an_odd_owner(tmp_path):
         async def notify(*_):
             return True
         relay = relay_module.Relay(root, 'python', 'helper', base_url='https://example.test/slack', upstream='http://127.0.0.1:9',
-                                   slack=slack, writer=writer, notifier=notify)
+                                   slack=slack, writer=writer, notifier=notify, scope_reader=env_scope(root))
         client = TestClient(TestServer(relay.application()))
         await client.start_server()
         try:

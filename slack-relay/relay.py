@@ -207,8 +207,8 @@ class Relay:
 
     async def gate_scope(self, profile):
         """The profile's gate keys as Hermes reads them, from the helper run
-        with Hermes's own Python. If that fails, the profile .env alone
-        (marked incomplete)."""
+        with Hermes's own Python. If that fails, the profile .env alone,
+        marked incomplete: publish_allowlist then commits nothing."""
         if self.scope_reader:
             return await self.scope_reader(profile)
         home = self.profile_home(profile)
@@ -242,7 +242,10 @@ class Relay:
         timeout, kills the writer and waits for it to exit), so the lock is
         never released while a writer can still change the .env. The new
         allowlist is read back through Hermes (gate_scope) before the record
-        changes, so a writer that refused silently commits nothing."""
+        changes, so a writer that refused silently commits nothing.
+        Everything in the relay that takes apps.lock runs in a thread like
+        this: a lock taken on the loop thread while a publish holds it would
+        block the loop that publish is waiting on."""
         loop = asyncio.get_running_loop()
         def write(values):
             asyncio.run_coroutine_threadsafe(self.write_profile(expect['profile'], values), loop).result()
@@ -261,7 +264,8 @@ class Relay:
         if record is None:
             return False
         profile = record['profile']
-        record = access_module.adopt(self.data, key, profile, lambda: self.profile_env(profile))
+        record = await asyncio.to_thread(access_module.adopt, self.data, key, profile,
+                                         lambda: self.profile_env(profile))
         if record is None or access_module.mode_of(record.get('access')) != 'members':
             return False   # owner and list need no sync; legacy is never rewritten
         now = int(time.time() if now is None else now)
@@ -294,6 +298,8 @@ class Relay:
         for key in list(_read_json(self.data / 'apps.json', {})):
             try:
                 done += bool(await self.sync_app(key))
+            except access_module.EnvNotApplied as exc:
+                LOG.warning('Slack member sync for one bot was not recorded: %s', exc)
             except Exception:
                 LOG.warning('Slack member sync failed for one bot')
         return done
@@ -341,7 +347,8 @@ class Relay:
 
     async def callback(self, request):
         try:
-            state = consume_state((self.data / 'state.key').read_bytes(), request.query.get('state', ''), self.data / 'used-nonces.json')
+            state = await asyncio.to_thread(consume_state, (self.data / 'state.key').read_bytes(),
+                                            request.query.get('state', ''), self.data / 'used-nonces.json')
             record = self.record(state['app_key'])
             if not record or record['profile'] != state['profile'] or record.get('team_id') != state['team_id']:
                 raise ValueError('invalid state')
@@ -418,10 +425,11 @@ class Relay:
             welcome_html = (f"<p>The welcome message couldn't be sent to you in Slack ({html.escape(welcome_error)}). "
                             "The bot is connected anyway.</p>") if welcome_error else ''
             return web.Response(text=f"<p>{html.escape(record.get('bot_name') or 'Hermes')} is in {html.escape(team_name)}.</p><p>{html.escape(audience['text'])}</p>{sync_html}{grants_html}{welcome_html}<p>You can close this tab and go back to Hermes.</p>", content_type='text/html')
-        except Exception:
+        except Exception as exc:
             self.pending(key, 'error')
             LOG.error('Slack authorization could not be completed')
-            return web.Response(status=502, text='Slack authorization could not be completed. Return to Hermes to try again.')
+            why = f'{exc}. ' if isinstance(exc, access_module.EnvNotApplied) else ''
+            return web.Response(status=502, text=f'Slack authorization could not be completed. {why}Return to Hermes to try again.')
 
     def application(self):
         @web.middleware

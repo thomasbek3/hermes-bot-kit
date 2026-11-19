@@ -169,7 +169,7 @@ def make_service():
     return service_module.Service(root, home.name, slack,
         load_env, save, remove, lambda: notify_multiplexer_profiles_changed(home.name), lambda: slack_module.profile_icon(home), live, lifecycle,
         lambda: check_profile_idle(root, home.name), lambda: recycle_profile(root, home.name),
-        SlackSwitch(home, root))
+        SlackSwitch(home, root), auth_test=scope_module.check_token)
 
 
 def homes():
@@ -332,4 +332,14 @@ def audience():
 
 @router.delete('/connect')
 def disconnect():
+    """Cancel: removes an incomplete app only, never one with a bot token."""
     return handle(lambda service: service.delete())
+
+
+@router.post('/remove')
+async def remove(request: Request):
+    """Remove from Slack, after the window's confirmation step."""
+    body = await request_object(request)
+    if body.get('confirm') is not True:
+        raise HTTPException(status_code=409, detail='Confirm removing this Slack app')
+    return await run_in_threadpool(lambda: handle(lambda service: service.delete(confirm=True)))

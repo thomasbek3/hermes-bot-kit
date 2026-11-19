@@ -59,6 +59,10 @@ ENV_NAME = re.compile(r'^[A-Z][A-Z0-9_]{0,63}$')
 SOURCES = ('administrator-managed env', 'external secret source', 'config.yaml allow_all_users')
 EXPECT_KEYS = ('app_id', 'profile', 'access', 'access_rev')
 MISSING_USERS_READ = 'the app lacks the users:read permission'
+NOT_CONFIRMED = "Couldn't confirm Hermes applied the change; nothing was recorded"
+# Records written by this release's Connect carry this marker. Only a record
+# without it (an earlier release) can be migrated by adopt().
+KIT_FORMAT = 2
 
 
 class SlackReadError(Exception):
@@ -214,8 +218,9 @@ def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, f
     connect flow writes in the same .env write. Returns False, writing nothing,
     on any mismatch. Both checks and the write happen under apps.lock.
     The record changes only once the value Hermes will use (`read_back()`, a
-    gate scope; by default the .env again) is the one intended: a writer that
-    refused silently, or an administrator-managed value, raises EnvNotApplied."""
+    gate scope read through Hermes) is the one intended: a writer that refused
+    silently, an administrator-managed value, or a read-back that failed or is
+    not complete (Hermes not importable) raises EnvNotApplied."""
     data = Path(data_dir)
     profile = expect.get('profile')
     if not isinstance(profile, str) or not expect.get('app_id'):
@@ -236,7 +241,12 @@ def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, f
         if values:
             write_env(values)
         if ids is not None:
-            scope = read_back() if read_back else scope_from_env(load(), str(path))
+            try:
+                scope = read_back()
+            except Exception:
+                scope = None
+            if not isinstance(scope, dict) or scope.get('complete') is not True:
+                raise EnvNotApplied(NOT_CONFIRMED)
             kept = (((scope or {}).get('keys') or {}).get('SLACK_ALLOWED_USERS') or {}).get('value')
             if coerce_allow_set(kept) != coerce_allow_set(env_value(ids)):
                 shown = kept if kept is None or len(kept) <= 80 else kept[:80] + '…'
@@ -291,41 +301,42 @@ def stale_ids(item, owner):
     return [owner] if owner and (item or {}).get('last_members_owner_ok') is True else []
 
 
-def committed(item, env=None):
+def committed(item, env=None, phase=None):
     """Whether this record is a completed connection (the member sync and
     audience changes need nothing else). `env` is the .env of the record's
-    profile. Connect stamps `installed_at`; a record from an earlier release
-    (v2026.11.16.3 or the first team-access build) has none, and counts when
-    that .env has this app's SLACK_APP_ID and a SLACK_BOT_TOKEN. The pending
-    phase is not needed: that release wrote it only after the welcome DM."""
+    profile, `phase` its pending phase. Connect stamps `installed_at`; a record
+    of this release (`kit_format`) counts only with it, so a failed Connect is
+    never taken as done. A record from an earlier release (v2026.11.16.3 or the
+    first team-access build) has no installed_at and counts when its phase is
+    'installed' and that .env has this app's SLACK_APP_ID and a SLACK_BOT_TOKEN.
+    One that ended in another phase counts only once auth.test proved its
+    token (see Service.status)."""
     item, env = item or {}, env or {}
     if type(item.get('installed_at')) is int:
         return True
+    if 'kit_format' in item or phase != 'installed':
+        return False
     return bool(item.get('app_id')) and env.get('SLACK_APP_ID') == item['app_id'] and bool(env.get('SLACK_BOT_TOKEN'))
 
 
 def adopt(data_dir, key, profile, read_env, now=None):
     """The record of app `key` (of `profile`) if it is a completed connection,
     else None. An older one is migrated under apps.lock: `installed_at` set,
-    `migrated: true`; its audience (access, allowed, access_rev, the .env
-    allowlist) is left as it is. A v2026.11.16.3 record has no `owner`, but
-    that release wrote SLACK_ALLOWED_USERS=<the installer> and nothing else, so
-    a single member ID there is taken as the installer (it is already the one
-    allowed person, so "Only me" can never widen access)."""
+    `migrated: true`; its audience (access, allowed, access_rev, owner, the .env
+    allowlist) is left exactly as it is. No owner is inferred: "Only me" needs
+    an owner recorded by a Connect."""
     data = Path(data_dir)
     with LockedFile(data / 'apps.lock'):
         apps = _read_json(data / 'apps.json', {})
         item = apps.get(key)
         if not isinstance(item, dict) or item.get('profile') != profile:
             return None
-        env = read_env()
-        if not committed(item, env):
+        pending = _read_json(data / 'pending' / (key + '.json'), {})
+        phase = pending.get('phase') if isinstance(pending, dict) else None
+        if not committed(item, read_env(), phase):
             return None
         if not committed(item):
             item.update({'installed_at': int(time.time() if now is None else now), 'migrated': True})
-            only = sorted(_ids(env.get('SLACK_ALLOWED_USERS')))
-            if 'access' not in item and not owner_of(item) and len(only) == 1 and USER_ID.fullmatch(only[0]):
-                item['owner'] = only[0]
             _atomic_json(data / 'apps.json', apps)
         return item
 

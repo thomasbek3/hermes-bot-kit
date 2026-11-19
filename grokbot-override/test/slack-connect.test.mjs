@@ -55,6 +55,7 @@ test('Slack provisioning confirms removal and cancels a created app', { skip: !R
     calls.push(`${req.method} ${req.path}`)
     if (req.path.endsWith('/workspaces')) return [{team_id:'T1',team_name:'Example'}]
     if (req.path.endsWith('/status')) return {mode:'http',phase,team_name:'Example',readiness:{infrastructure_ready:true}}
+    if (req.method === 'POST' && req.path.endsWith('/remove')) { assert.deepEqual(req.body, {confirm:true}); phase = 'none'; return {ok:true} }
     if (req.method === 'POST') { phase = 'created'; return {authorize_url:'https://slack.com/oauth/v2/authorize?fake=1',app_id:'A1'} }
     if (req.method === 'DELETE') { phase = 'none'; return {ok:true} }
     throw new Error('unexpected')
@@ -84,7 +85,8 @@ test('Slack provisioning confirms removal and cancels a created app', { skip: !R
   buttonWithText(sheet, 'Remove from Slack').click()
   await waitFor(() => sheet.textContent.includes('This deletes the app'), 'confirmation again')
   buttonWithText(sheet, 'Remove').click()
-  await waitFor(() => calls.filter(x => x.startsWith('DELETE')).length === 2, 'confirmed deletion')
+  await waitFor(() => calls.includes('POST /api/plugins/slack-connect/remove'), 'confirmed deletion')
+  assert.equal(calls.filter(x => x.startsWith('DELETE')).length, 1, 'Remove is its own confirmed route')
   await waitFor(() => sheet.textContent.includes('Bring Scholar to Slack'), 'removal finishes')
   sheet.querySelector('[aria-label="Close"]').click()
   await waitFor(() => !sheetEl(), 'sheet closes after removal')
@@ -93,7 +95,7 @@ test('Slack provisioning confirms removal and cancels a created app', { skip: !R
   sheet = await waitFor(() => sheetEl()?.textContent.includes('Slack install was cancelled') ? sheetEl() : null, 'denied dialog')
   buttonWithText(sheet, 'Cancel').click()
   await waitFor(() => !sheetEl(), 'denied cancel cleans up and closes')
-  assert.equal(calls.filter(x => x.startsWith('DELETE')).length, 3)
+  assert.equal(calls.filter(x => x.startsWith('DELETE')).length, 2)
 })
 
 test('readiness picks one-click, add-a-workspace or the paste-tokens dialog', async () => {

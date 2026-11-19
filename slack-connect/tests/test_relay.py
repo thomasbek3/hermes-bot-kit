@@ -15,6 +15,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.core import issue_state
+from common import access
 path = Path(__file__).resolve().parents[2] / 'slack-relay' / 'relay.py'
 spec = importlib.util.spec_from_file_location('relay_test', path)
 relay_module = importlib.util.module_from_spec(spec)
@@ -118,7 +119,11 @@ def test_oauth_success_denial_and_single_use(tmp_path):
                 env.write(''.join(f'{k}={v}\n' for k, v in values.items()))
         async def notify(profile):
             notifications.append(profile)
-        relay = relay_module.Relay(tmp_path, 'python', 'helper', base_url='https://example.test/slack', upstream='http://127.0.0.1:9999', slack=slack, writer=writer, notifier=notify)
+        async def scope_reader(profile):   # test-only stand-in for Hermes's read-back
+            home = tmp_path / 'profiles' / profile
+            return access.scope_from_env(access.read_env_file(home / '.env'), f'{home}/.env')
+        relay = relay_module.Relay(tmp_path, 'python', 'helper', base_url='https://example.test/slack', upstream='http://127.0.0.1:9999', slack=slack, writer=writer, notifier=notify,
+                                   scope_reader=scope_reader)
         client = TestClient(TestServer(relay.application()))
         await client.start_server()
         try:

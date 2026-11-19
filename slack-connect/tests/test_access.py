@@ -673,3 +673,151 @@ def test_profile_helper_writes_nothing_when_hermes_refuses_a_key(tmp_path):
     ok = subprocess.run([sys.executable, '-I', str(HELPER)], input=json.dumps({'SLACK_BOT_TOKEN': 'xoxb-FAKE'}).encode(),
                         env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True)
     assert ok.returncode == 0 and log.read_text() == 'SLACK_BOT_TOKEN\n'
+
+
+# ---- round 6: no lock on the loop; an authoritative read-back; kit_format ---
+
+DEADLOCK_SCRIPT = r'''
+import asyncio, importlib.util, json, sys
+from pathlib import Path
+kit, root = Path(sys.argv[1]), Path(sys.argv[2])
+sys.path.insert(0, str(kit / 'slack-connect'))
+from aiohttp.test_utils import TestClient, TestServer
+from common import access
+from common.core import issue_state
+spec = importlib.util.spec_from_file_location('relay_deadlock', kit / 'slack-relay' / 'relay.py')
+relay_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(relay_module)
+home = root / 'profiles' / 'bot'
+
+async def main():
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def slack(method, values, token):
+        if method == 'oauth.v2.access':
+            return {'ok': True, 'app_id': 'A1', 'team': {'id': 'T1', 'name': 'Acme'}, 'authed_user': {'id': 'U1'},
+                    'access_token': 'xoxb-FAKE-bot', 'bot_user_id': 'B1'}
+        if method == 'users.list':
+            return {'ok': True, 'members': [{'id': 'U1', 'team_id': 'T1'}]}
+        return {'ok': True}
+    async def writer(_profile, values):
+        entered.set()
+        await release.wait()   # the publish holds apps.lock in its thread meanwhile
+        env = access.read_env_file(home / '.env')
+        env.update(values)
+        (home / '.env').write_text(''.join(f'{k}={v}\n' for k, v in env.items()))
+    async def scope_reader(_profile):
+        return access.scope_from_env(access.read_env_file(home / '.env'), f'{home}/.env')
+    async def notify(_profile):
+        return True
+    relay = relay_module.Relay(root, 'python', 'helper', base_url='https://example.test/slack',
+                               upstream='http://127.0.0.1:9', slack=slack, writer=writer, notifier=notify,
+                               scope_reader=scope_reader)
+    client = TestClient(TestServer(relay.application()))
+    await client.start_server()
+    try:
+        state = issue_state(b'k' * 32, 'bot', 'b' * 32, 'T1')
+        callback = asyncio.ensure_future(client.get('/oauth/callback', params={'state': state, 'code': 'c'}))
+        await asyncio.wait_for(entered.wait(), 5)
+        sync = asyncio.ensure_future(relay.sync_members_once())   # the 15-minute refresh starts now
+        await asyncio.sleep(0.2)
+        release.set()
+        response, _ = await asyncio.wait_for(asyncio.gather(callback, sync), 5)
+        print(json.dumps({'status': response.status}))
+    finally:
+        await client.close()
+
+asyncio.run(main())
+'''
+
+
+def test_a_member_sync_during_a_callback_write_never_deadlocks(tmp_path):
+    """A callback's publish holds apps.lock in a thread while the loop runs its
+    profile write; the member refresh starting then must not take that lock on
+    the loop thread. On the old code the loop blocks in adopt() for good, so
+    this runs in a subprocess that is killed on the timeout."""
+    prepare(tmp_path, {'kit_format': 2})
+    try:
+        out = subprocess.run([sys.executable, '-I', '-c', DEADLOCK_SCRIPT, str(BASE.parent), str(tmp_path)],
+                             capture_output=True, timeout=30, env={'PYTHONDONTWRITEBYTECODE': '1'})
+    except subprocess.TimeoutExpired:
+        pytest.fail('deadlock: the member sync took apps.lock on the event-loop thread')
+    assert out.returncode == 0, out.stderr.decode()[-2000:]
+    assert json.loads(out.stdout) == {'status': 200}
+    assert type(record_of(tmp_path / 'slack-connect')['installed_at']) is int
+
+
+def test_relay_never_takes_a_file_lock_on_the_loop_thread():
+    """Static: every lock-taking call in relay.py is handed to asyncio.to_thread
+    (as a function, never called directly)."""
+    import ast
+    locking = {'adopt', 'publish_allowlist', 'consume_state', 'LockedFile'}
+    tree = ast.parse(path.read_text())
+    direct = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call) and
+              (getattr(node.func, 'attr', None) or getattr(node.func, 'id', None)) in locking]
+    assert direct == [], f'relay.py calls a lock-taking function on the loop at lines {direct}'
+
+
+@pytest.mark.parametrize('scope', ['raises', 'incomplete'])
+def test_a_relay_read_back_that_is_not_authoritative_commits_nothing(tmp_path, scope):
+    data, home = installed(tmp_path)
+    before = record_of(data)
+    relay = make_relay(tmp_path, home, FakeSlack([[{'id': 'U1', 'team_id': 'T1'}]]))
+
+    async def unconfirmed(_profile):
+        if scope == 'raises':
+            raise RuntimeError('the Hermes scope helper failed')
+        return access.local_scope(home)   # Hermes not importable: complete is False
+    relay.scope_reader = unconfirmed
+    with pytest.raises(access.EnvNotApplied, match=r"^Couldn't confirm Hermes applied the change; nothing was recorded$"):
+        asyncio.run(relay.sync_app(KEY, now=NOW))
+    assert record_of(data) == before
+
+
+def test_a_connect_whose_read_back_is_incomplete_is_not_committed(tmp_path):
+    data, home = prepare(tmp_path, {'kit_format': 2})
+    relay = make_relay(tmp_path, home, FakeSlack())
+
+    async def incomplete(_profile):
+        return access.local_scope(home)
+    relay.scope_reader = incomplete
+
+    async def exercise():
+        client = TestClient(TestServer(relay.application()))
+        await client.start_server()
+        try:
+            response = await client.get('/oauth/callback', params={'state': issue_state(b'k' * 32, 'bot', KEY, 'T1'), 'code': 'c'})
+            return response.status, await response.text()
+        finally:
+            await client.close()
+    status, text = asyncio.run(exercise())
+    assert status == 502 and "Couldn't confirm Hermes applied the change; nothing was recorded" in text
+    assert 'installed_at' not in record_of(data)
+    assert json.loads((data / 'pending' / (KEY + '.json')).read_text())['phase'] == 'error'
+
+
+def test_publish_allowlist_requires_a_read_back():
+    """Production rule: no read-back, no commit (there is no .env default)."""
+    import inspect
+    assert 'scope_from_env' not in inspect.getsource(access.publish_allowlist)
+
+
+def test_a_current_failed_connect_is_never_adopted(tmp_path):
+    """A record of this release (kit_format) whose Connect wrote the token but
+    never committed: not a connection, whatever the .env and phase say."""
+    for phase in ('installed', 'error'):
+        root = tmp_path / phase
+        data, home = prepare(root, {'kit_format': 2, 'owner': 'U1'},
+                             'SLACK_BOT_TOKEN=xoxb-FAKE\nSLACK_ALLOWED_USERS=U1\n', pending={'phase': phase, 'at': 1})
+        before = record_of(data)
+        assert access.adopt(data, KEY, 'bot', lambda: env_of(home)) is None
+        slack = FakeSlack()
+        assert asyncio.run(make_relay(root, home, slack).sync_members_once()) == 0 and slack.calls == []
+        assert record_of(data) == before
+
+
+def test_an_earlier_release_record_that_ended_in_error_is_not_adopted_unproven(tmp_path):
+    data, home = prepare(tmp_path, {'owner': 'U1'}, 'SLACK_BOT_TOKEN=xoxb-FAKE\nSLACK_ALLOWED_USERS=U1\n',
+                         pending={'phase': 'error', 'at': 1})
+    before = record_of(data)
+    assert access.adopt(data, KEY, 'bot', lambda: env_of(home)) is None
+    assert record_of(data) == before

@@ -61,13 +61,14 @@ test('Slack window sends the chosen audience and shows the effective one, its gr
   buttonWithText(sheet, 'Done').click()
   await waitFor(() => !sheetEl(), 'closed again')
   // Connected before team access, installer unknown: shown as it is, with an explicit choice and no "Only me".
-  legacy = { ids: ['U0LEGACY1'], text: 'Connected before team access: it allows U0LEGACY1.' }
+  legacy = { ids: ['U0LEGACY1'], text: 'Allowed now: U0LEGACY1 (from the earlier version)' }
   ownerKnown = false
   audience = { text: '1 person can talk to this bot: the 1 person in SLACK_ALLOWED_USERS.', open: false, grants: [], sync: { text: '' } }
   internals.openDialog({ kind: 'slack-status', bot })
   sheet = await waitFor(() => sheetEl()?.querySelector('.gbo-slack-legacy') ? sheetEl() : null, 'legacy shown')
-  assert.ok(sheet.querySelector('.gbo-slack-legacy').textContent.includes('Connected before team access: it allows U0LEGACY1.'))
+  assert.ok(sheet.querySelector('.gbo-slack-legacy').textContent.includes('Allowed now: U0LEGACY1 (from the earlier version)'))
   assert.ok(!sheet.querySelector('.gbo-slack-legacy-owner'), 'no Only me without a known installer')
+  assert.equal(sheet.querySelector('.gbo-slack-legacy-choices .gbo-slack-reconnect-hint')?.textContent, 'To choose Only me, reconnect the bot.')
   assert.ok(sheet.querySelector('.gbo-slack-legacy-members'))
   buttonWithText(sheet, 'Keep these people').click()
   await waitFor(() => bodies.at(-1)[1]?.access === 'list', 'keep sent')

@@ -99,20 +99,27 @@ is the app it created.
 
 **Bots connected before team access** (an earlier release of the kit) keep
 their list. Nothing rewrites it on upgrade, and the relay never refreshes it.
-The window says *Connected before team access: it allows …* and offers
-**Keep these people**, **Everyone in the workspace**, or **Only me** (only
-when the kit knows who added the bot: that release allowed only the person who
-added it, so a list that still names exactly one member is taken as them).
-On first sight after the upgrade the kit marks such a bot as connected (when
-its `.env` still has that app's `SLACK_APP_ID` and a bot token) without
-changing who can talk to it; a "full members" bot from an earlier build of
-team access is then refreshed again like any other.
+The window says *Allowed now: U123 (from the earlier version)* and offers
+**Keep these people** or **Everyone in the workspace**. **Only me** needs the
+person who added the bot, recorded by this release's Connect, so for such a
+bot the window says *To choose Only me, reconnect the bot.* On first sight
+after the upgrade the kit marks such a bot as connected (when its `.env` still
+has that app's `SLACK_APP_ID` and a bot token) without changing who can talk
+to it; a "full members" bot from an earlier build of team access is then
+refreshed again like any other. A bot whose earlier Connect ended in an error
+after its token was saved (for example, the welcome DM failed) is checked once
+with Slack (`auth.test`) when you open its window: if the token works for that
+workspace it reads as connected, otherwise it stays as it is. A Connect of
+this release that failed is never taken as connected.
 
 **When Hermes won't take the change.** On a managed Hermes, or when an
 administrator pins `SLACK_ALLOWED_USERS`, Hermes refuses the write. The window
 then shows Hermes's refusal, or *Hermes kept SLACK_ALLOWED_USERS=…
 (administrator-managed?)*, and keeps the audience it had: the kit reads the
-allowlist back the way Hermes reads it before it records any change.
+allowlist back the way Hermes reads it before it records any change. If that
+read-back fails, or Hermes's own settings can't be read, the change isn't
+recorded either: *Couldn't confirm Hermes applied the change; nothing was
+recorded.*
 
 How the kit does it: Hermes has no "full members only" switch.
 `SLACK_ALLOW_ALL_USERS=true` would also let guests in (Hermes refuses only
@@ -229,9 +236,11 @@ clone of this repository.
    ```
 7. **Verify:** see [Check it works](#check-it-works).
 
-To remove the bot from Slack, use **Remove from Slack** in the same window. It
-deletes the app and the bot's Slack keys, and restores the allowlist the
-profile had before.
+To remove the bot from Slack, use **Remove from Slack** in the same window and
+confirm. It deletes the app and the bot's Slack keys, and restores the
+allowlist the profile had before. **Cancel** or closing the window removes
+only an app that was never installed; once the bot has its Slack token, only
+the confirmed **Remove from Slack** deletes the app.
 
 ## Settings that matter afterwards
 
