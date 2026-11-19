@@ -55,8 +55,8 @@ them and leaves them alone unless `KIT_REMOVE_RETIRED=1` is set.
 
 Hermes Desktop loads disk plugins at startup and on plugin reload. One of:
 
-- In Hermes Desktop: command palette (Cmd+Shift+P / Ctrl+Shift+P) →
-  **Reload plugins**, or
+- In Hermes Desktop: command palette (**⌘K** on macOS, **Ctrl+K** on Windows/Linux; ⌘P / Ctrl+P also work) →
+  type `reload` → **Reload desktop plugins**, or
 - Restart the Hermes Desktop app.
 
 An agent without GUI control cannot complete this step; tell the user to do

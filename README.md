@@ -32,7 +32,7 @@ Desktop plugins plus an optional agent plugin, one install:
 
 | Plugin | What it does |
 |---|---|
-| 🤖 **[Grokbot Override](grokbot-override/)** *(preview, the kit's main plugin, installed switched on)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots and **your own named sections**, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘⇧P → Grokbot Override: toggle** switches back to stock instantly (and on again). See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
+| 🤖 **[Grokbot Override](grokbot-override/)** *(preview, the kit's main plugin, installed switched on)* | A chat-app **Bot Mode screen** on the Hermes engine, in light and dark: a roster with pinned bots and **your own named sections**, the bot's own Bot Chat in bubbles of the bot's colour with the work rows tucked away, question, approval and task cards, and a profile panel with scheduled jobs, the bot's computer, a Model row and a Slack card with **one-click Add to Slack**. Opens the **same** Bot Chat as Bot Mode (history shared both ways). Stock Bot Mode is never removed: **⌘K → Grokbot Override: toggle** switches back to stock instantly (and on again). See [what's new](#new-grokbot-override) and [PARITY.md](grokbot-override/PARITY.md). |
 | 🖥️ **[Computer](computer-viewer/)** | A live remote-desktop pane docked in Hermes — VPS and Docker boxes, spare Macs, Windows PCs, Linux machines, switchable like a KVM for your fleet. **Opens the moment your bot calls Hermes's own `computer_use` or browser tools** on its bound machine, so you watch it work, and **Take over / Hand back** for Macs the bot drives over SSH. Optional H.264 HD mode and per-bot computer bindings. |
 | 📱 **[texting-style](texting-style/)** | An **agent plugin** that makes bots *talk* like texting, not just look like it — and **only in Bot Mode chats**: short replies, mirrors your length, no walls of text, "on it" then the result. Regular Sessions stay stock. Per-profile install, one editable doctrine string. |
 | ✉️ **[email-drafts](email-drafts/)** | An **agent plugin**: bots write email as **drafts** that appear as Grok-Bot-style cards in the override's chat (editable To, Cc and body, your signature, attachments). Nothing leaves until you click **Send** (through Composio by default, using the `composio` CLI logged in on the bot's machine; or Gmail through Hermes's own OAuth sign-in, or SMTP), unless you allowed every recipient. Per-bot rules: allow recipient, needs approval, drafts off. Per-profile install. |
@@ -53,10 +53,12 @@ One command, the desktop plugins (idempotent, no sudo, agents can run it unatten
 curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh | bash
 ```
 
-Then in Hermes Desktop: **⌘K → Reload plugins** (or restart the app).
+Then in Hermes Desktop: **⌘K → Reload desktop plugins** (Ctrl+K on Windows and Linux; type `reload`), or quit and reopen the app.
+
+> **Nothing changed after installing?** Plugins load only after that reload or a restart. ⌘⇧P is not a Hermes shortcut; the command palette is **⌘K** (or ⌘P). The plugin switches live in **Capabilities → Plugins**.
 
 - Grokbot Override is installed **switched on**: its Bots tab replaces the
-  stock one. **⌘⇧P → Grokbot Override: toggle** switches back to stock Bot
+  stock one. **⌘K → Grokbot Override: toggle** switches back to stock Bot
   Mode (and on again); a choice you made before is kept on upgrade.
 - The Computer pane: enable **Computer** in **Settings → Plugins**, then add a
   computer — see the [computer-viewer README](computer-viewer/README.md) for
@@ -128,7 +130,7 @@ What you get:
   header to rename, move or delete it, click it to collapse; right-click a
   bot → **Move to section**.
 - **Hidden work rows.** Thinking and tool rows stay out of the chat by default.
-  **⌘⇧P → Grokbot Override: show work rows** brings them back.
+  **⌘K → Grokbot Override: show work rows** brings them back.
 
 <p align="center">
   <img src="grokbot-override/screenshots/slack-strip.png" alt="Add to Slack in three steps: Connect, Connected to Acme Team Slack, and the Slack card reading Connected" width="860">
