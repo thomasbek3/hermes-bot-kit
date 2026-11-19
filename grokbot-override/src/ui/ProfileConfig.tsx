@@ -9,7 +9,7 @@ import { boundedFetch, mcpNeedsSetup, modelOptionsParams, providerMatches, provi
 import { resolveBotConnectionRoute } from '../core/routing.js'
 import { Check, Field, Select } from './kit'
 import { installSkill, loadProfileConfig, request, searchSkills } from './rosterActions'
-import { skillIdentity, skillSource } from '../core/profileConfig.js'
+import { skillAmbiguous, skillIdentity, skillSource } from '../core/profileConfig.js'
 import { host, sdk } from './sdk'
 
 /** The model catalogue (model.options) for the app session: one per
@@ -220,16 +220,17 @@ function SkillsHub({ bot, onInstalled }: { bot: any; onInstalled: (name: string)
       </form>
       {error ? <div className="gbo-form-error">{error}</div> : null}
       {results && !results.length ? <span className="gbo-field-hint">No skills found.</span> : null}
-      {(results || []).slice(0, 8).map((r: any) => (
-        <div key={skillIdentity(r)} className="gbo-check" style={{ cursor: 'default' }}>
+      {(results || []).slice(0, 8).map((r: any, index: number) => (
+        <div key={`${index}:${skillIdentity(r)}`} className="gbo-check" style={{ cursor: 'default' }}>
           <span className="gbo-check-text" title={r.description || r.name}>
             {r.name}
             {skillSource(r) ? <span className="gbo-field-hint"> · {skillSource(r)}</span> : null}
+            {skillAmbiguous(results, r) ? <span className="gbo-field-hint gbo-skill-ambiguous"> · Several hub entries share this name and the hub does not say which is which; install it from Hermes's own Skills page.</span> : null}
           </span>
           <button
             type="button"
             className="gbo-btn is-small"
-            disabled={Boolean(busy)}
+            disabled={Boolean(busy) || skillAmbiguous(results, r)}
             onClick={async () => {
               setBusy(r.name)
               setError(null)

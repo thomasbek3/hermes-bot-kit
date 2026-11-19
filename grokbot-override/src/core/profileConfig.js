@@ -196,3 +196,13 @@ export function skillSource(row) {
   const parts = [row?.source, row?.trust || row?.trust_level].map(v => (typeof v === 'string' ? v.trim() : '')).filter(Boolean)
   return parts.join(', ')
 }
+
+/** True when Install cannot be bound to exactly this search row: the hub gave
+ *  no source-qualified identifier, and another row has the same name. The hub
+ *  search today returns only name and description, so a bare name could
+ *  resolve to a different entry on the bot's backend. */
+export function skillAmbiguous(rows, row) {
+  const name = String(row?.name || '').trim()
+  if (!name || skillIdentity(row) !== name) return false
+  return (Array.isArray(rows) ? rows : []).filter(r => String(r?.name || '').trim() === name).length > 1
+}

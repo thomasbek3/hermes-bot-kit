@@ -47902,6 +47902,11 @@ function skillSource(row) {
   const parts = [row?.source, row?.trust || row?.trust_level].map((v) => typeof v === "string" ? v.trim() : "").filter(Boolean);
   return parts.join(", ");
 }
+function skillAmbiguous(rows, row) {
+  const name = String(row?.name || "").trim();
+  if (!name || skillIdentity(row) !== name) return false;
+  return (Array.isArray(rows) ? rows : []).filter((r) => String(r?.name || "").trim() === name).length > 1;
+}
 
 // src/core/profileOps.js
 var NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -58900,20 +58905,21 @@ function SkillsHub({ bot, onInstalled }) {
     ),
     error ? /* @__PURE__ */ jsx17("div", { className: "gbo-form-error", children: error }) : null,
     results && !results.length ? /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint", children: "No skills found." }) : null,
-    (results || []).slice(0, 8).map((r) => /* @__PURE__ */ jsxs16("div", { className: "gbo-check", style: { cursor: "default" }, children: [
+    (results || []).slice(0, 8).map((r, index) => /* @__PURE__ */ jsxs16("div", { className: "gbo-check", style: { cursor: "default" }, children: [
       /* @__PURE__ */ jsxs16("span", { className: "gbo-check-text", title: r.description || r.name, children: [
         r.name,
         skillSource(r) ? /* @__PURE__ */ jsxs16("span", { className: "gbo-field-hint", children: [
           " · ",
           skillSource(r)
-        ] }) : null
+        ] }) : null,
+        skillAmbiguous(results, r) ? /* @__PURE__ */ jsx17("span", { className: "gbo-field-hint gbo-skill-ambiguous", children: " · Several hub entries share this name and the hub does not say which is which; install it from Hermes's own Skills page." }) : null
       ] }),
       /* @__PURE__ */ jsx17(
         "button",
         {
           type: "button",
           className: "gbo-btn is-small",
-          disabled: Boolean(busy),
+          disabled: Boolean(busy) || skillAmbiguous(results, r),
           onClick: async () => {
             setBusy(r.name);
             setError(null);
@@ -58929,7 +58935,7 @@ function SkillsHub({ bot, onInstalled }) {
           children: busy === r.name ? "Installing…" : "Install"
         }
       )
-    ] }, skillIdentity(r)))
+    ] }, `${index}:${skillIdentity(r)}`))
   ] });
 }
 function backendScope(bot) {
