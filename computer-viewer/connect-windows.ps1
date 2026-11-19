@@ -11,8 +11,14 @@
 
   TightVNC MSI SET_PASSWORD / VALUE_OF_PASSWORD is historically unreliable
   (upstream bug #1392: 8-char passwords could be dropped; some 2.8.x builds omit
-  the properties). We still pass them, print the generated password regardless,
-  and may need a registry / TightVNC configuration fallback for auth.
+  the properties), and a command line is visible to other accounts. So the
+  password is never passed to msiexec: it is written to the server's registry
+  value (the same DES form vncpasswd uses), read back, and the service is
+  restarted, on every run, before the password is printed.
+
+  Everything run as Administrator or SYSTEM (Python, websockify, the virtual
+  display installer, UltraVNC) must sit in admin-only folders, checked before
+  its first run; a folder another account created first is refused.
 
   Headless PCs (no monitor, VirtualScreen 1024x768 / WinDisc): install Amyuni
   usbmmidd_v2 (signed IDD, no test-signing) and persist enableidd at startup.
@@ -172,10 +178,61 @@ function Test-WritableByNonAdmins([string]$Path) {
     $writeMask = [long](0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
     foreach ($ace in @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
         if ($ace.AccessControlType -ne 'Allow') { continue }
+        # An inherit-only entry (e.g. CREATOR OWNER on Program Files) does not apply to this object.
+        if (($ace.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
         if ($TrustedOwnerSids -contains $ace.IdentityReference.Value) { continue }
         if (([long]$ace.FileSystemRights -band $writeMask) -ne 0) { return $true }
     }
     return $false
+}
+
+function Test-ReadableByNonAdmins([string]$Path) {
+    # True when anyone other than Administrators, SYSTEM or TrustedInstaller may read $Path.
+    $acl = Get-Acl -LiteralPath $Path
+    # ReadData, GENERIC_ALL, GENERIC_READ.
+    $readMask = [long](0x1 -bor 0x10000000 -bor 0x80000000)
+    foreach ($ace in @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        if ($ace.AccessControlType -ne 'Allow') { continue }
+        if (($ace.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
+        if ($TrustedOwnerSids -contains $ace.IdentityReference.Value) { continue }
+        if (([long]$ace.FileSystemRights -band $readMask) -ne 0) { return $true }
+    }
+    return $false
+}
+
+function Test-ProtectedPath([string]$Path) {
+    # Exists, is not a link, is owned by Administrators/SYSTEM/TrustedInstaller,
+    # and nobody else may write, delete or re-permission it.
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    if (Test-IsLink $Path) { return $false }
+    return -not (Test-WritableByNonAdmins $Path)
+}
+
+function Test-TrustedExecutable([string]$Exe, [string[]]$ImportDirs = @()) {
+    # $Exe can be run as Administrator or SYSTEM only when the file, every
+    # folder above it that someone could rename or replace (up to, not
+    # including, the drive root), and each folder it loads code from are
+    # admin-only. Checked BEFORE the first time it is run.
+    if (-not $Exe -or -not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return $false }
+    $paths = @($Exe)
+    $dir = Split-Path -Parent $Exe
+    while ($dir -and (Split-Path -Parent $dir)) {
+        $paths += $dir
+        $dir = Split-Path -Parent $dir
+    }
+    foreach ($d in $ImportDirs) { if (Test-Path -LiteralPath $d) { $paths += $d } }
+    foreach ($p in $paths) {
+        if (-not (Test-ProtectedPath $p)) {
+            Write-Warning "$p can be changed by a non-administrator (or is a link); not running $Exe."
+            return $false
+        }
+    }
+    return $true
+}
+
+function Get-PythonImportDirs([string]$Exe) {
+    $dir = Split-Path -Parent $Exe
+    return @((Join-Path $dir 'Lib'), (Join-Path $dir 'Lib\site-packages'), (Join-Path $dir 'DLLs'))
 }
 
 function Reset-ChildAcls([string]$Dir, [System.Security.Principal.SecurityIdentifier]$Owner) {
@@ -306,18 +363,26 @@ function New-VncPassword8 {
 }
 
 function Protect-PasswordFile {
-    try {
-        $acl = Get-Acl -LiteralPath $PasswordFile
-        $acl.SetAccessRuleProtection($true, $false)
-        $admin = New-Object System.Security.AccessControl.FileSystemAccessRule(
-            'BUILTIN\Administrators', 'FullControl', 'Allow')
-        $system = New-Object System.Security.AccessControl.FileSystemAccessRule(
-            'NT AUTHORITY\SYSTEM', 'FullControl', 'Allow')
-        $acl.AddAccessRule($admin)
-        $acl.AddAccessRule($system)
-        Set-Acl -LiteralPath $PasswordFile -AclObject $acl
-    } catch {
-        # Best-effort ACL harden; the file still exists.
+    # The whole ACL is replaced (no explicit grant survives) and checked; a
+    # failure stops the install instead of leaving a readable password.
+    Set-ProtectedAcl -Path $PasswordFile
+    if ((Test-ReadableByNonAdmins $PasswordFile) -or (Test-WritableByNonAdmins $PasswordFile)) {
+        throw "$PasswordFile is still readable or writable by non-administrators; refusing to use it."
+    }
+}
+
+function Assert-TrustedStateDir {
+    # C:\ProgramData\hermes-cv may already exist only if an administrator (or
+    # this installer) made it. One another account created first is refused:
+    # re-owning it would keep whatever was planted inside.
+    if (-not (Test-Path -LiteralPath $StateDir)) {
+        New-Item -ItemType Directory -Path $StateDir -ErrorAction Stop | Out-Null
+        Set-ProtectedAcl -Path $StateDir
+        return
+    }
+    if ((Test-IsLink $StateDir) -or -not (Test-OwnedByUsOrTrusted $StateDir)) {
+        $owner = (Get-Acl -LiteralPath $StateDir).Owner
+        throw "$StateDir already exists and is owned by '$owner' (or is a link), not by an administrator. Another account may have created it. Check it, delete it from an Administrator prompt (Remove-Item -Recurse -Force '$StateDir'), then re-run."
     }
 }
 
@@ -330,8 +395,8 @@ function Get-OrCreateVncPassword {
         $reuseOk = (Test-OwnedByUsOrTrusted $StateDir) -and (Test-OwnedByUsOrTrusted $PasswordFile)
         if (-not $reuseOk) { Write-Warning "$PasswordFile was not created by this installer; making a new VNC password." }
     }
-    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-    # The state folder: Administrators and SYSTEM only, whoever created it.
+    Assert-TrustedStateDir
+    # The state folder: Administrators and SYSTEM only.
     # (The hiperf installer protects its own files inside it separately.)
     Set-ProtectedAcl -Path $StateDir
     if ($reuseOk) {
@@ -347,6 +412,10 @@ function Get-OrCreateVncPassword {
     }
     if (Test-Path -LiteralPath $PasswordFile) { Remove-Item -LiteralPath $PasswordFile -Force }
     $pw = New-VncPassword8
+    # Created empty, locked down, then written: the secret never sits in a file
+    # with a wider ACL.
+    New-Item -ItemType File -Path $PasswordFile -ErrorAction Stop | Out-Null
+    Protect-PasswordFile
     Set-Content -LiteralPath $PasswordFile -Value $pw -Encoding ASCII
     Protect-PasswordFile
     Write-Step "Generated 8-char VNC password (DES limit) -> $PasswordFile"
@@ -364,34 +433,76 @@ function Refresh-ProcessPath {
 }
 
 function Resolve-Python {
+    # Only an all-users install whose file, folders and import locations are
+    # admin-only is returned; it is validated here, before it is ever run
+    # (as Administrator now, as SYSTEM at every boot). Per-user installs and
+    # anything on PATH that fails the check are skipped.
     Refresh-ProcessPath
     $candidates = @(
         (Join-Path ${env:ProgramFiles} 'Python312\python.exe'),
         (Join-Path ${env:ProgramFiles} 'Python313\python.exe'),
-        (Join-Path ${env:ProgramFiles} 'Python311\python.exe'),
-        (Join-Path $env:LocalAppData 'Programs\Python\Python312\python.exe'),
-        (Join-Path $env:LocalAppData 'Programs\Python\Python313\python.exe')
+        (Join-Path ${env:ProgramFiles} 'Python311\python.exe')
     )
-    foreach ($c in $candidates) {
-        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
-    }
     foreach ($name in @('python', 'python3')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and ($cmd.Source -notmatch 'WindowsApps\\python')) {
-            return $cmd.Source
-        }
+        if ($cmd -and $cmd.Source -and ($cmd.Source -notmatch 'WindowsApps\\python')) { $candidates += $cmd.Source }
+    }
+    foreach ($c in $candidates) {
+        if (-not $c -or -not (Test-Path -LiteralPath $c -PathType Leaf)) { continue }
+        if ($c -match '\\Users\\') { Write-Warning "Skipping per-user Python $c (its owner can change it)."; continue }
+        if (Test-TrustedExecutable $c (Get-PythonImportDirs $c)) { return $c }
     }
     return $null
 }
 
 function Test-PythonWorks([string]$Exe) {
+    # -I: isolated mode, no PYTHON* variables, user site-packages or current folder.
     if (-not $Exe) { return $false }
     try {
-        & $Exe -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' | Out-Null
+        & $Exe -I -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' | Out-Null
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
     }
+}
+
+function ConvertTo-VncObfuscated([string]$Password) {
+    # TightVNC's stored-password form: the 8-byte DES-ECB of the password
+    # (zero padded) under VNC's fixed key, in standard DES bit order.
+    $key = [byte[]](0xE8, 0x4A, 0xD6, 0x60, 0xC4, 0x72, 0x1A, 0xE0)
+    $plain = New-Object byte[] 8
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes($Password)
+    [Array]::Copy($bytes, $plain, [Math]::Min(8, $bytes.Length))
+    $des = [System.Security.Cryptography.DES]::Create()
+    try {
+        $des.Mode = [System.Security.Cryptography.CipherMode]::ECB
+        $des.Padding = [System.Security.Cryptography.PaddingMode]::None
+        $enc = $des.CreateEncryptor($key, (New-Object byte[] 8))
+        return $enc.TransformFinalBlock($plain, 0, 8)
+    } finally {
+        $des.Dispose()
+    }
+}
+
+function Set-TightVncPassword([string]$Password) {
+    # The running server's password is the one in the file: set it, restart
+    # the service, and read it back. A mismatch stops the install, so the
+    # password printed below is always the one the server accepts.
+    $want = ConvertTo-VncObfuscated $Password
+    $rp = 'HKLM:\SOFTWARE\TightVNC\Server'
+    if (-not (Test-Path -LiteralPath $rp)) { New-Item -Path $rp -Force | Out-Null }
+    $have = (Get-ItemProperty -LiteralPath $rp -Name 'Password' -ErrorAction SilentlyContinue).Password
+    $same = $have -and ($have.Length -eq 8) -and (-not (Compare-Object ([byte[]]$have) $want -SyncWindow 0))
+    if (-not $same) {
+        New-ItemProperty -Path $rp -Name 'Password' -PropertyType Binary -Value $want -Force | Out-Null
+        New-ItemProperty -Path $rp -Name 'UseVncAuthentication' -PropertyType DWord -Value 1 -Force | Out-Null
+        Write-Step 'Set the TightVNC server password to the one in the password file'
+    }
+    $check = (Get-ItemProperty -LiteralPath $rp -Name 'Password' -ErrorAction Stop).Password
+    if (-not $check -or ($check.Length -ne 8) -or (Compare-Object ([byte[]]$check) $want -SyncWindow 0)) {
+        throw 'The TightVNC server password could not be set to the stored one; not printing a password that would not work.'
+    }
+    return (-not $same)
 }
 
 function Get-DisplaySnapshot {
@@ -471,23 +582,18 @@ function Install-UsbmmiddVirtualDisplay {
     # The SYSTEM startup task runs a program from this folder. A folder that
     # someone else created (a standard user can create folders in C:\) or a
     # link is not adopted: stop, and drop any task that points into it.
-    if (Test-Path -LiteralPath $UsbmmiddDir) {
-        if ((Test-IsLink $UsbmmiddDir) -or -not (Test-TrustedOwner $UsbmmiddDir)) {
-            $owner = (Get-Acl -LiteralPath $UsbmmiddDir).Owner
-            Write-Warning "$UsbmmiddDir already exists and is owned by '$owner', not Administrators, SYSTEM or TrustedInstaller (or it is a link)."
-            Write-Warning 'Another account may have created it. Not installing the virtual display and not running anything from it.'
-            Write-Warning "Check the folder, delete it from an Administrator prompt (Remove-Item -Recurse -Force '$UsbmmiddDir'), then re-run."
-            try { Unregister-ScheduledTask -TaskName $UsbmmiddTaskName -Confirm:$false -ErrorAction Stop } catch {}
-            return $false
-        }
-        # Lock it down before anything in it is hashed or run.
-        try {
-            Set-ProtectedAcl -Path $UsbmmiddDir -Recurse -ErrorAction Stop
-        } catch {
-            Write-Warning "Could not lock down $UsbmmiddDir ($_). Not running anything from it."
-            return $false
-        }
+    function Test-UsbmmiddDirTrusted {
+        if (-not (Test-Path -LiteralPath $UsbmmiddDir)) { return $true }
+        return (-not (Test-IsLink $UsbmmiddDir)) -and (Test-TrustedOwner $UsbmmiddDir)
     }
+    function Stop-UntrustedUsbmmidd {
+        $owner = (Get-Acl -LiteralPath $UsbmmiddDir).Owner
+        Write-Warning "$UsbmmiddDir exists and is owned by '$owner', not Administrators, SYSTEM or TrustedInstaller (or it is a link)."
+        Write-Warning 'Another account may have created it. Not installing the virtual display and not running anything from it.'
+        Write-Warning "Check the folder, delete it from an Administrator prompt (Remove-Item -Recurse -Force '$UsbmmiddDir'), then re-run."
+        try { Unregister-ScheduledTask -TaskName $UsbmmiddTaskName -Confirm:$false -ErrorAction Stop } catch {}
+    }
+    if (-not (Test-UsbmmiddDirTrusted)) { Stop-UntrustedUsbmmidd; return $false }
 
     $exe = Join-Path $UsbmmiddDir 'deviceinstaller64.exe'
     $inf = Join-Path $UsbmmiddDir 'usbmmidd.inf'
@@ -495,18 +601,20 @@ function Install-UsbmmiddVirtualDisplay {
         $inf = Join-Path $UsbmmiddDir 'usbmmIdd.inf'
     }
 
-    # An already-present deviceinstaller64.exe is NOT trusted just because it is
-    # there: 'enableidd 1' below and the SYSTEM scheduled task both execute it,
-    # so it is hashed against the pin every run. A mismatch re-extracts it from
-    # the hash-verified zip rather than running whatever is on disk.
+    # An installed copy is used only when its folder and exe are admin-only
+    # (nobody else could have put files next to it) and the exe matches the
+    # pin: 'enableidd 1' below and the SYSTEM task both execute it. Anything
+    # else is replaced by a fresh copy from the hash-verified zip.
     $exeVerified = $false
-    if (Test-Path -LiteralPath $exe) {
+    if ((Test-Path -LiteralPath $exe) -and (Test-ProtectedPath $UsbmmiddDir) -and (Test-ProtectedPath $exe)) {
         $exeVerified = Test-PinnedHash -Path $exe -Expected $UsbmmiddExeSha256 -Label 'installed deviceinstaller64.exe'
         if (-not $exeVerified) {
             Write-Warning 'The deviceinstaller64.exe already in C:\usbmmidd_v2 does not match the pin.'
             Write-Warning $UsbmmiddRepinHelp
-            Write-Host '    Re-extracting deviceinstaller64.exe from the pinned zip instead of running it.'
+            Write-Host '    Replacing it with a fresh copy from the pinned zip instead of running it.'
         }
+    } elseif (Test-Path -LiteralPath $UsbmmiddDir) {
+        Write-Host "    $UsbmmiddDir is not admin-only; replacing it with a fresh, verified copy."
     }
 
     if (-not $exeVerified) {
@@ -515,7 +623,7 @@ function Install-UsbmmiddVirtualDisplay {
         Write-Host "    Downloading $UsbmmiddUrl"
         $ProgressPreference = 'SilentlyContinue'
         try {
-            Invoke-WebRequest -Uri $UsbmmiddUrl -OutFile $zip -UseBasicParsing
+            Invoke-WebRequest -Uri $UsbmmiddUrl -OutFile $zip -UseBasicParsing -TimeoutSec 300
         } catch {
             Write-Warning "usbmmidd download failed: $_"
             Write-Warning 'Headless Windows has no display target. Plug in a monitor or an HDMI/DisplayPort dummy plug (~$8), then re-run.'
@@ -541,25 +649,39 @@ function Install-UsbmmiddVirtualDisplay {
             return $false
         }
         $srcDir = $installer.Directory.FullName
-        if (-not (Test-Path -LiteralPath $UsbmmiddDir)) {
-            # Exclusive create: if another account made the folder after the
-            # owner check above (during the download), this fails instead of
-            # adopting it.
-            try {
-                New-Item -ItemType Directory -Path $UsbmmiddDir -ErrorAction Stop | Out-Null
-            } catch {
-                Write-Warning "$UsbmmiddDir appeared while installing; not adopting it. Delete it from an Administrator prompt and re-run."
-                return $false
-            }
-        }
-        # Protected before the files land and again after: Administrators and
-        # SYSTEM only, inheritance removed, owner Administrators.
+        # A fresh folder with a random name, created exclusively (it fails if
+        # it exists) and made admin-only BEFORE any file lands in it. Only the
+        # verified files go in. It then replaces the real folder by a rename.
+        $stage = '{0}.new-{1}' -f $UsbmmiddDir, ([guid]::NewGuid().ToString('N').Substring(0, 12))
         try {
-            Set-ProtectedAcl -Path $UsbmmiddDir -ErrorAction Stop
-            Copy-Item -Path (Join-Path $srcDir '*') -Destination $UsbmmiddDir -Recurse -Force -ErrorAction Stop
-            Set-ProtectedAcl -Path $UsbmmiddDir -Recurse -ErrorAction Stop
+            New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
+            Set-ProtectedAcl -Path $stage
+            Copy-Item -Path (Join-Path $srcDir '*') -Destination $stage -Recurse -Force -ErrorAction Stop
+            Set-ProtectedAcl -Path $stage -Recurse
         } catch {
-            Write-Warning "Could not place or lock down $UsbmmiddDir ($_). Not running anything from it."
+            Write-Warning "Could not stage the driver files in $stage ($_). Not running anything."
+            if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+            return $false
+        }
+        if (-not (Test-PinnedHash -Path (Join-Path $stage 'deviceinstaller64.exe') -Expected $UsbmmiddExeSha256 -Label 'staged deviceinstaller64.exe')) {
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Warning $UsbmmiddRepinHelp
+            return $false
+        }
+        # Revalidated right before the files are placed: a folder that
+        # appeared during the download, or changed hands, is refused.
+        if (-not (Test-UsbmmiddDirTrusted)) {
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+            Stop-UntrustedUsbmmidd
+            return $false
+        }
+        try {
+            if (Test-Path -LiteralPath $UsbmmiddDir) { Remove-Item -LiteralPath $UsbmmiddDir -Recurse -Force -ErrorAction Stop }
+            # Fails if anyone re-created the folder in between: never merged.
+            [System.IO.Directory]::Move($stage, $UsbmmiddDir)
+        } catch {
+            Write-Warning "Could not put the verified driver files in $UsbmmiddDir ($_). Not running anything from it."
+            if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
             return $false
         }
         $exe = Join-Path $UsbmmiddDir 'deviceinstaller64.exe'
@@ -567,8 +689,9 @@ function Install-UsbmmiddVirtualDisplay {
         if (-not (Test-Path -LiteralPath $inf)) {
             $inf = Join-Path $UsbmmiddDir 'usbmmIdd.inf'
         }
-        # The extracted copy is re-hashed where it will actually be run from.
-        $exeVerified = Test-PinnedHash -Path $exe -Expected $UsbmmiddExeSha256 -Label 'deviceinstaller64.exe'
+        # Checked again where it will actually be run from.
+        $exeVerified = (Test-ProtectedPath $UsbmmiddDir) -and (Test-ProtectedPath $exe) -and
+            (Test-PinnedHash -Path $exe -Expected $UsbmmiddExeSha256 -Label 'deviceinstaller64.exe')
     }
 
     if (-not $exeVerified) {
@@ -714,6 +837,49 @@ public static class ComputerViewerDisp {
     Write-Host "    Set 1920x1080 primary rc=$rc (0=success, -99=no attached USB monitor in this session)"
 }
 
+function Restore-TightVnc([string]$Why) {
+    # Fail closed: UltraVNC is stopped and disabled, TightVNC serves :5900 again.
+    Write-Warning "$Why Not using UltraVNC; TightVNC keeps serving :5900."
+    try { Stop-Service -Name 'uvnc_service' -Force -ErrorAction SilentlyContinue } catch {}
+    try { Set-Service -Name 'uvnc_service' -StartupType Disabled -ErrorAction SilentlyContinue } catch {}
+    try { & taskkill.exe /F /IM winvnc.exe /T 2>$null | Out-Null } catch {}
+    try {
+        Set-Service -Name 'tvnserver' -StartupType Automatic -ErrorAction SilentlyContinue
+        Start-Service -Name 'tvnserver' -ErrorAction SilentlyContinue
+    } catch {}
+}
+
+function Test-UltraVncIniText([string]$Text, [string]$PasswdHex, [int]$Port) {
+    # The settings that keep UltraVNC private: the password is required and
+    # set, and it listens on loopback only, on the expected port.
+    if (-not $PasswdHex) { return $false }
+    foreach ($want in @("passwd=$PasswdHex", 'AuthRequired=1', 'LoopbackOnly=1', 'AllowLoopback=1', "PortNumber=$Port")) {
+        if ($Text -notmatch ('(?m)^' + [regex]::Escape($want) + '\r?$')) { return $false }
+    }
+    foreach ($bad in @('AuthRequired=0', 'LoopbackOnly=0')) {
+        if ($Text -match ('(?m)^' + [regex]::Escape($bad))) { return $false }
+    }
+    return $true
+}
+
+function Test-UltraVncIni([string]$Path, [string]$PasswdHex) {
+    # The file the service will read: admin-only and private (see above).
+    if (-not (Test-ProtectedPath $Path)) { return $false }
+    if (Test-ReadableByNonAdmins $Path) { return $false }
+    $text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    return (Test-UltraVncIniText $text $PasswdHex $VncPort)
+}
+
+function Test-LoopbackOnlyListener([int]$Port) {
+    # Every listener on $Port is bound to 127.0.0.1 or ::1. No listener = false.
+    $l = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    if ($l.Count -eq 0) { return $false }
+    foreach ($c in $l) {
+        if (@('127.0.0.1', '::1') -notcontains $c.LocalAddress) { return $false }
+    }
+    return $true
+}
+
 function Install-UltraVncHeadlessFallback {
     Write-Step 'Headless capture: TightVNC DXGI is black on the virtual display; switching to UltraVNC hook/poll'
     $passwdHex = Get-UltraVncPasswdHex
@@ -722,6 +888,12 @@ function Install-UltraVncHeadlessFallback {
         return $false
     }
 
+    # Program Files\UltraVNC is admin-only by inheritance. One that exists but
+    # isn't (a link, another owner, a user-writable entry) is not used.
+    if ((Test-Path -LiteralPath $UltraVncDir) -and -not (Test-ProtectedPath $UltraVncDir)) {
+        Write-Warning "$UltraVncDir can be changed by non-administrators (or is a link). Not using UltraVNC; TightVNC keeps serving :5900."
+        return $false
+    }
     $winvnc = Join-Path $UltraVncDir 'winvnc.exe'
     if (-not (Test-Path -LiteralPath $winvnc)) {
         $zip = Join-Path $env:TEMP 'UltraVNC.zip'
@@ -729,7 +901,7 @@ function Install-UltraVncHeadlessFallback {
         Write-Host "    Downloading $UltraVncZipUrl"
         $ProgressPreference = 'SilentlyContinue'
         try {
-            Invoke-WebRequest -Uri $UltraVncZipUrl -OutFile $zip -UseBasicParsing
+            Invoke-WebRequest -Uri $UltraVncZipUrl -OutFile $zip -UseBasicParsing -TimeoutSec 300
         } catch {
             Write-Warning "UltraVNC download failed: $_"
             Write-Warning 'TightVNC will keep serving :5900. Expect a black picture on a headless IDD. Dummy-plug fallback still applies.'
@@ -755,9 +927,19 @@ function Install-UltraVncHeadlessFallback {
             Write-Warning 'UltraVNC zip did not contain winvnc.exe'
             return $false
         }
-        New-Item -ItemType Directory -Force -Path $UltraVncDir | Out-Null
-        Copy-Item -Path (Join-Path $found.Directory.FullName '*') -Destination $UltraVncDir -Recurse -Force
-        $winvnc = Join-Path $UltraVncDir 'winvnc.exe'
+        try {
+            if (-not (Test-Path -LiteralPath $UltraVncDir)) { New-Item -ItemType Directory -Path $UltraVncDir -ErrorAction Stop | Out-Null }
+            Set-ProtectedAcl -Path $UltraVncDir
+            Copy-Item -Path (Join-Path $found.Directory.FullName '*') -Destination $UltraVncDir -Recurse -Force -ErrorAction Stop
+            Set-ProtectedAcl -Path $UltraVncDir -Recurse
+        } catch {
+            Write-Warning "Could not place UltraVNC in $UltraVncDir ($_)."
+            return $false
+        }
+    }
+    if (-not (Test-TrustedExecutable $winvnc)) {
+        Write-Warning "Not running $winvnc. TightVNC keeps serving :5900."
+        return $false
     }
 
     $ini = @"
@@ -784,29 +966,40 @@ TurboMode=1
 CaptureAlphaBlending=0
 rdpmode=0
 "@
-    $iniDirs = @(
-        (Join-Path $env:ProgramData 'UltraVNC'),
-        $UltraVncDir
-    )
-    if ($env:APPDATA) { $iniDirs += (Join-Path $env:APPDATA 'UltraVNC') }
-    $machineDirs = @((Join-Path $env:ProgramData 'UltraVNC'), $UltraVncDir)
+    # The ini holds the VNC password (reversible obfuscation) and the service's
+    # AuthRequired/LoopbackOnly settings. It is written only where the service
+    # reads it, machine-wide (no per-user copy), into folders that are made
+    # admin-only BEFORE the file exists; then the file's own ACL is replaced
+    # and the result is checked. Any failure stops here, before the service
+    # is started.
+    $iniDirs = @((Join-Path $env:ProgramData 'UltraVNC'), $UltraVncDir)
     foreach ($d in $iniDirs) {
         try {
-            $machineWide = $machineDirs -contains $d
-            # The ini holds the VNC password (reversible obfuscation) and the
-            # service's AuthRequired/LoopbackOnly settings: a machine-wide
-            # folder another account created first is not used, and ours is
-            # Administrators/SYSTEM only.
-            if ($machineWide -and (Test-Path -LiteralPath $d) -and ((Test-IsLink $d) -or -not (Test-OwnedByUsOrTrusted $d))) {
-                Write-Warning "$d was not created by an administrator; not writing ultravnc.ini there."
-                continue
+            if (Test-Path -LiteralPath $d) {
+                if ((Test-IsLink $d) -or -not (Test-OwnedByUsOrTrusted $d)) {
+                    throw "$d was not created by an administrator (or is a link)"
+                }
+            } else {
+                New-Item -ItemType Directory -Path $d -ErrorAction Stop | Out-Null
             }
-            New-Item -ItemType Directory -Force -Path $d | Out-Null
-            Set-Content -LiteralPath (Join-Path $d 'ultravnc.ini') -Value $ini -Encoding ASCII
-            if ($machineWide) { Set-ProtectedAcl -Path $d -Recurse -ErrorAction Stop }
+            Set-ProtectedAcl -Path $d -Recurse
+            if (-not (Test-ProtectedPath $d)) { throw "$d is still writable by non-administrators" }
+            $f = Join-Path $d 'ultravnc.ini'
+            if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction Stop }
+            New-Item -ItemType File -Path $f -ErrorAction Stop | Out-Null
+            Set-ProtectedAcl -Path $f
+            Set-Content -LiteralPath $f -Value $ini -Encoding ASCII -ErrorAction Stop
+            Set-ProtectedAcl -Path $f
+            if (-not (Test-UltraVncIni $f $passwdHex)) { throw "$f did not verify (ACL, AuthRequired, LoopbackOnly or password)" }
         } catch {
-            Write-Warning "Could not write ultravnc.ini in $d : $_"
+            Restore-TightVnc "Could not write a protected ultravnc.ini in $d ($_)."
+            return $false
         }
+    }
+    # The old per-user copy (an earlier version wrote one) would hold the password.
+    if ($env:APPDATA) {
+        $old = Join-Path $env:APPDATA 'UltraVNC\ultravnc.ini'
+        if ((Test-Path -LiteralPath $old) -and -not (Test-IsLink $old)) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue }
     }
 
     try {
@@ -825,14 +1018,23 @@ rdpmode=0
     } catch {}
     Start-Sleep -Seconds 1
     try {
-        Set-Service -Name 'uvnc_service' -StartupType Automatic -ErrorAction SilentlyContinue
+        Set-Service -Name 'uvnc_service' -StartupType Automatic -ErrorAction Stop
         Start-Service -Name 'uvnc_service' -ErrorAction Stop
-        Write-Host '    Started uvnc_service'
     } catch {
-        Write-Warning "Could not start uvnc_service: $_"
-        try { Start-Service -Name 'tvnserver' -ErrorAction SilentlyContinue } catch {}
+        Restore-TightVnc "Could not start uvnc_service: $_."
         return $false
     }
+    # Running is not enough: it must be listening on loopback only.
+    $ok = $false
+    foreach ($i in 1..10) {
+        Start-Sleep -Seconds 1
+        if (Test-LoopbackOnlyListener $VncPort) { $ok = $true; break }
+    }
+    if (-not $ok) {
+        Restore-TightVnc "uvnc_service is not listening on 127.0.0.1:$VncPort only."
+        return $false
+    }
+    Write-Host "    Started uvnc_service (password required, 127.0.0.1:$VncPort only)"
     return $true
 }
 
@@ -853,7 +1055,8 @@ if (-not $tvnInstalled) {
         throw 'TightVNC MSI failed its pinned sha256 check. Refusing to run msiexec on it.'
     }
     Write-Step 'Installing TightVNC Server (service, SAS/CAD, VNC auth)'
-    # MSI password properties are unreliable - see header comment. Print $vncPassword later regardless.
+    # The password is not passed to msiexec (a command line other accounts can
+    # read); Set-TightVncPassword below writes it and checks it.
     $msiArgs = @(
         '/i', $msi,
         '/quiet', '/norestart',
@@ -861,9 +1064,7 @@ if (-not $tvnInstalled) {
         'SERVER_REGISTER_AS_SERVICE=1',
         'SERVER_ALLOW_SAS=1',
         'SET_USEVNCAUTHENTICATION=1',
-        'VALUE_OF_USEVNCAUTHENTICATION=1',
-        'SET_PASSWORD=1',
-        "VALUE_OF_PASSWORD=$vncPassword"
+        'VALUE_OF_USEVNCAUTHENTICATION=1'
     )
     $p = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru
     if ($p.ExitCode -notin 0, 3010) {
@@ -891,6 +1092,9 @@ foreach ($rp in $regPaths) {
     }
 }
 
+# The MSI's password property is unreliable and an existing install keeps its
+# old password: make the server use exactly the stored one, then restart.
+[void](Set-TightVncPassword $vncPassword)
 try {
     $svc = Get-Service -Name 'tvnserver' -ErrorAction Stop
     if ($svc.Status -ne 'Running') {
@@ -898,9 +1102,10 @@ try {
     } else {
         Restart-Service -Name 'tvnserver' -Force
     }
-    Write-Step 'Restarted service tvnserver'
+    (Get-Service -Name 'tvnserver').WaitForStatus('Running', [TimeSpan]::FromSeconds(20))
+    Write-Step 'Restarted service tvnserver with the stored password'
 } catch {
-    Write-Warning "Could not start/restart tvnserver: $_. Start TightVNC Server (Service Mode) from the Start menu."
+    throw "tvnserver is not running with the stored password ($_). Start TightVNC Server (Service Mode) from the Start menu, then re-run; no password is printed until it is."
 }
 
 # --- Python + websockify ----------------------------------------------------
@@ -918,24 +1123,12 @@ if (-not (Test-PythonWorks $python)) {
 }
 
 if (-not (Test-PythonWorks $python)) {
-    throw "Python 3.10+ not available after install. Open a new Admin PowerShell and re-run, or install from python.org."
+    throw "No all-users Python 3.10+ with admin-only folders was found. Install it with: winget install -e --id Python.Python.3.12 --scope machine (or python.org, 'Install for all users'), then re-run."
 }
 
-Write-Step "Using Python: $python"
-# The SYSTEM task runs this interpreter at every boot: a standard user must not
-# be able to change it, its folder or its site-packages.
-$pyDir = Split-Path -Parent $python
-foreach ($p in @($python, $pyDir, (Join-Path $pyDir 'Lib'), (Join-Path $pyDir 'Lib\site-packages'))) {
-    if ((Test-Path -LiteralPath $p) -and ((Test-IsLink $p) -or (Test-WritableByNonAdmins $p))) {
-        throw "$p can be changed by non-administrators, and the SYSTEM task would run it. Install Python for all users (winget install -e --id Python.Python.3.12 --scope machine), then re-run."
-    }
-}
-if ($python -match '\\Users\\') {
-    Write-Warning "Python looks like a per-user install. The SYSTEM scheduled task may not see it. Prefer: winget install -e --id Python.Python.3.12 --scope machine"
-}
+Write-Step "Using Python: $python (all-users install, admin-only folders)"
 Write-Step "Installing $WebsockifyPin (machine site-packages - SYSTEM scheduled task has no user PATH)"
-& $python -m pip install --upgrade pip | Out-Null
-& $python -m pip install $WebsockifyPin
+& $python -I -m pip install $WebsockifyPin
 if ($LASTEXITCODE -ne 0) {
     throw "pip install $WebsockifyPin failed (exit $LASTEXITCODE)."
 }
@@ -944,7 +1137,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Step "Registering scheduled task $TaskName (SYSTEM, AtStartup, ExecutionTimeLimit=0)"
 # Default ExecutionTimeLimit is 72 hours - the task would be killed. Zero = unlimited.
-$action = New-ScheduledTaskAction -Execute $python -Argument "-m websockify ${Bind}:$ListenPort 127.0.0.1:$VncPort"
+$action = New-ScheduledTaskAction -Execute $python -Argument "-I -m websockify ${Bind}:$ListenPort 127.0.0.1:$VncPort"
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `

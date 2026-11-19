@@ -111,30 +111,32 @@ function Refresh-ProcessPath {
 }
 
 function Resolve-Python {
+    # Only an all-users install whose file, folders and import locations are
+    # admin-only is returned, validated before it is ever run as
+    # Administrator (and before the venv the logon task uses is built on it).
     Refresh-ProcessPath
     $candidates = @(
         (Join-Path ${env:ProgramFiles} 'Python312\python.exe'),
         (Join-Path ${env:ProgramFiles} 'Python313\python.exe'),
-        (Join-Path ${env:ProgramFiles} 'Python311\python.exe'),
-        (Join-Path $env:LocalAppData 'Programs\Python\Python312\python.exe'),
-        (Join-Path $env:LocalAppData 'Programs\Python\Python313\python.exe')
+        (Join-Path ${env:ProgramFiles} 'Python311\python.exe')
     )
-    foreach ($c in $candidates) {
-        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
-    }
     foreach ($name in @('python', 'python3')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd -and $cmd.Source -and ($cmd.Source -notmatch 'WindowsApps\\python')) {
-            return $cmd.Source
-        }
+        if ($cmd -and $cmd.Source -and ($cmd.Source -notmatch 'WindowsApps\\python')) { $candidates += $cmd.Source }
+    }
+    foreach ($c in $candidates) {
+        if (-not $c -or -not (Test-Path -LiteralPath $c -PathType Leaf)) { continue }
+        if ($c -match '\\Users\\') { Write-Warning "Skipping per-user Python $c (its owner can change it)."; continue }
+        if (Test-TrustedExecutable $c (Get-PythonImportDirs $c)) { return $c }
     }
     return $null
 }
 
 function Test-PythonWorks([string]$Exe) {
+    # -I: isolated mode, no PYTHON* variables, user site-packages or current folder.
     if (-not $Exe) { return $false }
     try {
-        & $Exe -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' | Out-Null
+        & $Exe -I -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' | Out-Null
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
@@ -143,9 +145,11 @@ function Test-PythonWorks([string]$Exe) {
 
 function Resolve-Ffmpeg {
     Refresh-ProcessPath
-    # Program Files and the machine-scope winget locations first. C:\ffmpeg is
-    # last and only used when no standard user can change it: any account may
-    # create folders in C:\, and the logon task runs this ffmpeg.
+    # Program Files, the machine-scope winget locations, PATH, then C:\ffmpeg.
+    # The logon task runs this ffmpeg, so each candidate, and every folder
+    # above it, must be admin-only (any account may create folders in C:\,
+    # and PATH can name a user folder). A link (winget's Links) is followed
+    # and its target checked the same way.
     $candidates = @(
         (Join-Path ${env:ProgramFiles} 'ffmpeg\bin\ffmpeg.exe'),
         (Join-Path ${env:ProgramFiles} 'Gyan\FFmpeg\bin\ffmpeg.exe'),
@@ -158,18 +162,20 @@ function Resolve-Ffmpeg {
             Select-Object -ExpandProperty FullName)
     }
     $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
-    if ($cmd -and $cmd.Source) { $candidates = @($cmd.Source) + $candidates }
+    if ($cmd -and $cmd.Source) { $candidates += $cmd.Source }
+    $candidates += 'C:\ffmpeg\bin\ffmpeg.exe'
     foreach ($c in $candidates) {
-        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
-    }
-    $rootFfmpeg = 'C:\ffmpeg\bin\ffmpeg.exe'
-    if (Test-Path -LiteralPath $rootFfmpeg) {
-        $unsafe = $false
-        foreach ($p in @('C:\ffmpeg', 'C:\ffmpeg\bin', $rootFfmpeg)) {
-            if ((Test-IsLink $p) -or (Test-WritableByNonAdmins $p)) { $unsafe = $true }
+        if (-not $c -or -not (Test-Path -LiteralPath $c -PathType Leaf)) { continue }
+        $real = $c
+        if (Test-IsLink $c) {
+            # The link's own folder must be admin-only too, or it could be re-pointed.
+            if (-not (Test-ProtectedPath (Split-Path -Parent $c))) { Write-Warning "Skipping $c : its folder can be changed by a non-administrator."; continue }
+            $target = @((Get-Item -LiteralPath $c -Force).Target)[0]
+            if (-not $target) { continue }
+            if (-not [System.IO.Path]::IsPathRooted($target)) { $target = Join-Path (Split-Path -Parent $c) $target }
+            $real = [System.IO.Path]::GetFullPath($target)
         }
-        if (-not $unsafe) { return $rootFfmpeg }
-        Write-Warning "Skipping $rootFfmpeg : a non-administrator can change it (C:\ffmpeg is writable by other accounts or not owned by Administrators)."
+        if (Test-TrustedExecutable $real) { return $real }
     }
     return $null
 }
@@ -186,8 +192,7 @@ function New-HiperfToken {
 }
 
 function Get-OrCreateToken {
-    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-    if (Test-Path -LiteralPath $TokenFile) {
+    if ((Test-Path -LiteralPath $TokenFile) -and -not (Test-IsLink $TokenFile) -and (Test-OwnedByUsOrTrusted $TokenFile)) {
         $existing = (Get-Content -LiteralPath $TokenFile -Raw -ErrorAction SilentlyContinue)
         if ($existing) {
             $existing = $existing.Trim()
@@ -198,6 +203,10 @@ function Get-OrCreateToken {
         }
     }
     $tok = New-HiperfToken
+    # A new file, locked down before the token is written into it.
+    if (Test-Path -LiteralPath $TokenFile) { Remove-Item -LiteralPath $TokenFile -Force }
+    New-Item -ItemType File -Path $TokenFile -ErrorAction Stop | Out-Null
+    Set-ProtectedAcl -Path $TokenFile -Extra @(@{ Identity = $InstallUser; Rights = 'Read'; Inherit = $false })
     Set-Content -LiteralPath $TokenFile -Value $tok -Encoding ASCII
     Write-Step "Generated token -> $TokenFile"
     return $tok
@@ -287,10 +296,74 @@ function Test-WritableByNonAdmins([string]$Path) {
     $writeMask = [long](0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
     foreach ($ace in @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
         if ($ace.AccessControlType -ne 'Allow') { continue }
+        # An inherit-only entry (e.g. CREATOR OWNER on Program Files) does not apply to this object.
+        if (($ace.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
         if ($TrustedOwnerSids -contains $ace.IdentityReference.Value) { continue }
         if (([long]$ace.FileSystemRights -band $writeMask) -ne 0) { return $true }
     }
     return $false
+}
+
+function Test-ProtectedPath([string]$Path) {
+    # Exists, is not a link, and only Administrators/SYSTEM/TrustedInstaller
+    # own it or may write, delete or re-permission it.
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    if (Test-IsLink $Path) { return $false }
+    return -not (Test-WritableByNonAdmins $Path)
+}
+
+function Test-TrustedExecutable([string]$Exe, [string[]]$ImportDirs = @()) {
+    # The file, every folder above it up to (not including) the drive root,
+    # and each folder it loads code from must be admin-only. Checked BEFORE
+    # the first time it is run.
+    if (-not $Exe -or -not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return $false }
+    $paths = @($Exe)
+    $dir = Split-Path -Parent $Exe
+    while ($dir -and (Split-Path -Parent $dir)) {
+        $paths += $dir
+        $dir = Split-Path -Parent $dir
+    }
+    foreach ($d in $ImportDirs) { if (Test-Path -LiteralPath $d) { $paths += $d } }
+    foreach ($p in $paths) {
+        if (-not (Test-ProtectedPath $p)) {
+            Write-Warning "$p can be changed by a non-administrator (or is a link); not using $Exe."
+            return $false
+        }
+    }
+    return $true
+}
+
+function Get-PythonImportDirs([string]$Exe) {
+    $dir = Split-Path -Parent $Exe
+    return @((Join-Path $dir 'Lib'), (Join-Path $dir 'Lib\site-packages'), (Join-Path $dir 'DLLs'))
+}
+
+function Find-UntrustedItem([string]$Root) {
+    # The first item at or below $Root that is a link or is owned by an
+    # account other than Administrators/SYSTEM/TrustedInstaller/this one.
+    # Links are reported, never followed.
+    if (-not (Test-Path -LiteralPath $Root)) { return $null }
+    if ((Test-IsLink $Root) -or -not (Test-OwnedByUsOrTrusted $Root)) { return $Root }
+    if (-not (Get-Item -LiteralPath $Root -Force).PSIsContainer) { return $null }
+    foreach ($child in @(Get-ChildItem -LiteralPath $Root -Force)) {
+        $bad = Find-UntrustedItem $child.FullName
+        if ($bad) { return $bad }
+    }
+    return $null
+}
+
+function Assert-TrustedTree([string]$Root) {
+    $bad = Find-UntrustedItem $Root
+    if ($bad) {
+        $owner = (Get-Acl -LiteralPath $bad).Owner
+        throw "$bad (under $Root) was not created by an administrator (owner '$owner', or it is a link). Another account may have put it there. Check it, delete $Root from an Administrator prompt (Remove-Item -Recurse -Force '$Root'), then re-run."
+    }
+}
+
+function New-TrustedDir([string]$Path) {
+    # Exclusive create: a folder that appears in between is not adopted.
+    if (Test-Path -LiteralPath $Path) { Assert-TrustedTree $Path; return }
+    New-Item -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
 }
 
 function Test-OwnedByUsOrTrusted([string]$Path) {
@@ -347,28 +420,24 @@ if (-not (Test-PythonWorks $python)) {
 }
 Write-Step "Using Python: $python"
 
-# Content another account put here before the first install (a standard user
-# may create folders in C:\ProgramData) is never trusted: re-owning it below
-# would keep the files. Checked before the tree is re-owned.
-$planted = $false
-foreach ($p in @($StateDir, $HiperfDir, $VenvDir, $TokenFile)) {
-    if ((Test-Path -LiteralPath $p) -and ((Test-IsLink $p) -or -not (Test-OwnedByUsOrTrusted $p))) { $planted = $true }
+# A state tree another account created or put anything into (a standard user
+# may create folders in C:\ProgramData) is refused, not adopted: re-owning it
+# would keep whatever was planted. Checked before anything is re-owned.
+if (Test-Path -LiteralPath $StateDir) {
+    if ((Test-IsLink $StateDir) -or -not (Test-OwnedByUsOrTrusted $StateDir)) { Assert-TrustedTree $StateDir }
+    foreach ($p in @($HiperfDir, $TokenFile, $LogFile)) { Assert-TrustedTree $p }
 }
-New-Item -ItemType Directory -Force -Path $HiperfDir | Out-Null
+New-TrustedDir $StateDir
+New-TrustedDir $HiperfDir
 # Locked down before the venv, the agent and the token are written into it.
 Protect-HiperfState
-if ($planted) {
-    Write-Warning "$StateDir held files this installer did not create; recreating the venv and the HD token."
-    if (Test-Path -LiteralPath $VenvDir) { Remove-Item -LiteralPath $VenvDir -Recurse -Force }
-    if (Test-Path -LiteralPath $TokenFile) { Remove-Item -LiteralPath $TokenFile -Force }
-}
 $token = Get-OrCreateToken
 
 $venvPython = Join-Path $VenvDir 'Scripts\python.exe'
 $venvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
 if (-not (Test-Path -LiteralPath $venvPython)) {
     Write-Step "Creating dedicated venv at $VenvDir"
-    & $python -m venv $VenvDir
+    & $python -I -m venv $VenvDir
     if ($LASTEXITCODE -ne 0) { throw "python -m venv failed (exit $LASTEXITCODE)." }
 } else {
     Write-Step "Reusing venv at $VenvDir"
@@ -378,8 +447,7 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 }
 
 Write-Step "Installing $WebsocketsPin into the venv"
-& $venvPython -m pip install --upgrade pip | Out-Null
-& $venvPython -m pip install $WebsocketsPin
+& $venvPython -I -m pip install $WebsocketsPin
 if ($LASTEXITCODE -ne 0) {
     throw "pip install $WebsocketsPin failed (exit $LASTEXITCODE)."
 }
@@ -460,6 +528,12 @@ $actualSha = (Get-FileHash -LiteralPath $agentTmp -Algorithm SHA256).Hash
 if ($actualSha -ne $agentSha.ToUpperInvariant()) {
     Remove-Item -LiteralPath $agentTmp -Force -ErrorAction SilentlyContinue
     throw "hiperf-agent.py sha256 mismatch - refusing to install. manifest $agentSha, file $actualSha. Left $AgentPath untouched."
+}
+# Revalidated right before the agent is placed.
+Assert-TrustedTree $HiperfDir
+if (-not (Test-ProtectedPath $HiperfDir)) {
+    Remove-Item -LiteralPath $agentTmp -Force -ErrorAction SilentlyContinue
+    throw "$HiperfDir is no longer admin-only; refusing to place the agent. Re-run the installer."
 }
 Move-Item -LiteralPath $agentTmp -Destination $AgentPath -Force
 Write-Host "    installed from $agentSrc"

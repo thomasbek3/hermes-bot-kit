@@ -71,6 +71,10 @@ jobs:
       - name: Shell syntax
         run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n 1 bash -n
 
+      - name: Windows installer pure-function tests
+        shell: pwsh
+        run: pwsh -NoProfile -NonInteractive -File computer-viewer/tests/test-windows-pure.ps1
+
       - name: HD agent tests
         run: python3 computer-viewer/tests/test-hiperf-agent.py
 
@@ -124,6 +128,10 @@ jobs:
             }
           }
           if ($failed) { exit 1 }
+
+      - name: Windows installer pure-function tests
+        shell: pwsh
+        run: pwsh -NoProfile -NonInteractive -File computer-viewer/tests/test-windows-pure.ps1
 
       - name: HD agent tests
         run: python3 computer-viewer/tests/test-hiperf-agent.py
