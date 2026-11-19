@@ -45,6 +45,10 @@ is new in this one.
   add-only repair (2026-11-18).** New bots get the scope the 👀
   acknowledgement needs. **Test connection** warns when an older app lacks
   it, and `scope_repair.py` adds only the missing required scope.
+- **grokbot-override: unread dots (2026-11-19).** A Grok-Bot-style blue dot on
+  the right of each bot with unread messages, and a **More unreads** pill when
+  unread bots are scrolled out of view. Remote and SSH bots don't get dots yet.
+  (Branch `unread-look`; its own CHANGELOG entry has the details.)
 - **grokbot-override: the bot's computer (2026-11-18).** The profile panel's
   Computer card shows a thumbnail; the viewer wakes the screen on open,
   recovers by itself, has a Close icon, a visible pointer and its controls as a
