@@ -238,7 +238,10 @@ function Get-TokenState {
 function Get-OrCreateToken($State) {
     # $State: Get-TokenState, taken before the tree was re-permissioned. A
     # token another account owns, a link, or one others could read or change
-    # may be known: a new one is made (rotation) and printed.
+    # may be known: a new one is made (rotation) and printed. Returns
+    # @{ Token; New }. A new token is written later by Invoke-TokenRotation,
+    # after the running agent is stopped; the old file is deleted now, so an
+    # install that fails before then makes a new token next time.
     $existing = ''
     if ($State.Exists -and $State.OwnerOk -and -not $State.Exposed) {
         $existing = ([string](Get-Content -LiteralPath $TokenFile -Raw -ErrorAction SilentlyContinue)).Trim()
@@ -246,7 +249,7 @@ function Get-OrCreateToken($State) {
     $action = Get-PasswordAction -Exists $State.Exists -OwnerOk $State.OwnerOk -WasReadableByOthers $State.Exposed -ContentOk ($existing -match '^[0-9a-fA-F]{32}$')
     if ($action -eq 'reuse') {
         Write-Step "Reusing token stored in $TokenFile"
-        return $existing.ToLowerInvariant()
+        return @{ Token = $existing.ToLowerInvariant(); New = $false }
     }
     if ($State.Exists) {
         $why = 'it was not created by this installer (or is a link)'
@@ -254,14 +257,102 @@ function Get-OrCreateToken($State) {
         elseif ($State.OwnerOk) { $why = 'it does not hold a valid token' }
         Write-Warning "Not reusing ${TokenFile}: $why. Rotating to a new HD token; paste the one printed below into the viewer."
     }
-    $tok = New-HiperfToken
+    Remove-TreeNoFollow $TokenFile
+    return @{ Token = (New-HiperfToken); New = $true }
+}
+
+function Write-HiperfToken([string]$Token) {
     # A new file, locked down before the token is written into it (links removed as links).
     Remove-TreeNoFollow $TokenFile
     New-Item -ItemType File -Path $TokenFile -ErrorAction Stop | Out-Null
     Set-ProtectedAcl -Path $TokenFile -Extra @(@{ Identity = $InstallUser; Rights = 'Read'; Inherit = $false })
-    Set-Content -LiteralPath $TokenFile -Value $tok -Encoding ASCII
+    Set-Content -LiteralPath $TokenFile -Value $Token -Encoding ASCII
     Write-Step "Generated token -> $TokenFile"
-    return $tok
+}
+
+function Select-KitHiperf([object[]]$Processes, [string]$PythonwExe, [string]$AgentPath) {
+    # Pure: the Win32_Process entries that are this kit's HD agent: the
+    # venv's pythonw.exe with $AgentPath on its command line. Any other
+    # python is never selected.
+    @($Processes) | Where-Object {
+        $_ -and ([string]$_.ExecutablePath -ieq $PythonwExe) -and
+        ([string]$_.CommandLine).IndexOf($AgentPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    }
+}
+
+function Stop-KitHiperf {
+    # Stops the kit's task, then confirms no kit agent process is left
+    # (a leftover one, and only that one, is killed and checked again).
+    # Throws when it cannot be confirmed gone.
+    Stop-ScheduledTask -TaskName $TaskName
+    foreach ($round in 1..2) {
+        $left = @(Select-KitHiperf -Processes @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pythonw.exe'" -ErrorAction Stop) -PythonwExe $venvPythonw -AgentPath $AgentPath)
+        if ($left.Count -eq 0) { return }
+        if ($round -eq 2) { throw "The HD agent ($venvPythonw $AgentPath, PID $(($left | ForEach-Object { $_.ProcessId }) -join ', ')) is still running after it was stopped. The new token was not written; end that process, then re-run." }
+        # The re-check above, not this call's result, decides.
+        foreach ($p in $left) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 2
+    }
+}
+
+function Start-KitHiperf {
+    Start-ScheduledTask -TaskName $TaskName
+    Write-Step "Started $TaskName"
+}
+
+function Get-HiperfProbeHost([string]$Bind) {
+    # Where the installer can reach the agent: its bind address, or loopback for 0.0.0.0.
+    if ($Bind -eq '0.0.0.0') { return '127.0.0.1' }
+    return $Bind
+}
+
+function Test-HiperfAcceptsToken([string]$Token, [string]$Address, [int]$Port, [int]$TimeoutSec = 60) {
+    # True once the agent at ws://$Address:$Port/stream answers an auth
+    # frame carrying $Token with its "hello" (no stream is started). A close
+    # or an error after connecting is a no: the agent closes a wrong token
+    # with 4401. A refused connection is retried until $TimeoutSec, because
+    # the agent dry-runs its ffmpeg pipelines (up to 10 s each) before it
+    # listens.
+    $uri = [Uri]('ws://{0}:{1}/stream' -f $Address, $Port)
+    $auth = [Text.Encoding]::UTF8.GetBytes((@{ type = 'auth'; token = $Token } | ConvertTo-Json -Compress))
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $ws = New-Object System.Net.WebSockets.ClientWebSocket
+        $ws.Options.Proxy = $null
+        $cts = New-Object System.Threading.CancellationTokenSource ([TimeSpan]::FromSeconds(10))
+        try {
+            # [void]: PowerShell sees these Tasks as Task<VoidTaskResult>, whose
+            # GetResult() would otherwise land in the function's output.
+            try { [void]$ws.ConnectAsync($uri, $cts.Token).GetAwaiter().GetResult() }
+            catch { Start-Sleep -Seconds 1; continue }
+            try {
+                [void]$ws.SendAsync([ArraySegment[byte]]::new($auth), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).GetAwaiter().GetResult()
+                $buf = New-Object byte[] 8192
+                $r = $ws.ReceiveAsync([ArraySegment[byte]]::new($buf), $cts.Token).GetAwaiter().GetResult()
+                if ($r.MessageType -ne [System.Net.WebSockets.WebSocketMessageType]::Text) { return $false }
+                return ((ConvertFrom-Json ([Text.Encoding]::UTF8.GetString($buf, 0, $r.Count))).type -eq 'hello')
+            } catch { return $false }
+        } finally {
+            $ws.Dispose(); $cts.Dispose()
+        }
+    }
+    return $false
+}
+
+function Invoke-TokenRotation([bool]$Rotated, [string]$Token, [string]$Address) {
+    # Only for a new token. The running agent holds the token it read at
+    # start, so: stop it and confirm it is gone, write the new token, start
+    # it, and confirm it accepts the new token before anything reports
+    # success. Returns $false (and does nothing) when the token was reused.
+    if (-not $Rotated) { return $false }
+    Stop-KitHiperf
+    Write-HiperfToken $Token
+    Start-KitHiperf
+    if (-not (Test-HiperfAcceptsToken -Token $Token -Address $Address -Port $ListenPort)) {
+        throw "The HD agent did not accept the new token; restart it from Task Scheduler ($TaskName) and re-run."
+    }
+    Write-Step "The HD agent on ${Address}:$ListenPort accepts the new token"
+    return $true
 }
 
 # --- ACL helpers (well-known SIDs: independent of the display language) -----
@@ -554,7 +645,8 @@ New-TrustedDir $StateDir
 New-TrustedDir $HiperfDir
 # Locked down before the venv, the agent and the token are written into it.
 Protect-HiperfState
-$token = Get-OrCreateToken $tokenState
+$tokenInfo = Get-OrCreateToken $tokenState
+$token = $tokenInfo.Token
 
 $venvPython = Join-Path $VenvDir 'Scripts\python.exe'
 $venvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
@@ -678,7 +770,8 @@ if (-not (Test-Path -LiteralPath $LogFile)) {
 # Administrators and SYSTEM; the log (the agent's only runtime write, next to
 # the token) modifiable by the install user.
 Protect-HiperfState
-Set-ProtectedAcl -Path $TokenFile -Extra @(@{ Identity = $InstallUser; Rights = 'Read'; Inherit = $false })
+# A new token is written (locked) by Invoke-TokenRotation below.
+if (-not $tokenInfo.New) { Set-ProtectedAcl -Path $TokenFile -Extra @(@{ Identity = $InstallUser; Rights = 'Read'; Inherit = $false }) }
 Set-ProtectedAcl -Path $LogFile -Extra @(@{ Identity = $InstallUser; Rights = 'Modify'; Inherit = $false })
 
 # --- Scheduled Task (interactive user, AtLogOn, no 72h kill) ----------------
@@ -704,11 +797,14 @@ $settings = New-ScheduledTaskSettingsSet `
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 
-try {
-    Start-ScheduledTask -TaskName $TaskName
-    Write-Step "Started $TaskName"
-} catch {
-    Write-Warning "Start-ScheduledTask failed: $_. The task will run at next logon."
+# A new token: stop the running agent, write it, start, and confirm the agent
+# accepts it (throws otherwise, before the token is printed below).
+if (-not (Invoke-TokenRotation -Rotated $tokenInfo.New -Token $token -Address (Get-HiperfProbeHost $Bind))) {
+    try {
+        Start-KitHiperf
+    } catch {
+        Write-Warning "Start-ScheduledTask failed: $_. The task will run at next logon."
+    }
 }
 
 # --- Firewall: stream port, Private profile ---------------------------------

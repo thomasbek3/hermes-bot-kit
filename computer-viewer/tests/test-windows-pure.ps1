@@ -455,23 +455,145 @@ function global:Write-Warning { param($Message) $global:Warned += , $Message }
 try {
     $global:Calls = @(); $global:Warned = @()
     $t = Get-OrCreateToken @{ Exists = $true; OwnerOk = $true; Exposed = $false }
-    Check 'token: a clean recorded state reuses the stored token' (($t -eq $oldTok.ToLowerInvariant()) -and ($global:Calls -notcontains 'write') -and ($global:Warned.Count -eq 0))
+    Check 'token: a clean recorded state reuses the stored token' (($t.Token -eq $oldTok.ToLowerInvariant()) -and (-not $t.New) -and ($global:Calls -notcontains 'write') -and ($global:Calls -notcontains 'remove') -and ($global:Warned.Count -eq 0))
     $global:Calls = @(); $global:Warned = @()
     $t = Get-OrCreateToken @{ Exists = $true; OwnerOk = $true; Exposed = $true }
-    Check 'token: an exposed recorded state rotates, in one warning, created locked then written' (($t -eq ('cd' * 16)) -and ($global:Warned.Count -eq 1) -and ($global:Calls -notcontains 'read') -and (($global:Calls -join ',') -eq 'remove,create,protect,write'))
+    Check 'token: an exposed recorded state rotates in one warning; the old file is deleted now, the new token not yet written' (($t.Token -eq ('cd' * 16)) -and $t.New -and ($global:Warned.Count -eq 1) -and (($global:Calls -join ',') -eq 'remove'))
     $global:Calls = @(); $global:Warned = @()
     $t = Get-OrCreateToken @{ Exists = $false; OwnerOk = $false; Exposed = $false }
-    Check 'token: no token yet -> a new one, no warning' (($t -eq ('cd' * 16)) -and ($global:Warned.Count -eq 0))
+    Check 'token: no token yet -> a new one, no warning' (($t.Token -eq ('cd' * 16)) -and $t.New -and ($global:Warned.Count -eq 0))
+    Import-ScriptFunctions $hiperf @('Write-HiperfToken')
+    $global:Calls = @()
+    Write-HiperfToken ('cd' * 16)
+    Check 'token: Write-HiperfToken creates the file locked, then writes' (($global:Calls -join ',') -eq 'remove,create,protect,write')
 } finally {
     Remove-Item Function:\Get-Content, Function:\New-HiperfToken, Function:\Remove-TreeNoFollow, Function:\New-Item, Function:\Set-ProtectedAcl, Function:\Set-Content, Function:\Write-Step, Function:\Write-Warning
 }
 $h4 = Get-Content -LiteralPath $hiperf -Raw
 $iState = $h4.IndexOf('$tokenState = Get-TokenState')
 $firstProtect4 = [regex]::Match($h4, '(?m)^Protect-HiperfState\s*$')
-$tokenAcl = [regex]::Match($h4, '(?m)^Set-ProtectedAcl -Path \$TokenFile')
-Check 'hiperf: the token ACL is recorded before the first tightening call' (($iState -ge 0) -and $firstProtect4.Success -and ($iState -lt $firstProtect4.Index) -and ($iState -lt $h4.IndexOf('$token = Get-OrCreateToken $tokenState')) -and $tokenAcl.Success -and ($iState -lt $tokenAcl.Index))
+$tokenAcl = [regex]::Match($h4, '(?m)^if \(-not \$tokenInfo\.New\) \{ Set-ProtectedAcl -Path \$TokenFile')
+Check 'hiperf: the token ACL is recorded before the first tightening call' (($iState -ge 0) -and $firstProtect4.Success -and ($iState -lt $firstProtect4.Index) -and ($iState -lt $h4.IndexOf('$tokenInfo = Get-OrCreateToken $tokenState')) -and $tokenAcl.Success -and ($iState -lt $tokenAcl.Index))
 $tokFn = [regex]::Match($h4, '(?s)function Get-OrCreateToken\(\$State\) \{(.*?)\n\}').Groups[1].Value
 Check 'hiperf: Get-OrCreateToken uses the recorded state, warns once, deletes without following links' (($tokFn -notmatch 'Get-Acl|Test-OwnedByUsOrTrusted') -and (([regex]::Matches($tokFn, 'Write-Warning')).Count -eq 1) -and ($tokFn -match 'Remove-TreeNoFollow \$TokenFile') -and ($tokFn -notmatch 'Remove-Item'))
+
+# --- HD token rotation reaches the running agent (round 5, item 10) -----------
+Import-ScriptFunctions $hiperf @('Select-KitHiperf', 'Stop-KitHiperf', 'Get-HiperfProbeHost', 'Test-HiperfAcceptsToken', 'Invoke-TokenRotation')
+$venvPythonw = 'C:\ProgramData\hermes-cv\hiperf\venv\Scripts\pythonw.exe'
+$AgentPath = 'C:\ProgramData\hermes-cv\hiperf\hiperf-agent.py'
+$TaskName = 'ComputerViewerHiperf'
+$ListenPort = 6090
+$kitAgent = [pscustomobject]@{ ProcessId = 700; ExecutablePath = $venvPythonw; CommandLine = "`"$venvPythonw`" `"$AgentPath`" --port 6090 --token-file x" }
+$otherScript = [pscustomobject]@{ ProcessId = 701; ExecutablePath = $venvPythonw; CommandLine = "`"$venvPythonw`" C:\work\tool.py" }
+$otherPython = [pscustomobject]@{ ProcessId = 702; ExecutablePath = 'C:\Program Files\Python312\pythonw.exe'; CommandLine = "pythonw `"$AgentPath`"" }
+$noCmdLine = [pscustomobject]@{ ProcessId = 703; ExecutablePath = $venvPythonw; CommandLine = $null }
+Check 'kit agent: only the venv pythonw running the agent is selected' (((@(Select-KitHiperf -Processes @($kitAgent, $otherScript, $otherPython, $noCmdLine) -PythonwExe $venvPythonw -AgentPath $AgentPath) | ForEach-Object { $_.ProcessId }) -join ',') -eq '700')
+Check 'kit agent: path case differences still match' ((@(Select-KitHiperf -Processes @([pscustomobject]@{ ProcessId = 1; ExecutablePath = $venvPythonw.ToUpperInvariant(); CommandLine = $AgentPath.ToLowerInvariant() }) -PythonwExe $venvPythonw -AgentPath $AgentPath)).Count -eq 1)
+Check 'probe host: 0.0.0.0 -> loopback' ((Get-HiperfProbeHost '0.0.0.0') -eq '127.0.0.1')
+Check 'probe host: a specific bind address is used as is' ((Get-HiperfProbeHost '192.0.2.10') -eq '192.0.2.10')
+
+# Invoke-TokenRotation order, every step stubbed and recorded.
+function global:Stop-KitHiperf { $global:Calls += 'stop'; if ($global:StopFails) { throw 'The HD agent (pythonw) is still running after it was stopped.' } }
+function global:Write-HiperfToken { param($Token) $global:Calls += "write $Token" }
+function global:Start-KitHiperf { $global:Calls += 'start' }
+function global:Test-HiperfAcceptsToken { param($Token, $Address, $Port, $TimeoutSec) $global:Calls += "accept $Token $Address $Port"; $global:Accepts }
+function global:Write-Step { param($Message) $global:Calls += "step $Message" }
+function Invoke-Rot([bool]$Rotated) { try { $r = Invoke-TokenRotation -Rotated $Rotated -Token 'newtok' -Address '127.0.0.1'; return "ok $r" } catch { return "threw: $_" } }
+function Reset-Rot { $global:Calls = @(); $global:Accepts = $true; $global:StopFails = $false }
+try {
+    Reset-Rot
+    $r = Invoke-Rot $true
+    Check 'rotation: stop, write, start, accept check, then success' (($r -eq 'ok True') -and (($global:Calls -join '|') -eq 'stop|write newtok|start|accept newtok 127.0.0.1 6090|step The HD agent on 127.0.0.1:6090 accepts the new token'))
+    Reset-Rot
+    $r = Invoke-Rot $false
+    Check 'rotation: a reused token -> nothing stopped, written, started or checked' (($r -eq 'ok False') -and ($global:Calls.Count -eq 0))
+    Reset-Rot; $global:Accepts = $false
+    $r = Invoke-Rot $true
+    Check 'rotation: the agent rejects the new token -> throws, no success printed' (($r -eq 'threw: The HD agent did not accept the new token; restart it from Task Scheduler (ComputerViewerHiperf) and re-run.') -and (@($global:Calls | Where-Object { $_ -like 'step *' }).Count -eq 0) -and ($global:Calls[-1] -like 'accept *'))
+    Reset-Rot; $global:StopFails = $true
+    $r = Invoke-Rot $true
+    Check 'rotation: the agent will not stop -> throws before the write' (($r -like 'threw: *still running*') -and (($global:Calls -join '|') -eq 'stop'))
+} finally {
+    Remove-Item Function:\Stop-KitHiperf, Function:\Write-HiperfToken, Function:\Start-KitHiperf, Function:\Test-HiperfAcceptsToken
+}
+
+# Stop-KitHiperf with stubbed Task Scheduler, processes and kills.
+Import-ScriptFunctions $hiperf @('Stop-KitHiperf', 'Write-HiperfToken', 'Test-HiperfAcceptsToken')
+function global:Stop-ScheduledTask { param($TaskName) $global:Calls += "stoptask $TaskName"; if ($global:TaskStops) { $global:Procs = @($global:Procs | Where-Object { $_.ProcessId -ne 700 }) } }
+function global:Get-CimInstance { param($ClassName, $Filter, $ErrorAction) $global:Calls += 'list'; $global:Procs }
+function global:Stop-Process { param($Id, [switch]$Force, $ErrorAction) $global:Calls += "kill $Id"; if (-not $global:Unkillable) { $global:Procs = @($global:Procs | Where-Object { $_.ProcessId -ne $Id }) } }
+function global:Start-Sleep { param($Seconds) }
+function global:Remove-TreeNoFollow { param($Path) $global:Calls += 'write-token' }
+function global:New-Item { param($ItemType, $Path, $ErrorAction) }
+function global:Set-ProtectedAcl { param($Path, $Extra) }
+function global:Set-Content { param($LiteralPath, $Value, $Encoding) }
+function Reset-Stop([bool]$TaskStops = $true, [bool]$Unkillable = $false) { $global:Procs = @($kitAgent, $otherScript, $otherPython); $global:TaskStops = $TaskStops; $global:Unkillable = $Unkillable; $global:Calls = @() }
+function Invoke-Stop { try { Stop-KitHiperf; return 'ok' } catch { return "threw: $_" } }
+try {
+    Reset-Stop
+    Check 'stop: the task ends the kit agent -> confirmed gone, nothing killed' (((Invoke-Stop) -eq 'ok') -and ($global:Calls[0] -eq 'stoptask ComputerViewerHiperf') -and (@($global:Calls | Where-Object { $_ -like 'kill *' }).Count -eq 0))
+    Reset-Stop -TaskStops $false
+    $r = Invoke-Stop
+    Check 'stop: a leftover kit agent is killed, other pythons are not' (($r -eq 'ok') -and ($global:Calls -contains 'kill 700') -and ($global:Calls -notcontains 'kill 701') -and ($global:Calls -notcontains 'kill 702') -and ($global:Procs.Count -eq 2))
+    Reset-Stop -TaskStops $false -Unkillable $true
+    Check 'stop: a kit agent that survives the kill -> throws' ((Invoke-Stop) -like 'threw: The HD agent (*PID 700) is still running after it was stopped. The new token was not written*')
+    # The real Stop-KitHiperf inside the rotation: the write never happens.
+    Reset-Stop -TaskStops $false -Unkillable $true
+    $global:Accepts = $true
+    $r = Invoke-Rot $true
+    Check 'rotation: an agent that will not stop (real Stop-KitHiperf) -> throws, token not written, task not started' (($r -like 'threw: *still running*') -and ($global:Calls -notcontains 'write-token') -and (@($global:Calls | Where-Object { $_ -like 'step *' }).Count -eq 0))
+} finally {
+    Remove-Item Function:\Stop-ScheduledTask, Function:\Get-CimInstance, Function:\Stop-Process, Function:\Start-Sleep, Function:\Remove-TreeNoFollow, Function:\New-Item, Function:\Set-ProtectedAcl, Function:\Set-Content, Function:\Write-Step
+}
+
+# Test-HiperfAcceptsToken for real: nothing listening -> false once the timeout passes.
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$ok = Test-HiperfAcceptsToken -Token ('ab' * 16) -Address '127.0.0.1' -Port 1 -TimeoutSec 2
+Check 'accept check: no agent listening -> false after the timeout' ((-not $ok) -and ($sw.Elapsed.TotalSeconds -ge 1.5) -and ($sw.Elapsed.TotalSeconds -lt 15))
+# Against a loopback stand-in with hiperf-agent.py's auth contract: the
+# first text frame {"type":"auth","token":...}; the right token gets a
+# "hello" text frame, a wrong one a close with 4401. Two connections.
+$stubAgent = {
+    param($Listener, $Token)
+    function Read-N($S, [int]$N) { $b = New-Object byte[] $N; $o = 0; while ($o -lt $N) { $r = $S.Read($b, $o, $N - $o); if ($r -le 0) { throw 'eof' }; $o += $r }; return , $b }
+    foreach ($i in 1..2) {
+        $c = $Listener.AcceptTcpClient(); $s = $c.GetStream(); $req = ''
+        while (-not $req.EndsWith("`r`n`r`n")) { $req += [char](Read-N $s 1)[0] }
+        $key = [regex]::Match($req, '(?im)^Sec-WebSocket-Key:\s*(\S+)').Groups[1].Value
+        $accept = [Convert]::ToBase64String([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::ASCII.GetBytes($key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')))
+        $resp = [Text.Encoding]::ASCII.GetBytes("HTTP/1.1 101 Switching Protocols`r`nUpgrade: websocket`r`nConnection: Upgrade`r`nSec-WebSocket-Accept: $accept`r`n`r`n")
+        $s.Write($resp, 0, $resp.Length)
+        $h = Read-N $s 2; $len = $h[1] -band 0x7F; $mask = Read-N $s 4; $p = Read-N $s $len
+        for ($j = 0; $j -lt $len; $j++) { $p[$j] = $p[$j] -bxor $mask[$j % 4] }
+        $msg = [Text.Encoding]::UTF8.GetString($p) | ConvertFrom-Json
+        if ($msg.type -eq 'auth' -and $msg.token -eq $Token) {
+            $out = [Text.Encoding]::UTF8.GetBytes('{"type":"hello","version":1}'); $frame = [byte[]](@(0x81, $out.Length) + $out)
+        } else { $frame = [byte[]](0x88, 2, 0x11, 0x31) }
+        $s.Write($frame, 0, $frame.Length); Start-Sleep -Milliseconds 300; $c.Close()
+    }
+}
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+$listener.Start()
+$stubPs = [powershell]::Create().AddScript($stubAgent).AddArgument($listener).AddArgument('ab' * 16)
+$stubRun = $stubPs.BeginInvoke()
+try {
+    $port = $listener.LocalEndpoint.Port
+    $yes = Test-HiperfAcceptsToken -Token ('ab' * 16) -Address '127.0.0.1' -Port $port -TimeoutSec 10
+    Check 'accept check: the right token gets hello -> exactly $true (a bool, nothing else in the output)' (($yes -is [bool]) -and $yes)
+    $no = Test-HiperfAcceptsToken -Token ('cd' * 16) -Address '127.0.0.1' -Port $port -TimeoutSec 10
+    Check 'accept check: a wrong token is closed with 4401 -> exactly $false' (($no -is [bool]) -and (-not $no))
+} finally {
+    $listener.Stop(); [void]$stubRun.AsyncWaitHandle.WaitOne(5000); $stubPs.Dispose()
+}
+
+# Static: success and the token are printed only after the accept check.
+$h5 = Get-Content -LiteralPath $hiperf -Raw
+$rotFn = [regex]::Match($h5, '(?s)function Invoke-TokenRotation\(.*?\) \{(.*?)\n\}').Groups[1].Value
+$iStop = $rotFn.IndexOf('Stop-KitHiperf'); $iWrite = $rotFn.IndexOf('Write-HiperfToken'); $iStart = $rotFn.IndexOf('Start-KitHiperf'); $iAccept = $rotFn.IndexOf('Test-HiperfAcceptsToken'); $iOk = $rotFn.IndexOf('Write-Step')
+Check 'hiperf: Invoke-TokenRotation stops, writes, starts, checks, then reports success' (($iStop -ge 0) -and ($iStop -lt $iWrite) -and ($iWrite -lt $iStart) -and ($iStart -lt $iAccept) -and ($iAccept -lt $iOk))
+$iCall = $h5.IndexOf('Invoke-TokenRotation -Rotated $tokenInfo.New')
+Check 'hiperf: the rotation runs after the task is registered and before the token is printed' (($iCall -gt $h5.IndexOf('Register-ScheduledTask -TaskName')) -and ($iCall -lt $h5.IndexOf("Write-Host 'Token:'")))
+Check 'hiperf: the new token is written only by Write-HiperfToken (inside the rotation)' ((([regex]::Matches($h5, 'Write-HiperfToken ')).Count -eq 1) -and (([regex]::Matches($h5, 'Set-Content -LiteralPath \$TokenFile')).Count -eq 1))
 
 Write-Host ''
 Write-Host "$script:passed passed, $script:failed failed"

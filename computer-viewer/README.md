@@ -433,7 +433,11 @@ stream), paste the printed token, turn on HD.
   stored `hiperf-token.txt` whose ACL, as found, let anyone but the installing
   user (read only), Administrators and SYSTEM read or change it is not reused:
   the installer makes a new token, says so, and prints it; paste it into the
-  viewer. TightVNC's server key, which holds the VNC password, is locked to
+  viewer. Whenever it makes a new token, the installer first stops the
+  `ComputerViewerHiperf` task and confirms the kit's agent process is gone,
+  then writes the token, starts the task, and prints the token only after the
+  agent accepts it (an auth hello on port 6090); otherwise setup stops with a
+  message to restart the task and re-run. TightVNC's server key, which holds the VNC password, is locked to
   Administrators and SYSTEM before the password is written into it.
 - **The control fence is a tool-level fence.** While you hold control of a
   bot-driven Mac, the bot's `computer_use` is refused and this pane sends
