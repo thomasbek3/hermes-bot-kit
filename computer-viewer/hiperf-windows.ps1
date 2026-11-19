@@ -338,25 +338,82 @@ function Get-PythonImportDirs([string]$Exe) {
     return @((Join-Path $dir 'Lib'), (Join-Path $dir 'Lib\site-packages'), (Join-Path $dir 'DLLs'))
 }
 
-function Find-UntrustedItem([string]$Root) {
+function Find-UntrustedItem([string]$Root, [switch]$Writable) {
     # The first item at or below $Root that is a link or is owned by an
     # account other than Administrators/SYSTEM/TrustedInstaller/this one.
-    # Links are reported, never followed.
-    if (-not (Test-Path -LiteralPath $Root)) { return $null }
+    # -Writable: also one whose ACL lets a non-administrator write, delete or
+    # re-permission it (ACLs, not just the owner). Links are reported, never
+    # followed.
+    $item = Get-Item -LiteralPath $Root -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return $null }
     if ((Test-IsLink $Root) -or -not (Test-OwnedByUsOrTrusted $Root)) { return $Root }
-    if (-not (Get-Item -LiteralPath $Root -Force).PSIsContainer) { return $null }
+    if ($Writable -and (Test-WritableByNonAdmins $Root)) { return $Root }
+    if (-not $item.PSIsContainer) { return $null }
     foreach ($child in @(Get-ChildItem -LiteralPath $Root -Force)) {
-        $bad = Find-UntrustedItem $child.FullName
+        $bad = Find-UntrustedItem $child.FullName -Writable:$Writable
         if ($bad) { return $bad }
     }
     return $null
+}
+
+function Remove-TreeNoFollow([string]$Path) {
+    # Deletes $Path and everything below it without following a link: a
+    # junction or symlink is removed as a link, its target untouched; real
+    # folders are recursed into. Never Remove-Item -Recurse on such a tree:
+    # Windows PowerShell 5.1 can follow a junction.
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return }
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        if ($item.PSIsContainer) { [System.IO.Directory]::Delete($item.FullName, $false) }
+        else { [System.IO.File]::Delete($item.FullName) }
+        return
+    }
+    if ($item.PSIsContainer) {
+        foreach ($child in @(Get-ChildItem -LiteralPath $item.FullName -Force)) { Remove-TreeNoFollow $child.FullName }
+        [System.IO.Directory]::Delete($item.FullName, $false)
+        return
+    }
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+        $item.Attributes = $item.Attributes -bxor [System.IO.FileAttributes]::ReadOnly
+    }
+    [System.IO.File]::Delete($item.FullName)
+}
+
+function Get-VenvAction([string]$CfgText, [string]$ExpectedHome, [bool]$TreeOk, [bool]$ExesPresent) {
+    # 'reuse' only for a venv built on the validated Python: pyvenv.cfg has
+    # exactly one home = line naming that Python's folder (full path, any
+    # case), nothing in the HD tree could be changed by a non-administrator,
+    # and both launchers exist. Anything else: 'rebuild'.
+    if (-not $TreeOk -or -not $ExesPresent -or -not $CfgText -or -not $ExpectedHome) { return 'rebuild' }
+    $homes = @([regex]::Matches($CfgText, '(?im)^[ \t]*home[ \t]*=(.*)$') | ForEach-Object { $_.Groups[1].Value.Trim() })
+    if ($homes.Count -ne 1 -or -not $homes[0]) { return 'rebuild' }
+    try {
+        $have = [System.IO.Path]::GetFullPath($homes[0]).TrimEnd('\', '/')
+        $want = [System.IO.Path]::GetFullPath($ExpectedHome.Trim()).TrimEnd('\', '/')
+    } catch {
+        return 'rebuild'
+    }
+    if ([string]::Equals($have, $want, [System.StringComparison]::OrdinalIgnoreCase)) { return 'reuse' }
+    return 'rebuild'
+}
+
+function Test-VenvTrusted([string]$Dir, [string]$Python, [bool]$TreeOk) {
+    # $TreeOk: the HD tree as found, recorded before Protect-HiperfState
+    # re-permissioned it. The venv is also checked again as it is now.
+    if ($TreeOk -and (Find-UntrustedItem $Dir -Writable)) { $TreeOk = $false }
+    $cfg = Join-Path $Dir 'pyvenv.cfg'
+    $text = ''
+    if (Test-Path -LiteralPath $cfg -PathType Leaf) { $text = [string](Get-Content -LiteralPath $cfg -Raw) }
+    $exes = (Test-Path -LiteralPath (Join-Path $Dir 'Scripts\python.exe') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $Dir 'Scripts\pythonw.exe') -PathType Leaf)
+    return ((Get-VenvAction -CfgText $text -ExpectedHome (Split-Path -Parent $Python) -TreeOk $TreeOk -ExesPresent $exes) -eq 'reuse')
 }
 
 function Assert-TrustedTree([string]$Root) {
     $bad = Find-UntrustedItem $Root
     if ($bad) {
         $owner = (Get-Acl -LiteralPath $bad).Owner
-        throw "$bad (under $Root) was not created by an administrator (owner '$owner', or it is a link). Another account may have put it there. Check it, delete $Root from an Administrator prompt (Remove-Item -Recurse -Force '$Root'), then re-run."
+        throw "$bad (under $Root) was not created by an administrator (owner '$owner', or it is a link). Another account may have put it there. Check it, delete $Root from an Administrator prompt (cmd /c rmdir /s /q `"$Root`", which does not follow links), then re-run."
     }
 }
 
@@ -423,9 +480,18 @@ Write-Step "Using Python: $python"
 # A state tree another account created or put anything into (a standard user
 # may create folders in C:\ProgramData) is refused, not adopted: re-owning it
 # would keep whatever was planted. Checked before anything is re-owned.
+$hiperfTreeOk = $true
 if (Test-Path -LiteralPath $StateDir) {
     if ((Test-IsLink $StateDir) -or -not (Test-OwnedByUsOrTrusted $StateDir)) { Assert-TrustedTree $StateDir }
     foreach ($p in @($HiperfDir, $TokenFile, $LogFile)) { Assert-TrustedTree $p }
+    # ACLs, not just owners, recorded BEFORE Protect-HiperfState re-permissions
+    # the tree: an item a non-administrator could write may have been changed,
+    # so the venv is rebuilt (the agent is replaced by the verified download).
+    $changeable = Find-UntrustedItem $HiperfDir -Writable
+    if ($changeable) {
+        $hiperfTreeOk = $false
+        Write-Warning "$changeable could be changed by a non-administrator; the HD venv will be rebuilt."
+    }
 }
 New-TrustedDir $StateDir
 New-TrustedDir $HiperfDir
@@ -435,12 +501,19 @@ $token = Get-OrCreateToken
 
 $venvPython = Join-Path $VenvDir 'Scripts\python.exe'
 $venvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
-if (-not (Test-Path -LiteralPath $venvPython)) {
+# The venv's python runs only when the venv was built on $python and nobody
+# else could have changed it; otherwise it is deleted (links as links) and
+# built again, inside the now admin-only tree.
+if (Test-VenvTrusted -Dir $VenvDir -Python $python -TreeOk $hiperfTreeOk) {
+    Write-Step "Reusing venv at $VenvDir"
+} else {
+    if (Get-Item -LiteralPath $VenvDir -Force -ErrorAction SilentlyContinue) {
+        Write-Step "Rebuilding the venv at $VenvDir (not built on $python, incomplete, or changeable by others)"
+        Remove-TreeNoFollow $VenvDir
+    }
     Write-Step "Creating dedicated venv at $VenvDir"
     & $python -I -m venv $VenvDir
     if ($LASTEXITCODE -ne 0) { throw "python -m venv failed (exit $LASTEXITCODE)." }
-} else {
-    Write-Step "Reusing venv at $VenvDir"
 }
 if (-not (Test-Path -LiteralPath $venvPython)) {
     throw "venv python missing at $venvPython"

@@ -127,6 +127,201 @@ $h = Get-Content -LiteralPath $hiperf -Raw
 Check 'hiperf: Resolve-Ffmpeg validates every candidate' ($h -match 'if \(Test-TrustedExecutable \$real\) \{ return \$real \}')
 Check 'hiperf: a planted state tree is refused, not recreated' (($h -notmatch '\$planted') -and ($h -match 'Assert-TrustedTree \$HiperfDir'))
 
+# --- HD venv reuse decision (round 3, item 4) ---------------------------------
+Import-ScriptFunctions $hiperf @('Get-VenvAction')
+$base = 'C:\Program Files\Python312'
+$cfg = "home = $base`r`ninclude-system-site-packages = false`r`nversion = 3.12.7`r`n"
+Check 'venv: built on the validated Python, good tree, launchers present -> reuse' ((Get-VenvAction -CfgText $cfg -ExpectedHome $base -TreeOk $true -ExesPresent $true) -eq 'reuse')
+Check 'venv: home differs only in case and a trailing slash -> reuse' ((Get-VenvAction -CfgText "home = c:\program files\python312\`n" -ExpectedHome $base -TreeOk $true -ExesPresent $true) -eq 'reuse')
+Check 'venv: home is another all-users Python -> rebuild' ((Get-VenvAction -CfgText ($cfg -replace 'Python312', 'Python311') -ExpectedHome $base -TreeOk $true -ExesPresent $true) -eq 'rebuild')
+Check 'venv: home is a per-user Python -> rebuild' ((Get-VenvAction -CfgText 'home = C:\Users\someone\AppData\Local\Programs\Python\Python312' -ExpectedHome $base -TreeOk $true -ExesPresent $true) -eq 'rebuild')
+Check 'venv: home is a prefix of the expected one only -> rebuild' ((Get-VenvAction -CfgText 'home = C:\Program Files\Python3' -ExpectedHome $base -TreeOk $true -ExesPresent $true) -eq 'rebuild')
+Check 'venv: missing pyvenv.cfg -> rebuild' ((Get-VenvAction -CfgText '' -ExpectedHome $base -TreeOk $true -ExesPresent $true) -eq 'rebuild')
+Check 'venv: pyvenv.cfg without home -> rebuild' ((Get-VenvAction -CfgText 'version = 3.12.7' -ExpectedHome $base -TreeOk $true -ExesPresent $true) -eq 'rebuild')
+Check 'venv: two home lines -> rebuild' ((Get-VenvAction -CfgText ($cfg + "home = C:\Users\x\py`r`n") -ExpectedHome $base -TreeOk $true -ExesPresent $true) -eq 'rebuild')
+Check 'venv: tree changeable by others -> rebuild' ((Get-VenvAction -CfgText $cfg -ExpectedHome $base -TreeOk $false -ExesPresent $true) -eq 'rebuild')
+Check 'venv: python.exe or pythonw.exe missing -> rebuild' ((Get-VenvAction -CfgText $cfg -ExpectedHome $base -TreeOk $true -ExesPresent $false) -eq 'rebuild')
+
+# Test-VenvTrusted / Find-UntrustedItem -Writable over a real folder, ACL helpers stubbed.
+Import-ScriptFunctions $hiperf @('Test-VenvTrusted', 'Find-UntrustedItem', 'Remove-TreeNoFollow')
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('cv-win-venv-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$venv = Join-Path $tmp 'venv'
+$scripts = Join-Path $venv 'Scripts'
+New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+$pyHome = Join-Path $tmp 'Python312'
+Set-Content -LiteralPath (Join-Path $venv 'pyvenv.cfg') -Value "home = $pyHome" -Encoding ASCII
+foreach ($n in @('python.exe', 'pythonw.exe')) { Set-Content -LiteralPath (Join-Path $scripts $n) -Value '' -Encoding ASCII }
+function global:Test-IsLink([string]$Path) { return ($global:Links -contains $Path) }
+function global:Test-OwnedByUsOrTrusted([string]$Path) { return -not ($global:OtherOwner -contains $Path) }
+function global:Test-WritableByNonAdmins([string]$Path) { return ($global:Writable -contains $Path) }
+try {
+    $pyExe = Join-Path $pyHome 'python.exe'
+    $global:Links = @(); $global:OtherOwner = @(); $global:Writable = @()
+    Check 'Test-VenvTrusted: a good venv passes' (Test-VenvTrusted -Dir $venv -Python $pyExe -TreeOk $true)
+    Check 'Test-VenvTrusted: the tree as found was changeable -> fails' (-not (Test-VenvTrusted -Dir $venv -Python $pyExe -TreeOk $false))
+    $global:Writable = @((Join-Path $scripts 'python.exe'))
+    Check 'Test-VenvTrusted: a non-admin-writable launcher (ACL, owner fine) fails' (-not (Test-VenvTrusted -Dir $venv -Python $pyExe -TreeOk $true))
+    $global:Writable = @(); $global:Links = @($scripts)
+    Check 'Test-VenvTrusted: a link inside the venv fails' (-not (Test-VenvTrusted -Dir $venv -Python $pyExe -TreeOk $true))
+    $global:Links = @(); $global:OtherOwner = @((Join-Path $venv 'pyvenv.cfg'))
+    Check 'Test-VenvTrusted: an item owned by another account fails' (-not (Test-VenvTrusted -Dir $venv -Python $pyExe -TreeOk $true))
+    $global:OtherOwner = @()
+    $global:Writable = @($scripts)
+    Check 'Find-UntrustedItem: without -Writable an ACL-only problem is not reported (round-2 owner check)' (-not (Find-UntrustedItem $venv))
+    Check 'Find-UntrustedItem -Writable reports it' ((Find-UntrustedItem $venv -Writable) -eq $scripts)
+    $global:Writable = @()
+    Remove-Item -LiteralPath (Join-Path $scripts 'pythonw.exe')
+    Check 'Test-VenvTrusted: missing pythonw.exe fails' (-not (Test-VenvTrusted -Dir $venv -Python $pyExe -TreeOk $true))
+    Check 'Test-VenvTrusted: built on another Python fails' (-not (Test-VenvTrusted -Dir $venv -Python (Join-Path $tmp 'Python311\python.exe') -TreeOk $true))
+} finally {
+    Remove-Item Function:\Test-IsLink, Function:\Test-OwnedByUsOrTrusted, Function:\Test-WritableByNonAdmins
+}
+
+# --- Remove-TreeNoFollow: a link is removed as a link, its target kept ----------
+$outside = Join-Path $tmp 'outside'
+New-Item -ItemType Directory -Force -Path $outside | Out-Null
+$keep = Join-Path $outside 'keep.txt'
+Set-Content -LiteralPath $keep -Value 'x' -Encoding ASCII
+$doomed = Join-Path $tmp 'doomed'
+New-Item -ItemType Directory -Force -Path (Join-Path $doomed 'sub') | Out-Null
+Set-Content -LiteralPath (Join-Path $doomed 'sub\f.txt') -Value 'y' -Encoding ASCII
+$linked = $false
+try {
+    New-Item -ItemType SymbolicLink -Path (Join-Path $doomed 'sub\to-outside') -Target $outside -ErrorAction Stop | Out-Null
+    New-Item -ItemType SymbolicLink -Path (Join-Path $doomed 'file-link') -Target $keep -ErrorAction Stop | Out-Null
+    $linked = $true
+} catch {
+    Write-Host "skip symlink cases (cannot create links here: $_)"
+}
+Remove-TreeNoFollow $doomed
+Check 'Remove-TreeNoFollow deletes the whole tree' (-not (Test-Path -LiteralPath $doomed))
+if ($linked) {
+    Check 'Remove-TreeNoFollow leaves a linked folder and file target intact' ((Test-Path -LiteralPath $keep) -and ((Get-Content -LiteralPath $keep -Raw).Trim() -eq 'x'))
+}
+Remove-TreeNoFollow (Join-Path $tmp 'does-not-exist')
+Check 'Remove-TreeNoFollow on a missing path is a no-op' $true
+$h = Get-Content -LiteralPath $hiperf -Raw
+$venvBlock = [regex]::Match($h, '(?s)\$venvPython = Join-Path.*?Write-Step "Installing \$WebsocketsPin').Value
+Check 'hiperf: the venv python runs only after Test-VenvTrusted' (($venvBlock -match 'if \(Test-VenvTrusted ') -and ($h.IndexOf('Test-VenvTrusted -Dir $VenvDir') -lt $h.IndexOf('& $venvPython -I -m pip')))
+Check 'hiperf: a rejected venv is removed with the no-follow delete' (($venvBlock -match 'Remove-TreeNoFollow \$VenvDir') -and ($venvBlock -notmatch 'Remove-Item[^\r\n]*-Recurse'))
+$firstProtect = [regex]::Match($h, '(?m)^Protect-HiperfState\s*$')
+Check 'hiperf: the venv is rebuilt only after the HD tree is protected' ($firstProtect.Success -and ($firstProtect.Index -lt $h.IndexOf('& $python -I -m venv')))
+Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
+# --- VNC password reuse decision (round 3, item 7) ----------------------------
+Import-ScriptFunctions $connect @('Get-PasswordAction')
+Check 'password: ours, private, valid -> reuse' ((Get-PasswordAction -Exists $true -OwnerOk $true -WasReadableByOthers $false -ContentOk $true) -eq 'reuse')
+Check 'password: was readable or changeable by others -> rotate' ((Get-PasswordAction -Exists $true -OwnerOk $true -WasReadableByOthers $true -ContentOk $true) -eq 'rotate')
+Check 'password: created by another account -> rotate' ((Get-PasswordAction -Exists $true -OwnerOk $false -WasReadableByOthers $false -ContentOk $true) -eq 'rotate')
+Check 'password: empty or invalid content -> rotate' ((Get-PasswordAction -Exists $true -OwnerOk $true -WasReadableByOthers $false -ContentOk $false) -eq 'rotate')
+Check 'password: no file -> rotate (new)' ((Get-PasswordAction -Exists $false -OwnerOk $false -WasReadableByOthers $false -ContentOk $false) -eq 'rotate')
+$c = Get-Content -LiteralPath $connect -Raw
+$pwFn = [regex]::Match($c, '(?s)function Get-OrCreateVncPassword \{(.*?)\n\}').Groups[1].Value
+Check 'connect: readability is recorded before any ACL is tightened' (($pwFn.IndexOf('Test-ReadableByNonAdmins $PasswordFile') -ge 0) -and ($pwFn.IndexOf('Test-ReadableByNonAdmins $PasswordFile') -lt $pwFn.IndexOf('Set-ProtectedAcl')) -and ($pwFn.IndexOf('Test-ReadableByNonAdmins $PasswordFile') -lt $pwFn.IndexOf('Assert-TrustedStateDir')))
+Check 'connect: rotation is announced in exactly one warning' (([regex]::Matches($pwFn, 'Write-Warning')).Count -eq 1)
+
+# --- TightVNC read-back (round 3, item 7) -------------------------------------
+Import-ScriptFunctions $connect @('Get-TightVncMismatch')
+$TightVncDwords = @('UseVncAuthentication', 'AllowLoopback', 'LoopbackOnly')
+$want = ConvertTo-VncObfuscated 'password'
+function New-Props($Password, $Auth = 1, $Allow = 1, $Only = 1) {
+    $o = [ordered]@{}
+    if ($null -ne $Password) { $o.Password = [byte[]]$Password }
+    if ($null -ne $Auth) { $o.UseVncAuthentication = [int]$Auth }
+    if ($null -ne $Allow) { $o.AllowLoopback = [int]$Allow }
+    if ($null -ne $Only) { $o.LoopbackOnly = [int]$Only }
+    return [pscustomobject]$o
+}
+Check 'tightvnc: all four as written -> no mismatch' (@(Get-TightVncMismatch (New-Props $want) $want).Count -eq 0)
+Check 'tightvnc: another password -> Password' ((@(Get-TightVncMismatch (New-Props (ConvertTo-VncObfuscated 'other')) $want) -join ',') -eq 'Password')
+Check 'tightvnc: no password -> Password' ((@(Get-TightVncMismatch (New-Props $null) $want) -join ',') -eq 'Password')
+Check 'tightvnc: a 7-byte password -> Password' ((@(Get-TightVncMismatch (New-Props ([byte[]]$want[0..6])) $want) -join ',') -eq 'Password')
+Check 'tightvnc: UseVncAuthentication=0 -> named' ((@(Get-TightVncMismatch (New-Props $want 0) $want) -join ',') -eq 'UseVncAuthentication')
+Check 'tightvnc: LoopbackOnly missing -> named' ((@(Get-TightVncMismatch (New-Props $want 1 1 $null) $want) -join ',') -eq 'LoopbackOnly')
+Check 'tightvnc: AllowLoopback=0 and LoopbackOnly=0 -> both named' ((@(Get-TightVncMismatch (New-Props $want 1 0 0) $want) -join ',') -eq 'AllowLoopback,LoopbackOnly')
+Check 'tightvnc: a string "1" is not a DWORD 1' ((@(Get-TightVncMismatch ([pscustomobject]@{ Password = $want; UseVncAuthentication = '1'; AllowLoopback = 1; LoopbackOnly = 1 }) $want) -join ',') -eq 'UseVncAuthentication')
+Check 'tightvnc: nothing read back -> all named' (@(Get-TightVncMismatch $null $want).Count -eq 4)
+$setFn = [regex]::Match($c, '(?s)function Set-TightVncPassword\(\[string\]\$Password\) \{(.*?)\n\}').Groups[1].Value
+Check 'connect: Set-TightVncPassword writes every value with -ErrorAction Stop and checks the read-back' (($setFn -match "foreach \(\`$n in \`$TightVncDwords\)") -and ($setFn -match 'Get-TightVncMismatch \(Get-ItemProperty') -and ($setFn -notmatch 'SilentlyContinue'))
+Check 'connect: the 64-bit key is no longer in the best-effort loopback loop' ($c -notmatch "(?m)^\s*'HKLM:\\SOFTWARE\\TightVNC\\Server',\s*$")
+
+# --- UltraVNC recovery fails closed (round 3) ---------------------------------
+Import-ScriptFunctions $connect @('Restore-TightVnc')
+$VncPort = 5900
+function New-Svc([string]$Name, [string]$Status) {
+    $o = [pscustomobject]@{ Name = $Name; Status = $Status }
+    $o | Add-Member -MemberType ScriptMethod -Name WaitForStatus -Value {
+        param($Want, $Timeout)
+        if ($global:Stuck -contains $this.Name) { throw "Time out has expired and the operation has not been completed." }
+        $this.Status = $Want
+    }
+    return $o
+}
+function global:Get-Service { param($Name, $ErrorAction) $s = $global:Services[$Name]; if (-not $s -and $ErrorAction -eq 'Stop') { throw "no service $Name" }; $s }
+function global:Set-Service { param($Name, $StartupType, $ErrorAction) $global:Calls += "set $Name $StartupType" }
+function global:Stop-Service { param($Name, [switch]$Force, $ErrorAction) $global:Calls += "stop $Name"; if ($global:Stuck -notcontains $Name) { $global:Services[$Name].Status = 'Stopped' } }
+function global:Start-Service { param($Name, $ErrorAction) $global:Calls += "start $Name"; $global:Services[$Name].Status = 'Running'; if ($global:ListenAfterStart) { $global:Listeners = $global:ListenAfterStart } }
+function global:Get-Process { param($Name, $ErrorAction) @($global:Procs) }
+function global:Stop-Process { param($Id, [switch]$Force, $ErrorAction) $global:Calls += "kill $Id"; if (-not $global:Unkillable) { $global:Procs = @($global:Procs | Where-Object { $_.Id -ne $Id }) } }
+function global:Start-Sleep { param($Seconds) }
+function global:Write-Warning { param($Message) $global:Warned += , $Message }
+function Reset-Vnc([string]$Uvnc = 'Running', [object[]]$Procs = @(), [string[]]$Stuck = @(), [bool]$Unkillable = $false, [bool]$Listens = $true) {
+    $global:Services = @{ 'tvnserver' = (New-Svc 'tvnserver' 'Stopped') }
+    if ($Uvnc) { $global:Services['uvnc_service'] = (New-Svc 'uvnc_service' $Uvnc) }
+    $global:Procs = $Procs; $global:Stuck = $Stuck; $global:Unkillable = $Unkillable
+    $global:Calls = @(); $global:Warned = @(); $global:Listeners = @()
+    $global:ListenAfterStart = $null
+    if ($Listens) { $global:ListenAfterStart = @([pscustomobject]@{ LocalAddress = '127.0.0.1' }) }
+}
+function Invoke-Restore { try { Restore-TightVnc 'test.'; return 'ok' } catch { return "threw: $_" } }
+
+Reset-Vnc
+$r = Invoke-Restore
+Check 'restore: UltraVNC stops, TightVNC comes back on loopback' (($r -eq 'ok') -and ($global:Services['uvnc_service'].Status -eq 'Stopped') -and ($global:Services['tvnserver'].Status -eq 'Running') -and ($global:Calls -contains 'set uvnc_service Disabled'))
+Reset-Vnc -Uvnc $null
+Check 'restore: no uvnc_service installed is fine' ((Invoke-Restore) -eq 'ok')
+Reset-Vnc -Stuck @('uvnc_service')
+$r = Invoke-Restore
+Check 'restore: uvnc_service will not stop -> throws, TightVNC not started' (($r -like 'threw: UltraVNC (uvnc_service) could not be confirmed stopped*') -and ($global:Calls -notcontains 'start tvnserver'))
+Reset-Vnc -Procs @([pscustomobject]@{ Id = 4242; Name = 'winvnc' })
+$r = Invoke-Restore
+Check 'restore: a leftover winvnc.exe is killed, then TightVNC starts' (($r -eq 'ok') -and ($global:Calls -contains 'kill 4242') -and ($global:Procs.Count -eq 0))
+Reset-Vnc -Procs @([pscustomobject]@{ Id = 4243; Name = 'winvnc' }) -Unkillable $true
+$r = Invoke-Restore
+Check 'restore: winvnc.exe survives the kill -> throws, TightVNC not started' (($r -like 'threw: winvnc.exe (UltraVNC) is still running*') -and ($global:Calls -notcontains 'start tvnserver'))
+Reset-Vnc -Listens $false
+$r = Invoke-Restore
+Check 'restore: TightVNC not listening -> throws' ($r -like 'threw: TightVNC is running but not listening*')
+Reset-Vnc
+$global:ListenAfterStart = @([pscustomobject]@{ LocalAddress = '0.0.0.0' })
+$r = Invoke-Restore
+Check 'restore: TightVNC listening on every interface -> throws' ($r -like 'threw: TightVNC is running but not listening*')
+Reset-Vnc -Stuck @('tvnserver')
+$r = Invoke-Restore
+Check 'restore: TightVNC never reaches Running -> throws' ($r -like 'threw: UltraVNC is stopped but TightVNC (tvnserver) could not be started*')
+Remove-Item Function:\Get-Service, Function:\Set-Service, Function:\Stop-Service, Function:\Start-Service, Function:\Get-Process, Function:\Stop-Process, Function:\Start-Sleep, Function:\Write-Warning
+$restoreFn = [regex]::Match($c, '(?s)function Restore-TightVnc\(\[string\]\$Why\) \{(.*?)\n\}').Groups[1].Value
+Check 'connect: Restore-TightVnc does not swallow service errors' (($restoreFn -notmatch 'catch \{\}') -and ($restoreFn -notmatch "(Stop|Set|Start)-Service -Name '(uvnc_service|tvnserver)'[^\r\n]*SilentlyContinue"))
+Check 'connect: an UltraVNC failure is outside the non-fatal headless catch' ($c -match '(?s)\nif \(\$headless\) \{\s*#[^\n]*\n(\s*#[^\n]*\n)*\s*try \{\s*\$script:UsedUltraVnc = Install-UltraVncHeadlessFallback\s*\} catch \{\s*\$script:UsedUltraVnc = \$false\s*Restore-TightVnc')
+Check 'connect: no Remove-Item -Recurse on C:\usbmmidd_v2' ($c -notmatch 'Remove-Item -LiteralPath \$UsbmmiddDir -Recurse')
+
+# --- TightVNC registry key readable by others (round 3) -----------------------
+Import-ScriptFunctions $connect @('Test-AclReadableByOthers')
+$global:TrustedOwnerSids = @('S-1-5-32-544', 'S-1-5-18', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+function New-Rule($Sid, [long]$Rights, $Type = 'Allow', $Prop = 'None') {
+    [pscustomobject]@{ AccessControlType = $Type; PropagationFlags = [System.Security.AccessControl.PropagationFlags]$Prop
+        IdentityReference = [pscustomobject]@{ Value = $Sid }; RegistryRights = $Rights }
+}
+$users = 'S-1-5-32-545'
+Check 'registry: Users with ReadKey is exposed' (Test-AclReadableByOthers @((New-Rule 'S-1-5-32-544' 0xF003F), (New-Rule $users 0x20019)) 'RegistryRights')
+Check 'registry: Administrators and SYSTEM only is not exposed' (-not (Test-AclReadableByOthers @((New-Rule 'S-1-5-32-544' 0xF003F), (New-Rule 'S-1-5-18' 0xF003F)) 'RegistryRights'))
+Check 'registry: a Deny rule for Users is not exposure' (-not (Test-AclReadableByOthers @((New-Rule $users 0x20019 'Deny')) 'RegistryRights'))
+Check 'registry: an inherit-only Users rule does not apply to the key' (-not (Test-AclReadableByOthers @((New-Rule $users 0x20019 'Allow' 'InheritOnly')) 'RegistryRights'))
+Check 'registry: GENERIC_READ for Users is exposed' (Test-AclReadableByOthers @((New-Rule $users 0x80000000)) 'RegistryRights')
+$c3 = Get-Content -LiteralPath $connect -Raw
+Check 'connect: the TightVNC key is locked after the read-back' ($c3 -match '(?s)if \(\$bad\.Count\) \{.*?\}\s*Protect-TightVncKey')
+Check 'connect: an exposed TightVNC key forces a rotation' ($c3 -match '\$keyExposed = Test-TightVncKeyExposed; \$exposed = \$keyExposed')
+
 Write-Host ''
 Write-Host "$script:passed passed, $script:failed failed"
 if ($script:failed) { exit 1 }

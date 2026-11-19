@@ -292,6 +292,29 @@ function Set-ProtectedAcl {
     if ($Recurse -and $isDir) { Reset-ChildAcls -Dir $Path -Owner $admins }
 }
 
+function Remove-TreeNoFollow([string]$Path) {
+    # Deletes $Path and everything below it without following a link: a
+    # junction or symlink is removed as a link, its target untouched; real
+    # folders are recursed into. Never Remove-Item -Recurse on a tree that may
+    # hold a junction: Windows PowerShell 5.1 can follow it.
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return }
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        if ($item.PSIsContainer) { [System.IO.Directory]::Delete($item.FullName, $false) }
+        else { [System.IO.File]::Delete($item.FullName) }
+        return
+    }
+    if ($item.PSIsContainer) {
+        foreach ($child in @(Get-ChildItem -LiteralPath $item.FullName -Force)) { Remove-TreeNoFollow $child.FullName }
+        [System.IO.Directory]::Delete($item.FullName, $false)
+        return
+    }
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+        $item.Attributes = $item.Attributes -bxor [System.IO.FileAttributes]::ReadOnly
+    }
+    [System.IO.File]::Delete($item.FullName)
+}
+
 function Write-Step([string]$Message) {
     Write-Host "==> $Message"
 }
@@ -382,35 +405,58 @@ function Assert-TrustedStateDir {
     }
     if ((Test-IsLink $StateDir) -or -not (Test-OwnedByUsOrTrusted $StateDir)) {
         $owner = (Get-Acl -LiteralPath $StateDir).Owner
-        throw "$StateDir already exists and is owned by '$owner' (or is a link), not by an administrator. Another account may have created it. Check it, delete it from an Administrator prompt (Remove-Item -Recurse -Force '$StateDir'), then re-run."
+        throw "$StateDir already exists and is owned by '$owner' (or is a link), not by an administrator. Another account may have created it. Check it, delete it from an Administrator prompt (cmd /c rmdir /s /q `"$StateDir`", which does not follow links), then re-run."
     }
 }
 
+function Get-PasswordAction([bool]$Exists, [bool]$OwnerOk, [bool]$WasReadableByOthers, [bool]$ContentOk) {
+    # 'reuse' only for a stored password nobody else could have read or set:
+    # the file exists, it and the state folder are ours (no links), its ACL
+    # as found gave no non-administrator read, write or re-permission rights,
+    # and it holds a 1-8 character password. Anything else: 'rotate'.
+    if ($Exists -and $OwnerOk -and -not $WasReadableByOthers -and $ContentOk) { return 'reuse' }
+    return 'rotate'
+}
+
 function Get-OrCreateVncPassword {
-    # A password file another account created first (a standard user may
-    # create folders in C:\ProgramData) is never reused: that account would
-    # know the password. Checked before the folder is re-owned below.
-    $reuseOk = $false
-    if ((Test-Path -LiteralPath $PasswordFile) -and -not (Test-IsLink $PasswordFile) -and -not (Test-IsLink $StateDir)) {
-        $reuseOk = (Test-OwnedByUsOrTrusted $StateDir) -and (Test-OwnedByUsOrTrusted $PasswordFile)
-        if (-not $reuseOk) { Write-Warning "$PasswordFile was not created by this installer; making a new VNC password." }
+    # Recorded BEFORE any ACL is tightened: a password file another account
+    # created (a standard user may create folders in C:\ProgramData), or one
+    # a non-administrator could read or change, may be known to someone else,
+    # so it is not reused: a new password is made (rotation). The file's ACL
+    # includes what it inherits from the state folder, so a folder that
+    # passed read access down is caught here too.
+    $exists = (Test-Path -LiteralPath $PasswordFile -PathType Leaf)
+    $ownerOk = $false; $exposed = $false; $existing = ''
+    if ($exists) {
+        $ownerOk = (-not (Test-IsLink $PasswordFile)) -and (-not (Test-IsLink $StateDir)) -and
+            (Test-OwnedByUsOrTrusted $StateDir) -and (Test-OwnedByUsOrTrusted $PasswordFile)
+        if ($ownerOk) {
+            $exposed = (Test-ReadableByNonAdmins $PasswordFile) -or (Test-WritableByNonAdmins $PasswordFile)
+            $existing = ([string](Get-Content -LiteralPath $PasswordFile -Raw -ErrorAction SilentlyContinue)).Trim()
+        }
     }
+    # The same password also sits, reversibly encoded, in TightVNC's registry
+    # key; a key other accounts could read exposes it as well.
+    $keyExposed = $false
+    if ($exists -and $ownerOk -and -not $exposed) { $keyExposed = Test-TightVncKeyExposed; $exposed = $keyExposed }
+    $action = Get-PasswordAction -Exists $exists -OwnerOk $ownerOk -WasReadableByOthers $exposed -ContentOk ($existing -match '^[\x21-\x7E]{1,8}$')
     Assert-TrustedStateDir
     # The state folder: Administrators and SYSTEM only.
     # (The hiperf installer protects its own files inside it separately.)
     Set-ProtectedAcl -Path $StateDir
-    if ($reuseOk) {
-        $existing = (Get-Content -LiteralPath $PasswordFile -Raw -ErrorAction SilentlyContinue)
-        if ($existing) {
-            $existing = $existing.Trim()
-            if ($existing.Length -ge 1) {
-                Protect-PasswordFile
-                Write-Step "Reusing VNC password stored in $PasswordFile"
-                return $existing.Substring(0, [Math]::Min(8, $existing.Length))
-            }
-        }
+    if ($action -eq 'reuse') {
+        Protect-PasswordFile
+        Write-Step "Reusing VNC password stored in $PasswordFile"
+        return $existing
     }
-    if (Test-Path -LiteralPath $PasswordFile) { Remove-Item -LiteralPath $PasswordFile -Force }
+    if ($exists) {
+        $why = 'it was not created by this installer (or is a link)'
+        if ($ownerOk -and $keyExposed) { $why = "non-administrators could read it in $TightVncKey, so the old password may be known" }
+        elseif ($ownerOk -and $exposed) { $why = 'non-administrators could read or change it, so the old password may be known' }
+        elseif ($ownerOk) { $why = 'it does not hold a valid password' }
+        Write-Warning "Not reusing ${PasswordFile}: $why. Rotating to a new VNC password; use the one printed below."
+    }
+    Remove-TreeNoFollow $PasswordFile
     $pw = New-VncPassword8
     # Created empty, locked down, then written: the secret never sits in a file
     # with a wider ACL.
@@ -484,25 +530,94 @@ function ConvertTo-VncObfuscated([string]$Password) {
     }
 }
 
+$TightVncDwords = @('UseVncAuthentication', 'AllowLoopback', 'LoopbackOnly')
+
+function Get-TightVncMismatch([object]$Props, [byte[]]$Want) {
+    # Pure: the names of the values read back from the server key that are not
+    # what setup wrote (empty = all good): Password must be exactly $Want and
+    # each of $TightVncDwords exactly 1.
+    $bad = @()
+    $pw = $null
+    if ($Props) { $pw = $Props.Password }
+    if (-not $pw -or (@($pw).Length -ne 8) -or -not $Want -or ($Want.Length -ne 8) -or
+        (Compare-Object ([byte[]]@($pw)) $Want -SyncWindow 0)) { $bad += 'Password' }
+    foreach ($n in $TightVncDwords) {
+        $v = $null
+        if ($Props) { $v = $Props.$n }
+        if (($null -eq $v) -or -not ($v -is [int] -or $v -is [long] -or $v -is [uint32]) -or ($v -ne 1)) { $bad += $n }
+    }
+    return $bad
+}
+
+$TightVncKey = 'HKLM:\SOFTWARE\TightVNC\Server'
+
+function Test-AclReadableByOthers([object[]]$Rules, [string]$RightsProperty) {
+    # Pure: true when an Allow rule for anyone other than Administrators,
+    # SYSTEM or TrustedInstaller grants read (bit 0x1: ReadData on a file,
+    # QueryValues on a registry key; or GENERIC_READ / GENERIC_ALL).
+    $readMask = [long](0x1 -bor 0x80000000 -bor 0x10000000)
+    foreach ($ace in @($Rules)) {
+        if ($ace.AccessControlType -ne 'Allow') { continue }
+        if (($ace.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
+        if ($TrustedOwnerSids -contains $ace.IdentityReference.Value) { continue }
+        if (([long]$ace.$RightsProperty -band $readMask) -ne 0) { return $true }
+    }
+    return $false
+}
+
+function Test-TightVncKeyExposed {
+    # The server key holds the password in reversible DES form. Under a plain
+    # HKLM\SOFTWARE ACL every local user can read it.
+    if (-not (Test-Path -LiteralPath $TightVncKey)) { return $false }
+    $rules = (Get-Acl -LiteralPath $TightVncKey).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+    return (Test-AclReadableByOthers @($rules) 'RegistryRights')
+}
+
+function Protect-TightVncKey {
+    # Administrators and SYSTEM only (the service runs as SYSTEM), checked
+    # after it is set; a failure stops setup.
+    $admins = New-Object System.Security.Principal.SecurityIdentifier($SidAdministrators)
+    $system = New-Object System.Security.Principal.SecurityIdentifier($SidSystem)
+    $acl = New-Object System.Security.AccessControl.RegistrySecurity
+    $acl.SetOwner($admins)
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($sid in @($admins, $system)) {
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.RegistryAccessRule($sid, 'FullControl', 'ContainerInherit', 'None', 'Allow')))
+    }
+    try {
+        Set-Acl -LiteralPath $TightVncKey -AclObject $acl -ErrorAction Stop
+    } catch {
+        throw "Could not lock down $TightVncKey ($_); it holds the VNC password."
+    }
+    if (Test-TightVncKeyExposed) { throw "$TightVncKey is still readable by non-administrators; it holds the VNC password." }
+}
+
 function Set-TightVncPassword([string]$Password) {
-    # The running server's password is the one in the file: set it, restart
-    # the service, and read it back. A mismatch stops the install, so the
-    # password printed below is always the one the server accepts.
+    # The running server's password is the one in the file, VNC authentication
+    # is on and it listens on loopback only: set all four on every run, read
+    # them back, then the caller restarts the service. A failed write or a
+    # mismatch stops the install, so the password printed below is always the
+    # one the server accepts, on 127.0.0.1 only.
     $want = ConvertTo-VncObfuscated $Password
     $rp = 'HKLM:\SOFTWARE\TightVNC\Server'
-    if (-not (Test-Path -LiteralPath $rp)) { New-Item -Path $rp -Force | Out-Null }
-    $have = (Get-ItemProperty -LiteralPath $rp -Name 'Password' -ErrorAction SilentlyContinue).Password
-    $same = $have -and ($have.Length -eq 8) -and (-not (Compare-Object ([byte[]]$have) $want -SyncWindow 0))
-    if (-not $same) {
-        New-ItemProperty -Path $rp -Name 'Password' -PropertyType Binary -Value $want -Force | Out-Null
-        New-ItemProperty -Path $rp -Name 'UseVncAuthentication' -PropertyType DWord -Value 1 -Force | Out-Null
-        Write-Step 'Set the TightVNC server password to the one in the password file'
+    try {
+        if (-not (Test-Path -LiteralPath $rp)) { New-Item -Path $rp -Force -ErrorAction Stop | Out-Null }
+        $have = Get-ItemProperty -LiteralPath $rp -ErrorAction Stop
+        $changed = @(Get-TightVncMismatch $have $want).Count -gt 0
+        New-ItemProperty -Path $rp -Name 'Password' -PropertyType Binary -Value $want -Force -ErrorAction Stop | Out-Null
+        foreach ($n in $TightVncDwords) {
+            New-ItemProperty -Path $rp -Name $n -PropertyType DWord -Value 1 -Force -ErrorAction Stop | Out-Null
+        }
+        $bad = @(Get-TightVncMismatch (Get-ItemProperty -LiteralPath $rp -ErrorAction Stop) $want)
+    } catch {
+        throw "Could not write the TightVNC server settings at $rp ($_); not printing a password that may not work."
     }
-    $check = (Get-ItemProperty -LiteralPath $rp -Name 'Password' -ErrorAction Stop).Password
-    if (-not $check -or ($check.Length -ne 8) -or (Compare-Object ([byte[]]$check) $want -SyncWindow 0)) {
-        throw 'The TightVNC server password could not be set to the stored one; not printing a password that would not work.'
+    if ($bad.Count) {
+        throw "TightVNC server settings did not read back as written at $rp ($($bad -join ', ')); not printing a password that may not work."
     }
-    return (-not $same)
+    Protect-TightVncKey
+    if ($changed) { Write-Step 'Set the TightVNC server password, VNC authentication and loopback-only' }
+    return $changed
 }
 
 function Get-DisplaySnapshot {
@@ -590,7 +705,7 @@ function Install-UsbmmiddVirtualDisplay {
         $owner = (Get-Acl -LiteralPath $UsbmmiddDir).Owner
         Write-Warning "$UsbmmiddDir exists and is owned by '$owner', not Administrators, SYSTEM or TrustedInstaller (or it is a link)."
         Write-Warning 'Another account may have created it. Not installing the virtual display and not running anything from it.'
-        Write-Warning "Check the folder, delete it from an Administrator prompt (Remove-Item -Recurse -Force '$UsbmmiddDir'), then re-run."
+        Write-Warning "Check the folder, delete it from an Administrator prompt (cmd /c rmdir /s /q `"$UsbmmiddDir`", which does not follow links), then re-run."
         try { Unregister-ScheduledTask -TaskName $UsbmmiddTaskName -Confirm:$false -ErrorAction Stop } catch {}
     }
     if (-not (Test-UsbmmiddDirTrusted)) { Stop-UntrustedUsbmmidd; return $false }
@@ -676,7 +791,8 @@ function Install-UsbmmiddVirtualDisplay {
             return $false
         }
         try {
-            if (Test-Path -LiteralPath $UsbmmiddDir) { Remove-Item -LiteralPath $UsbmmiddDir -Recurse -Force -ErrorAction Stop }
+            # It may not be admin-only, so it may hold a planted junction: no-follow delete.
+            if (Test-Path -LiteralPath $UsbmmiddDir) { Remove-TreeNoFollow $UsbmmiddDir }
             # Fails if anyone re-created the folder in between: never merged.
             [System.IO.Directory]::Move($stage, $UsbmmiddDir)
         } catch {
@@ -838,15 +954,43 @@ public static class ComputerViewerDisp {
 }
 
 function Restore-TightVnc([string]$Why) {
-    # Fail closed: UltraVNC is stopped and disabled, TightVNC serves :5900 again.
-    Write-Warning "$Why Not using UltraVNC; TightVNC keeps serving :5900."
-    try { Stop-Service -Name 'uvnc_service' -Force -ErrorAction SilentlyContinue } catch {}
-    try { Set-Service -Name 'uvnc_service' -StartupType Disabled -ErrorAction SilentlyContinue } catch {}
-    try { & taskkill.exe /F /IM winvnc.exe /T 2>$null | Out-Null } catch {}
+    # Fail closed: UltraVNC is disabled and confirmed stopped (no winvnc.exe
+    # left), then TightVNC is started and confirmed listening on loopback
+    # only. Anything that cannot be confirmed throws: setup stops rather than
+    # run TightVNC beside a live UltraVNC, or print a password for no server.
+    Write-Warning "$Why Not using UltraVNC; switching :5900 back to TightVNC."
+    $stopHelp = 'Stop it from an Administrator prompt (Set-Service uvnc_service -StartupType Disabled; Stop-Service uvnc_service -Force; Stop-Process -Name winvnc -Force), then re-run.'
+    $uvnc = Get-Service -Name 'uvnc_service' -ErrorAction SilentlyContinue
+    if ($uvnc) {
+        try {
+            Set-Service -Name 'uvnc_service' -StartupType Disabled -ErrorAction Stop
+            if ($uvnc.Status -ne 'Stopped') { Stop-Service -Name 'uvnc_service' -Force -ErrorAction Stop }
+            $uvnc.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20))
+        } catch {
+            throw "UltraVNC (uvnc_service) could not be confirmed stopped ($_). Setup stopped so TightVNC does not run beside it. $stopHelp"
+        }
+    }
+    foreach ($round in 1..2) {
+        $left = @(Get-Process -Name 'winvnc' -ErrorAction SilentlyContinue)
+        if ($left.Count -eq 0) { break }
+        if ($round -eq 2) { throw "winvnc.exe (UltraVNC) is still running after it was killed. Setup stopped so TightVNC does not run beside it. $stopHelp" }
+        # The re-check above, not this call's result, decides.
+        foreach ($p in $left) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 2
+    }
     try {
-        Set-Service -Name 'tvnserver' -StartupType Automatic -ErrorAction SilentlyContinue
-        Start-Service -Name 'tvnserver' -ErrorAction SilentlyContinue
-    } catch {}
+        Set-Service -Name 'tvnserver' -StartupType Automatic -ErrorAction Stop
+        $tvn = Get-Service -Name 'tvnserver' -ErrorAction Stop
+        if ($tvn.Status -ne 'Running') { Start-Service -Name 'tvnserver' -ErrorAction Stop }
+        $tvn.WaitForStatus('Running', [TimeSpan]::FromSeconds(20))
+    } catch {
+        throw "UltraVNC is stopped but TightVNC (tvnserver) could not be started ($_). Start TightVNC Server (Service Mode) from the Start menu, then re-run."
+    }
+    foreach ($i in 1..10) {
+        if (Test-LoopbackOnlyListener $VncPort) { return }
+        Start-Sleep -Seconds 1
+    }
+    throw "TightVNC is running but not listening on 127.0.0.1:$VncPort only. Setup stopped; check HKLM:\SOFTWARE\TightVNC\Server (LoopbackOnly=1) and re-run."
 }
 
 function Test-UltraVncIniText([string]$Text, [string]$PasswdHex, [int]$Port) {
@@ -1074,12 +1218,12 @@ if (-not $tvnInstalled) {
     Write-Step 'TightVNC Server already installed - skipping MSI'
 }
 
-Write-Step 'Hardening TightVNC to loopback-only (registry, best-effort)'
-$regPaths = @(
-    'HKLM:\SOFTWARE\TightVNC\Server',
-    'HKLM:\SOFTWARE\WOW6432Node\TightVNC\Server'
-)
-foreach ($rp in $regPaths) {
+# The 64-bit server reads HKLM:\SOFTWARE\TightVNC\Server: Set-TightVncPassword
+# below sets and verifies AllowLoopback, LoopbackOnly and VNC auth there, and a
+# failure stops setup. The 32-bit view (WOW6432Node) is only read by a 32-bit
+# TightVNC, which this script does not install, so it stays best-effort.
+Write-Step 'Hardening TightVNC to loopback-only (32-bit registry view, best-effort)'
+foreach ($rp in @('HKLM:\SOFTWARE\WOW6432Node\TightVNC\Server')) {
     try {
         if (-not (Test-Path -LiteralPath $rp)) {
             New-Item -Path $rp -Force | Out-Null
@@ -1093,7 +1237,8 @@ foreach ($rp in $regPaths) {
 }
 
 # The MSI's password property is unreliable and an existing install keeps its
-# old password: make the server use exactly the stored one, then restart.
+# old password: make the server use exactly the stored one (with VNC auth and
+# loopback-only), then restart.
 [void](Set-TightVncPassword $vncPassword)
 try {
     $svc = Get-Service -Name 'tvnserver' -ErrorAction Stop
@@ -1198,15 +1343,25 @@ try {
         if (-not $script:UsbmmiddOk) {
             Write-Warning 'Virtual display was not installed. VNC may stay black until a real monitor or HDMI/DisplayPort dummy plug is attached.'
         }
-        $script:UsedUltraVnc = Install-UltraVncHeadlessFallback
-        if (-not $script:UsedUltraVnc) {
-            Write-Warning 'UltraVNC fallback did not start. TightVNC DXGI capture of an IDD / WinDisc is usually all-black on Windows 11.'
-            Write-Warning 'If the picture is black: HDMI/DisplayPort dummy plug (~$8) plus TightVNC, or install UltraVNC in service mode (loopback, PollFullScreen, EnableHook).'
-        }
     }
 } catch {
     Write-Warning "Headless display setup failed (non-fatal): $_"
     Write-Warning 'Fallback: plug in a monitor or an HDMI/DisplayPort dummy plug (~$8), then re-run.'
+}
+if ($headless) {
+    # Outside the non-fatal block: if UltraVNC fails part-way, :5900 goes
+    # back to TightVNC, and when that can't be confirmed (Restore-TightVnc
+    # throws) setup stops here.
+    try {
+        $script:UsedUltraVnc = Install-UltraVncHeadlessFallback
+    } catch {
+        $script:UsedUltraVnc = $false
+        Restore-TightVnc "UltraVNC setup failed: $_."
+    }
+    if (-not $script:UsedUltraVnc) {
+        Write-Warning 'UltraVNC fallback did not start. TightVNC DXGI capture of an IDD / WinDisc is usually all-black on Windows 11.'
+        Write-Warning 'If the picture is black: HDMI/DisplayPort dummy plug (~$8) plus TightVNC, or install UltraVNC in service mode (loopback, PollFullScreen, EnableHook).'
+    }
 }
 
 # --- Summary ----------------------------------------------------------------

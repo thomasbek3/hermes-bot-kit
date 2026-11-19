@@ -166,6 +166,11 @@ ASCII-only so `irm ... | iex` works on Windows PowerShell 5.1. Physically
 headless PCs (no monitor) get a virtual display + UltraVNC capture fallback;
 see **Headless Windows** below.
 
+Needs a machine-wide (all-users) Python 3.10+ (3.11-3.13 in Program Files,
+or one on PATH). If this PC only has a per-user Python, the installer
+installs a second, machine-wide copy (winget `Python.Python.3.12 --scope
+machine`) and uses that; your per-user Python is left alone.
+
 ### Linux (X11; wlroots-Wayland best-effort)
 
 ```bash
@@ -419,8 +424,11 @@ stream), paste the printed token, turn on HD.
   the user may write. An existing `C:\usbmmidd_v2` not owned by
   Administrators, SYSTEM or TrustedInstaller stops the virtual-display step.
   `C:\ffmpeg\bin\ffmpeg.exe` is used only after the Program Files and winget
-  locations, and never when a non-administrator can change it. If you
-  installed the HD agent before this, re-run `hiperf-windows.ps1` and, if
+  locations, and never when a non-administrator can change it. The HD venv
+  is reused only when its `pyvenv.cfg` names the validated all-users Python
+  and nothing in the HD tree was writable by a non-administrator;
+  otherwise it is deleted (links removed as links, never followed) and
+  rebuilt. Anything there owned by another account stops the install. If you installed the HD agent before this, re-run `hiperf-windows.ps1` and, if
   other people use that PC, delete `hiperf-token.txt` first so a new token is
   made.
 - **The control fence is a tool-level fence.** While you hold control of a
@@ -592,19 +600,26 @@ irm https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/co
 
 The script is ASCII-only so `irm ... | iex` works on Windows PowerShell 5.1.
 
+Needs a machine-wide (all-users) Python 3.10+ (3.11-3.13 in Program Files,
+or one on PATH). If this PC only has a per-user Python, the installer
+installs a second, machine-wide copy (winget `Python.Python.3.12 --scope
+machine`) and uses that; your per-user Python is left alone. The HD
+installer (`hiperf-windows.ps1`) does the same.
+
 The script self-elevates, installs TightVNC Server from official
 `tightvnc.com` (service + SAS/CAD + VNC auth), forces **loopback-only** via
-`HKLM\SOFTWARE\TightVNC\Server` (`AllowLoopback=1`, `LoopbackOnly=1`),
-installs Python 3.12 if needed (`winget ... Python.Python.3.12 --scope
-machine`), pins `websockify==0.13.0`, and registers a SYSTEM scheduled task
-at startup with `RestartCount 3` / `RestartInterval 1min` and
+`HKLM\SOFTWARE\TightVNC\Server` (`AllowLoopback=1`, `LoopbackOnly=1`,
+`UseVncAuthentication=1`, read back on every run; setup stops if they don't
+stick), installs a machine-wide Python 3.12 if needed (above), pins
+`websockify==0.13.0`, and registers a SYSTEM scheduled task at startup with `RestartCount 3` / `RestartInterval 1min` and
 **`ExecutionTimeLimit` zero** (the default would kill the task after 72
 hours). Command: `python -m websockify <bind>:6080 127.0.0.1:5900` (`<bind>`
 is the Tailscale IPv4, loopback, or `-Bind`). Firewall: inbound TCP 6080 on
 the **Private** profile only.
 
 It prints `ws://<COMPUTERNAME>:6080/websockify` and the generated 8-character
-VNC password. UAC prompts are visible in TightVNC service mode (expected).
+VNC password. A stored password that other accounts could read or change is
+not reused: the script makes a new one, says so, and prints it. UAC prompts are visible in TightVNC service mode (expected).
 Defender may flag VNC - allow it.
 
 #### Headless Windows
@@ -627,7 +642,10 @@ hypervisor already provides a virtual display.
    SourceForge #1486 / #1574). The script switches **capture** to UltraVNC in
    service mode (loopback `:5900`, `PollFullScreen` + `EnableHook`), keeps
    websockify pointed at `127.0.0.1:5900`, and leaves TightVNC installed but
-   Manual.
+   Manual. If UltraVNC fails, it is disabled and confirmed stopped (no
+   `winvnc.exe` left) and TightVNC must come back on loopback `:5900`; when
+   either can't be confirmed, setup stops with a message instead of running
+   both.
 3. If the usbmmidd signature is rejected (publisher trust / `0xE0000242`),
    the script does **not** enable test-signing and does **not** import
    certificates. It prints the fallback: an HDMI or DisplayPort **dummy
