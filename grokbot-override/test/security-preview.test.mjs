@@ -78,35 +78,28 @@ test('loader-faithful: a preview page cannot send on its own; the user sees the 
   ;[...chatEl.querySelectorAll('.gbo-preview-ask button')].find(b => b.textContent === 'Dismiss').click()
   assert.equal(submits().length, 1)
 
-  // Focus moving into the frame without the pointer over it (a page script
-  // calling focus()) is not the user's step: still asks.
+  // Focus moving into the frame (a script, or the user's own click) and the
+  // pointer over it are not consent: the text still waits for Send.
   await new Promise(resolve => setTimeout(resolve, 1050))
   Object.defineProperty(document, 'activeElement', { configurable: true, get: () => frame })
   t.after(() => delete document.activeElement)
-  window.dispatchEvent(new window.Event('blur'))
-  fromFrame(5, 'scripted focus')
-  await waitFor(() => chatEl.querySelector('.gbo-preview-ask'), 'asks after a scripted focus')
-  ;[...chatEl.querySelectorAll('.gbo-preview-ask button')].find(b => b.textContent === 'Dismiss').click()
-  assert.equal(submits().length, 1)
-
-  // The user steps into THIS frame (pointer over it, this window blurs onto
-  // it): the next intent within 3 s goes at once, and only that one.
-  await new Promise(resolve => setTimeout(resolve, 1050))
   frame.dispatchEvent(new window.MouseEvent('mouseenter'))
   window.dispatchEvent(new window.Event('blur'))
-  fromFrame(6, 'more please')
-  await waitFor(() => submits().length === 2, 'sent at once after the user step')
-  assert.equal(submits()[1].params.text, 'more please')
-  assert.equal(chatEl.querySelector('.gbo-preview-ask'), null, 'no row needed')
-  await new Promise(resolve => setTimeout(resolve, 1050))
-  fromFrame(7, 'and again')
-  await waitFor(() => chatEl.querySelector('.gbo-preview-ask'), 'the step-in was used up: asks again')
-  assert.equal(submits().length, 2)
+  fromFrame(5, 'hover and focus')
+  await waitFor(() => chatEl.querySelector('.gbo-preview-ask-prompt')?.textContent === 'hover and focus', 'asks after hover + focus')
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(submits().length, 1, 'hover + iframe focus never submits')
+  ;[...chatEl.querySelectorAll('.gbo-preview-ask button')].find(b => b.textContent === 'Send').click()
+  await waitFor(() => submits().length === 2, 'sent only after the host Send click')
+  assert.equal(submits()[1].params.text, 'hover and focus')
 
   // A swap of the waiting text right before the click: that click sends
   // nothing; a click after the person has seen the new text sends it.
   await new Promise(resolve => setTimeout(resolve, 1050))
-  fromFrame(8, 'swapped text')
+  fromFrame(8, 'harmless text')
+  await waitFor(() => chatEl.querySelector('.gbo-preview-ask-prompt')?.textContent === 'harmless text', 'the first text shown')
+  await new Promise(resolve => setTimeout(resolve, 1050))
+  fromFrame(9, 'swapped text')
   await waitFor(() => chatEl.querySelector('.gbo-preview-ask-prompt')?.textContent === 'swapped text', 'the swap shown')
   ;[...chatEl.querySelectorAll('.gbo-preview-ask button')].find(b => b.textContent === 'Send').click()
   await new Promise(resolve => setTimeout(resolve, 50))

@@ -22,9 +22,9 @@
 //    inline-preview-directive.tsx does: token-gated, 500 chars, one per
 //    second, every intent acked. Stricter than stock in two ways: the frame
 //    gets a Content-Security-Policy with no network at all (PREVIEW_CSP), and
-//    an intent goes out at once only when the parent saw the user step into
-//    that frame in the last 3 s (previewIntentRoute); otherwise the parent
-//    shows the exact text with Send / Dismiss and waits for the user.
+//    an intent never goes out by itself: the parent shows the exact text with
+//    its own Send / Dismiss and waits for the user's click (previewIntentRoute
+//    is kept for older callers and is no longer used by the frame).
 //
 // Files are read from the bot's machine by REST relative to its session
 // (`/api/fs/read-text?path=<rel>&session_id=<stored id>`, which resolves

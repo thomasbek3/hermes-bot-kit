@@ -28,7 +28,6 @@ import {
   previewDocument,
   previewHeightFrom,
   previewIntentFrom,
-  previewIntentRoute,
   previewPrelude,
   previewStartHeight,
   PREVIEW_SWAP_GRACE_MS,
@@ -325,13 +324,9 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
   })
   const [height, setHeight] = React.useState(startHeight)
   const lastIntent = React.useRef(0)
-  // When this window last saw the user step into THIS frame: its blur while
-  // the frame is the focused element AND the pointer is over the frame (a
-  // page script moving focus into itself does not move the pointer). One
-  // step-in lets one intent go at once; it is used up by that send.
-  const lastUser = React.useRef(0)
-  const pointerOver = React.useRef(false)
-  const stepUsed = React.useRef(false)
+  // A page never sends by itself: every intent waits under the frame until the
+  // person clicks this window's own Send button for the text shown (hovering
+  // or clicking inside the frame is not consent).
   // When the waiting text last changed under a visible Send button; a click
   // right after a swap is ignored so the person sees what they send.
   const changedAt = React.useRef(0)
@@ -359,32 +354,6 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
     pendingRef.current = next
     setPending(next)
   }
-  React.useEffect(() => {
-    const win = (globalThis as any).window
-    if (!win?.addEventListener) return undefined
-    const seen = () => {
-      const el = frame.current
-      if (stepUsed.current) return
-      if (el && pointerOver.current && win.document?.activeElement === el) lastUser.current = Date.now()
-    }
-    const el = frame.current
-    const enter = () => { pointerOver.current = true }
-    const leave = () => { pointerOver.current = false }
-    el?.addEventListener?.('mouseenter', enter)
-    el?.addEventListener?.('mouseleave', leave)
-    const onBlur = () => {
-      stepUsed.current = false
-      seen()
-      // Some engines move focus onto the frame just after the blur.
-      timers().setTimeout(seen, 0)
-    }
-    win.addEventListener('blur', onBlur)
-    return () => {
-      win.removeEventListener('blur', onBlur)
-      el?.removeEventListener?.('mouseenter', enter)
-      el?.removeEventListener?.('mouseleave', leave)
-    }
-  }, [doc])
   React.useLayoutEffect(() => {
     const theme = themeFor(wrap.current, scope.theme)
     setDoc(previewDocument(html, token, previewPrelude(theme.vars, theme.font, theme.scheme)))
@@ -408,11 +377,6 @@ function PreviewFrame({ html, name, startHeight, scope }: { html: string; name: 
       if (decision.kind === 'reject') return reply(decision.ack)
       const now = Date.now()
       lastIntent.current = now
-      if (previewIntentRoute(now, lastUser.current) === 'send') {
-        lastUser.current = 0
-        stepUsed.current = true
-        return sendFromFrame(decision.prompt, reply)
-      }
       const older = pendingRef.current
       if (older) replyTo(older.id, { ok: false, error: 'replaced' })
       hold({ id: decision.id, prompt: decision.prompt })

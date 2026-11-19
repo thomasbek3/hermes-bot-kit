@@ -43158,7 +43158,6 @@ var PREVIEW_MIN_HEIGHT = 120;
 var PREVIEW_MAX_HEIGHT = 1200;
 var PREVIEW_DEFAULT_HEIGHT = 280;
 var INTENT_THROTTLE_MS = 1e3;
-var PREVIEW_GESTURE_MS = 3e3;
 var PREVIEW_SWAP_GRACE_MS = 1e3;
 var PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:";
 var SIZE_TYPE = "hermes-inline-preview-size";
@@ -43200,9 +43199,6 @@ function previewIntentFrom(data, token, now, lastAcceptedAt) {
   const elapsed = now - lastAcceptedAt;
   if (lastAcceptedAt > 0 && elapsed < INTENT_THROTTLE_MS) return { kind: "reject", id, ack: { ok: false, error: "throttled", retryAfterMs: INTENT_THROTTLE_MS - elapsed } };
   return { kind: "accept", id, prompt };
-}
-function previewIntentRoute(now, lastUserAt) {
-  return lastUserAt > 0 && now >= lastUserAt && now - lastUserAt <= PREVIEW_GESTURE_MS ? "send" : "ask";
 }
 function previewAck(token, id, ack) {
   return { type: ACK_TYPE, token, id, ack };
@@ -55630,9 +55626,6 @@ function PreviewFrame({ html, name, startHeight, scope }) {
   });
   const [height, setHeight] = React7.useState(startHeight);
   const lastIntent = React7.useRef(0);
-  const lastUser = React7.useRef(0);
-  const pointerOver = React7.useRef(false);
-  const stepUsed = React7.useRef(false);
   const changedAt = React7.useRef(0);
   const [pending, setPending] = React7.useState(null);
   const pendingRef = React7.useRef(null);
@@ -55657,35 +55650,6 @@ function PreviewFrame({ html, name, startHeight, scope }) {
     pendingRef.current = next;
     setPending(next);
   };
-  React7.useEffect(() => {
-    const win = globalThis.window;
-    if (!win?.addEventListener) return void 0;
-    const seen = () => {
-      const el2 = frame.current;
-      if (stepUsed.current) return;
-      if (el2 && pointerOver.current && win.document?.activeElement === el2) lastUser.current = Date.now();
-    };
-    const el = frame.current;
-    const enter = () => {
-      pointerOver.current = true;
-    };
-    const leave = () => {
-      pointerOver.current = false;
-    };
-    el?.addEventListener?.("mouseenter", enter);
-    el?.addEventListener?.("mouseleave", leave);
-    const onBlur = () => {
-      stepUsed.current = false;
-      seen();
-      timers().setTimeout(seen, 0);
-    };
-    win.addEventListener("blur", onBlur);
-    return () => {
-      win.removeEventListener("blur", onBlur);
-      el?.removeEventListener?.("mouseenter", enter);
-      el?.removeEventListener?.("mouseleave", leave);
-    };
-  }, [doc]);
   React7.useLayoutEffect(() => {
     const theme = themeFor(wrap.current, scope.theme);
     setDoc(previewDocument(html, token, previewPrelude(theme.vars, theme.font, theme.scheme)));
@@ -55709,11 +55673,6 @@ function PreviewFrame({ html, name, startHeight, scope }) {
       if (decision.kind === "reject") return reply(decision.ack);
       const now = Date.now();
       lastIntent.current = now;
-      if (previewIntentRoute(now, lastUser.current) === "send") {
-        lastUser.current = 0;
-        stepUsed.current = true;
-        return sendFromFrame(decision.prompt, reply);
-      }
       const older = pendingRef.current;
       if (older) replyTo(older.id, { ok: false, error: "replaced" });
       hold({ id: decision.id, prompt: decision.prompt });
