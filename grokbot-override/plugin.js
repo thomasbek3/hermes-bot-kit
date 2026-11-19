@@ -56819,6 +56819,7 @@ var SLACK_BOT_SCOPES = Object.freeze([
   "mpim:history",
   "mpim:read",
   "reactions:read",
+  "reactions:write",
   "usergroups:read",
   "usergroups:write",
   "users:read"

@@ -66,7 +66,7 @@ test('manifest scopes: Hermes’s agent-view set plus the owner’s fleet extras
   const want = [
     'app_mentions:read', 'assistant:write', 'canvases:write', 'channels:history', 'channels:read', 'chat:write', 'commands', 'files:read',
     'files:write', 'groups:history', 'groups:read', 'groups:write', 'groups:write.invites', 'groups:write.topic', 'im:history', 'im:read',
-    'im:write', 'mpim:history', 'mpim:read', 'reactions:read', 'usergroups:read', 'usergroups:write', 'users:read'
+    'im:write', 'mpim:history', 'mpim:read', 'reactions:read', 'reactions:write', 'usergroups:read', 'usergroups:write', 'users:read'
   ]
   assert.deepEqual([...SLACK_BOT_SCOPES], want)
   assert.deepEqual([...SLACK_BOT_SCOPES].sort(), want, 'sorted')
@@ -75,6 +75,8 @@ test('manifest scopes: Hermes’s agent-view set plus the owner’s fleet extras
   for (const scope of ['app_mentions:read', 'channels:history', 'channels:read', 'chat:write', 'commands', 'files:read', 'files:write', 'groups:history', 'groups:read', 'im:history', 'im:read', 'im:write', 'mpim:history', 'mpim:read', 'reactions:read', 'users:read', 'assistant:write']) {
     assert.ok(SLACK_BOT_SCOPES.includes(scope), scope)
   }
+  // The bot marks a message it is working on with a reaction; Slack drops that without reactions:write.
+  assert.ok(SLACK_BOT_SCOPES.includes('reactions:write'))
   assert.ok(Object.isFrozen(SLACK_BOT_SCOPES))
 })
 

@@ -35,7 +35,9 @@ export const SLACK_NEW_APP_URL = 'https://api.slack.com/apps'
 
 /** The manifest's bot scopes: Hermes's agent-view set (slack_cli.py
  *  _build_full_manifest) plus the extras the owner's existing Slack bots were
- *  granted (canvases:write, groups:write*, usergroups:*). Sorted, unique. */
+ *  granted (canvases:write, groups:write*, usergroups:*), and reactions:write so the
+ *  bot can mark a message it is working on (Hermes's Slack adapter adds a reaction
+ *  when it starts and when it finishes). Sorted, unique. */
 export const SLACK_BOT_SCOPES = Object.freeze([
   'app_mentions:read',
   'assistant:write',
@@ -57,6 +59,7 @@ export const SLACK_BOT_SCOPES = Object.freeze([
   'mpim:history',
   'mpim:read',
   'reactions:read',
+  'reactions:write',
   'usergroups:read',
   'usergroups:write',
   'users:read'

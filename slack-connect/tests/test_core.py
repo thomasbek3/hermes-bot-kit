@@ -21,9 +21,9 @@ def test_published_signature():
 
 
 def test_manifest_has_exact_owner_scopes_and_reply_enabled():
-    expected = {'app_mentions:read', 'assistant:write', 'canvases:write', 'channels:history', 'channels:read', 'chat:write', 'commands', 'files:read', 'files:write', 'groups:history', 'groups:read', 'groups:write', 'groups:write.invites', 'groups:write.topic', 'im:history', 'im:read', 'im:write', 'mpim:history', 'mpim:read', 'reactions:read', 'usergroups:read', 'usergroups:write', 'users:read'}
+    expected = {'app_mentions:read', 'assistant:write', 'canvases:write', 'channels:history', 'channels:read', 'chat:write', 'commands', 'files:read', 'files:write', 'groups:history', 'groups:read', 'groups:write', 'groups:write.invites', 'groups:write.topic', 'im:history', 'im:read', 'im:write', 'mpim:history', 'mpim:read', 'reactions:read', 'reactions:write', 'usergroups:read', 'usergroups:write', 'users:read'}
     result = manifest('Bot', 'https://example.test/slack', 'a' * 32)
-    assert len(BOT_SCOPES) == 23 and set(result['oauth_config']['scopes']['bot']) == expected
+    assert len(BOT_SCOPES) == 24 and set(result['oauth_config']['scopes']['bot']) == expected
     assert result['features']['app_home']['messages_tab_read_only_enabled'] is False
     assert result['settings']['event_subscriptions']['request_url'] == 'https://example.test/slack/events/' + 'a' * 32
     assert result['settings']['socket_mode_enabled'] is False

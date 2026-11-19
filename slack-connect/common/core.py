@@ -16,7 +16,8 @@ BOT_SCOPES = (
     'channels:read', 'chat:write', 'commands', 'files:read', 'files:write',
     'groups:history', 'groups:read', 'groups:write', 'groups:write.invites',
     'groups:write.topic', 'im:history', 'im:read', 'im:write', 'mpim:history',
-    'mpim:read', 'reactions:read', 'usergroups:read', 'usergroups:write', 'users:read',
+    'mpim:read', 'reactions:read', 'reactions:write', 'usergroups:read', 'usergroups:write',
+    'users:read',
 )
 BOT_EVENTS = tuple(sorted(('app_mention', 'message.channels', 'message.groups',
     'message.im', 'message.mpim', 'reaction_added', 'reaction_removed',
