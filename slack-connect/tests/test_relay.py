@@ -120,10 +120,13 @@ def test_oauth_success_denial_and_single_use(tmp_path):
             state = issue_state(b'k' * 32, 'test-profile', KEY, 'T1')
             response = await client.get('/oauth/callback', params={'state':state, 'code':'fake-code'})
             assert response.status == 200
+            # Default audience: the workspace's full members (users.list); the
+            # fake answers with no other members, so only the installer.
             assert writes[0][0] == 'test-profile' and writes[0][1]['SLACK_ALLOWED_USERS'] == 'U1'
             assert notifications == ['test-profile']
-            assert calls[1][0] == 'chat.postMessage' and calls[1][1]['channel'] == 'U1'
-            assert len(json.loads(calls[1][1]['blocks'])) == 2
+            assert calls[1][0] == 'users.list'
+            assert calls[2][0] == 'chat.postMessage' and calls[2][1]['channel'] == 'U1'
+            assert len(json.loads(calls[2][1]['blocks'])) == 2
             assert json.loads((data / 'pending' / (KEY + '.json')).read_text())['phase'] == 'installed'
             assert (await client.get('/oauth/callback', params={'state':state, 'code':'fake-code'})).status == 400
             denied = issue_state(b'k' * 32, 'test-profile', KEY, 'T1')

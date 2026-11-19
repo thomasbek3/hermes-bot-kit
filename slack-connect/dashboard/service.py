@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 from common.core import BOT_SCOPES, ENV_KEYS, LockedFile, _atomic_json, _read_json, issue_state, manifest
 from common.token_store import TokenStore, TokenExpired
 from common.config import load_config
+from common import access as access_module
 
 LOG = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class SlackRefused(Conflict):
 
 class Service:
     def __init__(self, root, profile, slack, read_env, save_env, remove_env, notify, icon, live=None, lifecycle=None,
-                 check_idle=None, recycle_profile=None, slack_switch=None):
+                 check_idle=None, recycle_profile=None, slack_switch=None, revoke_pairing=None):
         self.root, self.profile = Path(root), profile
         if not PROFILE.fullmatch(profile) or profile == 'default':
             raise ValueError('a named profile is required')
@@ -47,6 +48,8 @@ class Service:
         self.recycle_profile = recycle_profile or (lambda: None)
         # Reads and sets only platforms.slack.enabled in this profile's config.
         self.slack_switch = slack_switch
+        # Removes one Slack pairing approval through Hermes's own store.
+        self.revoke_pairing = revoke_pairing
         self.base = None
         self.tokens = TokenStore(self.data / 'config-tokens.json')
 
@@ -136,7 +139,13 @@ class Service:
             _atomic_json(apps_path, apps)
             pending_path.unlink(missing_ok=True)
 
-    def connect(self, team, bot_name):
+    def connect(self, team, bot_name, access='members', allowed=None):
+        access = str(access or 'members').strip().lower()
+        if access not in access_module.MODES:
+            raise ValueError('invalid access choice')
+        named = access_module.parse_ids(allowed or '') if access == 'list' else []
+        if access == 'list' and not named:
+            raise ValueError('name at least one Slack member ID')
         self.base = load_config(self.root)['public_url']
         if not self.base:
             raise Conflict('Configure a public HTTPS address before connecting Slack')
@@ -155,7 +164,8 @@ class Service:
             if any(isinstance(v, dict) and v.get('profile') == self.profile for v in apps.values()):
                 raise Conflict('profile already has an app in progress')
             apps[key] = {'profile': self.profile, 'team_id': team, 'bot_name': bot_name,
-                         'prior_allowed_users': env.get('SLACK_ALLOWED_USERS')}
+                         'prior_allowed_users': env.get('SLACK_ALLOWED_USERS'),
+                         'access': access, 'allowed': ','.join(named)}
             _atomic_json(apps_path, apps)
             _atomic_json(pending_path, {'phase':'pending', 'at':int(time.time())})
         app_id = None
@@ -241,6 +251,90 @@ class Service:
                 _atomic_json(pending_path, {'phase':'error', 'at':int(time.time())})
             raise RuntimeError('Slack app creation could not be completed') from None
 
+    def _record(self):
+        for key, item in _read_json(self.data / 'apps.json', {}).items():
+            if isinstance(item, dict) and item.get('profile') == self.profile:
+                return key, item
+        return None, None
+
+    def audience(self, env=None, key=None, item=None):
+        """The effective audience: every grant Hermes honours for this bot,
+        compared with the chosen one. Never claims less than the truth."""
+        env = self.read_env() if env is None else env
+        if key is None:
+            key, item = self._record()
+        pending = _read_json(self.data / 'pending' / (key + '.json'), {}) if key else {}
+        mode = access_module.mode_of((item or {}).get('access'))
+        chosen = pending.get('chosen') if isinstance(pending.get('chosen'), list) else sorted(
+            x for x in (env.get('SLACK_ALLOWED_USERS') or '').split(',') if x and x != '*')
+        root_env_path = self.root / '.env'
+        root_env = {}
+        if root_env_path.is_file():
+            for line in root_env_path.read_text(encoding='utf-8', errors='replace').splitlines():
+                name, sep, value = line.partition('=')
+                if sep and name.strip() in ('GATEWAY_ALLOWED_USERS', 'GATEWAY_ALLOW_ALL_USERS', 'SLACK_ALLOW_ALL_USERS'):
+                    root_env[name.strip()] = value.strip().strip('"\'')
+        eff = access_module.effective(env, access_module.pairing_approved(self.root / 'profiles' / self.profile), root_env)
+        text = access_module.describe(mode, chosen, eff, public_text(env.get('SLACK_TEAM_NAME') or 'the workspace'))
+        if mode == 'members' and pending.get('audience', {}).get('synced') is False and not eff['open']:
+            text = "Only you for now: Slack's member list could not be read yet (the relay retries every 15 minutes)."
+        return {'mode': mode, 'text': text, 'open': eff['open'], 'count': len(eff['ids']),
+                'extra_grants': access_module.extra_grants(chosen, eff, self.profile)}
+
+    def set_access(self, access, allowed=None):
+        """Change who can talk to a connected bot: 'members' (full members of
+        the workspace), 'owner' (only the installer) or 'list' (named IDs)."""
+        access = str(access or '').strip().lower()
+        if access not in access_module.MODES:
+            raise ValueError('invalid access choice')
+        key, item = self._record()
+        pending = _read_json(self.data / 'pending' / (key + '.json'), {}) if key else {}
+        owner = pending.get('owner')
+        env = self.read_env()
+        if not key or pending.get('phase') != 'installed' or not isinstance(owner, str) or not env.get('SLACK_BOT_TOKEN'):
+            raise Conflict('Connect the bot to Slack first')
+        named = access_module.parse_ids(allowed or '') if access == 'list' else []
+        if access == 'list' and not named:
+            raise ValueError('name at least one Slack member ID')
+        members = []
+        if access == 'members':
+            members = access_module.full_members(self.slack.users_list(env['SLACK_BOT_TOKEN']), item.get('team_id'))
+        ids = access_module.chosen_ids(access, owner, members, named)
+        self.save_env({'SLACK_ALLOWED_USERS': ','.join(ids)})
+        with LockedFile(self.data / 'apps.lock'):
+            apps = _read_json(self.data / 'apps.json', {})
+            if key in apps:
+                apps[key]['access'], apps[key]['allowed'] = access, ','.join(named)
+                _atomic_json(self.data / 'apps.json', apps)
+            pending = _read_json(self.data / 'pending' / (key + '.json'), {})
+            pending['chosen'] = ids
+            pending.setdefault('audience', {})['synced'] = True
+            _atomic_json(self.data / 'pending' / (key + '.json'), pending)
+        return self.status()
+
+    def fix_access(self):
+        """Remove the grants that let in more than the chosen audience and that
+        the kit can change for this bot alone: SLACK_ALLOW_ALL_USERS, a * in
+        SLACK_ALLOWED_USERS, and Slack pairing approvals. GATEWAY_* settings
+        apply to every platform of the bot and are only reported."""
+        key, item = self._record()
+        pending = _read_json(self.data / 'pending' / (key + '.json'), {}) if key else {}
+        chosen = pending.get('chosen')
+        if not key or not isinstance(chosen, list):
+            raise Conflict('Connect the bot to Slack first')
+        env = self.read_env()
+        if str(env.get('SLACK_ALLOW_ALL_USERS') or '').strip():
+            self.remove_env(('SLACK_ALLOW_ALL_USERS',))
+        if '*' in (env.get('SLACK_ALLOWED_USERS') or '').split(','):
+            self.save_env({'SLACK_ALLOWED_USERS': ','.join(chosen)})
+        extra = sorted(access_module.pairing_approved(self.root / 'profiles' / self.profile) - set(chosen))
+        if extra:
+            if self.revoke_pairing is None:
+                raise Conflict('Pairing approvals can only be removed with: hermes -p %s pairing revoke slack <member id>' % self.profile)
+            for uid in extra:
+                self.revoke_pairing(uid)
+        return self.status()
+
     def status(self):
         env = self.read_env()
         if env.get('SLACK_APP_TOKEN'):
@@ -262,10 +356,17 @@ class Service:
                                             'scope_warning': public_text(answer.get('warning'))}
                     except Exception:
                         pass
+                audience = {}
+                if phase in ('installed', 'connected'):
+                    try:
+                        audience = {'audience': self.audience(env, key, item)}
+                    except Exception:
+                        audience = {}
                 return {'phase':phase, 'team_name':public_text(pending.get('team_name')),
                         'bot':public_text(item.get('bot_name')), 'mode':'http',
+                        'access': access_module.mode_of(item.get('access')),
                         'icon_result':item.get('icon_result'),
-                        'manifest_update_result':item.get('manifest_update_result'), **scope_fields}
+                        'manifest_update_result':item.get('manifest_update_result'), **scope_fields, **audience}
         return {'phase':'none', 'mode':'http'}
 
     def delete(self):

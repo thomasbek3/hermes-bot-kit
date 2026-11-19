@@ -16,8 +16,17 @@ else:
         raise SystemExit(2)
     # A value is one .env line: refuse control characters (CR, LF, NUL, ...),
     # line separators and anything longer than a Slack value can be.
-    if any(len(v) > 512 or any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 or c in '\u2028\u2029' for c in v)
+    if any(any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 or c in '\u2028\u2029' for c in v)
            for v in values.values()):
         raise SystemExit(2)
+    # One Slack value is short; the member allowlist is a comma list of IDs
+    # (a whole workspace), checked character by character.
+    import re
+    for key, value in values.items():
+        if key == 'SLACK_ALLOWED_USERS':
+            if len(value) > 400000 or (value and not re.fullmatch(r'[UW][A-Z0-9]{1,31}(,[UW][A-Z0-9]{1,31})*', value)):
+                raise SystemExit(2)
+        elif len(value) > 512:
+            raise SystemExit(2)
     for key, value in values.items():
         save_env_value(key, value)

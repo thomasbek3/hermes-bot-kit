@@ -57369,6 +57369,32 @@ function refreshTokenError(value) {
   if (!s.startsWith("xoxe-") || /\s/.test(s) || s.length <= 13) return "Paste the complete refresh token starting with xoxe-";
   return null;
 }
+var ACCESS_CHOICES = Object.freeze([
+  { id: "members", label: "Everyone in the workspace", hint: "Full members only: not guests, not Slack Connect people from other companies. Kept up to date as people join or leave." },
+  { id: "owner", label: "Only me", hint: "Only you, the person who adds it." },
+  { id: "list", label: "Only these people", hint: "Slack member IDs, separated by commas (Slack: profile → ⋮ → Copy member ID). You are always included." }
+]);
+var MEMBER_ID = /^[UW][A-Z0-9]{1,31}$/;
+function accessBody(mode, listText) {
+  const access = ACCESS_CHOICES.some((c2) => c2.id === mode) ? mode : "members";
+  if (access !== "list") return { body: { access } };
+  const ids = String(listText || "").split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  if (!ids.length) return { error: "Add at least one Slack member ID" };
+  const bad = ids.filter((x) => !MEMBER_ID.test(x));
+  if (bad.length) return { error: `Not a Slack member ID: ${bad.slice(0, 3).join(", ")}` };
+  return { body: { access, allowed: ids.join(",") } };
+}
+function audienceView(status) {
+  const a2 = status?.audience;
+  if (!a2 || typeof a2 !== "object" || typeof a2.text !== "string") return null;
+  const extras = Array.isArray(a2.extra_grants) ? a2.extra_grants.filter((g) => g && typeof g.grant === "string") : [];
+  return {
+    text: a2.text,
+    open: a2.open === true,
+    extras: extras.map((g) => ({ grant: g.grant, who: String(g.who || ""), how: String(g.how || ""), fixable: g.fixable === true })),
+    fixable: extras.some((g) => g.fixable === true)
+  };
+}
 
 // src/ui/slackActions.ts
 var slack = {
@@ -59163,6 +59189,10 @@ function SlackConnect({ bot, name, initial, onClose }) {
   const [timedOut, setTimedOut] = React17.useState(false);
   const [testResult, setTestResult] = React17.useState("");
   const [needsBootstrap, setNeedsBootstrap] = React17.useState(Boolean(initial.bootstrap));
+  const [access, setAccess] = React17.useState(initial.status?.access || "members");
+  const [allowed, setAllowed] = React17.useState("");
+  const [audience, setAudience] = React17.useState(audienceView(initial.status));
+  const [changing, setChanging] = React17.useState(false);
   const phaseRef = React17.useRef(phase);
   const alive = React17.useRef(true);
   phaseRef.current = phase;
@@ -59183,6 +59213,8 @@ function SlackConnect({ bot, name, initial, onClose }) {
         const status = await slackProvisioning(bot, "status");
         if (stopped) return;
         if (status?.team_name) setTeamName(status.team_name);
+        const view = audienceView(status);
+        if (view) setAudience(view);
         if (["created", "installed", "connected", "denied", "error"].includes(status?.phase)) setPhase(status.phase);
         if (status?.phase === "connected") void loadSlackState(bot);
       } catch {
@@ -59220,11 +59252,16 @@ function SlackConnect({ bot, name, initial, onClose }) {
     setBusy(true);
     setError("");
     try {
+      const who = accessBody(access, allowed);
+      if (who.error) {
+        setError(who.error);
+        return;
+      }
       if (needsBootstrap) {
         await enableSlackProvisioning(bot);
         setNeedsBootstrap(false);
       }
-      const result = await slackProvisioning(bot, "connect", "POST", { team_id: selected, bot_name: name });
+      const result = await slackProvisioning(bot, "connect", "POST", { team_id: selected, bot_name: name, ...who.body });
       if (!alive.current) return;
       setPhase("created");
       if (!isSlackAuthorizationUrl(result.authorize_url)) {
@@ -59262,6 +59299,77 @@ function SlackConnect({ bot, name, initial, onClose }) {
     if (["created", "denied", "error"].includes(phaseRef.current)) void remove(true);
     else onClose();
   };
+  const applyAccess = async () => {
+    if (busy) return;
+    const who = accessBody(access, allowed);
+    if (who.error) {
+      setError(who.error);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const status = await slackProvisioning(bot, "access", "POST", who.body);
+      if (!alive.current) return;
+      setAudience(audienceView(status));
+      setChanging(false);
+    } catch (err2) {
+      if (alive.current) setError(failure(err2));
+    } finally {
+      if (alive.current) setBusy(false);
+    }
+  };
+  const fixAccess = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const status = await slackProvisioning(bot, "access/fix", "POST", {});
+      if (alive.current) setAudience(audienceView(status));
+    } catch (err2) {
+      if (alive.current) setError(failure(err2));
+    } finally {
+      if (alive.current) setBusy(false);
+    }
+  };
+  const accessPicker = /* @__PURE__ */ jsxs17("fieldset", { className: "gbo-slack-access", children: [
+    /* @__PURE__ */ jsxs17("legend", { className: "gbo-sheet-text", children: [
+      "Who can talk to ",
+      name,
+      " in Slack"
+    ] }),
+    ACCESS_CHOICES.map((c2) => /* @__PURE__ */ jsxs17("label", { className: "gbo-sheet-choice", title: c2.hint, children: [
+      /* @__PURE__ */ jsx18("input", { className: "gbo-slack-access-choice", type: "radio", name: "slack-access", checked: access === c2.id, onChange: () => setAccess(c2.id) }),
+      /* @__PURE__ */ jsxs17("span", { children: [
+        c2.label,
+        /* @__PURE__ */ jsxs17("span", { className: "gbo-field-hint", children: [
+          " · ",
+          c2.hint
+        ] })
+      ] })
+    ] }, c2.id)),
+    access === "list" ? /* @__PURE__ */ jsxs17("label", { className: "gbo-sheet-field", children: [
+      /* @__PURE__ */ jsx18("span", { children: "Member IDs" }),
+      /* @__PURE__ */ jsx18("input", { className: "gbo-input gbo-slack-access-list", spellCheck: false, value: allowed, onChange: (e2) => setAllowed(e2.target.value), placeholder: "U0123ABCD, U0456EFGH" })
+    ] }) : null,
+    /* @__PURE__ */ jsxs17("p", { className: "gbo-field-hint", children: [
+      "Anyone who can talk to ",
+      name,
+      " can ask it to use its tools, and it acts with its own access. Give it only the tools you are happy for all of them to use."
+    ] })
+  ] });
+  const audienceBlock = audience ? /* @__PURE__ */ jsxs17("div", { className: `gbo-sheet-note gbo-slack-audience${audience.open || audience.extras.length ? " is-warning" : ""}`, role: "status", children: [
+    /* @__PURE__ */ jsxs17("div", { children: [
+      "Who can talk to it: ",
+      audience.text
+    ] }),
+    audience.extras.length ? /* @__PURE__ */ jsx18("ul", { className: "gbo-slack-extra-grants", children: audience.extras.map((g) => /* @__PURE__ */ jsxs17("li", { children: [
+      g.grant,
+      ": ",
+      g.who,
+      g.fixable ? "" : ` (${g.how})`
+    ] }, g.grant)) }) : null
+  ] }) : null;
   const testConnection = async () => {
     if (busy) return;
     setBusy(true);
@@ -59304,6 +59412,12 @@ function SlackConnect({ bot, name, initial, onClose }) {
         workspace,
         " Slack. It’ll respond with the same plugins, context, and memories it uses here."
       ] }),
+      audienceBlock,
+      audience?.fixable ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-access-fix", disabled: busy, onClick: () => void fixAccess(), children: "Remove the extra access" }) : null,
+      changing ? /* @__PURE__ */ jsxs17(Fragment11, { children: [
+        accessPicker,
+        /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary is-small gbo-slack-access-apply", disabled: busy, onClick: () => void applyAccess(), children: "Apply" })
+      ] }) : /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-access-change", disabled: busy, onClick: () => setChanging(true), children: "Change who can talk to it" }),
       testResult ? /* @__PURE__ */ jsx18("div", { className: "gbo-sheet-note", role: "status", children: testResult }) : null
     ] });
     footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
@@ -59312,9 +59426,12 @@ function SlackConnect({ bot, name, initial, onClose }) {
       /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: onClose, children: "Done" })
     ] });
   } else if (waiting) {
-    body = /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-note", children: [
-      phase === "installed" ? "Slack is installed. Waiting for the bot connection…" : "Finish in Slack… Allow the bot in the browser tab that just opened.",
-      timedOut ? " The connection timed out. Select Cancel to remove the incomplete app." : ""
+    body = /* @__PURE__ */ jsxs17(Fragment11, { children: [
+      /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-note", children: [
+        phase === "installed" ? "Slack is installed. Waiting for the bot connection…" : "Finish in Slack… Allow the bot in the browser tab that just opened.",
+        timedOut ? " The connection timed out. Select Cancel to remove the incomplete app." : ""
+      ] }),
+      phase === "installed" ? audienceBlock : null
     ] });
     footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,
@@ -59358,7 +59475,8 @@ function SlackConnect({ bot, name, initial, onClose }) {
         /* @__PURE__ */ jsx18("input", { className: "gbo-slack-workspace-choice", type: "radio", name: "slack-workspace", checked: selected === w.team_id, onChange: () => setSelected(w.team_id) }),
         workspaceLabel(w, Object.values(slack.checks.get()))
       ] }, w.team_id)),
-      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-add-workspace", onClick: () => setAdding(true), children: "+ Connect another workspace" })
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-add-workspace", onClick: () => setAdding(true), children: "+ Connect another workspace" }),
+      accessPicker
     ] });
     footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,

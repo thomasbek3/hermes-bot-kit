@@ -36,6 +36,22 @@ class SlackAPI:
         return self.post('apps.manifest.update', token,
                          {'app_id': app_id, 'manifest': json.dumps(data, separators=(',', ':'))})
 
+    def users_list(self, token, pages=100):
+        """Every user of the bot's workspace (users.list, paginated)."""
+        users, cursor = [], ''
+        for _ in range(pages):
+            values = {'limit': '200'}
+            if cursor:
+                values['cursor'] = cursor
+            result = self.post('users.list', token, values)
+            if not result.get('ok'):
+                raise RuntimeError('Slack could not list the workspace members')
+            users.extend(result.get('members') or [])
+            cursor = ((result.get('response_metadata') or {}).get('next_cursor') or '').strip()
+            if not cursor:
+                return users
+        raise RuntimeError('workspace too large to list')
+
     def delete(self, token, app_id):
         return self.post('apps.manifest.delete', token, {'app_id':app_id})
 

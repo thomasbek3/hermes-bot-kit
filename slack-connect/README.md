@@ -6,6 +6,17 @@ Slack's Allow page, and when you click Allow the bot is in Slack. It answers
 DMs and @mentions with the same plugins, context and memories it uses in
 Hermes. **Remove from Slack** deletes the app again.
 
+**Who can talk to it:** by default every full member of the workspace (not
+guests, not Slack Connect users from other companies); or only you, or named
+people, chosen in the same window. The kit writes that list into the bot's
+`SLACK_ALLOWED_USERS` and the relay refreshes it from Slack's `users.list` every
+15 minutes. The window, the confirmation page and the welcome DM show the
+**effective** audience, worked out from every grant Hermes honours
+(`SLACK_ALLOWED_USERS`, `SLACK_ALLOW_ALL_USERS`, `GATEWAY_ALLOWED_USERS`, pairing
+approvals). Any extra grant is named, and **Remove the extra access** clears the
+bot-level ones. Anyone who can talk to the bot can use its tools with the bot's
+access: see [docs/SLACK.md](../docs/SLACK.md#who-can-talk-to-the-bot).
+
 <p align="center">
   <img src="../grokbot-override/screenshots/slack-strip.png" alt="Add to Slack in three steps: the Add to Slack window with the Acme Team workspace and Connect, the Connected to Acme Team Slack window, and the Slack card reading Connected" width="860">
 </p>

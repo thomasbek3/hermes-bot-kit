@@ -14,6 +14,7 @@ from urllib.parse import quote
 from aiohttp import ClientError, ClientSession, ClientTimeout, web
 from dotenv import dotenv_values
 from common.core import _atomic_json, _read_json, consume_state, verify_slack_signature
+from common import access as access_module
 
 LOG = logging.getLogger('slack_relay')
 APP_KEY = re.compile(r'^[a-f0-9]{32}$')
@@ -24,6 +25,9 @@ VERIFICATION_KEY = web.RequestKey('url_verification', bool)
 # a known app, or an OAuth callback with a valid state). Such a request is
 # always processed and never charged to the rate limit.
 AUTHENTICATED_KEY = web.RequestKey('authenticated', bool)
+# How often the relay refreshes "full members" allowlists from Slack.
+MEMBER_SYNC_SECONDS = 900
+MEMBER_PAGES_MAX = 100
 BUCKET_SIZE = 60.0
 MAX_IDENTITIES = 4096
 TEAM_NAME_MAX = 100
@@ -74,17 +78,17 @@ def client_identity(peer, forwarded):
     return peer
 
 
-def welcome(bot, workspace):
-    text = (f"👋 Hi, I'm {bot}, the bot you added to {workspace}.\n"
-            '• You can DM me here, or @mention me in a channel.\n'
-            '• I only answer you.\n'
-            "• I have my own credentials, and if a task needs one of your accounts, I'll ask you to connect it.")
+def welcome(bot, workspace, audience):
+    """The installer's welcome DM. `audience` is the honest who-can-talk line."""
+    lines = ('You can DM me here, or @mention me in a channel.',
+             'Who can talk to me: ' + audience,
+             "Whatever my tools can do, I do for anyone who can talk to me, with my own access. "
+             "Change who can talk to me in my Slack window in Hermes.")
+    text = f"👋 Hi, I'm {bot}, the bot you added to {workspace}.\n" + '\n'.join('• ' + line for line in lines)
     return {'text': text, 'blocks': [
         {'type': 'section', 'text': {'type': 'mrkdwn', 'text': f"👋 Hi, I'm {bot}, the bot you added to {workspace}."}},
         {'type': 'rich_text', 'elements': [{'type': 'rich_text_list', 'style': 'bullet', 'elements': [
-            {'type': 'rich_text_section', 'elements': [{'type': 'text', 'text': line}]} for line in (
-                'You can DM me here, or @mention me in a channel.', 'I only answer you.',
-                "I have my own credentials, and if a task needs one of your accounts, I'll ask you to connect it.")]}]}]}
+            {'type': 'rich_text_section', 'elements': [{'type': 'text', 'text': line}]} for line in lines]}]}]}
 
 
 class Relay:
@@ -161,6 +165,91 @@ class Relay:
                     raise RuntimeError('Slack request failed')
                 return result
 
+    async def workspace_members(self, token, team_id):
+        """Full members of the workspace (not guests, not Slack Connect users,
+        not bots) from users.list; raises when Slack cannot be read."""
+        users, cursor = [], ''
+        for _ in range(MEMBER_PAGES_MAX):
+            values = {'limit': '200'}
+            if cursor:
+                values['cursor'] = cursor
+            result = await self.slack_call('users.list', values, token)
+            users.extend(result.get('members') or [])
+            cursor = ((result.get('response_metadata') or {}).get('next_cursor') or '').strip()
+            if not cursor:
+                break
+        else:
+            raise RuntimeError('workspace too large to list')
+        members = access_module.full_members(users, team_id)
+        if len(members) > access_module.MAX_MEMBERS:
+            raise RuntimeError('workspace too large')
+        return members
+
+    def profile_home(self, profile):
+        return self.root / 'profiles' / profile
+
+    def audience(self, profile, record, chosen, synced=True):
+        env = dict(self.profile_env(profile))
+        root_env = dict(dotenv_values(self.root / '.env')) if (self.root / '.env').is_file() else {}
+        eff = access_module.effective(env, access_module.pairing_approved(self.profile_home(profile)), root_env)
+        mode = access_module.mode_of(record.get('access'))
+        text = access_module.describe(mode, chosen, eff, env.get('SLACK_TEAM_NAME') or 'the workspace')
+        if mode == 'members' and not synced and not eff['open']:
+            text = "Only you for now: Slack's member list could not be read yet (the relay retries every 15 minutes)."
+        return {'mode': mode, 'text': text, 'open': eff['open'], 'count': len(eff['ids']),
+                'extra_grants': access_module.extra_grants(chosen, eff, profile), 'synced': bool(synced)}
+
+    async def allowlist_for(self, record, owner, token, team_id):
+        """(SLACK_ALLOWED_USERS ids, synced) for the chosen audience."""
+        mode = access_module.mode_of(record.get('access'))
+        if mode == 'members':
+            try:
+                return access_module.chosen_ids(mode, owner, await self.workspace_members(token, team_id)), True
+            except Exception:
+                LOG.warning('Slack member list could not be read; allowing only the installer for now')
+                return access_module.chosen_ids('owner', owner), False
+        named = access_module.parse_ids(record.get('allowed') or '') if mode == 'list' else ()
+        return access_module.chosen_ids(mode, owner, named=named), True
+
+    async def sync_members_once(self):
+        """Refresh every "full members" bot's SLACK_ALLOWED_USERS from Slack.
+        A failed read keeps the current list (never widens it, never empties it)."""
+        changed = 0
+        for key, record in _read_json(self.data / 'apps.json', {}).items():
+            if not isinstance(record, dict) or access_module.mode_of(record.get('access')) != 'members':
+                continue
+            if self.record(key) is None:
+                continue
+            pending = _read_json(self.data / 'pending' / (key + '.json'), {})
+            owner = pending.get('owner')
+            if pending.get('phase') != 'installed' or not isinstance(owner, str):
+                continue
+            profile = record['profile']
+            try:
+                env = self.profile_env(profile)
+                token = env.get('SLACK_BOT_TOKEN') or ''
+                if not token or env.get('SLACK_APP_ID') != record.get('app_id'):
+                    continue
+                ids = access_module.chosen_ids('members', owner, await self.workspace_members(token, record.get('team_id')))
+            except Exception:
+                LOG.warning('Slack member sync skipped for one bot (Slack could not be read)')
+                continue
+            value = ','.join(ids)
+            if value != (env.get('SLACK_ALLOWED_USERS') or ''):
+                await self.write_profile(profile, {'SLACK_ALLOWED_USERS': value})
+                changed += 1
+            self.pending(key, 'installed', **{k: v for k, v in pending.items() if k not in ('phase', 'at', 'audience', 'chosen')},
+                         chosen=ids, audience=self.audience(profile, record, ids))
+        return changed
+
+    async def member_sync_loop(self):
+        while True:
+            await asyncio.sleep(MEMBER_SYNC_SECONDS)
+            try:
+                await self.sync_members_once()
+            except Exception:
+                LOG.error('Slack member sync failed')
+
     async def events(self, request):
         key = request.match_info['app_key']
         body = await request.read()
@@ -222,17 +311,20 @@ class Relay:
             team_name = safe_team_name((result.get('team') or {}).get('name')) or 'Slack'
             if not all(isinstance(x, str) and x for x in (owner, token, team_name)):
                 raise ValueError('incomplete authorization')
-            existing = [x.strip() for x in (env.get('SLACK_ALLOWED_USERS') or '').split(',') if x.strip()]
-            # The welcome message promises that only the installer is allowed.
-            if any(x != owner for x in existing):
-                raise ValueError('profile already permits other Slack users')
-            await self.write_profile(profile, {'SLACK_BOT_TOKEN': token, 'SLACK_TEAM_ID': state['team_id'], 'SLACK_TEAM_NAME': team_name, 'SLACK_ALLOWED_USERS': owner})
+            # The chosen audience (default: the workspace's full members) goes
+            # into SLACK_ALLOWED_USERS; then the effective audience, from every
+            # grant Hermes honours, is what the person is told.
+            ids, synced = await self.allowlist_for(record, owner, token, state['team_id'])
+            await self.write_profile(profile, {'SLACK_BOT_TOKEN': token, 'SLACK_TEAM_ID': state['team_id'], 'SLACK_TEAM_NAME': team_name, 'SLACK_ALLOWED_USERS': ','.join(ids)})
             await self.notify(profile)
-            payload = welcome(record.get('bot_name') or 'Hermes', team_name)
+            audience = self.audience(profile, record, ids, synced)
+            payload = welcome(record.get('bot_name') or 'Hermes', team_name, audience['text'])
             payload['channel'] = owner
             await self.slack_call('chat.postMessage', {'channel': owner, 'text': payload['text'], 'blocks': json.dumps(payload['blocks'])}, token)
-            self.pending(key, 'installed', team_name=team_name, bot_user_id=result.get('bot_user_id') or '')
-            return web.Response(text=f"<p>{html.escape(record.get('bot_name') or 'Hermes')} is in {html.escape(team_name)}. You can close this tab and go back to Hermes.</p>", content_type='text/html')
+            self.pending(key, 'installed', team_name=team_name, bot_user_id=result.get('bot_user_id') or '', owner=owner, chosen=ids, audience=audience)
+            extra = ''.join(f"<li>{html.escape(g['grant'])}: {html.escape(g['who'])}</li>" for g in audience['extra_grants'])
+            extra_html = f"<p>Other settings let more people in:</p><ul>{extra}</ul><p>Fix them in the bot's Slack window in Hermes.</p>" if extra else ''
+            return web.Response(text=f"<p>{html.escape(record.get('bot_name') or 'Hermes')} is in {html.escape(team_name)}.</p><p>Who can talk to it: {html.escape(audience['text'])}</p>{extra_html}<p>You can close this tab and go back to Hermes.</p>", content_type='text/html')
         except Exception:
             self.pending(key, 'error')
             LOG.error('Slack authorization could not be completed')
@@ -293,6 +385,16 @@ class Relay:
                 LOG.info('request method=%s path=%s status=%d url_verification=%s',
                          request.method, safe_path, status, bool(request.get(VERIFICATION_KEY, False)))
         app = web.Application(client_max_size=LIMIT, middlewares=[guard])
+
+        async def start_sync(application):
+            application['member_sync'] = asyncio.ensure_future(self.member_sync_loop())
+
+        async def stop_sync(application):
+            task = application.get('member_sync')
+            if task:
+                task.cancel()
+        app.on_startup.append(start_sync)
+        app.on_cleanup.append(stop_sync)
         async def health(_request):
             return web.Response(text='ok')
         for prefix in ('', '/slack'):

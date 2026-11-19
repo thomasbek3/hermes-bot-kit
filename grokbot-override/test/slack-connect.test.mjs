@@ -122,3 +122,21 @@ test('readiness picks one-click, add-a-workspace or the paste-tokens dialog', as
   assert.equal((await probeSlackConnect(viaDefault(false), scope)).kind, 'missing')
   assert.equal((await probeSlackConnect(viaDefault(true), scope)).bootstrap, true)
 })
+
+test('access choice: the whole team by default, restrictions validated', async () => {
+  const { accessBody, audienceView, ACCESS_CHOICES } = await import('../src/core/slackConnect.js')
+  assert.equal(ACCESS_CHOICES[0].id, 'members', 'the team is the default')
+  assert.match(ACCESS_CHOICES[0].hint, /not guests/)
+  assert.deepEqual(accessBody('members', ''), { body: { access: 'members' } })
+  assert.deepEqual(accessBody('owner', 'U1'), { body: { access: 'owner' } })
+  assert.deepEqual(accessBody('list', ' U01AB, U02CD '), { body: { access: 'list', allowed: 'U01AB,U02CD' } })
+  assert.ok(accessBody('list', '').error)
+  assert.ok(accessBody('list', 'U1, bob').error)
+  assert.deepEqual(accessBody('nonsense'), { body: { access: 'members' } })
+  assert.equal(audienceView({}), null)
+  const view = audienceView({ audience: { text: 'Anyone …', open: true, extra_grants: [{ grant: 'SLACK_ALLOW_ALL_USERS=true', who: 'anyone', fixable: true }, { grant: 'GATEWAY_ALLOWED_USERS', who: 'U9', how: 'edit it', fixable: false }] } })
+  assert.equal(view.open, true)
+  assert.equal(view.fixable, true)
+  assert.equal(view.extras.length, 2)
+})
+

@@ -560,3 +560,65 @@ def test_slack_switch_script_reads_only_explicit_false(tmp_path):
     assert get('platforms:\n  slack:\n    enabled: true\n') == 0
     assert get('platforms:\n  slack:\n    enabled: false\n    extra:\n      rich_blocks: true\n') == 3
     assert get('platforms:\n  slack:\n    enabled: "false"\n') == 3
+
+
+def _installed(data, env, chosen, access='members'):
+    key = 'c' * 32
+    (data / 'pending').mkdir(exist_ok=True)
+    (data / 'apps.json').write_text(json.dumps({key: {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Helper', 'access': access}}))
+    (data / 'pending' / (key + '.json')).write_text(json.dumps({'phase': 'installed', 'at': 1, 'owner': 'U1', 'chosen': chosen}))
+    env.update({'SLACK_BOT_TOKEN': 'fake-bot', 'SLACK_TEAM_NAME': 'Acme', 'SLACK_ALLOWED_USERS': ','.join(chosen)})
+
+
+def test_connect_rejects_unknown_access_and_empty_list(context):
+    client, slack, vault, env, data, _ = context
+    assert client.post('/connect', json={'team_id': 'T1', 'access': 'everyone'}).status_code == 400
+    assert client.post('/connect', json={'team_id': 'T1', 'access': 'list', 'allowed': ''}).status_code == 400
+    assert client.post('/connect', json={'team_id': 'T1', 'access': 'list', 'allowed': 'bad id'}).status_code == 400
+
+
+def test_status_tells_the_effective_audience_and_extra_grants(context, tmp_path):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1', 'U2'])
+    body = client.get('/status').json()
+    assert body['access'] == 'members'
+    assert body['audience']['text'].startswith('Full members of Acme (2 people')
+    assert body['audience']['extra_grants'] == []
+    env['SLACK_ALLOW_ALL_USERS'] = 'true'
+    pairing = tmp_path / 'profiles' / 'test-profile' / 'platforms' / 'pairing'
+    pairing.mkdir(parents=True)
+    (pairing / 'slack-approved.json').write_text(json.dumps({'U9': {}}))
+    body = client.get('/status').json()
+    assert body['audience']['open'] is True and 'including guests' in body['audience']['text']
+    assert {g['grant'] for g in body['audience']['extra_grants']} == {'SLACK_ALLOW_ALL_USERS=true', 'pairing approvals'}
+
+
+def test_set_access_owner_and_members(context):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1', 'U2'])
+    body = client.post('/access', json={'access': 'owner'}).json()
+    assert env['SLACK_ALLOWED_USERS'] == 'U1' and body['audience']['text'] == 'Only you.'
+    slack.users_list = lambda token: [{'id': 'U1', 'team_id': 'T1'}, {'id': 'U3', 'team_id': 'T1'},
+                                      {'id': 'U4', 'team_id': 'T1', 'is_restricted': True}]
+    body = client.post('/access', json={'access': 'members'}).json()
+    assert env['SLACK_ALLOWED_USERS'] == 'U1,U3' and body['access'] == 'members'
+    body = client.post('/access', json={'access': 'list', 'allowed': 'U7, U8'}).json()
+    assert env['SLACK_ALLOWED_USERS'] == 'U1,U7,U8' and 'The 3 people you named' in body['audience']['text']
+
+
+def test_fix_access_removes_bot_level_extra_grants(context, tmp_path):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1'], access='owner')
+    env['SLACK_ALLOW_ALL_USERS'] = 'true'
+    pairing = tmp_path / 'profiles' / 'test-profile' / 'platforms' / 'pairing'
+    pairing.mkdir(parents=True)
+    (pairing / 'slack-approved.json').write_text(json.dumps({'U9': {}}))
+    revoked = []
+    def revoke(uid):
+        revoked.append(uid)
+        (pairing / 'slack-approved.json').write_text('{}')
+    service = api.make_service()
+    service.revoke_pairing = revoke
+    body = client.post('/access/fix', json={}).json()
+    assert 'SLACK_ALLOW_ALL_USERS' not in env and revoked == ['U9']
+    assert body['audience']['open'] is False and body['audience']['text'] == 'Only you.'

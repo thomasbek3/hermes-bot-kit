@@ -66,4 +66,34 @@ export function refreshTokenError(value) {
   return null
 }
 
+/** Who can talk to the bot in Slack. The default lets the whole team in. */
+export const ACCESS_CHOICES = Object.freeze([
+  { id: 'members', label: 'Everyone in the workspace', hint: 'Full members only: not guests, not Slack Connect people from other companies. Kept up to date as people join or leave.' },
+  { id: 'owner', label: 'Only me', hint: 'Only you, the person who adds it.' },
+  { id: 'list', label: 'Only these people', hint: 'Slack member IDs, separated by commas (Slack: profile → ⋮ → Copy member ID). You are always included.' }
+])
+const MEMBER_ID = /^[UW][A-Z0-9]{1,31}$/
+/** The access part of a connect or change request, or an error message. */
+export function accessBody(mode, listText) {
+  const access = ACCESS_CHOICES.some(c => c.id === mode) ? mode : 'members'
+  if (access !== 'list') return { body: { access } }
+  const ids = String(listText || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
+  if (!ids.length) return { error: 'Add at least one Slack member ID' }
+  const bad = ids.filter(x => !MEMBER_ID.test(x))
+  if (bad.length) return { error: `Not a Slack member ID: ${bad.slice(0, 3).join(', ')}` }
+  return { body: { access, allowed: ids.join(',') } }
+}
+/** The truthful audience from the add-on's status: one line, plus any extra grants. */
+export function audienceView(status) {
+  const a = status?.audience
+  if (!a || typeof a !== 'object' || typeof a.text !== 'string') return null
+  const extras = Array.isArray(a.extra_grants) ? a.extra_grants.filter(g => g && typeof g.grant === 'string') : []
+  return {
+    text: a.text,
+    open: a.open === true,
+    extras: extras.map(g => ({ grant: g.grant, who: String(g.who || ''), how: String(g.how || ''), fixable: g.fixable === true })),
+    fixable: extras.some(g => g.fixable === true)
+  }
+}
+
 export { isSlackAuthorizationUrl } from './urls.js'

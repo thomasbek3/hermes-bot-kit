@@ -96,8 +96,13 @@ Then tell them what they will see:
 
 Offer these; install only what the person wants.
 
-- **Slack** (the bot answers DMs and @mentions in Slack): follow
-  [docs/SLACK.md](docs/SLACK.md). It has human-only steps.
+- **Slack** (your team DMs and @mentions the bot in Slack): follow
+  [docs/SLACK.md](docs/SLACK.md). It has human-only steps. Tell the person
+  plainly: with one-click Add to Slack, **every full member of the workspace**
+  (not guests, not Slack Connect users) can talk to the bot by default, and the
+  bot does whatever its tools allow for anyone who can talk to it, with the
+  bot's own access. They can restrict it to themselves or to named people in
+  the bot's Slack window, which always shows who can really talk to it.
 - **agent-cards skill** (approval, task and email-draft cards in the override's
   chat; question cards work without it):
 
