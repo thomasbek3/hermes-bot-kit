@@ -49990,16 +49990,47 @@ var ADAPT_SRC = (
 .gbo-row-line > svg, .gbo-row-line .gbo-attn, .gbo-row-line .gbo-row-flag { width: 12px; height: 12px; flex: none; color: var(--color-text-tertiary); }
 .gbo-row-line .gbo-attn { color: var(--color-warn); }
 .gbo-row-line .gbo-attn svg, .gbo-row-line .gbo-row-flag svg { width: 100%; height: 100%; display: block; }
-/* The live status (unread, working, needs input) is Hermes's own dot,
-   placed as the reference's status dot: the avatar's top right, ringed in
-   the sidebar colour. Its idle and draft dots carry no live state (no
-   role="status") and are not drawn. */
-.bot-row__avatar .gbo-row-dot, .pinned__avatar .gbo-row-dot { position: absolute; right: -1px; top: -1px; line-height: 0; }
-.pinned__avatar .gbo-row-dot { right: 4px; top: 4px; }
-.gbo-row-face .gbo-row-dot:not(:has([role="status"])) { display: none; }
-.gbo-row-face .gbo-row-dot [role="status"] { width: 8px; height: 8px; border-width: 0; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
-.bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
-.bot-row.is-selected .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
+/* The unread dot, Grok Bot's look: Hermes's own status dot (Unread.tsx) at
+   the row's right edge, vertically centred, as a small blue dot. Only its
+   unread state (painted blue) and its needs-input state (Hermes's amber)
+   draw (working, idle and draft are the running cue's, below). A pinned tile has no
+   right edge: the same dot sits on its avatar, ringed in the sidebar colour.
+   The hover ⋯ button covers the row's dot while it shows. */
+.gbo-unread-dot { display: none; flex: none; align-items: center; justify-content: center; width: 8px; height: 8px; margin: 0 4px 0 2px; line-height: 0; }
+.gbo-unread-dot:has([role="status"][class*="ui-success"]), .gbo-unread-dot:has([role="status"][class*="amber"]) { display: inline-flex; }
+.gbo-unread-dot > span { display: inline-flex; line-height: 0; }
+.gbo-unread-dot [role="status"] { display: block; width: 8px; height: 8px; border-radius: 50%; border-width: 0; }
+.gbo-unread-dot [role="status"][class*="ui-success"] { background: var(--color-bot-blue); }
+/* Hermes's running cue (RunningDot): the same status dot in its working,
+   stalled or background state, on the avatar's top right, ringed in the
+   sidebar colour; independent of the unread dot. */
+.gbo-run-dot { display: none; position: absolute; right: -1px; top: -1px; line-height: 0; }
+.gbo-run-dot:has([role="status"][class*="ui-accent"]), .gbo-run-dot:has([role="status"][class*="ui-text-tertiary"]) { display: inline-flex; }
+.gbo-run-dot > span { display: inline-flex; line-height: 0; }
+.pinned__avatar .gbo-run-dot { right: auto; left: 4px; top: 4px; }
+.gbo-run-dot [role="status"] { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
+.bot-row:hover .gbo-run-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
+.bot-row.is-selected .gbo-run-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
+.pinned__avatar .gbo-unread-dot { position: absolute; right: 4px; top: 4px; margin: 0; }
+.pinned__avatar .gbo-unread-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
+.gbo-pin:hover .gbo-unread-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
+.gbo-pin.is-selected .gbo-unread-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
+/* "More unreads": a floating blue pill over the roster's scroll area while
+   an unread row is scrolled out of view above (top) or below (bottom); a
+   click scrolls to the nearest one (UnreadPill.tsx). Its fill is a darker
+   blue than the dot so white text reads at 5.4:1 (hover 6.6:1); the dot
+   keeps the accent blue. */
+.gbo-unread-pill {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 6; top: 8px;
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 13px 0 10px; border: 0; border-radius: 999px;
+  background: #1366D6; color: #FFFFFF; font-size: 13px; font-weight: 500; line-height: 18px; letter-spacing: -0.08px; white-space: nowrap;
+  box-shadow: 0 2px 10px #1366D64D, 0 0 0 0.5px #0000001A; cursor: pointer;
+}
+.gbo-unread-pill.is-down { top: auto; bottom: 8px; }
+.gbo-unread-pill:hover { background: #0B59BE; }
+.gbo-unread-pill:focus-visible { outline: 2px solid #FFFFFF; outline-offset: -4px; }
+.gbo-unread-pill svg { width: 14px; height: 14px; flex: none; }
+.gbo-unread-pill-down { display: inline-flex; transform: rotate(180deg); }
 .gbo-room-row .bot-row__avatar { width: 36px; justify-content: center; }
 .gbo-row-more {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; opacity: 0;
@@ -50758,7 +50789,6 @@ var CHAT_CSS = (
 .gbo-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: var(--gbo-text-body-sm); color: var(--gbo-muted-fg); }
 
 /* ── R16 row dot ────────────────────────────────────────────────────── */
-.gbo-row-dot { display: inline-flex; align-items: center; flex: none; }
 
 /* ── R14 group chats ────────────────────────────────────────────────── */
 .gbo-section-head.is-rooms { display: flex; align-items: center; padding-right: 6px; }
@@ -62936,7 +62966,7 @@ function ChatWorkspace({ slot = mainSlot } = {}) {
 }
 
 // src/ui/Roster.tsx
-import * as React28 from "react";
+import * as React29 from "react";
 
 // src/core/person.js
 function initialsOf(name) {
@@ -62955,18 +62985,196 @@ function footerPerson(name) {
 // src/ui/Unread.tsx
 import * as React27 from "react";
 import { jsx as jsx29 } from "react/jsx-runtime";
-function UnreadDot({ bot }) {
+var UNREAD_STATE_SELECTOR = '[role="status"][class*="ui-success"]';
+var UNREAD_DOT_SELECTOR = `.gbo-unread-dot ${UNREAD_STATE_SELECTOR}`;
+function StatusDot({ bot, className }) {
   const Dot = sdk.SessionStatusDot;
   const id = botCanonicalSessionId(bot);
   if (!id || !(typeof Dot === "function" || Dot && typeof Dot === "object")) return null;
-  return /* @__PURE__ */ jsx29("span", { className: "gbo-row-dot", children: React27.createElement(Dot, { storedSessionId: id }) });
+  return /* @__PURE__ */ jsx29("span", { className, children: React27.createElement(Dot, { storedSessionId: id }) });
+}
+function UnreadDot({ bot }) {
+  return /* @__PURE__ */ jsx29(StatusDot, { bot, className: "gbo-unread-dot" });
+}
+function RunningDot({ bot }) {
+  return /* @__PURE__ */ jsx29(StatusDot, { bot, className: "gbo-run-dot" });
+}
+
+// src/ui/UnreadPill.tsx
+import * as React28 from "react";
+
+// src/core/unreadPill.js
+var IN_VIEW_RATIO = 0.5;
+function sideOf(rect, view) {
+  if (!rect || !view) return null;
+  const height = rect.bottom - rect.top;
+  const overlap = Math.max(0, Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top));
+  if (height > 0 ? overlap / height >= IN_VIEW_RATIO : overlap > 0) return null;
+  return (rect.top + rect.bottom) / 2 < (view.top + view.bottom) / 2 ? "up" : "down";
+}
+function nearestUnread(direction, items, view) {
+  let best = null;
+  for (const item of Array.isArray(items) ? items : []) {
+    if (sideOf(item?.rect, view) !== direction) continue;
+    if (!best) best = item;
+    else if (direction === "up" ? item.rect.bottom > best.rect.bottom : item.rect.top < best.rect.top) best = item;
+  }
+  return best;
+}
+function scrollTopFor2(rect, view, scrollTop) {
+  const viewHeight = Math.max(0, view.bottom - view.top);
+  const height = Math.max(0, rect.bottom - rect.top);
+  const target = scrollTop + (rect.top - view.top) - Math.max(0, (viewHeight - height) / 2);
+  return Math.max(0, Math.round(target));
+}
+
+// src/ui/UnreadPill.tsx
+import { Fragment as Fragment16, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
+var ITEM_SELECTOR = ".gbo-row-wrap, .gbo-pin-wrap";
+var ITEM_BUTTON = "button.gbo-row, button.gbo-pin";
+function entrySide(entry) {
+  return sideOf(entry?.boundingClientRect, entry?.rootBounds);
+}
+function useUnreadPill(scrollerRef) {
+  const [sides, setSides] = React28.useState({ up: false, down: false });
+  const jumpRef = React28.useRef(null);
+  React28.useEffect(() => {
+    const scroller = scrollerRef.current;
+    const IO = globalThis.IntersectionObserver;
+    const MO = globalThis.MutationObserver;
+    if (!scroller || typeof IO !== "function" || typeof MO !== "function") return void 0;
+    const raf2 = globalThis.requestAnimationFrame;
+    const caf = globalThis.cancelAnimationFrame;
+    const watched = /* @__PURE__ */ new Map();
+    let viewHeight = 0;
+    let collectFrame = null;
+    let scrollFrame = null;
+    let alive = true;
+    const publish = () => {
+      let up = false;
+      let down = false;
+      for (const watch of watched.values()) {
+        if (watch.side === "up") up = true;
+        else if (watch.side === "down") down = true;
+      }
+      setSides((prev) => prev.up === up && prev.down === down ? prev : { up, down });
+    };
+    const io = new IO(
+      (entries) => {
+        if (!alive) return;
+        const top = scroller.scrollTop;
+        for (const entry of entries) {
+          const watch = watched.get(entry.target);
+          if (!watch) continue;
+          const rect = entry.boundingClientRect;
+          const root = entry.rootBounds;
+          watch.side = entrySide(entry);
+          if (rect && root) {
+            watch.offset = rect.top - root.top + top;
+            watch.height = rect.bottom - rect.top;
+            viewHeight = root.bottom - root.top;
+          }
+        }
+        publish();
+      },
+      { root: scroller, threshold: [0, IN_VIEW_RATIO, 1] }
+    );
+    function collect() {
+      collectFrame = null;
+      if (!alive) return;
+      const rows = /* @__PURE__ */ new Set();
+      for (const dot of Array.from(scroller.querySelectorAll(UNREAD_DOT_SELECTOR))) {
+        const row = dot.closest(ITEM_SELECTOR);
+        if (row && scroller.contains(row)) rows.add(row);
+      }
+      for (const el of [...watched.keys()]) {
+        if (rows.has(el)) continue;
+        io.unobserve(el);
+        watched.delete(el);
+      }
+      for (const el of rows) {
+        if (watched.has(el)) io.unobserve(el);
+        else watched.set(el, { side: null, offset: null, height: 0 });
+        io.observe(el);
+      }
+      publish();
+    }
+    function reside() {
+      scrollFrame = null;
+      if (!alive || !(viewHeight > 0)) return;
+      const top = scroller.scrollTop;
+      let changed = false;
+      for (const watch of watched.values()) {
+        if (watch.side === null || watch.offset === null) continue;
+        const side = sideOf({ top: watch.offset - top, bottom: watch.offset - top + watch.height }, { top: 0, bottom: viewHeight });
+        if (side && side !== watch.side) {
+          watch.side = side;
+          changed = true;
+        }
+      }
+      if (changed) publish();
+    }
+    const frameOf = (fn) => typeof raf2 === "function" ? raf2(fn) : (fn(), null);
+    function schedule() {
+      if (!alive || collectFrame !== null) return;
+      collectFrame = frameOf(collect);
+    }
+    function onScroll() {
+      if (!alive || scrollFrame !== null) return;
+      scrollFrame = frameOf(reside);
+    }
+    const mo = new MO(schedule);
+    mo.observe(scroller, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "role"] });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    collect();
+    jumpRef.current = (direction) => {
+      const box = scroller.getBoundingClientRect();
+      const candidates2 = [...watched].filter(([, watch]) => watch.side === direction).map(([el]) => ({ el, rect: el.getBoundingClientRect() }));
+      const target = nearestUnread(direction, candidates2, box);
+      if (!target) return;
+      const top = scrollTopFor2(target.rect, box, scroller.scrollTop);
+      if (typeof scroller.scrollTo === "function") scroller.scrollTo({ top, behavior: "smooth" });
+      else scroller.scrollTop = top;
+      const button = target.el.querySelector(ITEM_BUTTON);
+      try {
+        button?.focus({ preventScroll: true });
+      } catch {
+        button?.focus();
+      }
+    };
+    return () => {
+      alive = false;
+      jumpRef.current = null;
+      if (typeof caf === "function") {
+        if (collectFrame !== null) caf(collectFrame);
+        if (scrollFrame !== null) caf(scrollFrame);
+      }
+      io.disconnect();
+      mo.disconnect();
+      scroller.removeEventListener("scroll", onScroll);
+    };
+  }, [scrollerRef]);
+  const jump = React28.useCallback((direction) => jumpRef.current?.(direction), []);
+  return { sides, jump };
+}
+function UnreadPills({ sides, jump }) {
+  return /* @__PURE__ */ jsxs27(Fragment16, { children: [
+    sides.up ? /* @__PURE__ */ jsxs27("button", { type: "button", className: "gbo-unread-pill is-up", "aria-label": "More unreads above", onClick: () => jump("up"), children: [
+      /* @__PURE__ */ jsx30(IconArrowUp, {}),
+      "More unreads"
+    ] }) : null,
+    sides.down ? /* @__PURE__ */ jsxs27("button", { type: "button", className: "gbo-unread-pill is-down", "aria-label": "More unreads below", onClick: () => jump("down"), children: [
+      /* @__PURE__ */ jsx30("span", { className: "gbo-unread-pill-down", "aria-hidden": "true", children: /* @__PURE__ */ jsx30(IconArrowUp, {}) }),
+      "More unreads"
+    ] }) : null
+  ] });
 }
 
 // src/ui/Roster.tsx
-import { Fragment as Fragment17, jsx as jsx30, jsxs as jsxs27 } from "react/jsx-runtime";
+import { Fragment as Fragment18, jsx as jsx31, jsxs as jsxs28 } from "react/jsx-runtime";
 function useNow(ms = 3e4) {
-  const [now, setNow] = React28.useState(() => Date.now());
-  React28.useEffect(() => {
+  const [now, setNow] = React29.useState(() => Date.now());
+  React29.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(id);
   }, [ms]);
@@ -62981,8 +63189,8 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
   const age = at ? shortAge(at, now) : "";
   const attention = attentionFor(bot);
   const entries = botMenuEntries(bot);
-  return /* @__PURE__ */ jsxs27("div", { className: "gbo-row-wrap", children: [
-    /* @__PURE__ */ jsx30(ContextMenuFor, { entries, children: /* @__PURE__ */ jsxs27(
+  return /* @__PURE__ */ jsxs28("div", { className: "gbo-row-wrap", children: [
+    /* @__PURE__ */ jsx31(ContextMenuFor, { entries, children: /* @__PURE__ */ jsxs28(
       "button",
       {
         type: "button",
@@ -62992,31 +63200,32 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }) {
         onClick: () => selectBot(bot),
         onPointerEnter: () => warmBot(bot),
         children: [
-          /* @__PURE__ */ jsxs27("span", { className: "bot-row__avatar gbo-row-face", children: [
-            /* @__PURE__ */ jsx30(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 40, working }),
-            /* @__PURE__ */ jsx30(UnreadDot, { bot })
+          /* @__PURE__ */ jsxs28("span", { className: "bot-row__avatar gbo-row-face", children: [
+            /* @__PURE__ */ jsx31(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size: 40, working }),
+            /* @__PURE__ */ jsx31(RunningDot, { bot })
           ] }),
-          /* @__PURE__ */ jsxs27("span", { className: "bot-row__text gbo-row-main", children: [
-            /* @__PURE__ */ jsxs27("span", { className: "gbo-row-line", children: [
-              /* @__PURE__ */ jsx30("span", { className: "bot-row__name gbo-row-name", children: name }),
-              meta?.pinned ? /* @__PURE__ */ jsx30(IconPin, {}) : null,
-              hidden ? /* @__PURE__ */ jsx30("span", { className: "gbo-row-flag", title: "Hidden from the roster", children: /* @__PURE__ */ jsx30(IconEyeOff, {}) }) : null,
-              attention ? /* @__PURE__ */ jsx30("span", { className: "gbo-attn", role: "img", "aria-label": "needs attention", title: botAttentionHint(attention.reason), children: /* @__PURE__ */ jsx30(IconWarn, {}) }) : null
+          /* @__PURE__ */ jsxs28("span", { className: "bot-row__text gbo-row-main", children: [
+            /* @__PURE__ */ jsxs28("span", { className: "gbo-row-line", children: [
+              /* @__PURE__ */ jsx31("span", { className: "bot-row__name gbo-row-name", children: name }),
+              meta?.pinned ? /* @__PURE__ */ jsx31(IconPin, {}) : null,
+              hidden ? /* @__PURE__ */ jsx31("span", { className: "gbo-row-flag", title: "Hidden from the roster", children: /* @__PURE__ */ jsx31(IconEyeOff, {}) }) : null,
+              attention ? /* @__PURE__ */ jsx31("span", { className: "gbo-attn", role: "img", "aria-label": "needs attention", title: botAttentionHint(attention.reason), children: /* @__PURE__ */ jsx31(IconWarn, {}) }) : null
             ] }),
-            /* @__PURE__ */ jsx30("span", { className: `bot-row__preview gbo-row-preview${working ? " is-working" : ""}`, children: line })
-          ] })
+            /* @__PURE__ */ jsx31("span", { className: `bot-row__preview gbo-row-preview${working ? " is-working" : ""}`, children: line })
+          ] }),
+          /* @__PURE__ */ jsx31(UnreadDot, { bot })
         ]
       }
     ) }),
-    /* @__PURE__ */ jsx30(MenuButton, { entries, label: `Actions for ${name}`, className: "icon-btn gbo-row-more" })
+    /* @__PURE__ */ jsx31(MenuButton, { entries, label: `Actions for ${name}`, className: "icon-btn gbo-row-more" })
   ] });
 }
 function SectionNameField({ initial = "", label, onCommit, onCancel }) {
-  const [value, setValue] = React28.useState(initial);
-  const ref = React28.useRef(null);
-  const done = React28.useRef(false);
-  const mountedAt = React28.useRef(Date.now());
-  React28.useEffect(() => {
+  const [value, setValue] = React29.useState(initial);
+  const ref = React29.useRef(null);
+  const done = React29.useRef(false);
+  const mountedAt = React29.useRef(Date.now());
+  React29.useEffect(() => {
     const focus = () => {
       if (done.current) return;
       ref.current?.focus();
@@ -63033,7 +63242,7 @@ function SectionNameField({ initial = "", label, onCommit, onCancel }) {
     if (save && name) onCommit(name);
     else onCancel();
   };
-  return /* @__PURE__ */ jsx30("div", { className: "gbo-section-edit", children: /* @__PURE__ */ jsx30(
+  return /* @__PURE__ */ jsx31("div", { className: "gbo-section-edit", children: /* @__PURE__ */ jsx31(
     "input",
     {
       ref,
@@ -63067,7 +63276,7 @@ function PinnedBot({ bot, size, selected, working }) {
   const meta = metaFor(bot);
   const name = displayName(bot, meta);
   const dim = sourceUnreachable(bot);
-  return /* @__PURE__ */ jsx30("div", { className: "gbo-pin-wrap", children: /* @__PURE__ */ jsx30(ContextMenuFor, { entries: botMenuEntries(bot), children: /* @__PURE__ */ jsxs27(
+  return /* @__PURE__ */ jsx31("div", { className: "gbo-pin-wrap", children: /* @__PURE__ */ jsx31(ContextMenuFor, { entries: botMenuEntries(bot), children: /* @__PURE__ */ jsxs28(
     "button",
     {
       type: "button",
@@ -63077,17 +63286,18 @@ function PinnedBot({ bot, size, selected, working }) {
       onClick: () => selectBot(bot),
       onPointerEnter: () => warmBot(bot),
       children: [
-        /* @__PURE__ */ jsxs27("span", { className: "pinned__avatar gbo-row-face gbo-pin-face", children: [
-          /* @__PURE__ */ jsx30(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size, working }),
-          /* @__PURE__ */ jsx30(UnreadDot, { bot })
+        /* @__PURE__ */ jsxs28("span", { className: "pinned__avatar gbo-row-face gbo-pin-face", children: [
+          /* @__PURE__ */ jsx31(BotAvatar, { shapeKey: rowKey(bot), name: bot.name, meta, size, working }),
+          /* @__PURE__ */ jsx31(RunningDot, { bot }),
+          /* @__PURE__ */ jsx31(UnreadDot, { bot })
         ] }),
-        /* @__PURE__ */ jsx30("span", { className: "pinned__label gbo-pin-name", children: name })
+        /* @__PURE__ */ jsx31("span", { className: "pinned__label gbo-pin-name", children: name })
       ]
     }
   ) }) });
 }
 function useRosterShown(ref) {
-  React28.useEffect(() => {
+  React29.useEffect(() => {
     app.rosterShown.set(true);
     const el = ref.current;
     const RO = globalThis.ResizeObserver;
@@ -63104,7 +63314,7 @@ function useRosterShown(ref) {
 }
 var NAV_KEYS = /* @__PURE__ */ new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"]);
 function usePointerMode(ref) {
-  React28.useEffect(() => {
+  React29.useEffect(() => {
     const el = ref.current;
     const doc = el?.ownerDocument;
     if (!el || !doc) return;
@@ -63137,10 +63347,12 @@ function RosterPane() {
   const sectionEdit = useStore(roster2.sectionEdit);
   const sectionDelete = useStore(roster2.sectionDelete);
   const person = footerPerson(useStore(app.userName));
-  React28.useEffect(() => loadUserName(), []);
-  const [searching, setSearching] = React28.useState(false);
+  React29.useEffect(() => loadUserName(), []);
+  const [searching, setSearching] = React29.useState(false);
   const now = useNow();
-  const rootRef = React28.useRef(null);
+  const rootRef = React29.useRef(null);
+  const scrollRef = React29.useRef(null);
+  const unreadPill = useUnreadPill(scrollRef);
   useRosterShown(rootRef);
   usePointerMode(rootRef);
   const roster = app.roster.get();
@@ -63154,7 +63366,7 @@ function RosterPane() {
   const hiddenListed = pinned ? withoutPinned(view.hidden, pinned, rowKey) : view.hidden;
   const list = buildSections(listed, { metaFor, sections: ownSections, query: "", keepEmpty: !view.hasConstraint });
   const ownCount = list.filter((section) => section.own).length;
-  const newSectionField = sectionEdit?.kind === "new" ? /* @__PURE__ */ jsx30(
+  const newSectionField = sectionEdit?.kind === "new" ? /* @__PURE__ */ jsx31(
     SectionNameField,
     {
       label: "New section name",
@@ -63179,7 +63391,7 @@ function RosterPane() {
   const chatKey = chat ? rowKey(chat.bot) : "";
   const row = (bot, hidden = false) => {
     const key = rowKey(bot);
-    return /* @__PURE__ */ jsx30(
+    return /* @__PURE__ */ jsx31(
       BotRow,
       {
         bot,
@@ -63193,12 +63405,12 @@ function RosterPane() {
     );
   };
   const showSearchBox = searching || Boolean(query) || Boolean(view.showFilters && view.activeFilterCount);
-  return /* @__PURE__ */ jsxs27("div", { "data-gbo-root": "", className: "sidebar gbo-roster", ref: rootRef, children: [
-    /* @__PURE__ */ jsxs27("div", { className: "sidebar__titlebar gbo-roster-top", children: [
-      /* @__PURE__ */ jsx30("h2", { className: "gbo-roster-title", children: "Bots" }),
-      /* @__PURE__ */ jsxs27("div", { className: "sidebar__controls", children: [
-        canToggleSidebar() ? /* @__PURE__ */ jsx30("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Hide sidebar (⌘B)", "aria-label": "Hide sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx30(IconSidebar, {}) }) : null,
-        /* @__PURE__ */ jsx30(
+  return /* @__PURE__ */ jsxs28("div", { "data-gbo-root": "", className: "sidebar gbo-roster", ref: rootRef, children: [
+    /* @__PURE__ */ jsxs28("div", { className: "sidebar__titlebar gbo-roster-top", children: [
+      /* @__PURE__ */ jsx31("h2", { className: "gbo-roster-title", children: "Bots" }),
+      /* @__PURE__ */ jsxs28("div", { className: "sidebar__controls", children: [
+        canToggleSidebar() ? /* @__PURE__ */ jsx31("button", { type: "button", className: "icon-btn icon-btn--plain", title: "Hide sidebar (⌘B)", "aria-label": "Hide sidebar", onClick: () => void toggleSidebar(), children: /* @__PURE__ */ jsx31(IconSidebar, {}) }) : null,
+        /* @__PURE__ */ jsx31(
           "button",
           {
             type: "button",
@@ -63210,15 +63422,15 @@ function RosterPane() {
               setSearching((v) => !v);
               if (showSearchBox) app.query.set("");
             },
-            children: /* @__PURE__ */ jsx30(IconSearch, {})
+            children: /* @__PURE__ */ jsx31(IconSearch, {})
           }
         ),
-        /* @__PURE__ */ jsx30(MenuButton, { entries: newMenuEntries(), label: "New bot or group", className: "icon-btn", children: /* @__PURE__ */ jsx30(IconPlus, {}) })
+        /* @__PURE__ */ jsx31(MenuButton, { entries: newMenuEntries(), label: "New bot or group", className: "icon-btn", children: /* @__PURE__ */ jsx31(IconPlus, {}) })
       ] })
     ] }),
-    showSearchBox ? /* @__PURE__ */ jsx30("div", { className: "gbo-search-row", children: /* @__PURE__ */ jsxs27("label", { className: "text-input gbo-search", children: [
-      /* @__PURE__ */ jsx30(IconSearch, {}),
-      /* @__PURE__ */ jsx30(
+    showSearchBox ? /* @__PURE__ */ jsx31("div", { className: "gbo-search-row", children: /* @__PURE__ */ jsxs28("label", { className: "text-input gbo-search", children: [
+      /* @__PURE__ */ jsx31(IconSearch, {}),
+      /* @__PURE__ */ jsx31(
         "input",
         {
           autoFocus: searching,
@@ -63233,111 +63445,121 @@ function RosterPane() {
           }
         }
       ),
-      view.showFilters ? /* @__PURE__ */ jsxs27("span", { className: "gbo-search-filter", children: [
-        /* @__PURE__ */ jsx30(
+      view.showFilters ? /* @__PURE__ */ jsxs28("span", { className: "gbo-search-filter", children: [
+        /* @__PURE__ */ jsx31(
           MenuButton,
           {
             entries: filterMenuEntries(view, groupCount),
             label: view.activeFilterCount ? `Filter roster, ${view.activeFilterCount} active` : "Filter roster",
             className: `icon-btn icon-btn--plain${view.activeFilterCount ? " has-filters" : ""}`,
-            children: /* @__PURE__ */ jsx30(IconFilter, {})
+            children: /* @__PURE__ */ jsx31(IconFilter, {})
           }
         ),
-        view.activeFilterCount ? /* @__PURE__ */ jsx30("span", { className: "gbo-filter-count", children: view.activeFilterCount }) : null
+        view.activeFilterCount ? /* @__PURE__ */ jsx31("span", { className: "gbo-filter-count", children: view.activeFilterCount }) : null
       ] }) : null
     ] }) }) : null,
-    unreachable2.length ? /* @__PURE__ */ jsxs27("div", { className: "gbo-source-retry", role: "status", children: [
-      /* @__PURE__ */ jsx30(IconWarn, {}),
-      /* @__PURE__ */ jsx30("span", { children: unreachable2.length === 1 ? `${unreachable2[0].label || unreachable2[0].connectionId} is not reachable` : `${unreachable2.length} connections are not reachable` }),
-      /* @__PURE__ */ jsx30("button", { type: "button", className: "gbo-link-btn", disabled: retrying, onClick: () => void retrySources(), children: retrying ? "Retrying…" : "Retry" })
+    unreachable2.length ? /* @__PURE__ */ jsxs28("div", { className: "gbo-source-retry", role: "status", children: [
+      /* @__PURE__ */ jsx31(IconWarn, {}),
+      /* @__PURE__ */ jsx31("span", { children: unreachable2.length === 1 ? `${unreachable2[0].label || unreachable2[0].connectionId} is not reachable` : `${unreachable2.length} connections are not reachable` }),
+      /* @__PURE__ */ jsx31("button", { type: "button", className: "gbo-link-btn", disabled: retrying, onClick: () => void retrySources(), children: retrying ? "Retrying…" : "Retry" })
     ] }) : null,
-    /* @__PURE__ */ jsxs27(OverlayScroll, { wrapClassName: "gbo-roster-scroll", className: "sidebar__scroll gbo-roster-list", role: "list", children: [
-      pinned?.shown.length ? /* @__PURE__ */ jsx30("div", { className: `pinned gbo-pins is-${pinned.shown.length}`, role: "group", "aria-label": "Pinned bots", children: pinned.shown.map((bot) => {
-        const key = rowKey(bot);
-        return /* @__PURE__ */ jsx30(PinnedBot, { bot, size: PIN_AVATAR[pinned.shown.length - 1], selected: key === selectedKey, working: key === workingKey }, key);
-      }) }) : null,
-      roster.rows.length === 0 ? /* @__PURE__ */ jsx30("div", { className: "gbo-roster-empty", children: roster.origin === "none" && !roster.error ? "Loading bots…" : roster.error ? /* @__PURE__ */ jsxs27("div", { className: "gbo-empty-card", children: [
-        /* @__PURE__ */ jsxs27("span", { children: [
-          "Could not load bots: ",
-          roster.error
-        ] }),
-        /* @__PURE__ */ jsxs27("button", { type: "button", className: "gbo-btn is-small", disabled: retrying, onClick: () => void retrySources(), children: [
-          /* @__PURE__ */ jsx30(IconRefresh, {}),
-          retrying ? "Retrying…" : "Retry now"
-        ] })
-      ] }) : "No bots yet." }) : view.allHidden && !hiddenExpanded ? /* @__PURE__ */ jsxs27("div", { className: "gbo-empty-card", children: [
-        /* @__PURE__ */ jsx30("strong", { children: "All bots are hidden" }),
-        /* @__PURE__ */ jsx30("span", { children: "Hidden bots keep working; they are just not listed." }),
-        /* @__PURE__ */ jsx30("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
-      ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx30("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs27(Fragment17, { children: [
-        ownCount === 0 ? newSectionField : null,
-        list.map((section, index) => {
-          const isCollapsed = section.own ? section.collapsed : collapsed.includes(section.name);
-          const renaming = section.own && sectionEdit?.kind === "rename" && sectionEdit.id === section.id;
-          const head = renaming ? /* @__PURE__ */ jsx30(
-            SectionNameField,
-            {
-              initial: section.name,
-              label: `Rename ${section.name}`,
-              onCommit: (name) => {
-                renameOwnSection(section.id, name);
-                roster2.sectionEdit.set(null);
-              },
-              onCancel: () => roster2.sectionEdit.set(null)
-            }
-          ) : section.own || list.length > 1 || section.name !== "Unassigned" ? /* @__PURE__ */ jsx30(ContextMenuFor, { entries: sectionMenuEntries(section), children: /* @__PURE__ */ jsxs27(
-            "button",
-            {
-              type: "button",
-              className: `gbo-section-head${section.own ? " is-own" : ""}`,
-              "aria-expanded": !isCollapsed,
-              onClick: () => section.own ? toggleOwnSection(section.id) : toggleSection(section.name),
-              children: [
-                /* @__PURE__ */ jsx30(IconChevronDown, {}),
-                section.name,
-                /* @__PURE__ */ jsx30("span", { className: "gbo-count", children: section.bots.length })
-              ]
-            }
-          ) }) : null;
-          return /* @__PURE__ */ jsxs27(React28.Fragment, { children: [
-            /* @__PURE__ */ jsxs27("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
-              head,
-              isCollapsed ? null : section.bots.map((bot) => row(bot))
+    /* @__PURE__ */ jsxs28(
+      OverlayScroll,
+      {
+        wrapClassName: "gbo-roster-scroll",
+        className: "sidebar__scroll gbo-roster-list",
+        role: "list",
+        scrollRef,
+        overlay: /* @__PURE__ */ jsx31(UnreadPills, { sides: unreadPill.sides, jump: unreadPill.jump }),
+        children: [
+          pinned?.shown.length ? /* @__PURE__ */ jsx31("div", { className: `pinned gbo-pins is-${pinned.shown.length}`, role: "group", "aria-label": "Pinned bots", children: pinned.shown.map((bot) => {
+            const key = rowKey(bot);
+            return /* @__PURE__ */ jsx31(PinnedBot, { bot, size: PIN_AVATAR[pinned.shown.length - 1], selected: key === selectedKey, working: key === workingKey }, key);
+          }) }) : null,
+          roster.rows.length === 0 ? /* @__PURE__ */ jsx31("div", { className: "gbo-roster-empty", children: roster.origin === "none" && !roster.error ? "Loading bots…" : roster.error ? /* @__PURE__ */ jsxs28("div", { className: "gbo-empty-card", children: [
+            /* @__PURE__ */ jsxs28("span", { children: [
+              "Could not load bots: ",
+              roster.error
             ] }),
-            section.own && index === ownCount - 1 ? newSectionField : null
-          ] }, section.own ? `own:${section.id}` : `default:${section.name}`);
-        }),
-        view.showHiddenSection ? /* @__PURE__ */ jsxs27("div", { role: "group", "aria-label": "Hidden", className: "bot-list gbo-hidden-head", children: [
-          /* @__PURE__ */ jsxs27(
-            "button",
-            {
-              type: "button",
-              className: "gbo-section-head",
-              "aria-expanded": view.showHiddenRows,
-              disabled: view.hasConstraint,
-              onClick: () => roster2.hiddenExpanded.set(!hiddenExpanded),
-              children: [
-                /* @__PURE__ */ jsx30(IconChevronDown, {}),
-                "Hidden",
-                /* @__PURE__ */ jsx30("span", { className: "gbo-count", children: view.hasConstraint ? view.hidden.length : view.hiddenCount })
-              ]
-            }
-          ),
-          view.showHiddenRows ? hiddenListed.length ? hiddenListed.map((bot) => row(bot, true)) : /* @__PURE__ */ jsx30("div", { className: "gbo-roster-empty", children: "No hidden bot matches." }) : null
-        ] }) : null
-      ] }),
-      showGroups ? /* @__PURE__ */ jsx30(RoomsSection, { query }) : null
-    ] }),
-    /* @__PURE__ */ jsxs27("div", { className: "sidebar__footer gbo-roster-foot", title: roster.rows.length ? `${roster.rows.length} bots` : void 0, children: [
-      /* @__PURE__ */ jsx30("div", { className: "sidebar__fade" }),
-      /* @__PURE__ */ jsx30("div", { className: "account", children: /* @__PURE__ */ jsxs27("span", { className: "account__btn", children: [
-        /* @__PURE__ */ jsx30("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: person.initials }),
-        person.known ? /* @__PURE__ */ jsx30("span", { className: "account__name gbo-user-name", children: person.name }) : null
+            /* @__PURE__ */ jsxs28("button", { type: "button", className: "gbo-btn is-small", disabled: retrying, onClick: () => void retrySources(), children: [
+              /* @__PURE__ */ jsx31(IconRefresh, {}),
+              retrying ? "Retrying…" : "Retry now"
+            ] })
+          ] }) : "No bots yet." }) : view.allHidden && !hiddenExpanded ? /* @__PURE__ */ jsxs28("div", { className: "gbo-empty-card", children: [
+            /* @__PURE__ */ jsx31("strong", { children: "All bots are hidden" }),
+            /* @__PURE__ */ jsx31("span", { children: "Hidden bots keep working; they are just not listed." }),
+            /* @__PURE__ */ jsx31("button", { type: "button", className: "gbo-btn is-small", onClick: () => roster2.hiddenExpanded.set(true), children: "Show hidden" })
+          ] }) : list.length === 0 && hiddenListed.length === 0 && !pinned?.shown.length ? filters.kind === "groups" ? null : /* @__PURE__ */ jsx31("div", { className: "gbo-roster-empty", role: "status", children: query ? `No bot matches “${query}”.` : "No bot matches these filters." }) : /* @__PURE__ */ jsxs28(Fragment18, { children: [
+            ownCount === 0 ? newSectionField : null,
+            list.map((section, index) => {
+              const isCollapsed = section.own ? section.collapsed : collapsed.includes(section.name);
+              const renaming = section.own && sectionEdit?.kind === "rename" && sectionEdit.id === section.id;
+              const head = renaming ? /* @__PURE__ */ jsx31(
+                SectionNameField,
+                {
+                  initial: section.name,
+                  label: `Rename ${section.name}`,
+                  onCommit: (name) => {
+                    renameOwnSection(section.id, name);
+                    roster2.sectionEdit.set(null);
+                  },
+                  onCancel: () => roster2.sectionEdit.set(null)
+                }
+              ) : section.own || list.length > 1 || section.name !== "Unassigned" ? /* @__PURE__ */ jsx31(ContextMenuFor, { entries: sectionMenuEntries(section), children: /* @__PURE__ */ jsxs28(
+                "button",
+                {
+                  type: "button",
+                  className: `gbo-section-head${section.own ? " is-own" : ""}`,
+                  "aria-expanded": !isCollapsed,
+                  onClick: () => section.own ? toggleOwnSection(section.id) : toggleSection(section.name),
+                  children: [
+                    /* @__PURE__ */ jsx31(IconChevronDown, {}),
+                    section.name,
+                    /* @__PURE__ */ jsx31("span", { className: "gbo-count", children: section.bots.length })
+                  ]
+                }
+              ) }) : null;
+              return /* @__PURE__ */ jsxs28(React29.Fragment, { children: [
+                /* @__PURE__ */ jsxs28("div", { role: "group", "aria-label": section.name, className: "bot-list", children: [
+                  head,
+                  isCollapsed ? null : section.bots.map((bot) => row(bot))
+                ] }),
+                section.own && index === ownCount - 1 ? newSectionField : null
+              ] }, section.own ? `own:${section.id}` : `default:${section.name}`);
+            }),
+            view.showHiddenSection ? /* @__PURE__ */ jsxs28("div", { role: "group", "aria-label": "Hidden", className: "bot-list gbo-hidden-head", children: [
+              /* @__PURE__ */ jsxs28(
+                "button",
+                {
+                  type: "button",
+                  className: "gbo-section-head",
+                  "aria-expanded": view.showHiddenRows,
+                  disabled: view.hasConstraint,
+                  onClick: () => roster2.hiddenExpanded.set(!hiddenExpanded),
+                  children: [
+                    /* @__PURE__ */ jsx31(IconChevronDown, {}),
+                    "Hidden",
+                    /* @__PURE__ */ jsx31("span", { className: "gbo-count", children: view.hasConstraint ? view.hidden.length : view.hiddenCount })
+                  ]
+                }
+              ),
+              view.showHiddenRows ? hiddenListed.length ? hiddenListed.map((bot) => row(bot, true)) : /* @__PURE__ */ jsx31("div", { className: "gbo-roster-empty", children: "No hidden bot matches." }) : null
+            ] }) : null
+          ] }),
+          showGroups ? /* @__PURE__ */ jsx31(RoomsSection, { query }) : null
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxs28("div", { className: "sidebar__footer gbo-roster-foot", title: roster.rows.length ? `${roster.rows.length} bots` : void 0, children: [
+      /* @__PURE__ */ jsx31("div", { className: "sidebar__fade" }),
+      /* @__PURE__ */ jsx31("div", { className: "account", children: /* @__PURE__ */ jsxs28("span", { className: "account__btn", children: [
+        /* @__PURE__ */ jsx31("span", { className: "account__initials gbo-user-dot", "aria-hidden": "true", children: person.initials }),
+        person.known ? /* @__PURE__ */ jsx31("span", { className: "account__name gbo-user-name", children: person.name }) : null
       ] }) }),
-      canOpenSettings() ? /* @__PURE__ */ jsx30("button", { type: "button", className: "icon-btn gbo-foot-btn", title: "Hermes settings", "aria-label": "Open Hermes settings", onClick: () => void openSettings(), children: /* @__PURE__ */ jsx30(IconSettings, {}) }) : null
+      canOpenSettings() ? /* @__PURE__ */ jsx31("button", { type: "button", className: "icon-btn gbo-foot-btn", title: "Hermes settings", "aria-label": "Open Hermes settings", onClick: () => void openSettings(), children: /* @__PURE__ */ jsx31(IconSettings, {}) }) : null
     ] }),
-    /* @__PURE__ */ jsx30(RosterDialogs, {}),
-    /* @__PURE__ */ jsx30(
+    /* @__PURE__ */ jsx31(RosterDialogs, {}),
+    /* @__PURE__ */ jsx31(
       Confirm,
       {
         open: Boolean(sectionDelete),
@@ -63494,10 +63716,10 @@ function contractNotice(result) {
 }
 
 // src/ui/UsageMeter.tsx
-import { jsx as jsx31, jsxs as jsxs28 } from "react/jsx-runtime";
+import { jsx as jsx32, jsxs as jsxs29 } from "react/jsx-runtime";
 function Bar({ percent }) {
   if (percent === null) return null;
-  return /* @__PURE__ */ jsx31("span", { className: `gbo-meter-bar${percent >= 80 ? " is-high" : ""}`, role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-label": "Context used", children: /* @__PURE__ */ jsx31("span", { style: { width: `${percent}%` } }) });
+  return /* @__PURE__ */ jsx32("span", { className: `gbo-meter-bar${percent >= 80 ? " is-high" : ""}`, role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": percent, "aria-label": "Context used", children: /* @__PURE__ */ jsx32("span", { style: { width: `${percent}%` } }) });
 }
 function UsageStatusChip() {
   const u = useStore(roster2.usage);
@@ -63505,10 +63727,10 @@ function UsageStatusChip() {
   const label = usageContextLabel(u.usage);
   if (!enabled || !u.runtimeId || !label) return null;
   const cost = costLabel(u.usage);
-  return /* @__PURE__ */ jsxs28("span", { "data-gbo-root": "", className: "gbo-status-meter", style: { height: "auto", width: "auto" }, title: "Open Bot Chat: context used", children: [
-    /* @__PURE__ */ jsx31(Bar, { percent: contextPercent(u.usage) }),
-    /* @__PURE__ */ jsx31("span", { children: label }),
-    cost ? /* @__PURE__ */ jsxs28("span", { children: [
+  return /* @__PURE__ */ jsxs29("span", { "data-gbo-root": "", className: "gbo-status-meter", style: { height: "auto", width: "auto" }, title: "Open Bot Chat: context used", children: [
+    /* @__PURE__ */ jsx32(Bar, { percent: contextPercent(u.usage) }),
+    /* @__PURE__ */ jsx32("span", { children: label }),
+    cost ? /* @__PURE__ */ jsxs29("span", { children: [
       "· ",
       cost
     ] }) : null
@@ -63578,7 +63800,7 @@ function unwireParity() {
 }
 
 // src/index.tsx
-import { jsx as jsx32 } from "react/jsx-runtime";
+import { jsx as jsx33 } from "react/jsx-runtime";
 var contractEvents = createEventLog();
 var NOTICE_FLAG = "__grokbotOverrideContractNoticed";
 var CONTRACT_PROBE_MS = 8e3;
@@ -63664,13 +63886,13 @@ var index_default = {
   description: 'A chat-app Bot Mode screen (roster, Bot Chat, profile panel) on the same chats and gateway as Hermes Bot Mode. Palette: "Grokbot Override: toggle" switches back to stock Bot Mode instantly.',
   register(ctx) {
     setRenderers({
-      roster: () => /* @__PURE__ */ jsx32(OverrideBoundary, { area: "roster", children: /* @__PURE__ */ jsx32(RosterPane, {}) }),
-      workspace: () => /* @__PURE__ */ jsx32(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx32(ChatWorkspace, {}) }),
+      roster: () => /* @__PURE__ */ jsx33(OverrideBoundary, { area: "roster", children: /* @__PURE__ */ jsx33(RosterPane, {}) }),
+      workspace: () => /* @__PURE__ */ jsx33(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx33(ChatWorkspace, {}) }),
       tab: (slot) => {
         trackChatSlot(slot);
-        return /* @__PURE__ */ jsx32(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx32(ChatWorkspace, { slot }) });
+        return /* @__PURE__ */ jsx33(OverrideBoundary, { area: "chat", children: /* @__PURE__ */ jsx33(ChatWorkspace, { slot }) });
       },
-      room: (slot) => /* @__PURE__ */ jsx32(OverrideBoundary, { area: "room", children: /* @__PURE__ */ jsx32(RoomWorkspace, { slot }) })
+      room: (slot) => /* @__PURE__ */ jsx33(OverrideBoundary, { area: "room", children: /* @__PURE__ */ jsx33(RoomWorkspace, { slot }) })
     });
     ctx.registerMany([
       {
@@ -63763,7 +63985,7 @@ var index_default = {
         id: "usage-meter",
         area: sdk.STATUSBAR_AREAS?.right ?? "statusBar.right",
         order: 90,
-        render: () => /* @__PURE__ */ jsx32(OverrideBoundary, { area: "usage", compact: true, children: /* @__PURE__ */ jsx32(UsageStatusChip, {}) })
+        render: () => /* @__PURE__ */ jsx33(OverrideBoundary, { area: "usage", compact: true, children: /* @__PURE__ */ jsx33(UsageStatusChip, {}) })
       },
       {
         id: "palette-self-check",

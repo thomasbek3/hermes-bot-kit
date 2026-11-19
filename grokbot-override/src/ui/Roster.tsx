@@ -39,7 +39,8 @@ import { attentionFor, retrySources } from './rosterActions'
 import { botMenuEntries, filterMenuEntries, newMenuEntries, sectionMenuEntries } from './RosterMenus'
 import { roster2 } from './rosterStores'
 import { useStore } from './store'
-import { UnreadDot } from './Unread'
+import { RunningDot, UnreadDot } from './Unread'
+import { UnreadPills, useUnreadPill } from './UnreadPill'
 import { OverlayScroll } from './OverlayScroll'
 import { RoomsSection } from './Rooms'
 
@@ -72,11 +73,11 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }: { 
           onClick={() => selectBot(bot)}
           onPointerEnter={() => warmBot(bot)}
         >
-          {/* The live status dot (unread, working, needs input) is a badge on
-              the avatar; the idle / never-run dot is not drawn. */}
+          {/* Hermes's running cue sits on the avatar; the unread dot at the
+              row's right edge (Unread.tsx). */}
           <span className="bot-row__avatar gbo-row-face">
             <BotAvatar shapeKey={rowKey(bot)} name={bot.name} meta={meta} size={40} working={working} />
-            <UnreadDot bot={bot} />
+            <RunningDot bot={bot} />
           </span>
           <span className="bot-row__text gbo-row-main">
             <span className="gbo-row-line">
@@ -95,6 +96,8 @@ function BotRow({ bot, selected, working, livePreview, now, hidden = false }: { 
             </span>
             <span className={`bot-row__preview gbo-row-preview${working ? ' is-working' : ''}`}>{line}</span>
           </span>
+          {/* Grok Bot's unread dot: blue, at the row's right edge. */}
+          <UnreadDot bot={bot} />
         </button>
       </ContextMenuFor>
       <MenuButton entries={entries} label={`Actions for ${name}`} className="icon-btn gbo-row-more" />
@@ -166,7 +169,7 @@ const PIN_AVATAR = [67, 58, 52, 46]
 
 /** A bot pinned to the top: a big round avatar with its name under it. A
  *  click opens its chat exactly as its row does; the row's menu is on
- *  right-click; the unread / working badge sits on the avatar. */
+ *  right-click; the unread dot and the running cue sit on the avatar. */
 function PinnedBot({ bot, size, selected, working }: { bot: any; size: number; selected: boolean; working: boolean }) {
   const meta = metaFor(bot)
   const name = displayName(bot, meta)
@@ -184,6 +187,7 @@ function PinnedBot({ bot, size, selected, working }: { bot: any; size: number; s
         >
           <span className="pinned__avatar gbo-row-face gbo-pin-face">
             <BotAvatar shapeKey={rowKey(bot)} name={bot.name} meta={meta} size={size} working={working} />
+            <RunningDot bot={bot} />
             <UnreadDot bot={bot} />
           </span>
           <span className="pinned__label gbo-pin-name">{name}</span>
@@ -257,6 +261,8 @@ export function RosterPane() {
   const [searching, setSearching] = React.useState(false)
   const now = useNow()
   const rootRef = React.useRef<HTMLDivElement | null>(null)
+  const scrollRef = React.useRef<any>(null)
+  const unreadPill = useUnreadPill(scrollRef)
   useRosterShown(rootRef)
   usePointerMode(rootRef)
   const roster = app.roster.get()
@@ -391,7 +397,13 @@ export function RosterPane() {
           </button>
         </div>
       ) : null}
-      <OverlayScroll wrapClassName="gbo-roster-scroll" className="sidebar__scroll gbo-roster-list" role="list">
+      <OverlayScroll
+        wrapClassName="gbo-roster-scroll"
+        className="sidebar__scroll gbo-roster-list"
+        role="list"
+        scrollRef={scrollRef}
+        overlay={<UnreadPills sides={unreadPill.sides} jump={unreadPill.jump} />}
+      >
         {pinned?.shown.length ? (
           <div className={`pinned gbo-pins is-${pinned.shown.length}`} role="group" aria-label="Pinned bots">
             {pinned.shown.map((bot: any) => {
