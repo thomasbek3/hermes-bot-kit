@@ -1,7 +1,10 @@
 // The browser parts the "More unreads" pill needs, faked for jsdom (which has
 // no layout, no IntersectionObserver, no ResizeObserver, no matchMedia):
-// - a layout: the roster scroller is `view.height` tall at y 0; rows stack
-//   `rowHeight` apart in document order, moved by the scroller's scrollTop;
+// - a layout: the roster scroller is `view.height` CSS px tall at y 0; rows
+//   stack `rowHeight` apart in document order, moved by the scroller's
+//   scrollTop. `view.zoom` (default 1) is the renderer's CSS zoom (Hermes's
+//   browser-hosted UI scale): rects come out in zoomed px while scrollTop and
+//   clientHeight stay in the scroller's CSS px, as in Chromium;
 // - an IntersectionObserver with Chromium's notification rule: a target is
 //   reported when first observed, then only when its intersecting state or
 //   threshold bucket changes; `report()` evaluates the layout now, and
@@ -15,17 +18,30 @@ const SCROLLER = '.gbo-roster-list'
 export function installLayout({ view, rowHeight }) {
   const proto = window.Element.prototype
   const saved = proto.getBoundingClientRect
+  const zoom = () => view.zoom || 1
   proto.getBoundingClientRect = function () {
     const s = document.querySelector(SCROLLER)
-    if (this === s) return { top: 0, bottom: view.height, left: 0, right: 280, width: 280, height: view.height }
+    const z = zoom()
+    if (this === s) return { top: 0, bottom: view.height * z, left: 0, right: 280 * z, width: 280 * z, height: view.height * z }
     if (s && this.classList?.contains('gbo-row-wrap') && s.contains(this)) {
       const i = [...s.querySelectorAll('.gbo-row-wrap')].indexOf(this)
-      const top = i * rowHeight - s.scrollTop
-      return { top, bottom: top + rowHeight, left: 0, right: 280, width: 280, height: rowHeight }
+      const top = (i * rowHeight - s.scrollTop) * z
+      return { top, bottom: top + rowHeight * z, left: 0, right: 280 * z, width: 280 * z, height: rowHeight * z }
     }
     return saved.call(this)
   }
-  return () => (proto.getBoundingClientRect = saved)
+  const html = window.HTMLElement.prototype
+  const savedClient = Object.getOwnPropertyDescriptor(window.Element.prototype, 'clientHeight')
+  Object.defineProperty(html, 'clientHeight', {
+    configurable: true,
+    get() {
+      return this === document.querySelector(SCROLLER) ? view.height : savedClient?.get?.call(this) ?? 0
+    }
+  })
+  return () => {
+    proto.getBoundingClientRect = saved
+    delete html.clientHeight
+  }
 }
 
 export function installObserver() {

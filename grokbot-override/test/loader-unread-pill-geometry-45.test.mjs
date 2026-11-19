@@ -8,7 +8,10 @@
 //      before the rows in tab (DOM) order;
 // L-4  selecting a row (an ordinary state change) re-registers nothing with
 //      the observer;
-// L-5  with Reduce Motion on, the jump is instant.
+// L-5  with Reduce Motion on, the jump is instant (one scroll, to the row,
+//      then focus there);
+// L2-1 at 150 % UI scale (CSS zoom), the pill lands the row in view;
+// L2-3 an avatar's contents being replaced re-measures no row.
 // Fakes: test/fixtures/pill-env.mjs.
 
 import assert from 'node:assert/strict'
@@ -136,20 +139,67 @@ test('loader-faithful unread look: pill geometry after resizes and late entries,
   await settle()
   assert.deepEqual(io.calls(), before, 'L-4: no observe / unobserve on a selection')
 
-  // L-5: Reduce Motion on: the jump is instant.
+  // L-5: Reduce Motion on: activation scrolls once, instantly, to the
+  // nearest unread row below (Bot 19 at 1140: centred, 1140 - 120), and
+  // moves focus there.
   const jumps = []
   scroller().scrollTo = options => {
     jumps.push(options)
     scroller().scrollTop = options.top
   }
+  const focusedButton = name => rowEl(name).querySelector('button.gbo-row')
   motion.reduce = true
   pill('down').click()
-  assert.notEqual(jumps.at(-1)?.behavior, 'smooth', 'L-5: no smooth scroll with Reduce Motion')
+  assert.equal(jumps.length, 1, 'L-5: exactly one scroll')
+  assert.deepEqual(jumps[0], { top: 1140 - (300 - ROW_H) / 2, behavior: 'auto' }, 'L-5: to the row, instantly')
+  assert.ok(rosterEl.ownerDocument.activeElement === focusedButton('Bot 19'), 'L-5: focus on the destination row')
   motion.reduce = false
   scrollTo(600)
   io.report()
   await waitFor(() => pill('down'), 'the pill again')
   pill('down').click()
-  assert.equal(jumps.at(-1)?.behavior, 'smooth', 'smooth otherwise')
+  assert.equal(jumps.length, 2)
+  assert.deepEqual(jumps[1], { top: 1140 - (300 - ROW_H) / 2, behavior: 'smooth' }, 'smooth otherwise')
+
+  // L2-3: an avatar's contents are replaced (a picture loads): the rows did
+  // not move, so no unread row is measured again.
+  const proto = window.Element.prototype
+  const layoutRead = proto.getBoundingClientRect
+  let reads = 0
+  proto.getBoundingClientRect = function () {
+    reads += 1
+    return layoutRead.call(this)
+  }
+  const face = rowEl('Bot 05').querySelector('.gbo-row-face')
+  const picture = rosterEl.ownerDocument.createElement('img')
+  face.replaceChild(picture, face.firstElementChild)
+  await settle()
+  await settle()
+  proto.getBoundingClientRect = layoutRead
+  assert.equal(reads, 0, `L2-3: an avatar swap re-measures nothing (${reads} rect reads)`)
+
+  // L2-1: at 150 % UI scale (CSS zoom) the pill scrolls to the row in the
+  // scroller's own units, and the focused row ends up in view.
+  view.zoom = 1.5
+  ro.resize()
+  scrollTo(0)
+  io.report()
+  await settle()
+  unread.delete('bot00-root')
+  unread.delete('bot07-root')
+  unread.delete('bot19-root')
+  unread.add('bot15-root') // CSS y 900-960, the only unread row
+  emit()
+  await waitFor(() => io.observed().length === 1 && io.observed()[0] === rowEl('Bot 15'), 'only Bot 15 watched')
+  await waitFor(() => pill('down'), 'the pill at 150 %')
+  jumps.length = 0
+  pill('down').click()
+  assert.equal(jumps.length, 1)
+  const landed = jumps[0].top
+  const cssTop = 15 * ROW_H - landed
+  assert.ok(cssTop >= 0 && cssTop + ROW_H <= 300, `L2-1: the focused row is in view after the jump (scrollTop ${landed}, row at ${cssTop})`)
+  assert.equal(landed, 15 * ROW_H - (300 - ROW_H) / 2, 'centred in CSS px')
+  assert.ok(rosterEl.ownerDocument.activeElement === focusedButton('Bot 15'))
+  view.zoom = 1
   assert.deepEqual(errors.map(e => `${e.kind}: ${e.error?.message}`), [])
 })

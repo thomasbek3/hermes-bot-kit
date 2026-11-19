@@ -9,10 +9,12 @@
 //
 // Geometry: each unread row's offset in the list and its height, and the
 // view's height, are measured together in one synchronous read (the row's
-// rect, the scroller's rect and its scrollTop at the same moment), only when
+// rect, the scroller's rect and its scrollTop at the same moment), in the
+// scroller's CSS px (rects are divided by the UI scale, CSS zoom), only when
 // the structure or the layout changes: a row joins (its dot appears), rows
-// are added, removed or moved (MutationObserver, element changes only), or
-// the scroller is resized (ResizeObserver). Which side a row lies on is then
+// are added, removed or moved (MutationObserver; a change inside a row,
+// such as an avatar's picture, moves none), or the scroller is resized
+// (ResizeObserver). Which side a row lies on is then
 // worked out from those offsets and the CURRENT scrollTop, with one rule
 // (core/unreadPill.js sideOf: less than half in view is out of view) for
 // showing the pill and for picking its target. An IntersectionObserver entry
@@ -48,10 +50,23 @@ function touchesMembership(record: any) {
   return Boolean(target && typeof target.closest === 'function' && target.closest('.gbo-unread-dot'))
 }
 
-/** A childList record that adds or removes elements (a structure change). */
+/** A childList record that adds or removes elements. */
 function elementsIn(record: any) {
   if (record.type !== 'childList') return false
   for (const node of [...Array.from(record.addedNodes || []), ...Array.from(record.removedNodes || [])] as any[]) if (node?.nodeType === 1) return true
+  return false
+}
+
+/** A change that can move rows (a structure change): elements added or
+ *  removed outside any row, or a row itself added or removed. A change
+ *  inside a row (an avatar's picture, a preview, a dot) moves no row. */
+function movesRows(record: any) {
+  if (!elementsIn(record)) return false
+  const target = record.target
+  if (!(target && typeof target.closest === 'function' && target.closest(ITEM_SELECTOR))) return true
+  for (const node of [...Array.from(record.addedNodes || []), ...Array.from(record.removedNodes || [])] as any[]) {
+    if (node?.nodeType === 1 && (node.matches?.(ITEM_SELECTOR) || node.querySelector?.(ITEM_SELECTOR))) return true
+  }
   return false
 }
 
@@ -85,18 +100,30 @@ export function useUnreadPill(scrollerRef: React.MutableRefObject<any>) {
       setSides(prev => (prev.up === up && prev.down === down ? prev : { up, down }))
     }
 
-    /** One synchronous read: the scroller's box and scrollTop and each
-     *  given row's rect, so offsets and the view height belong together. */
+    /** Rect px per CSS px of the scroller: Hermes's UI scale is CSS zoom
+     *  in the browser-hosted renderer (lib/browser-zoom.ts), so rects come
+     *  out scaled while scrollTop and clientHeight do not. */
+    function scaleOf(box: any) {
+      const css = scroller!.clientHeight
+      const drawn = box.bottom - box.top
+      return css > 0 && drawn > 0 ? drawn / css : 1
+    }
+
+    /** One synchronous read: the scroller's box, scale and scrollTop and
+     *  each given row's rect, so offsets and the view height belong
+     *  together; all in the scroller's CSS px. */
     function measure(rows: Iterable<Element>) {
+      const list = [...rows].filter(el => watched.has(el))
+      if (!list.length && viewHeight > 0) return
       const box = scroller!.getBoundingClientRect()
+      const scale = scaleOf(box)
       const top = scroller!.scrollTop
-      viewHeight = Math.max(0, box.bottom - box.top)
-      for (const el of rows) {
-        const watch = watched.get(el)
-        if (!watch) continue
+      viewHeight = Math.max(0, (box.bottom - box.top) / scale)
+      for (const el of list) {
+        const watch = watched.get(el)!
         const rect = el.getBoundingClientRect()
-        watch.offset = rect.top - box.top + top
-        watch.height = Math.max(0, rect.bottom - rect.top)
+        watch.offset = (rect.top - box.top) / scale + top
+        watch.height = Math.max(0, (rect.bottom - rect.top) / scale)
       }
     }
 
@@ -161,7 +188,7 @@ export function useUnreadPill(scrollerRef: React.MutableRefObject<any>) {
     }
 
     const mo = new MO((records: any[]) => {
-      if (records.some(touchesMembership)) schedule(records.some(elementsIn))
+      if (records.some(touchesMembership)) schedule(records.some(movesRows))
     })
     mo.observe(scroller, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'role'] })
     // A resize changes the view's height and the rows' offsets.
@@ -172,11 +199,19 @@ export function useUnreadPill(scrollerRef: React.MutableRefObject<any>) {
     collect()
 
     jumpRef.current = (direction: Direction) => {
+      // Fresh rects, turned into the scroller's CSS px (scrollTop's units).
       const box = scroller.getBoundingClientRect()
-      const candidates = [...watched].filter(([, watch]) => watch.side === direction).map(([el]) => ({ el, rect: el.getBoundingClientRect() }))
-      const target = nearestUnread(direction, candidates, box)
+      const scale = scaleOf(box)
+      const view = { top: 0, bottom: (box.bottom - box.top) / scale }
+      const candidates = [...watched]
+        .filter(([, watch]) => watch.side === direction)
+        .map(([el]) => {
+          const rect = el.getBoundingClientRect()
+          return { el, rect: { top: (rect.top - box.top) / scale, bottom: (rect.bottom - box.top) / scale } }
+        })
+      const target = nearestUnread(direction, candidates, view)
       if (!target) return
-      const top = scrollTopFor(target.rect, box, scroller.scrollTop)
+      const top = scrollTopFor(target.rect, view, scroller.scrollTop)
       if (typeof (scroller as any).scrollTo === 'function') (scroller as any).scrollTo({ top, behavior: reducedMotion() ? 'auto' : 'smooth' })
       else scroller.scrollTop = top
       // The pill goes away once the row shows: focus moves to the row.

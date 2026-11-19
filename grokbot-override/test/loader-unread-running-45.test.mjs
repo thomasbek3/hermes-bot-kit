@@ -66,9 +66,19 @@ test('loader-faithful unread look: a running bot keeps Hermes\'s running cue on 
     const cs = getComputedStyle(el)
     return cs.width !== '0px' && cs.height !== '0px' && cs.width !== '' && cs.height !== ''
   }
+  // Hermes's own utility classes for the dot (Tailwind in the app): the
+  // hollow states are drawn by their 1px border alone.
+  const tw = rosterEl.ownerDocument.createElement('style')
+  tw.textContent = '.border{border-width:1px;border-style:solid}.rounded-full{border-radius:9999px}'
+  rosterEl.ownerDocument.head.appendChild(tw)
   for (const [name, state] of [['Security', 'working'], ['Finch', 'stalled'], ['Gull', 'background']]) {
     const inner = rowOf(name).querySelector('.gbo-row-face .gbo-run-dot [role="status"]')
     assert.ok(inner && visibleChain(inner) && sized(inner), `${state}: the running cue's dot is visible and sized`)
+    assert.equal(getComputedStyle(rowOf(name).querySelector('.gbo-run-dot')).position, 'absolute', `${state}: the cue is placed on the avatar (absolute)`)
+    if (state !== 'working') {
+      const width = getComputedStyle(inner).borderTopWidth
+      assert.ok(width && width !== '0px' && width !== '0', `${state}: the hollow dot keeps its border (${width})`)
+    }
     assert.ok(!shown(rowOf(name).querySelector('.gbo-unread-dot')), `${state}: no unread dot`)
   }
   for (const [name, state] of [['Owl', 'unread'], ['Hawk', 'needs-input']]) {

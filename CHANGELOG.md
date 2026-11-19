@@ -8,8 +8,9 @@
   running cue (working, stalled, background) keeps its own dot on the avatar. A blue "More unreads" pill (#1366D6,
   white text at 5.4:1; hover #0B59BE) floats at the top or bottom of the roster while an unread row is less than half
   in view that way; a click (or a key: the pills are buttons named "More unreads above" / "below" and come before the
-  rows in tab order) scrolls to the nearest one, instantly with Reduce Motion, and moves focus to it. Row offsets and the
-  view height are measured together on structure or layout changes (MutationObserver, ResizeObserver), so a resized
+  rows in tab order) scrolls to the nearest one, instantly with Reduce Motion, and moves focus to it, also at a UI scale
+  other than 100 % (CSS zoom). Row offsets and the view height are measured together on structure or layout changes
+  (MutationObserver, not for changes inside a row such as an avatar's picture; ResizeObserver), so a resized
   roster, a late observer entry or a large scroll jump never turns the pill the wrong way; scrolling reads no layout and
   selecting a row re-registers nothing. Remote and SSH bots have no dot yet. New `src/core/unreadPill.js`,
   `src/ui/UnreadPill.tsx`; tests `test/unread-look-45.test.mjs`, `test/loader-unread-dot-45.test.mjs`,

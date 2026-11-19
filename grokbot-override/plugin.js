@@ -63043,6 +63043,15 @@ function elementsIn(record) {
   for (const node of [...Array.from(record.addedNodes || []), ...Array.from(record.removedNodes || [])]) if (node?.nodeType === 1) return true;
   return false;
 }
+function movesRows(record) {
+  if (!elementsIn(record)) return false;
+  const target = record.target;
+  if (!(target && typeof target.closest === "function" && target.closest(ITEM_SELECTOR))) return true;
+  for (const node of [...Array.from(record.addedNodes || []), ...Array.from(record.removedNodes || [])]) {
+    if (node?.nodeType === 1 && (node.matches?.(ITEM_SELECTOR) || node.querySelector?.(ITEM_SELECTOR))) return true;
+  }
+  return false;
+}
 function useUnreadPill(scrollerRef) {
   const [sides, setSides] = React28.useState({ up: false, down: false });
   const jumpRef = React28.useRef(null);
@@ -63069,16 +63078,23 @@ function useUnreadPill(scrollerRef) {
       }
       setSides((prev) => prev.up === up && prev.down === down ? prev : { up, down });
     };
+    function scaleOf(box) {
+      const css = scroller.clientHeight;
+      const drawn = box.bottom - box.top;
+      return css > 0 && drawn > 0 ? drawn / css : 1;
+    }
     function measure(rows) {
+      const list = [...rows].filter((el) => watched.has(el));
+      if (!list.length && viewHeight > 0) return;
       const box = scroller.getBoundingClientRect();
+      const scale = scaleOf(box);
       const top = scroller.scrollTop;
-      viewHeight = Math.max(0, box.bottom - box.top);
-      for (const el of rows) {
+      viewHeight = Math.max(0, (box.bottom - box.top) / scale);
+      for (const el of list) {
         const watch = watched.get(el);
-        if (!watch) continue;
         const rect = el.getBoundingClientRect();
-        watch.offset = rect.top - box.top + top;
-        watch.height = Math.max(0, rect.bottom - rect.top);
+        watch.offset = (rect.top - box.top) / scale + top;
+        watch.height = Math.max(0, (rect.bottom - rect.top) / scale);
       }
     }
     function reside() {
@@ -63133,7 +63149,7 @@ function useUnreadPill(scrollerRef) {
       scrollFrame = frameOf(reside);
     }
     const mo = new MO((records) => {
-      if (records.some(touchesMembership)) schedule(records.some(elementsIn));
+      if (records.some(touchesMembership)) schedule(records.some(movesRows));
     });
     mo.observe(scroller, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "role"] });
     const ro = typeof RO === "function" ? new RO(() => schedule(true)) : null;
@@ -63143,10 +63159,15 @@ function useUnreadPill(scrollerRef) {
     collect();
     jumpRef.current = (direction) => {
       const box = scroller.getBoundingClientRect();
-      const candidates2 = [...watched].filter(([, watch]) => watch.side === direction).map(([el]) => ({ el, rect: el.getBoundingClientRect() }));
-      const target = nearestUnread(direction, candidates2, box);
+      const scale = scaleOf(box);
+      const view = { top: 0, bottom: (box.bottom - box.top) / scale };
+      const candidates2 = [...watched].filter(([, watch]) => watch.side === direction).map(([el]) => {
+        const rect = el.getBoundingClientRect();
+        return { el, rect: { top: (rect.top - box.top) / scale, bottom: (rect.bottom - box.top) / scale } };
+      });
+      const target = nearestUnread(direction, candidates2, view);
       if (!target) return;
-      const top = scrollTopFor2(target.rect, box, scroller.scrollTop);
+      const top = scrollTopFor2(target.rect, view, scroller.scrollTop);
       if (typeof scroller.scrollTo === "function") scroller.scrollTo({ top, behavior: reducedMotion() ? "auto" : "smooth" });
       else scroller.scrollTop = top;
       const button = target.el.querySelector(ITEM_BUTTON);
