@@ -336,4 +336,75 @@ set -e
 [ "${status}" -eq 2 ] || fail "KIT_CARDS_SKILL=yes exited ${status}, want 2"
 echo "OK  KIT_CARDS_SKILL rejects other values"
 
+# Newest-release resolution (remote mode, no checkout next to the script):
+# a fake curl answers the GitHub API and serves raw files from this tree.
+remote_dir=$(mktemp -d)
+CLEANUP+=("${remote_dir}")
+cp "${INSTALLER}" "${remote_dir}/install.sh"
+fake=$(mktemp -d)
+CLEANUP+=("${fake}")
+cat > "${fake}/curl" <<'EOF'
+#!/usr/bin/env bash
+# Fake curl: GitHub API per FAKE_API, raw files from FAKE_ROOT, refs logged.
+out="" url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -H|--connect-timeout|--max-time) shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+case "${url}" in
+  *api.github.com*|*releases/latest*)
+    case "${FAKE_API}" in
+      ok) printf '{\n  "url": "x",\n  "tag_name": "v2099.01.02",\n  "name": "x"\n}\n' ;;
+      garbage) printf '{"tag_name": "main; rm -rf /"}\n' ;;
+      old) printf '{"tag_name": "v2020.01.01"}\n' ;;
+      *) exit 22 ;;
+    esac
+    exit 0 ;;
+  https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/*)
+    rest=${url#https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/}
+    ref=${rest%%/*}
+    rel=${rest#*/}
+    printf '%s\n' "${ref}" >> "${FAKE_LOG}"
+    [ -f "${FAKE_ROOT}/${rel}" ] || exit 22
+    if [ -n "${out}" ]; then cat "${FAKE_ROOT}/${rel}" > "${out}"; else cat "${FAKE_ROOT}/${rel}"; fi ;;
+  *) exit 22 ;;
+esac
+EOF
+chmod +x "${fake}/curl"
+fallback=$(sed -n 's/^KIT_FALLBACK_REF="\(.*\)"/\1/p' "${INSTALLER}")
+[ -n "${fallback}" ] || fail "install.sh has no KIT_FALLBACK_REF"
+
+remote_install() {
+  # remote_install <api mode> <log> <home> [KIT_REF]
+  env -i PATH="${fake}:/usr/bin:/bin" HOME="${HOME:-/tmp}" FAKE_API="$1" FAKE_LOG="$2" FAKE_ROOT="${ROOT}" \
+    HERMES_HOME="$3" ${4:+KIT_REF="$4"} bash "${remote_dir}/install.sh"
+}
+
+for mode in ok down garbage old; do
+  log=$(mktemp)
+  CLEANUP+=("${log}")
+  rhome=$(new_home)
+  out=$(remote_install "${mode}" "${log}" "${rhome}") || fail "remote install (${mode}) failed"
+  case "${mode}" in
+    ok) want="v2099.01.02" ;;
+    *) want="${fallback}" ;;
+  esac
+  printf '%s\n' "${out}" | grep -q "Release          -> ${want}" || fail "remote install (${mode}) did not report ${want}"
+  [ "$(sort -u "${log}")" = "${want}" ] || fail "remote install (${mode}) fetched refs: $(sort -u "${log}" | tr '\n' ' ')"
+  assert_plugin "${rhome}" "computer-viewer/plugin.js"
+  assert_plugin "${rhome}" "grokbot-override/plugin.js"
+  echo "OK  remote install, API ${mode} -> ${want}"
+done
+
+log=$(mktemp)
+CLEANUP+=("${log}")
+rhome=$(new_home)
+remote_install ok "${log}" "${rhome}" v2001.02.03 >/dev/null || fail "remote install with KIT_REF failed"
+[ "$(sort -u "${log}")" = "v2001.02.03" ] || fail "KIT_REF was not used as given"
+echo "OK  KIT_REF overrides the newest release"
+
 echo "test-install.sh: all passed"

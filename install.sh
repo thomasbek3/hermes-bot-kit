@@ -8,9 +8,14 @@
 #
 # or from a clone:  bash install.sh
 #
+# Which release: the newest GitHub release (asked of the GitHub API), or the
+# tag this script was published with when the API cannot be reached. Every file
+# is checked against that release's MANIFEST.sha256 before anything is copied.
+#
 # Env knobs:
 #   HERMES_HOME            Hermes home dir (default ~/.hermes)
-#   KIT_REF                git ref to fetch (default v2026.11.16.3)
+#   KIT_REF                release tag to install (default: newest release,
+#                          falling back to v2026.11.16.3)
 #   KIT_SOURCE_DIR         local checkout to copy from (auto-detected from a clone)
 #   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
 #   KIT_SKIP_COMPUTER=1    skip the Computer viewer
@@ -22,8 +27,12 @@
 #   KIT_CARDS_PROFILES     comma-separated profiles for the skill (default: all)
 set -euo pipefail
 
-KIT_REF="${KIT_REF:-v2026.11.16.3}"
-RAW_BASE="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
+# The tag this script was released with (scripts/release.sh rewrites it).
+KIT_FALLBACK_REF="v2026.11.16.3"
+KIT_REPO="thomasbek3/hermes-bot-kit"
+KIT_RELEASES_API="${KIT_RELEASES_API:-https://api.github.com/repos/${KIT_REPO}/releases/latest}"
+KIT_REF_FROM_USER="${KIT_REF:-}"
+KIT_REF="${KIT_REF:-${KIT_FALLBACK_REF}}"
 PLUGIN_ROOT="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"
 GROKBOT_REL="grokbot-override/plugin.js"
 HERMES_ROOT="${HERMES_HOME:-$HOME/.hermes}"
@@ -40,9 +49,13 @@ Install the Hermes Bot Kit desktop plugins.
 
 or from a clone:  bash install.sh
 
+Installs the newest GitHub release (falls back to v2026.11.16.3 when the
+GitHub API cannot be reached) and checks every file against that release's
+MANIFEST.sha256 before copying anything.
+
 Env knobs:
   HERMES_HOME            Hermes home dir (default ~/.hermes)
-  KIT_REF                git ref to fetch (default v2026.11.16.3)
+  KIT_REF                release tag to install (default: newest release)
   KIT_SOURCE_DIR         local checkout to copy from
   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
   KIT_SKIP_COMPUTER=1    skip the Computer viewer
@@ -66,12 +79,30 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
-case "${KIT_REF}" in
-  v*) ;;
-  *)
-    echo "WARNING: installing from mutable ref '${KIT_REF}'; no release manifest guarantees apply." >&2
-    ;;
-esac
+# vYYYY.MM.DD or vYYYY.MM.DD.N: the only shape a release tag has.
+is_release_tag() {
+  printf '%s\n' "$1" | grep -Eqx 'v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{1,3})?'
+}
+
+# Numeric compare of two release tags: true when $1 is older than $2.
+tag_older_than() {
+  awk -v a="${1#v}" -v b="${2#v}" 'BEGIN {
+    na = split(a, x, "."); nb = split(b, y, ".")
+    for (i = 1; i <= 4; i++) { p = (i <= na) ? x[i] + 0 : 0; q = (i <= nb) ? y[i] + 0 : 0
+      if (p < q) exit 0; if (p > q) exit 1 }
+    exit 1 }'
+}
+
+# The newest release's tag from the GitHub API, or nothing (no network, rate
+# limit, an unexpected answer). Only a well-formed release tag is accepted.
+latest_release_tag() {
+  local body tag
+  command -v curl >/dev/null 2>&1 || return 1
+  body=$(curl -fsSL --connect-timeout 5 --max-time 15 -H 'Accept: application/vnd.github+json' "${KIT_RELEASES_API}" 2>/dev/null) || return 1
+  tag=$(printf '%s' "${body}" | tr -d '\r\n' | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  is_release_tag "${tag}" || return 1
+  printf '%s\n' "${tag}"
+}
 
 case "${KIT_CARDS_SKILL:-0}" in
   0|1|remove) ;;
@@ -144,6 +175,32 @@ if [ -n "${KIT_SOURCE_DIR:-}" ]; then
 elif [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/computer-viewer/plugin.js" ]; then
   SOURCE_DIR="${SCRIPT_DIR}"
 fi
+
+# Which release to fetch (not needed when copying from a local checkout).
+if [ -z "${SOURCE_DIR}" ]; then
+  if [ -z "${KIT_REF_FROM_USER}" ] || [ "${KIT_REF_FROM_USER}" = "latest" ]; then
+    if resolved=$(latest_release_tag) && ! tag_older_than "${resolved}" "${KIT_FALLBACK_REF}"; then
+      KIT_REF="${resolved}"
+      echo "Release          -> ${KIT_REF} (newest GitHub release)"
+    elif [ -n "${resolved:-}" ]; then
+      # Never install a release older than the one this script came with.
+      KIT_REF="${KIT_FALLBACK_REF}"
+      echo "Release          -> ${KIT_REF} (the newest GitHub release, ${resolved}, is older than this script's own)"
+    else
+      KIT_REF="${KIT_FALLBACK_REF}"
+      echo "Release          -> ${KIT_REF} (GitHub API not reachable; using the tag this script was released with)"
+    fi
+  else
+    KIT_REF="${KIT_REF_FROM_USER}"
+    echo "Release          -> ${KIT_REF} (KIT_REF)"
+    if ! is_release_tag "${KIT_REF}"; then
+      echo "WARNING: installing from mutable ref '${KIT_REF}'; no release manifest guarantees apply." >&2
+    fi
+  fi
+else
+  echo "Release          -> local checkout ${SOURCE_DIR}"
+fi
+RAW_BASE="https://raw.githubusercontent.com/${KIT_REPO}/${KIT_REF}"
 
 TMP_DIR=$(mktemp -d)
 NEEDED_FILE="${TMP_DIR}/.needed"
@@ -512,7 +569,9 @@ if [ "${GROKBOT_INSTALLED:-0}" = "1" ]; then
   echo "Grokbot Override is on: Cmd+Shift+P -> 'Grokbot Override: toggle' switches back to stock Bot Mode (and on again)."
   echo "Sections: Bots roster + -> 'New section'. Work rows: Cmd+Shift+P -> 'Grokbot Override: show work rows'."
 fi
-echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."
+if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
+  echo "Computer pane: enable 'Computer' in Settings -> Plugins, then add a computer."
+fi
 if [ "${CARDS_INSTALLED:-0}" = "1" ]; then
   echo "Cards skill: new chats load it; a chat started before keeps its old mode until its session restarts."
 fi

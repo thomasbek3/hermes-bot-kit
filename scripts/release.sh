@@ -31,9 +31,9 @@ if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
   exit 1
 fi
 
-OLD=$(sed -n 's/^KIT_REF="${KIT_REF:-\(.*\)}"/\1/p' install.sh | head -1)
+OLD=$(sed -n 's/^KIT_FALLBACK_REF="\(.*\)"/\1/p' install.sh | head -1)
 if [ -z "${OLD}" ]; then
-  echo "release.sh: could not read current KIT_REF from install.sh" >&2
+  echo "release.sh: could not read KIT_FALLBACK_REF from install.sh" >&2
   exit 1
 fi
 OLD_ESC=$(printf '%s' "${OLD}" | sed 's/\./\\./g')
@@ -79,6 +79,10 @@ bash scripts/make-manifest.sh
 run_ci_tests() {
   node --check computer-viewer/plugin.js
   node --check grokbot-override/plugin.js
+  node --test tests/privacy-guard.test.mjs
+  # The committed bundle must match src/ (needs `npm ci --prefix grokbot-override`).
+  npm run --prefix grokbot-override check
+  python3 -m unittest discover -s email-drafts/tests -p 'test_*.py'
   node --test computer-viewer/plugin.test.mjs
   python3 -m unittest discover -s texting-style/tests -p 'test_*.py'
   # -n 1: without it xargs passes every later path as an ARGUMENT to the
