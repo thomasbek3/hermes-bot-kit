@@ -20,9 +20,12 @@ Effective access is what Hermes actually honours for the profile
 (gateway/authz_mixin.py _principal_authorized, reading the profile's secret
 scope only, never the root .env): SLACK_ALLOW_ALL_USERS, the profile's Slack
 pairing approvals, the union of SLACK_ALLOWED_USERS and GATEWAY_ALLOWED_USERS
-("*" = everyone), and GATEWAY_ALLOW_ALL_USERS when no allowlist is set.
-Anything beyond the kit's own list is a grant, named with its source and how to
-change it.
+("*" = everyone; each parsed like Hermes's _coerce_allow_set, JSON list or
+comma list), and GATEWAY_ALLOW_ALL_USERS when no allowlist is set. Grants that
+Hermes checks before the human allowlist (_chat_scoped_grant) qualify it: a
+group-chat allowlist (env or config.yaml group_allowed_chats) and allow_bots
+(SLACK_ALLOW_BOTS, else config.yaml allow_bots). Anything beyond the kit's own
+list is a grant, named with its source and how to change it.
 """
 import json
 import re
@@ -45,6 +48,14 @@ NOBODY = 'NOBODY'
 # A members list older than this is not trusted when Slack cannot be read.
 STALE_SECONDS = 86400
 GATE_KEYS = ('SLACK_ALLOWED_USERS', 'SLACK_ALLOW_ALL_USERS', 'GATEWAY_ALLOWED_USERS', 'GATEWAY_ALLOW_ALL_USERS')
+# The env names of Slack's pre-allowlist grants, as Hermes declares them
+# (gateway/platform_env.py bundled_authz('slack'), plugins/platforms/slack/
+# gateway_env.py AUTHZ). Slack declares no group-chat env today. Used when
+# Hermes cannot be imported; test_hermes_parity checks it against Hermes.
+SLACK_AUTHZ = {'group_allowed_chats_env': '', 'allow_bots_env': 'SLACK_ALLOW_BOTS'}
+# config.yaml keys of the Slack adapter's `extra` that Hermes reads for them.
+EXTRA_KEYS = ('group_allowed_chats', 'allow_bots')
+ENV_NAME = re.compile(r'^[A-Z][A-Z0-9_]{0,63}$')
 SOURCES = ('administrator-managed env', 'external secret source', 'config.yaml allow_all_users')
 EXPECT_KEYS = ('app_id', 'profile', 'access', 'access_rev')
 MISSING_USERS_READ = 'the app lacks the users:read permission'
@@ -140,8 +151,27 @@ def env_value(ids):
     return ','.join(ids) if ids else NOBODY
 
 
+def coerce_allow_set(raw):
+    """An allowlist value parsed exactly as Hermes's _coerce_allow_set
+    (gateway/authz_mixin.py): a list, or a string whose first non-space
+    character is "[" and that parses as a JSON list, gives its stripped,
+    non-empty items; anything else is split on commas."""
+    if raw is None:
+        return set()
+    if isinstance(raw, str) and raw.lstrip()[:1] == '[':
+        try:
+            loaded = json.loads(raw)
+        except ValueError:
+            loaded = raw
+        if isinstance(loaded, list):
+            raw = loaded
+    if isinstance(raw, list):
+        return {str(part).strip() for part in raw if str(part).strip()}
+    return {part.strip() for part in str(raw).split(',') if part.strip()}
+
+
 def _ids(value):
-    return {x.strip() for x in str(value or '').split(',') if x.strip()} - {NOBODY}
+    return coerce_allow_set(value) - {NOBODY}
 
 
 def _truthy(value):
@@ -220,9 +250,7 @@ def sync_failure(item, owner, exc, now):
         fields['retry_after'] = int(now) + min(max(wait, 1), STALE_SECONDS)
     if not is_stale(item, now):
         return None, fields
-    if owner and item.get('last_members_owner_ok') is True:
-        return [owner], fields
-    return [], fields
+    return stale_ids(item, owner), fields
 
 
 def sync_error_text(error):
@@ -240,29 +268,116 @@ def is_stale(item, now):
     return type(synced) is not int or now - synced > STALE_SECONDS
 
 
+def stale_ids(item, owner):
+    """The allowlist once the member list is too old to keep: the installer
+    if Slack last said they are a full member, else nobody."""
+    return [owner] if owner and (item or {}).get('last_members_owner_ok') is True else []
+
+
+def committed(item):
+    """Whether the Connect callback committed credentials and access for this
+    record (the member sync and audience changes need nothing else)."""
+    return type((item or {}).get('installed_at')) is int
+
+
 # ---- the profile's gate settings, as Hermes reads them -------------------
 
-def scope_from_env(env, label, complete=True):
-    """Gate scope from one .env mapping: only the four gate keys, each with its source."""
-    scope = {k: {'value': str(env[k]).strip(), 'source': label} for k in GATE_KEYS
+def gate_names(authz=None):
+    """Every env key the gate reads: the four allowlist keys and the
+    pre-allowlist grant names."""
+    authz = SLACK_AUTHZ if authz is None else authz
+    return GATE_KEYS + tuple(v for v in authz.values() if v and v not in GATE_KEYS)
+
+
+def scope_from_env(env, label, complete=True, extra=None, authz=None):
+    """Gate scope from one .env mapping: only the gate keys, each with its source."""
+    authz = dict(SLACK_AUTHZ if authz is None else authz)
+    scope = {k: {'value': str(env[k]).strip(), 'source': label} for k in gate_names(authz)
              if isinstance(env.get(k), str) and env[k].strip()}
-    return {'keys': scope, 'complete': complete}
+    return {'keys': scope, 'complete': complete, 'authz': authz, 'extra': extra or {}}
+
+
+def hermes_authz():
+    """SLACK_AUTHZ read from Hermes's own declaration, or the constant."""
+    try:
+        from gateway.platform_env import bundled_authz
+        found = bundled_authz('slack')
+    except Exception:
+        return dict(SLACK_AUTHZ)
+    return {k: found.get(k) if isinstance(found.get(k), str) else '' for k in SLACK_AUTHZ}
+
+
+def config_extra(home):
+    """(The Slack adapter's config.yaml grant settings, read ok). Read the way
+    PlatformConfig.from_dict builds `extra`: platforms.slack.extra, then
+    platforms.slack, then the top-level slack: section (bridged into extra)."""
+    path = Path(home) / 'config.yaml'
+    if not path.is_file():
+        return {}, True
+    try:
+        try:
+            from hermes_yaml import safe_load
+        except ImportError:
+            from yaml import safe_load
+        data = safe_load(path.read_text(encoding='utf-8-sig'))
+    except Exception:
+        return {}, False
+    data = data if isinstance(data, dict) else {}
+    platforms = data.get('platforms') if isinstance(data.get('platforms'), dict) else {}
+    block = platforms.get('slack') if isinstance(platforms.get('slack'), dict) else {}
+    layers = [block.get('extra') if isinstance(block.get('extra'), dict) else {}, block,
+              data.get('slack') if isinstance(data.get('slack'), dict) else {}]
+    found = {}
+    for key in EXTRA_KEYS:
+        value = next((layer[key] for layer in layers if layer.get(key) is not None), None)
+        if isinstance(value, (list, tuple)):
+            value = json.dumps([str(v) for v in value])
+        if value is not None and str(value).strip():
+            found[key] = {'value': str(value).strip(), 'source': str(path)}
+    return found, True
+
+
+def local_scope(home):
+    """The profile .env and config.yaml alone (no Hermes): marked incomplete."""
+    home = Path(home)
+    extra, _ = config_extra(home)
+    return scope_from_env(read_env_file(home / '.env'), f'{home}/.env', complete=False, extra=extra)
+
+
+def valid_scope(scope):
+    """A gate scope from the helper's JSON, checked, or None."""
+    if not isinstance(scope, dict):
+        return None
+    keys, authz, extra = scope.get('keys'), scope.get('authz', SLACK_AUTHZ), scope.get('extra', {})
+    entry = lambda v: isinstance(v, dict) and isinstance(v.get('value'), str) and isinstance(v.get('source'), str)
+    if not (isinstance(authz, dict) and set(authz) == set(SLACK_AUTHZ) and
+            all(isinstance(v, str) and (not v or ENV_NAME.fullmatch(v)) for v in authz.values())):
+        return None
+    if not (isinstance(keys, dict) and set(keys) <= set(gate_names(authz)) and all(map(entry, keys.values()))):
+        return None
+    if not (isinstance(extra, dict) and set(extra) <= set(EXTRA_KEYS) and all(map(entry, extra.values()))):
+        return None
+    return {'keys': keys, 'complete': scope.get('complete') is True, 'authz': authz, 'extra': extra}
 
 
 def gate_scope(home):
-    """The four gate keys of a profile exactly as Hermes's platform_gate_env
-    reads them under multiplexing: build_profile_secret_scope(home), i.e. the
+    """The gate keys of a profile exactly as Hermes's platform_gate_env reads
+    them under multiplexing: build_profile_secret_scope(home), i.e. the
     profile .env, external secret sources, the default profile's bridged
     config.yaml allow_all_users and the administrator-managed env (which
-    overrides). Never the root .env. Each value carries its source. Without
-    Hermes (tests, the relay's own interpreter) only the profile .env is read
-    and `complete` is False."""
+    overrides). Never the root .env. Each value carries its source. The grant
+    env names come from Hermes (hermes_authz), the adapter's config.yaml
+    settings from config_extra. Without Hermes (tests, the relay's own
+    interpreter) only the profile .env and config.yaml are read and
+    `complete` is False."""
     home = Path(home)
     label = f'{home}/.env'
     try:
         from agent.secret_scope import build_profile_secret_scope, load_env_file
     except Exception:
-        return scope_from_env(read_env_file(home / '.env'), label, complete=False)
+        return local_scope(home)
+    authz = hermes_authz()
+    extra, extra_ok = config_extra(home)
     try:
         from hermes_cli.env_loader import hydrate_profile_secret_sources, get_secret_source_values
         hydrate_profile_secret_sources(home)
@@ -277,14 +392,14 @@ def gate_scope(home):
     scope = build_profile_secret_scope(home)
     dotenv = load_env_file(home / '.env')
     keys = {}
-    for name in GATE_KEYS:
+    for name in gate_names(authz):
         value = scope.get(name)
         if value is None or not str(value).strip():
             continue
         source = (SOURCES[0] if name in managed else SOURCES[1] if name in external
                   else label if name in dotenv else SOURCES[2])
         keys[name] = {'value': str(value).strip(), 'source': source}
-    return {'keys': keys, 'complete': True}
+    return {'keys': keys, 'complete': extra_ok, 'authz': authz, 'extra': extra}
 
 
 def pairing_approved(profile_home):
@@ -336,10 +451,15 @@ def sync_view(record, now):
 def effective_access(scope, pairing_ids, record, now=None, team_name='the workspace'):
     """Who Hermes lets talk to the bot, in one result. `scope` is gate_scope()'s
     output; `record` the app's apps.json record (its `profile`, `access`,
-    `owner`). Returns {people, ids, open, grants, text, sync}."""
+    `owner`). Returns {people, ids, open, chats, bots, grants, text, sync}:
+    `ids` the people whose DMs Hermes admits (all of Slack when `open`),
+    `chats` the channel IDs where anyone is admitted ("*" = every channel),
+    `bots` whether bot and workflow posts are admitted."""
     now = time.time() if now is None else now
     record = record or {}
     keys = (scope or {}).get('keys') or {}
+    authz = {**SLACK_AUTHZ, **((scope or {}).get('authz') or {})}
+    extra = (scope or {}).get('extra') or {}
     home_env = next((v['source'] for v in keys.values() if v['source'].endswith('/.env')), '<profile home>/.env')
     profile = record.get('profile') or '<profile>'
     owner = owner_of(record)
@@ -351,8 +471,8 @@ def effective_access(scope, pairing_ids, record, now=None, team_name='the worksp
     def source(name):
         return (keys.get(name) or {}).get('source') or home_env
 
-    def how(name, what):
-        where = source(name)
+    def how(name, what, where=None):
+        where = where or source(name)
         if where == SOURCES[0]:
             return f'{what} is set by the administrator-managed env; change it there'
         if where == SOURCES[1]:
@@ -361,26 +481,53 @@ def effective_access(scope, pairing_ids, record, now=None, team_name='the worksp
             return "set allow_all_users to false in the default profile's config.yaml"
         return f'remove {what} from {where}'
 
-    grants, open_ = [], False
+    grants, open_, reasons = [], False, []
+
+    def opened(what, name):
+        reasons.append(f'{what} in {source(name)}')
+        return True
+    # Grants Hermes checks before the human allowlist (_chat_scoped_grant):
+    # a channel allowlist (env, then config.yaml) and allow_bots (env wins
+    # over config.yaml). They let in people or bots the list does not name.
+    chats, chat_reasons = set(), []
+    for name, entry in ((authz['group_allowed_chats_env'], keys.get(authz['group_allowed_chats_env'] or '')),
+                        ('group_allowed_chats', extra.get('group_allowed_chats'))):
+        found = coerce_allow_set(entry['value']) if entry else set()
+        if found:
+            chats |= found
+            chat_reasons.append(f"{name} in {entry['source']}")
+            grants.append({'source': entry['source'], 'what': name, 'ids': None, 'chats': sorted(found),
+                           'how_to_change': how(name, name, entry['source'])})
+    # No allow_bots env declared: Hermes admits no bots (fails closed).
+    bots_env, bots = authz['allow_bots_env'], None
+    for name, entry in ((bots_env, keys.get(bots_env or '')), ('allow_bots', extra.get('allow_bots'))):
+        if bots_env and entry and entry['value'].strip():
+            mode_value = entry['value'].lower().strip()
+            if mode_value in ('mentions', 'all'):
+                bots = {'source': entry['source'], 'what': f'{name}={mode_value}', 'ids': None, 'bots': True,
+                        'how_to_change': how(name, name, entry['source'])}
+                grants.append(bots)
+            break
+
     if _truthy(value('SLACK_ALLOW_ALL_USERS')):
-        open_ = True
+        open_ = opened('SLACK_ALLOW_ALL_USERS=true', 'SLACK_ALLOW_ALL_USERS')
         grants.append({'source': source('SLACK_ALLOW_ALL_USERS'), 'what': 'SLACK_ALLOW_ALL_USERS=true', 'ids': None,
                        'how_to_change': how('SLACK_ALLOW_ALL_USERS', 'SLACK_ALLOW_ALL_USERS')})
     slack_raw, gateway_raw = _ids(value('SLACK_ALLOWED_USERS')), _ids(value('GATEWAY_ALLOWED_USERS'))
     slack_kit = source('SLACK_ALLOWED_USERS') == home_env
     if '*' in slack_raw:
-        open_ = True
+        open_ = opened('SLACK_ALLOWED_USERS=*', 'SLACK_ALLOWED_USERS')
         grants.append({'source': source('SLACK_ALLOWED_USERS'), 'what': 'SLACK_ALLOWED_USERS=*', 'ids': None,
                        'how_to_change': (f"choose who can talk to it in this bot's Slack window (that replaces the *)"
                                          if slack_kit else how('SLACK_ALLOWED_USERS', 'the *'))})
     if '*' in gateway_raw:
-        open_ = True
+        open_ = opened('GATEWAY_ALLOWED_USERS=*', 'GATEWAY_ALLOWED_USERS')
         grants.append({'source': source('GATEWAY_ALLOWED_USERS'), 'what': 'GATEWAY_ALLOWED_USERS=*', 'ids': None,
                        'how_to_change': how('GATEWAY_ALLOWED_USERS', 'the * in GATEWAY_ALLOWED_USERS') +
                        ' (it applies to every messaging platform of this bot)'})
     # Hermes reads "is an allowlist set" from the raw values: NOBODY counts.
     if not (value('SLACK_ALLOWED_USERS') or value('GATEWAY_ALLOWED_USERS')) and _truthy(value('GATEWAY_ALLOW_ALL_USERS')):
-        open_ = True
+        open_ = opened('GATEWAY_ALLOW_ALL_USERS=true with no allowlist', 'GATEWAY_ALLOW_ALL_USERS')
         grants.append({'source': source('GATEWAY_ALLOW_ALL_USERS'), 'what': 'GATEWAY_ALLOW_ALL_USERS=true with no allowlist',
                        'ids': None, 'how_to_change': how('GATEWAY_ALLOW_ALL_USERS', 'GATEWAY_ALLOW_ALL_USERS')})
 
@@ -407,12 +554,15 @@ def effective_access(scope, pairing_ids, record, now=None, team_name='the worksp
     ids = sorted(seen)
     people = len(ids)
 
+    where = 'any channel it is in' if '*' in chats else 'channels ' + ', '.join(sorted(chats))
+    why = '; '.join(chat_reasons)
     if open_:
-        reasons = '; '.join(f"{g['what']} in {g['source']}" for g in grants if g['ids'] is None)
-        text = f'Anyone in Slack who can message this bot, including guests ({reasons}).'
+        text = f"Anyone in Slack who can message this bot, including guests ({'; '.join(reasons)})."
+    elif people == 0 and chats:
+        text = f'Only people posting in {where} can talk to this bot ({why}).'
     elif people == 0:
         text = 'Nobody can talk to this bot in Slack.'
-    elif people == 1 and ids == [owner]:
+    elif people == 1 and ids == [owner] and not chats:
         text = 'Only you can talk to this bot.'
     else:
         n = len(base)
@@ -431,7 +581,11 @@ def effective_access(scope, pairing_ids, record, now=None, team_name='the worksp
         parts = [what] if what else []
         parts += [f'{"plus " if parts or i else ""}{c} from {label}' for i, (c, label) in enumerate(added)]
         text = f'{_people(people)} can talk to this bot: ' + ', '.join(parts) + '.'
+    if chats and people and not open_:
+        text = text[:-1] + f', and anyone posting in {where} ({why}).'
+    if bots:
+        text += f" Bots and workflows are also let in ({bots['what']} in {bots['source']})."
     if not (scope or {}).get('complete', True):
         text += " (Hermes's own settings could not be read, so only the bot's .env was counted.)"
-    return {'people': people, 'ids': ids, 'open': open_, 'grants': grants, 'text': text,
-            'sync': sync_view(record, now)}
+    return {'people': people, 'ids': ids, 'open': open_, 'chats': sorted(chats), 'bots': bool(bots), 'grants': grants,
+            'text': text, 'sync': sync_view(record, now)}

@@ -90,8 +90,8 @@ export function accessChoices(ownerKnown = true) {
 /**
  * The effective audience from the add-on's status (access.effective_access):
  * one line, the member-list health as a separate line, each extra grant with
- * its source and how to change it, and the legacy state of a bot connected
- * before team access.
+ * its source and how to change it, the legacy state of a bot connected
+ * before team access, and a welcome DM that could not be sent.
  */
 export function audienceView(status) {
   const a = status?.audience
@@ -105,7 +105,8 @@ export function audienceView(status) {
     stale: a.sync?.stale === true || typeof a.sync?.error === 'string',
     grants: grants.map(g => ({ what: g.what, source: String(g.source || ''), how: String(g.how_to_change || '') })),
     legacy: legacy ? { text: String(legacy.text || ''), ids: Array.isArray(legacy.ids) ? legacy.ids.filter(x => MEMBER_ID.test(x)) : [] } : null,
-    ownerKnown: status?.owner_known !== false
+    ownerKnown: status?.owner_known !== false,
+    welcomeError: status?.welcome === 'failed' ? String(status.welcome_error || 'unknown error') : ''
   }
 }
 

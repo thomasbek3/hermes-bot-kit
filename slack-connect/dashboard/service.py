@@ -275,8 +275,10 @@ class Service:
     def set_access(self, access, allowed=None):
         """Change who can talk to a connected bot: 'members' (verified full
         members of the workspace), 'owner' (only the installer) or 'list'
-        (named IDs, the installer included). The revision is bumped first, so
-        a member sync already under way can no longer publish."""
+        (named IDs, the installer included). The new mode, list and revision
+        are committed in publish_allowlist together with the .env write, after
+        it succeeded: a failed write leaves the record as it was. The bumped
+        revision then refuses any member sync that started before."""
         access = str(access or '').strip().lower()
         if access not in access_module.MODES:
             raise ValueError('invalid access choice')
@@ -286,34 +288,26 @@ class Service:
         key, item = self._record()
         pending = _read_json(self.data / 'pending' / (key + '.json'), {}) if key else {}
         env = self.read_env()
-        if not key or pending.get('phase') != 'installed' or not env.get('SLACK_BOT_TOKEN') or not item.get('app_id'):
+        if not key or not access_module.committed(item) or not env.get('SLACK_BOT_TOKEN') or not item.get('app_id'):
             raise Conflict('Connect the bot to Slack first')
         owner = access_module.owner_of(item, pending)
         if access == 'owner' and not owner:
             raise Conflict('The installer of this bot is not known; name the people instead')
-        apps_path = self.data / 'apps.json'
-        with LockedFile(self.data / 'apps.lock'):
-            apps = _read_json(apps_path, {})
-            item = apps.get(key)
-            if not isinstance(item, dict) or item.get('profile') != self.profile:
-                raise Conflict('Connect the bot to Slack first')
-            item.update({'access': access, 'allowed': ','.join(named), 'access_rev': access_module.rev_of(item) + 1,
-                         'synced_at': None, 'sync_error': None, 'retry_after': None})
-            if owner:
-                item['owner'] = owner
-            _atomic_json(apps_path, apps)
-            expect = access_module.expect_of(item)
-        fields = {}
+        expect = access_module.expect_of(item)
+        fields = {'access': access, 'allowed': ','.join(named), 'access_rev': access_module.rev_of(item) + 1,
+                  'synced_at': None, 'sync_error': None, 'retry_after': None, **({'owner': owner} if owner else {})}
         if access == 'members':
             # Read outside the lock; publish checks the revision is still ours.
+            # The new audience has no member list yet, so a failed read is judged as never read.
             now = time.time()
             try:
                 members = access_module.full_members(self.slack.users_list(env['SLACK_BOT_TOKEN']), item.get('team_id'))
-                ids, fields = access_module.sync_success(owner, members, now)
+                ids, synced = access_module.sync_success(owner, members, now)
             except Exception as exc:
                 exc = exc if isinstance(exc, access_module.SlackReadError) else access_module.SlackReadError()
                 LOG.warning('Slack member list could not be read: %s', exc.error)
-                ids, fields = access_module.sync_failure(item, owner, exc, now)
+                ids, synced = access_module.sync_failure({**item, 'synced_at': None}, owner, exc, now)
+            fields.update(synced)
         else:
             ids = access_module.allowlist(access, owner, named=named)
         if not access_module.publish_allowlist(self.data, key, expect, ids, self.save_env,
@@ -321,7 +315,10 @@ class Service:
             raise Conflict('Who can talk to the bot changed meanwhile; check the window and try again')
         return self.status()
 
-    def status(self):
+    def status(self, live=True):
+        """The window's state. `live=False` (the 20 s audience poll) reads only
+        local state: no Slack call and no connection test, so an installed
+        bot stays 'installed' rather than proven 'connected'."""
         env = self.read_env()
         if env.get('SLACK_APP_TOKEN'):
             return {'phase':'none', 'mode':'socket'}
@@ -330,7 +327,7 @@ class Service:
                 pending = _read_json(self.data / 'pending' / (key + '.json'), {})
                 phase = pending.get('phase', 'error')
                 scope_fields = {}
-                if phase == 'installed':
+                if phase == 'installed' and live:
                     try:
                         answer = self.live(env)
                         if answer:
@@ -352,14 +349,16 @@ class Service:
                 owner_known = bool(access_module.owner_of(item, pending))
                 if mode == access_module.LEGACY and audience:
                     # Connected before team access: shown as it is, until the owner chooses.
-                    ids = sorted(x.strip() for x in (env.get('SLACK_ALLOWED_USERS') or '').split(',')
-                                 if access_module.USER_ID.fullmatch(x.strip()))
+                    ids = sorted(x for x in access_module.coerce_allow_set(env.get('SLACK_ALLOWED_USERS'))
+                                 if access_module.USER_ID.fullmatch(x))
                     audience['legacy'] = {'ids': ids,
                         'text': 'Connected before team access: it allows ' + (', '.join(ids) if ids else 'no listed member IDs') + '.'}
                 return {'phase':phase, 'team_name':public_text(pending.get('team_name')),
                         'bot':public_text(item.get('bot_name')), 'mode':'http',
                         'access': mode, 'owner_known': owner_known,
                         'icon_result':item.get('icon_result'),
+                        **({'welcome': 'failed', 'welcome_error': public_text(item.get('welcome_error') or 'unknown')}
+                           if item.get('welcome') == 'failed' else {}),
                         'manifest_update_result':item.get('manifest_update_result'), **scope_fields, **audience}
         return {'phase':'none', 'mode':'http'}
 

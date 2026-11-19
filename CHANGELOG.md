@@ -63,7 +63,11 @@ is new in this one.
     setup. The HD venv is reused only if it was built on the checked machine
     Python and nobody else could change it; otherwise it is rebuilt (links
     deleted as links, never followed). If UltraVNC has to be backed out, setup
-    confirms it stopped and that TightVNC is on loopback only, or stops.
+    stops only the kit's own UltraVNC, confirms it stopped and that TightVNC is
+    on loopback only, or stops; another program on :5900 is named, not killed.
+    TightVNC's registry key is locked before the password is written, and an
+    HD token whose original permissions let other accounts read or change it
+    is replaced.
     **Computer viewer:** one check parses each address once (ws/wss, or
     http(s) mapped to them; nothing else, no credentials in the URL, plaintext
     only to a private host), and the connection uses that checked address, for
@@ -98,7 +102,21 @@ is new in this one.
   with every extra grant named with its source and how to change it. The kit
   changes only that bot's `SLACK_ALLOWED_USERS`. Bots connected by an earlier
   release keep their list until you pick **Keep these people**, **Everyone in
-  the workspace** or **Only me**.
+  the workspace** or **Only me**. Allowlists are read exactly as Hermes parses them: a JSON list such as
+  `'["U1","U2"]'` works, and `*` in either form means anyone. Channel
+  allowlists (`group_allowed_chats`) and `allow_bots` / `SLACK_ALLOW_BOTS`
+  are named with their source too. `scripts/test-with-hermes.sh <checkout>`
+  checks that verdict against Hermes's own gateway authorization and runs
+  slack-check's full suite against a Hermes checkout (a local step: CI never
+  imports upstream Hermes). A welcome DM that can't be sent no longer leaves
+  the bot half-connected: it is kept current as soon as its credentials and
+  access are saved, and the window says the welcome failed. A changed
+  audience is saved only together with the bot's `.env`, so a failed save
+  changes nothing, and a profile write that times out is stopped before its
+  lock is released. While Slack asks the relay to wait, a list older than 24
+  hours still falls back on time. The open window refreshes who can talk to
+  the bot from local settings only; it asks Slack only when opened and on
+  **Test connection**.
   `slack-connect/install.py --check` exits non-zero until the add-on is
   ready. Anyone who can message a bot uses it with the bot's own access:
   `docs/SLACK.md` says so and how to restrict it.

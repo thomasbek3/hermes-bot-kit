@@ -54,12 +54,14 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
     return () => { stopped = true; clearTimeout(timer) }
   }, [bot, phase])
   // While the window is open on a connected bot, keep who-can-talk current
-  // (a member sync or a settings change shows without reopening).
+  // (a member sync or a settings change shows without reopening). The
+  // audience route reads local state only; live checks run on open and on
+  // Test connection.
   React.useEffect(() => {
     if (phase !== 'connected') return
     const timer = setInterval(async () => {
       try {
-        const view = audienceView(await slackProvisioning(bot, 'status'))
+        const view = audienceView(await slackProvisioning(bot, 'audience'))
         if (view && alive.current) setAudience(view)
       } catch { /* The next poll retries. */ }
     }, 20_000)
@@ -140,6 +142,7 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
       {audience.legacy ? <div className="gbo-slack-legacy">{audience.legacy.text}</div> : null}
       <div>{audience.text}</div>
       {audience.sync ? <div className="gbo-field-hint gbo-slack-sync">{audience.sync}</div> : null}
+      {audience.welcomeError ? <div className="gbo-field-hint gbo-slack-welcome">Welcome message couldn’t be sent: {audience.welcomeError}</div> : null}
       {audience.grants.length ? <ul className="gbo-slack-extra-grants">{audience.grants.map((g: any) => <li key={g.what + g.source}>{g.what} ({g.source}). To change: {g.how}</li>)}</ul> : null}
     </div>
   ) : null

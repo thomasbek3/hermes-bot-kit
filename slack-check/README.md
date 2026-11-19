@@ -96,8 +96,26 @@ a plain 404 after enabling it, restart the backend.
 ## Tests
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pytest -p no:cacheprovider slack-check/tests
+python -m pytest -p no:cacheprovider slack-check/tests
 ```
+
+Without Hermes on the import path, the tests that read the profile through Hermes's own helpers
+skip with "needs Hermes: run scripts/test-with-hermes.sh".
+
+### Testing against Hermes
+
+```bash
+scripts/test-with-hermes.sh <hermes checkout>
+```
+
+It installs the checkout's locked dependencies (from its `uv.lock`, never the checkout itself) into
+a throwaway venv under `$TMPDIR`, puts the checkout on the import path with `PYTHONPATH` only, uses
+fresh temp dirs for `HERMES_HOME` and `HOME` (so `~/.hermes` is never touched), and runs
+`slack-check/tests` (all of them, none skipped) plus slack-connect's parity test, which compares
+the kit's "who can talk to the bot" with Hermes's own gateway authorization. It removes everything
+when it exits. It needs `uv` and Python 3.14 (`HERMES_TEST_PYTHON` picks another). CI deliberately
+never imports upstream Hermes (`.github/workflows/hermes-compat.yml` only reads it as text), so this
+is a local and reviewer step.
 
 The tests make no network calls. They cover profile env resolution (including a `?profile=` request
 through Hermes's real `_config_profile_scope`), a missing token, `auth.test` success and error,

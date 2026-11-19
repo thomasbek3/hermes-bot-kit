@@ -1,8 +1,10 @@
 """Write profile values from stdin; credentials never appear in arguments.
 
 --notify <profile>      tell the multiplexed gateway the profile changed
---gate-scope <home>     print the profile's four Slack gate keys (and only
-                        those) with their sources, as Hermes reads them
+--gate-scope <home>     print the profile's Slack gate keys (the four
+                        allowlist keys and the pre-allowlist grant envs that
+                        Hermes declares, and only those) with their sources,
+                        plus config.yaml allow_bots / group_allowed_chats
 """
 import json
 import os

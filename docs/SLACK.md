@@ -49,10 +49,12 @@ removes you too.
 **When Slack can't be read.** A failed refresh keeps the current list and the
 window says why (for example *the app lacks the users:read permission*). If
 Slack asks the relay to wait (`ratelimited`, with a `Retry-After`), the relay
-skips that bot until then. A list is trusted for **24 hours**: when the last
-good read is older than that (or there never was one) and Slack still can't be
-read, the bot falls back to **only you**, if Slack last said you are a full
-member, and otherwise to **nobody**. Nobody is written as
+makes no Slack call for that bot until then. A list is trusted for **24
+hours**: when the last good read is older than that (or there never was one)
+and Slack still can't be read, the bot falls back to **only you**, if Slack
+last said you are a full member, and otherwise to **nobody**. A wait Slack asked
+for never stretches those 24 hours: the fallback happens on time even while
+the relay is still waiting. Nobody is written as
 `SLACK_ALLOWED_USERS=NOBODY`, a value that matches no Slack ID; an empty value
 would make Hermes fall through to other settings. A new Connect whose first
 member read fails starts at nobody, because nobody is verified yet; the relay
@@ -69,7 +71,16 @@ reads them for the profile (its own `.env`, external secret sources, the
 administrator-managed env; never the root `.env`): `SLACK_ALLOWED_USERS`,
 `SLACK_ALLOW_ALL_USERS`, `GATEWAY_ALLOWED_USERS`, `GATEWAY_ALLOW_ALL_USERS`
 (which counts only when no allowlist is set) and the people approved through
-Hermes's first-DM pairing. The window keeps it current while it is open.
+Hermes's first-DM pairing. Each list is read exactly as Hermes reads it: a JSON
+list (`["U1","U2"]`) or a comma list, and `*` in either form (`'["*"]'`) means
+anyone. Two settings Hermes checks before any list are named in the same
+sentence: a channel allowlist (`group_allowed_chats` in the bot's
+`config.yaml`, under `platforms.slack` or `slack:`) lets **anyone posting in
+those channels** in, and `allow_bots: mentions` or `all` (`SLACK_ALLOW_BOTS`,
+which wins over `config.yaml`) lets **bots and workflows** in. The window
+keeps all of it current while it is open, from local settings only; it asks
+Slack (and tests the connection) only when you open it and when you click
+**Test connection**.
 
 Any other setting that lets people in is listed with **where it is set and how
 to change it**. The kit changes none of them for you: the only value it ever
@@ -81,6 +92,8 @@ is the app it created.
 | `SLACK_ALLOW_ALL_USERS=true` | Remove it from the file the window names (usually `<profile home>/.env`) |
 | `GATEWAY_ALLOWED_USERS` | Edit it where the window says; it applies to every messaging platform of the bot |
 | `GATEWAY_ALLOW_ALL_USERS=true` with no allowlist | Remove it where the window says |
+| `group_allowed_chats` (anyone posting in those channels) | Remove it from the file the window names (the bot's `config.yaml`) |
+| `SLACK_ALLOW_BOTS` / `allow_bots` = `mentions` or `all` (bots and workflows) | Remove it from the file the window names |
 | A Slack pairing approval | `hermes -p <profile> pairing revoke slack <member id>` |
 | A value from the administrator-managed env or an external secret source | Change it there; the bot's `.env` cannot override it |
 
@@ -191,7 +204,9 @@ clone of this repository.
    `message.groups`, `message.mpim` and a few app events. Socket Mode and token
    rotation are off.
 5. The window shows **Connected** and **who can talk to it**. The bot sends a
-   welcome DM that says the same.
+   welcome DM that says the same. If that DM can't be sent, the bot is still
+   connected (its member list is kept current all the same): Slack's page and
+   the window say *Welcome message couldn't be sent: <Slack's reason>*.
 6. **Optional, recommended:** install **slack-check** so the Slack card's
    **Test connection** asks Slack itself. Run it **after** Connect, so the bot's
    profile already has its token. Put the bot's profile name in `PROFILE`

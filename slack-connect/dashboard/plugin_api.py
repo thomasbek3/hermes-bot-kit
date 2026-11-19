@@ -298,6 +298,17 @@ def status():
     return {**result, 'readiness': readiness(root)}
 
 
+@router.get('/audience')
+def audience():
+    """Who can talk to the bot, from local state only (the record, the gate
+    scope, pairing): no Slack call and no connection test. The window polls
+    this; /status (live checks) runs on open and on Test connection."""
+    root, home = homes()
+    if home == root:
+        return {'phase': 'none', 'mode': 'bootstrap'}
+    return handle(lambda service: service.status(live=False))
+
+
 @router.delete('/connect')
 def disconnect():
     return handle(lambda service: service.delete())

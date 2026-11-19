@@ -11,13 +11,15 @@ Slack's member list confirms (not guests, not Slack Connect users from other
 companies); or only you, or named people, chosen in the same window. The kit
 writes that list into the bot's `SLACK_ALLOWED_USERS` and the relay refreshes it
 from Slack's `users.list` every 15 minutes (all pages or nothing; it honours
-`Retry-After`). If Slack can't be read for more than 24 hours the bot falls back
+`Retry-After`, which never stretches the 24 hours below). If Slack can't be read for more than 24 hours the bot falls back
 to only you (if Slack last listed you as a full member) or to nobody
 (`SLACK_ALLOWED_USERS=NOBODY`). The window, the confirmation page and the
 welcome DM show the **effective** audience, read the way Hermes reads the
 profile's settings (`SLACK_ALLOWED_USERS`, `SLACK_ALLOW_ALL_USERS`,
-`GATEWAY_ALLOWED_USERS`, `GATEWAY_ALLOW_ALL_USERS`, pairing approvals; never the
-root `.env`). Any other grant is named with where it is set and how to change
+`GATEWAY_ALLOWED_USERS`, `GATEWAY_ALLOW_ALL_USERS`, pairing approvals, each list
+parsed as Hermes parses it, JSON list or comma list; never the root `.env`), plus
+the channel and bot grants Hermes checks first (`group_allowed_chats`,
+`SLACK_ALLOW_BOTS` / `allow_bots`). Any other grant is named with where it is set and how to change
 it; the kit changes only `SLACK_ALLOWED_USERS`. Bots connected by an earlier
 release keep their list until you choose. Anyone who can talk to the bot can use
 its tools with the bot's access: see
@@ -118,7 +120,8 @@ installer leaves to you.
    Configuration Tokens*, click **Generate Token** for your workspace and paste
    the **Refresh token** (`xoxe-…`). This is done once per workspace.
 3. Pick the workspace and click **Connect**. Slack opens; click **Allow**.
-4. The window shows *Connected*, and the bot sends you a welcome DM in Slack.
+4. The window shows *Connected*, and the bot sends you a welcome DM in Slack. If
+   the DM fails, the bot is connected anyway and the window names Slack's reason.
 
 Connect changes only that bot's profile: it adds the Slack credentials to its
 `.env`, turns on the bot's own Slack platform plugin, and, if the bot's

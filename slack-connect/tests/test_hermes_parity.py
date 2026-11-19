@@ -1,0 +1,141 @@
+"""The kit's effective_access against Hermes's own gateway authorization.
+
+Runs only with HERMES_PARITY_CHECKOUT pointing at a Hermes checkout, on an
+isolated import path with a throwaway HERMES_HOME (scripts/test-with-hermes.sh
+does all of that). CI never imports upstream Hermes, so this is a local and
+reviewer step.
+
+Mode: single profile, not multiplexed. The gate keys are both written to the
+profile .env (what the kit reads through gate_scope, here the real Hermes
+build_profile_secret_scope) and set in os.environ, which is where Hermes's
+platform_gate_env reads them without a multiplexed secret scope. Pairing is
+Hermes's real PairingStore on the same HERMES_HOME. The verdict compared is
+GatewayRunner._principal_authorized, the allowlist decision before the bot loop
+guard, on a bare runner built the way Hermes's own authz tests build it
+(tests/gateway/test_slack_bot_auth_bypass.py).
+"""
+import json
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+CHECKOUT = os.environ.get('HERMES_PARITY_CHECKOUT')
+pytestmark = pytest.mark.skipif(not CHECKOUT, reason='needs Hermes: run scripts/test-with-hermes.sh <hermes checkout>')
+
+BASE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BASE))
+from common import access   # noqa: E402
+
+GRANT_ENVS = ('SLACK_ALLOW_BOTS',)
+USERS = ('U1', 'U2', 'U3', 'U9')
+REC = {'profile': 'bot', 'access': 'members', 'owner': 'U1'}
+
+
+@pytest.fixture
+def hermes(tmp_path, monkeypatch):
+    if str(Path(CHECKOUT).resolve()) not in map(str, (Path(p).resolve() for p in sys.path if p)):
+        sys.path.insert(0, CHECKOUT)
+    home = Path(os.environ.get('HERMES_HOME') or '')
+    real = Path.home() / '.hermes'
+    assert home.is_dir() and real not in (home, *home.parents), 'HERMES_HOME must be a throwaway directory'
+    profile = tmp_path / 'profile'
+    (profile / 'platforms' / 'pairing').mkdir(parents=True)
+    monkeypatch.setenv('HERMES_HOME', str(profile))
+    for name in access.gate_names() + GRANT_ENVS:
+        monkeypatch.delenv(name, raising=False)
+    from gateway.config import Platform
+    from gateway.pairing import PairingStore
+    from gateway.run import GatewayRunner
+    from gateway.session import SessionSource
+
+    def setup(env, approved=(), extra=None):
+        (profile / '.env').write_text(''.join(f'{k}={v}\n' for k, v in env.items()))
+        (profile / 'platforms' / 'pairing' / 'slack-approved.json').write_text(
+            json.dumps({u: {'user_name': u, 'approved_at': 1} for u in approved}))
+        for k, v in env.items():
+            monkeypatch.setenv(k, v)
+        runner = object.__new__(GatewayRunner)
+        runner.pairing_store = PairingStore()
+        runner.adapters = {Platform.SLACK: SimpleNamespace(config=SimpleNamespace(extra=dict(extra or {})))}
+        if extra:
+            (profile / 'config.yaml').write_text(json.dumps({'platforms': {'slack': {'extra': extra}}}))
+        eff = access.effective_access(access.gate_scope(profile), access.pairing_approved(profile), REC, team_name='Acme')
+        return runner, eff
+
+    def source(user, chat_type='dm', chat='D1', bot=False):
+        return SessionSource(platform=Platform.SLACK, chat_id=chat, chat_type=chat_type, user_id=user,
+                             user_name=user or '', is_bot=bot)
+
+    def hermes_says(runner, src):
+        return runner._principal_authorized(src, allow_adapter_delegation=True)
+    return SimpleNamespace(setup=setup, source=source, says=hermes_says)
+
+
+def kit_says(eff, user, chat=None, bot=False):
+    """The kit's verdict from one effective_access result."""
+    if chat and ('*' in eff['chats'] or chat in eff['chats']):
+        return True
+    if bot and eff['bots']:
+        return True
+    return bool(user) and (eff['open'] or user in eff['ids'])
+
+
+DM_CASES = {
+    'plain list': ({'SLACK_ALLOWED_USERS': 'U1,U2'}, ()),
+    'json list': ({'SLACK_ALLOWED_USERS': '["U1", " U2 "]'}, ()),
+    'malformed json is a comma list': ({'SLACK_ALLOWED_USERS': '["U1", "U2"'}, ()),
+    'json wildcard in GATEWAY_ALLOWED_USERS': ({'SLACK_ALLOWED_USERS': 'U1', 'GATEWAY_ALLOWED_USERS': '["*"]'}, ()),
+    'star in SLACK_ALLOWED_USERS': ({'SLACK_ALLOWED_USERS': 'U1,*'}, ()),
+    'SLACK_ALLOW_ALL_USERS=true': ({'SLACK_ALLOWED_USERS': 'NOBODY', 'SLACK_ALLOW_ALL_USERS': 'true'}, ()),
+    'NOBODY with GATEWAY_ALLOW_ALL_USERS=true denies': ({'SLACK_ALLOWED_USERS': 'NOBODY', 'GATEWAY_ALLOW_ALL_USERS': 'true'}, ()),
+    'empty json list is still a list': ({'SLACK_ALLOWED_USERS': '[]', 'GATEWAY_ALLOW_ALL_USERS': 'true'}, ()),
+    'no allowlist falls to GATEWAY_ALLOW_ALL_USERS': ({'GATEWAY_ALLOW_ALL_USERS': 'yes'}, ()),
+    'no allowlist at all denies': ({}, ()),
+    'gateway list adds people': ({'SLACK_ALLOWED_USERS': 'U1', 'GATEWAY_ALLOWED_USERS': 'U2,U3'}, ()),
+    'pairing approval': ({'SLACK_ALLOWED_USERS': 'U1'}, ('U3',)),
+}
+
+
+@pytest.mark.parametrize('case', DM_CASES)
+def test_dm_verdicts_match_hermes(hermes, case):
+    env, approved = DM_CASES[case]
+    runner, eff = hermes.setup(env, approved)
+    for user in USERS:
+        assert kit_says(eff, user) == hermes.says(runner, hermes.source(user)), (case, user, eff['text'])
+
+
+def test_the_star_reads_as_anyone(hermes):
+    _, eff = hermes.setup({'SLACK_ALLOWED_USERS': 'U1,U2', 'GATEWAY_ALLOWED_USERS': '["*"]'})
+    assert eff['text'].startswith('Anyone in Slack who can message this bot')
+
+
+def test_channel_grant_from_config_yaml_matches_hermes(hermes):
+    runner, eff = hermes.setup({'SLACK_ALLOWED_USERS': 'U1'}, extra={'group_allowed_chats': ['C1']})
+    assert eff['chats'] == ['C1'] and 'anyone posting in channels C1' in eff['text']
+    for user, chat in (('U9', 'C1'), ('U9', 'C2'), ('U1', 'C2'), (None, 'C1')):
+        assert kit_says(eff, user, chat) == hermes.says(runner, hermes.source(user, 'group', chat)), (user, chat)
+
+
+@pytest.mark.parametrize('env, extra', [({'SLACK_ALLOW_BOTS': 'mentions'}, None), ({}, {'allow_bots': 'all'}),
+                                        ({'SLACK_ALLOW_BOTS': 'none'}, {'allow_bots': 'all'}), ({}, None)])
+def test_bot_grant_matches_hermes(hermes, env, extra):
+    runner, eff = hermes.setup({'SLACK_ALLOWED_USERS': 'U1', **env}, extra=extra)
+    src = hermes.source(None, 'group', 'C2', bot=True)
+    assert kit_says(eff, None, 'C2', bot=True) == hermes.says(runner, src), (env, extra, eff['text'])
+
+
+def test_the_grant_env_names_are_hermes_own(hermes):
+    from gateway.platform_env import bundled_authz
+    declared = bundled_authz('slack')
+    assert {k: declared.get(k) or '' for k in access.SLACK_AUTHZ} == access.SLACK_AUTHZ
+    assert declared.get('allowed_users_env') == 'SLACK_ALLOWED_USERS' and declared.get('allow_all_env') == 'SLACK_ALLOW_ALL_USERS'
+    assert access.hermes_authz() == access.SLACK_AUTHZ
+
+
+def test_coerce_allow_set_is_hermes_own(hermes):
+    from gateway.authz_mixin import _coerce_allow_set
+    for raw in ('U1,U2', ' ["U1", " U2 ", ""] ', '["*"]', '["U1",', '[1, 2]', '{"a": 1}', '[]', '', None, ['U1', ' '], 'NOBODY'):
+        assert access.coerce_allow_set(raw) == _coerce_allow_set(raw), raw

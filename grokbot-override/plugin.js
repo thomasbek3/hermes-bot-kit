@@ -57369,7 +57369,8 @@ function audienceView(status) {
     stale: a2.sync?.stale === true || typeof a2.sync?.error === "string",
     grants: grants.map((g) => ({ what: g.what, source: String(g.source || ""), how: String(g.how_to_change || "") })),
     legacy: legacy ? { text: String(legacy.text || ""), ids: Array.isArray(legacy.ids) ? legacy.ids.filter((x) => MEMBER_ID.test(x)) : [] } : null,
-    ownerKnown: status?.owner_known !== false
+    ownerKnown: status?.owner_known !== false,
+    welcomeError: status?.welcome === "failed" ? String(status.welcome_error || "unknown error") : ""
   };
 }
 
@@ -59232,7 +59233,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
     if (phase !== "connected") return;
     const timer = setInterval(async () => {
       try {
-        const view = audienceView(await slackProvisioning(bot, "status"));
+        const view = audienceView(await slackProvisioning(bot, "audience"));
         if (view && alive.current) setAudience(view);
       } catch {
       }
@@ -59361,6 +59362,10 @@ function SlackConnect({ bot, name, initial, onClose }) {
     audience.legacy ? /* @__PURE__ */ jsx18("div", { className: "gbo-slack-legacy", children: audience.legacy.text }) : null,
     /* @__PURE__ */ jsx18("div", { children: audience.text }),
     audience.sync ? /* @__PURE__ */ jsx18("div", { className: "gbo-field-hint gbo-slack-sync", children: audience.sync }) : null,
+    audience.welcomeError ? /* @__PURE__ */ jsxs17("div", { className: "gbo-field-hint gbo-slack-welcome", children: [
+      "Welcome message couldn’t be sent: ",
+      audience.welcomeError
+    ] }) : null,
     audience.grants.length ? /* @__PURE__ */ jsx18("ul", { className: "gbo-slack-extra-grants", children: audience.grants.map((g) => /* @__PURE__ */ jsxs17("li", { children: [
       g.what,
       " (",

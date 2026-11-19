@@ -134,10 +134,11 @@ def test_helper_gate_scope_attributes_sources_and_prints_only_gate_keys(tmp_path
         (fake / pkg / '__init__.py').write_text('')
     (fake / 'agent' / 'secret_scope.py').write_text(
         'def load_env_file(p):\n'
-        '    return {"SLACK_ALLOWED_USERS": "U1", "SLACK_BOT_TOKEN": "xoxb-FAKE-SECRET", "GATEWAY_ALLOWED_USERS": "U2"}\n'
+        '    return {"SLACK_ALLOWED_USERS": "U1", "SLACK_BOT_TOKEN": "xoxb-FAKE-SECRET", "GATEWAY_ALLOWED_USERS": "U2",\n'
+        '            "SLACK_ALLOW_BOTS": "mentions"}\n'
         'def build_profile_secret_scope(h):\n'
         '    return {"SLACK_ALLOWED_USERS": "U1", "SLACK_BOT_TOKEN": "xoxb-FAKE-SECRET", "GATEWAY_ALLOWED_USERS": "U3",\n'
-        '            "SLACK_ALLOW_ALL_USERS": "false", "OTHER": "x"}\n')
+        '            "SLACK_ALLOW_ALL_USERS": "false", "SLACK_ALLOW_BOTS": "mentions", "OTHER": "x"}\n')
     (fake / 'hermes_cli' / 'env_loader.py').write_text(
         'def hydrate_profile_secret_sources(h):\n    return {}\n'
         'def get_secret_source_values(h):\n    return {"GATEWAY_ALLOWED_USERS": "U3"}\n')
@@ -145,6 +146,7 @@ def test_helper_gate_scope_attributes_sources_and_prints_only_gate_keys(tmp_path
         'def load_managed_env():\n    return {"SLACK_ALLOW_ALL_USERS": "false"}\n')
     home = tmp_path / 'profiles' / 'bot'
     home.mkdir(parents=True)
+    (home / 'config.yaml').write_text('platforms:\n  slack:\n    extra:\n      group_allowed_chats: [C1, C2]\n')
     out = subprocess.run([sys.executable, '-I', str(HELPER), '--gate-scope', str(home)],
                          env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
@@ -152,7 +154,10 @@ def test_helper_gate_scope_attributes_sources_and_prints_only_gate_keys(tmp_path
     assert json.loads(out.stdout) == {'complete': True, 'keys': {
         'SLACK_ALLOWED_USERS': {'value': 'U1', 'source': f'{home}/.env'},
         'GATEWAY_ALLOWED_USERS': {'value': 'U3', 'source': 'external secret source'},
-        'SLACK_ALLOW_ALL_USERS': {'value': 'false', 'source': 'administrator-managed env'}}}
+        'SLACK_ALLOW_ALL_USERS': {'value': 'false', 'source': 'administrator-managed env'},
+        'SLACK_ALLOW_BOTS': {'value': 'mentions', 'source': f'{home}/.env'}},
+        'authz': access.SLACK_AUTHZ,
+        'extra': {'group_allowed_chats': {'value': '["C1", "C2"]', 'source': f'{home}/config.yaml'}}}
 
 
 # ---- the relay: Connect and member sync -----------------------------------
@@ -291,7 +296,7 @@ def test_extra_grants_are_named_on_connect_with_their_source(tmp_path):
 
 
 def installed(tmp_path, record=None, allowed='U1,U2,W9'):
-    rec = {'owner': 'U1', 'synced_at': NOW - 600, 'last_members_owner_ok': True}
+    rec = {'owner': 'U1', 'synced_at': NOW - 600, 'last_members_owner_ok': True, 'installed_at': NOW - 3600}
     rec.update(record or {})
     return prepare(tmp_path, rec, f'SLACK_BOT_TOKEN=xoxb-FAKE\nSLACK_TEAM_NAME=Acme\nSLACK_ALLOWED_USERS={allowed}\n',
                    pending={'phase': 'installed', 'at': 1, 'team_name': 'Acme'})
@@ -421,3 +426,144 @@ def test_profile_helper_accepts_member_lists_and_nobody_and_refuses_junk(tmp_pat
     assert run({'SLACK_ALLOWED_USERS': 'NOBODY'}).returncode == 0
     for bad in ('U1,,U2', 'U1;rm', 'u1', 'U1\nX=1', '*', '', 'NOBODY,U1', 'nobody'):
         assert run({'SLACK_ALLOWED_USERS': bad}).returncode != 0, bad
+
+
+# ---- round 4: welcome DM, Hermes-exact parsing, grants, writer, backoff ----
+
+class WelcomeFails(FakeSlack):
+    """chat.postMessage fails the way Relay.slack_call reports a non-ok answer."""
+    async def __call__(self, method, values, token):
+        if method == 'chat.postMessage':
+            self.calls.append((method, values))
+            raise access.SlackReadError('channel_not_found')
+        return await super().__call__(method, values, token)
+
+
+def test_a_failed_welcome_dm_still_connects_and_the_member_sync_revokes(tmp_path):
+    data, home = prepare(tmp_path)
+    slack = WelcomeFails()
+
+    async def scenario():
+        relay = make_relay(tmp_path, home, slack)
+        client = TestClient(TestServer(relay.application()))
+        await client.start_server()
+        try:
+            response = await client.get('/oauth/callback', params={'state': issue_state(b'k' * 32, 'bot', KEY, 'T1'), 'code': 'c'})
+            page = (response.status, await response.text())
+        finally:
+            await client.close()
+        assert env_of(home)['SLACK_ALLOWED_USERS'] == 'U1,U2,W9'
+        slack.pages = [[u for u in USERS if u['id'] != 'W9']]   # W9 left the workspace
+        return page, await relay.sync_members_once()
+    (status, page), synced = asyncio.run(scenario())
+    assert status == 200 and 'Helper is in Acme.' in page
+    assert "The welcome message couldn't be sent to you in Slack (channel_not_found)" in page
+    rec = record_of(data)
+    assert type(rec['installed_at']) is int and rec['welcome'] == 'failed' and rec['welcome_error'] == 'channel_not_found'
+    assert synced == 1 and env_of(home)['SLACK_ALLOWED_USERS'] == 'U1,U2', 'the removed member is revoked'
+    status = file_service(tmp_path, home, slack_api=None).status(live=False)
+    assert status['welcome'] == 'failed' and status['welcome_error'] == 'channel_not_found'
+
+
+def test_a_sent_welcome_is_recorded(tmp_path):
+    _, _, _, data, _, _ = run_callback(tmp_path)
+    rec = record_of(data)
+    assert rec['welcome'] == 'sent' and rec['welcome_error'] is None
+
+
+@pytest.mark.parametrize('raw, expected', [
+    ('U1,U2', {'U1', 'U2'}), (' U1 , ,U2 ', {'U1', 'U2'}), ('["U1", " U2 ", ""]', {'U1', 'U2'}),
+    ('  ["*"]', {'*'}), ('[1, "U2"]', {'1', 'U2'}), ('["U1",', {'["U1"'}), ('[x]', {'[x]'}),
+    ('{"a": 1}', {'{"a": 1}'}), ('"U1"', {'"U1"'}), ('[]', set()), ('', set()), (None, set()),
+    (['U1', ' ', 'U2 '], {'U1', 'U2'}), ('*', {'*'}),
+])
+def test_coerce_allow_set_parses_like_hermes(raw, expected):
+    assert access.coerce_allow_set(raw) == expected
+
+
+def test_a_json_list_and_a_json_wildcard_read_as_hermes_reads_them():
+    rec = {'profile': 'p', 'access': 'members', 'owner': 'U1'}
+    anyone = access.effective_access(scope(SLACK_ALLOWED_USERS='U1,U2', GATEWAY_ALLOWED_USERS='["*"]'), (), rec, NOW, 'Acme')
+    assert anyone['open'] and anyone['text'] == ('Anyone in Slack who can message this bot, including guests '
+                                                 '(GATEWAY_ALLOWED_USERS=* in /h/.env).')
+    listed = access.effective_access(scope(SLACK_ALLOWED_USERS='["U1", "U2"]'), (), rec, NOW, 'Acme')
+    assert listed['ids'] == ['U1', 'U2'] and listed['text'] == '2 people can talk to this bot: the 2 full members of Acme.'
+    # '[]' is a set allowlist that names nobody: no fall-through to GATEWAY_ALLOW_ALL_USERS.
+    empty = access.effective_access(scope(SLACK_ALLOWED_USERS='[]', GATEWAY_ALLOW_ALL_USERS='true'), (), rec, NOW)
+    assert not empty['open'] and empty['people'] == 0
+
+
+def test_channel_and_bot_grants_qualify_the_audience_with_source_and_fix():
+    rec = {'profile': 'p', 'access': 'members', 'owner': 'U1'}
+    chats = {'group_allowed_chats': {'value': '["C1", "C2"]', 'source': '/h/config.yaml'}}
+    eff = access.effective_access(access.scope_from_env({'SLACK_ALLOWED_USERS': 'U1,U2', 'SLACK_ALLOW_BOTS': 'Mentions'}, '/h/.env',
+                                                        extra=chats), (), rec, NOW, 'Acme')
+    assert eff['chats'] == ['C1', 'C2'] and eff['bots'] is True and not eff['open']
+    assert eff['text'] == ('2 people can talk to this bot: the 2 full members of Acme, and anyone posting in channels '
+                           'C1, C2 (group_allowed_chats in /h/config.yaml). Bots and workflows are also let in '
+                           '(SLACK_ALLOW_BOTS=mentions in /h/.env).')
+    grants = {g['what']: g for g in eff['grants']}
+    assert grants['group_allowed_chats']['how_to_change'] == 'remove group_allowed_chats from /h/config.yaml'
+    assert grants['SLACK_ALLOW_BOTS=mentions']['how_to_change'] == 'remove SLACK_ALLOW_BOTS from /h/.env'
+    nobody = access.effective_access(access.scope_from_env({'SLACK_ALLOWED_USERS': 'NOBODY'}, '/h/.env',
+        extra={'group_allowed_chats': {'value': '*', 'source': '/h/config.yaml'}}), (), rec, NOW)
+    assert nobody['text'] == ('Only people posting in any channel it is in can talk to this bot '
+                              '(group_allowed_chats in /h/config.yaml).')
+    # allow_bots: a set env wins over config.yaml; without a declared env Hermes admits no bot.
+    yaml_all = {'allow_bots': {'value': 'all', 'source': '/h/config.yaml'}}
+    assert access.effective_access(access.scope_from_env({'SLACK_ALLOW_BOTS': 'none'}, '/h/.env', extra=yaml_all), (), rec, NOW)['bots'] is False
+    assert 'allow_bots=all in /h/config.yaml' in access.effective_access(access.scope_from_env({}, '/h/.env', extra=yaml_all), (), rec, NOW)['text']
+    undeclared = access.scope_from_env({'SLACK_ALLOW_BOTS': 'all'}, '/h/.env', extra=yaml_all,
+                                       authz={'group_allowed_chats_env': '', 'allow_bots_env': ''})
+    assert access.effective_access(undeclared, (), rec, NOW)['bots'] is False
+    # A group-chat env, when Hermes declares one, is read too.
+    declared = access.scope_from_env({'X_GROUP_CHATS': 'C9'}, '/h/.env', authz={'group_allowed_chats_env': 'X_GROUP_CHATS',
+                                                                               'allow_bots_env': 'SLACK_ALLOW_BOTS'})
+    assert access.effective_access(declared, (), rec, NOW)['chats'] == ['C9']
+
+
+def test_gate_scope_without_hermes_reports_config_yaml_grants(tmp_path):
+    home = tmp_path / 'profiles' / 'bot'
+    home.mkdir(parents=True)
+    (home / '.env').write_text('SLACK_ALLOWED_USERS=U1\nSLACK_ALLOW_BOTS=mentions\n')
+    (home / 'config.yaml').write_text('slack:\n  allow_bots: all\nplatforms:\n  slack:\n    group_allowed_chats: C1,C2\n')
+    got = access.gate_scope(home)
+    assert got['complete'] is False and got['keys']['SLACK_ALLOW_BOTS'] == {'value': 'mentions', 'source': f'{home}/.env'}
+    assert got['extra'] == {'group_allowed_chats': {'value': 'C1,C2', 'source': f'{home}/config.yaml'},
+                            'allow_bots': {'value': 'all', 'source': f'{home}/config.yaml'}}
+    assert access.valid_scope(json.loads(json.dumps(got))) == got
+    assert access.valid_scope({**got, 'keys': {'SLACK_BOT_TOKEN': {'value': 'x', 'source': 's'}}}) is None
+
+
+def test_a_timed_out_profile_writer_is_killed_before_the_lock_is_released(tmp_path, monkeypatch):
+    data, home = installed(tmp_path)
+    pid_file = tmp_path / 'writer.pid'
+    helper = tmp_path / 'slow_writer.py'
+    helper.write_text('import os, signal, sys, time\n'
+                      'signal.signal(signal.SIGTERM, signal.SIG_IGN)   # ignores a polite stop\n'
+                      f'open({str(pid_file)!r}, "w").write(str(os.getpid()))\n'
+                      'sys.stdin.read()\n'
+                      'time.sleep(30)\n')
+    monkeypatch.setattr(relay_module, 'WRITE_TIMEOUT', 1)
+    relay = relay_module.Relay(tmp_path, sys.executable, helper, base_url='https://example.test/slack',
+                               upstream='http://127.0.0.1:9999')
+    before = (data / 'apps.json').read_text()
+    with pytest.raises(RuntimeError, match='timed out'):
+        asyncio.run(relay.publish(KEY, access.expect_of(record_of(data)), ['U2'], {'synced_at': NOW}))
+    pid = int(pid_file.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)   # the writer is gone by the time the lock was released
+    assert (data / 'apps.json').read_text() == before, 'a failed publish records nothing'
+
+
+def test_backoff_never_stretches_the_24_hour_expiry(tmp_path):
+    expiry = NOW + 100
+    data, home = installed(tmp_path, {'synced_at': expiry - access.STALE_SECONDS, 'retry_after': NOW + 3600,
+                                      'last_members_owner_ok': True})
+    slack = FakeSlack()
+    relay = make_relay(tmp_path, home, slack)
+    assert asyncio.run(relay.sync_app(KEY, now=NOW)) is False and env_of(home)['SLACK_ALLOWED_USERS'] == 'U1,U2,W9'
+    assert asyncio.run(relay.sync_app(KEY, now=expiry + 1)) is True
+    assert slack.calls == [], 'no Slack call while Slack asked to wait'
+    assert env_of(home)['SLACK_ALLOWED_USERS'] == 'U1', 'the expired list fell back to the verified installer'
+    assert record_of(data)['retry_after'] == NOW + 3600

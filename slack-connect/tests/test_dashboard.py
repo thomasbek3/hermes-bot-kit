@@ -568,7 +568,7 @@ def _installed(data, env, ids, access='members', owner='U1', **record):
     key = 'c' * 32
     (data / 'pending').mkdir(exist_ok=True)
     item = {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Helper', 'access': access,
-            'access_rev': 1, 'owner': owner, **record}
+            'access_rev': 1, 'owner': owner, 'installed_at': 1, **record}
     (data / 'apps.json').write_text(json.dumps({key: {k: v for k, v in item.items() if v is not None}}))
     (data / 'pending' / (key + '.json')).write_text(json.dumps({'phase': 'installed', 'at': 1}))
     env.update({'SLACK_APP_ID': 'A1', 'SLACK_BOT_TOKEN': 'fake-bot', 'SLACK_TEAM_NAME': 'Acme', 'SLACK_ALLOWED_USERS': ','.join(ids)})
@@ -659,3 +659,34 @@ def test_legacy_record_is_shown_and_kept_until_the_owner_chooses(context):
     body = client.post('/access', json={'access': 'list', 'allowed': 'U1'}).json()   # Keep these people
     assert body['access'] == 'list' and env['SLACK_ALLOWED_USERS'] == 'U1'
     assert _record(data)['access'] == 'list' and _record(data)['access_rev'] == 1
+
+
+def test_set_access_with_a_failed_save_leaves_the_record_as_it_was(context):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1', 'U2'])
+    before = _record(data)
+    def broken(values):
+        raise OSError('disk full')
+    api.make_service().save_env = broken
+    response = client.post('/access', json={'access': 'list', 'allowed': 'U7'})
+    assert response.status_code == 503 and 'disk full' not in response.text
+    after = _record(data)
+    assert after == before, 'mode, list and revision move only with the .env'
+    assert (after['access'], after.get('allowed'), after['access_rev']) == ('members', None, 1)
+    assert env['SLACK_ALLOWED_USERS'] == 'U1,U2'
+
+
+def test_audience_route_is_local_only_and_status_stays_live(context):
+    client, slack, vault, env, data, _ = context
+    _installed(data, env, ['U1', 'U2'], synced_at=int(time.time()), welcome='failed', welcome_error='channel_not_found')
+    live_checks = []
+    api.make_service().live = lambda _env: live_checks.append(1) or True
+    def users_list(token):
+        raise AssertionError('no Slack call')
+    slack.users_list = users_list
+    body = client.get('/audience').json()
+    assert live_checks == [] and slack.calls == [], 'the 20 s poll makes no Slack call'
+    assert body['audience']['text'] == '2 people can talk to this bot: the 2 full members of Acme.'
+    assert body['phase'] == 'installed' and 'readiness' not in body
+    assert (body['welcome'], body['welcome_error']) == ('failed', 'channel_not_found')
+    assert client.get('/status').json()['phase'] == 'connected' and live_checks == [1], 'open and Test connection stay live'
