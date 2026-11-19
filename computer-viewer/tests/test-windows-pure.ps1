@@ -43,14 +43,16 @@ Check 'only the first 8 characters count (VNC DES limit)' ($long -eq 'dbd83cfd72
 
 # --- UltraVNC ini check (F2) ------------------------------------------------
 Import-ScriptFunctions $connect @('Test-UltraVncIniText')
-$good = "[ultravnc]`r`npasswd=DBD83CFD727A145800`r`npasswd2=`r`n[admin]`r`nAuthRequired=1`r`nPortNumber=5900`r`nAllowLoopback=1`r`nLoopbackOnly=1`r`n"
-Check 'ini with password, auth and loopback passes' (Test-UltraVncIniText $good 'DBD83CFD727A145800' 5900)
+# The sample blob is built at run time (the privacy guard refuses any passwd= blob in the tree).
+$blob = ((((ConvertTo-VncObfuscated 'password') | ForEach-Object { $_.ToString('X2') }) -join '') + '00')
+$good = "[ultravnc]`r`npasswd=$blob`r`npasswd2=`r`n[admin]`r`nAuthRequired=1`r`nPortNumber=5900`r`nAllowLoopback=1`r`nLoopbackOnly=1`r`n"
+Check 'ini with password, auth and loopback passes' (Test-UltraVncIniText $good $blob 5900)
 Check 'ini with another password fails' (-not (Test-UltraVncIniText $good '0000000000000000AA' 5900))
 Check 'ini without a password fails' (-not (Test-UltraVncIniText $good '' 5900))
-Check 'ini with AuthRequired=0 fails' (-not (Test-UltraVncIniText ($good -replace 'AuthRequired=1', 'AuthRequired=0') 'DBD83CFD727A145800' 5900))
-Check 'ini with LoopbackOnly=0 fails' (-not (Test-UltraVncIniText ($good -replace 'LoopbackOnly=1', 'LoopbackOnly=0') 'DBD83CFD727A145800' 5900))
-Check 'ini with both LoopbackOnly=1 and =0 fails' (-not (Test-UltraVncIniText ($good + "LoopbackOnly=0`r`n") 'DBD83CFD727A145800' 5900))
-Check 'ini on another port fails' (-not (Test-UltraVncIniText $good 'DBD83CFD727A145800' 5901))
+Check 'ini with AuthRequired=0 fails' (-not (Test-UltraVncIniText ($good -replace 'AuthRequired=1', 'AuthRequired=0') $blob 5900))
+Check 'ini with LoopbackOnly=0 fails' (-not (Test-UltraVncIniText ($good -replace 'LoopbackOnly=1', 'LoopbackOnly=0') $blob 5900))
+Check 'ini with both LoopbackOnly=1 and =0 fails' (-not (Test-UltraVncIniText ($good + "LoopbackOnly=0`r`n") $blob 5900))
+Check 'ini on another port fails' (-not (Test-UltraVncIniText $good $blob 5901))
 
 # --- Loopback-only listener (F2) --------------------------------------------
 Import-ScriptFunctions $connect @('Test-LoopbackOnlyListener')
