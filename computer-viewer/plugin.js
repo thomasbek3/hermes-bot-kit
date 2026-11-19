@@ -105,6 +105,10 @@ const ERRORS = {
     title: 'Server key changed',
     body: "The VNC server key for {name} does not match the one pinned on first connect. If that is expected (rebuilt machine, new host), clear the pin with 'Forget pinned server key' under Advanced."
   },
+  'bad-ws-url': {
+    title: 'Unusable address',
+    body: "The VNC address isn't a ws:// or wss:// address the viewer can open."
+  },
   'mixed-content': {
     title: 'Blocked insecure connection',
     body: 'ws:// to a public host is blocked. Use wss:// (TLS) or a localhost/Tailscale address.'
@@ -133,6 +137,13 @@ const ERRORS = {
     title: 'Redirect blocked',
     body: 'The API address redirected elsewhere; refusing to follow with your key.'
   }
+}
+
+const WS_URL_PROBLEMS = {
+  unparsable: "The VNC address isn't a valid URL.",
+  scheme: 'The VNC address must start with ws:// or wss:// (http:// and https:// also work).',
+  credentials: 'The VNC address carries a user name or password. Remove it and put the password in the VNC password field.',
+  host: 'The VNC address has no host.'
 }
 
 const MODE_OPTIONS = [
@@ -294,19 +305,40 @@ function isPrivateWsHost(hostName) {
   return isPrivateIpv4(host)
 }
 
-function isInsecurePublicWs(wsUrl) {
-  // A plaintext WebSocket target to a public host. The scheme is compared on
-  // the parsed, normalized URL; http: counts as plaintext too, because the
-  // browser WebSocket API turns http(s): into ws(s):. Public hosts need wss:.
-  const raw = String(wsUrl || '').trim()
-  if (!raw || !/^(?:wss?|https?):\/\//i.test(raw)) return false
+/**
+ * The one check every VNC WebSocket address passes before it is opened, from
+ * settings or from a session API. Parsed once; the caller connects to the
+ * returned `url` (the normalised href), never to the string it was given.
+ * http(s): is accepted and mapped to ws(s): (the browser WebSocket API treats
+ * them the same). No credentials in the URL (they belong in the VNC
+ * password), a host is required, and plaintext ws: only to a private host.
+ */
+function validateWsUrl(raw) {
+  const text = String(raw == null ? '' : raw).trim()
+  let parsed
   try {
-    const parsed = new URL(raw)
-    const plain = parsed.protocol === 'ws:' || parsed.protocol === 'http:'
-    return plain && !isPrivateWsHost(parsed.hostname)
+    parsed = new URL(text)
   } catch {
-    return true
+    return { ok: false, code: 'bad-ws-url', detail: WS_URL_PROBLEMS.unparsable }
   }
+  if (parsed.protocol === 'http:') parsed.protocol = 'ws:'
+  else if (parsed.protocol === 'https:') parsed.protocol = 'wss:'
+  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+    return { ok: false, code: 'bad-ws-url', detail: WS_URL_PROBLEMS.scheme }
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, code: 'bad-ws-url', detail: WS_URL_PROBLEMS.credentials }
+  }
+  if (!parsed.hostname) return { ok: false, code: 'bad-ws-url', detail: WS_URL_PROBLEMS.host }
+  if (parsed.protocol === 'ws:' && !isPrivateWsHost(parsed.hostname)) {
+    return { ok: false, code: 'mixed-content', detail: ERRORS['mixed-content'].body }
+  }
+  return { ok: true, url: parsed.href }
+}
+
+function isInsecurePublicWs(wsUrl) {
+  // Plaintext (ws:, or http: which becomes ws:) to a public host; for hints.
+  return validateWsUrl(wsUrl).code === 'mixed-content'
 }
 
 const DEFAULT_ENDPOINT_NAME = 'My computer'
@@ -1794,24 +1826,17 @@ async function connect(endpoint) {
     }
   }
 
-  engine.resolvedWsUrl = wsUrl || ''
-
-  if (isInsecurePublicWs(wsUrl)) {
+  // One check for every source: settings, the probe, and a session API reply.
+  const checked = validateWsUrl(wsUrl)
+  if (!checked.ok) {
+    engine.resolvedWsUrl = ''
     if (!still(gen)) return
-    if (iframeFallbackUrl) {
-      const next = normalizeEndpoint({
-        ...liveEndpoint(endpoint),
-        mode: 'iframe',
-        iframeUrl: iframeFallbackUrl,
-        probe: false
-      })
-      persistEndpointFields(next)
-      await connectIframe(next, gen)
-      return
-    }
-    setError('mixed-content', ERRORS['mixed-content'].body)
+    const fromSession = !probing && endpoint.mode === 'session-json'
+    setError(checked.code, fromSession ? `The session API returned an address the viewer won't open. ${checked.detail}` : checked.detail)
     return
   }
+  wsUrl = checked.url
+  engine.resolvedWsUrl = wsUrl
 
   patchState({ phase: 'loading-novnc', code: null, detail: null })
   let RfbCtor
@@ -3334,24 +3359,13 @@ function hiperfBuildUrl(endpoint) {
       return { error: 'hiperf-unreachable', url: '' }
     }
   }
-  let parsed
-  try {
-    parsed = new URL(raw)
-  } catch {
-    return { error: 'hiperf-unreachable', url: raw }
-  }
-  // Only WebSocket schemes; http(s): is the same channel by another name.
-  if (parsed.protocol === 'http:') parsed.protocol = 'ws:'
-  else if (parsed.protocol === 'https:') parsed.protocol = 'wss:'
-  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
-    return { error: 'hiperf-unreachable', url: parsed.toString() }
-  }
-  if (isInsecurePublicWs(parsed.toString())) {
-    return { error: 'mixed-public', url: parsed.toString() }
+  const checked = validateWsUrl(raw)
+  if (!checked.ok) {
+    return { error: checked.code === 'mixed-content' ? 'mixed-public' : 'hiperf-unreachable', url: raw }
   }
   // The token never goes in the URL: query strings land in logs and in the
   // agent's argv. It is sent as the first frame instead (see below).
-  return { url: parsed.toString() }
+  return { url: checked.url }
 }
 
 // Compatibility knob: a user-pasted hiperfUrl that already carries ?token=

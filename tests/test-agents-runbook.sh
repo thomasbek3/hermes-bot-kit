@@ -3,14 +3,14 @@
 # offline: a fake curl serves install.sh and the release files from this tree.
 # Checks the prerequisites, install, verify and uninstall blocks, for the
 # default install, Grokbot-only and viewer-only, and that verify fails when a
-# selected plugin, its digest or the record is missing.
+# selected plugin, its digest or the record is missing. Every block runs
+# literally under bash AND zsh (macOS's default shell); zsh must be installed.
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-WORK=$(mktemp -d)
-export TMPDIR="${WORK}"
-trap 'rm -rf "${WORK}"' EXIT
-fail() { echo "FAIL: $*" >&2; exit 1; }
+TOP=$(mktemp -d)
+trap 'rm -rf "${TOP}"' EXIT
+fail() { echo "FAIL[${SH:-?}]: $*" >&2; exit 1; }
 
 block() {
   # The fenced bash block right after <!-- runbook:$1 --> in AGENTS.md.
@@ -24,6 +24,20 @@ block() {
 for name in prereq install verify uninstall; do
   [ -n "$(block "${name}")" ] || fail "AGENTS.md has no runbook:${name} block"
 done
+# An interactive bash or zsh treats `!` as history expansion (also inside
+# double quotes and here-documents), so the pasted blocks carry none.
+awk '/^```bash/ { inside = 1; next } inside && /^```/ { inside = 0 } inside' "${ROOT}/AGENTS.md" |
+  grep -q '!' && fail "an AGENTS.md command block contains '!' (history expansion when pasted)"
+command -v zsh >/dev/null 2>&1 ||
+  fail "zsh is not installed; the runbook blocks must be tested in zsh (apt-get install zsh)"
+
+suite() {
+SH=$1
+SHBIN=$(command -v "${SH}")
+WORK="${TOP}/${SH}"
+mkdir -p "${WORK}"
+export TMPDIR="${WORK}"
+echo "--- blocks under ${SH}"
 
 FAKE="${WORK}/fake"
 mkdir -p "${FAKE}"
@@ -33,7 +47,7 @@ chmod +x "${FAKE}/curl"
 runblock() {
   # runblock <home> <script text>
   env -i PATH="${FAKE}:/usr/bin:/bin" HOME="${WORK}" TMPDIR="${WORK}" HERMES_HOME="$1" \
-    FAKE_API=down FAKE_ROOT="${ROOT}" bash -c "$2"
+    FAKE_API=down FAKE_ROOT="${ROOT}" "${SHBIN}" -c "$2"
 }
 
 install_variant() {
@@ -48,7 +62,7 @@ install_variant() {
 only_bash="${WORK}/only-bash"
 mkdir -p "${only_bash}"
 ln -s "$(command -v bash)" "${only_bash}/bash"
-if out=$(env -i PATH="${only_bash}" HOME="${WORK}" "${only_bash}/bash" -c "$(block prereq)" 2>&1); then
+if out=$(env -i PATH="${only_bash}" HOME="${WORK}" "${SHBIN}" -c "$(block prereq)" 2>&1); then
   fail "prerequisites passed with only bash on PATH"
 fi
 printf '%s\n' "${out}" | grep -q "prerequisites OK" && fail "prerequisites printed OK after a missing tool"
@@ -116,9 +130,12 @@ expect_verify_fail "${WORK}/home-default" "after uninstall"
 
 # A failed download stops the install block with a non-zero exit.
 if env -i PATH="${FAKE}:/usr/bin:/bin" HOME="${WORK}" TMPDIR="${WORK}" HERMES_HOME="${WORK}/home-x" \
-  FAKE_API=down FAKE_ROOT="${WORK}/nothing-here" bash -c "$(block install)" >/dev/null 2>&1; then
+  FAKE_API=down FAKE_ROOT="${WORK}/nothing-here" "${SHBIN}" -c "$(block install)" >/dev/null 2>&1; then
   fail "the install block succeeded on a failed download"
 fi
 echo "OK  install block fails on a failed download"
+}
 
-echo "test-agents-runbook.sh: all passed"
+suite bash
+suite zsh
+echo "test-agents-runbook.sh: all passed (bash and zsh)"

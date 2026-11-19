@@ -180,29 +180,43 @@ export function skillsInstallParams(bot, name) {
   return { action: 'install', query: String(name || ''), profile: bot.name }
 }
 
-/** The hub entry a skills search row names: its source-qualified identifier
- *  when the hub gives one (so Install gets exactly that entry), else its name. */
-export function skillIdentity(row) {
-  for (const key of ['identifier', 'id', 'name']) {
-    const value = row && typeof row[key] === 'string' ? row[key].trim() : ''
-    if (value) return value
-  }
-  return ''
+/** The hub entry a search row pins, by Hermes's own rule
+ *  (hermes_cli/skills_hub.py _full_identifier): an identifier with a "/"
+ *  ("official/pdf", "skills-sh/org/repo/x") names one entry; anything else is
+ *  a short name the backend resolves by search, maybe to another entry. */
+export function skillQualifiedId(row) {
+  const id = row && typeof row.identifier === 'string' ? row.identifier.trim() : ''
+  return id.includes('/') ? id : ''
 }
 
 /** Where a skills search row comes from (hub source or trust), shown next to
- *  its name so two entries with the same name can be told apart. */
+ *  its name. */
 export function skillSource(row) {
   const parts = [row?.source, row?.trust || row?.trust_level].map(v => (typeof v === 'string' ? v.trim() : '')).filter(Boolean)
   return parts.join(', ')
 }
 
-/** True when Install cannot be bound to exactly this search row: the hub gave
- *  no source-qualified identifier, and another row has the same name. The hub
- *  search today returns only name and description, so a bare name could
- *  resolve to a different entry on the bot's backend. */
-export function skillAmbiguous(rows, row) {
-  const name = String(row?.name || '').trim()
-  if (!name || skillIdentity(row) !== name) return false
-  return (Array.isArray(rows) ? rows : []).filter(r => String(r?.name || '').trim() === name).length > 1
+/** A value single-quoted for a POSIX shell; '' when it can't be shown safely
+ *  (empty, a quote, a control character, or a leading "-" read as a flag). */
+export function shellQuote(value) {
+  const text = String(value ?? '').trim()
+  if (!text || text.startsWith('-') || /['\u0000-\u001f\u007f]/.test(text)) return ''
+  return `'${text}'`
+}
+
+export const SKILL_BARE_NOTE = "The hub gave only a name, so Hermes picks the entry itself. Check which one first with hermes skills search <name>, which lists each entry's source and full identifier."
+
+/** What a skills search row offers. A row with a source-qualified id gets
+ *  one-click Install bound to exactly that id. Any other row (every row on
+ *  today's Hermes: the hub search returns name and description only) gets no
+ *  Install, only the CLI command to copy (hermes_cli/subcommands/skills.py:
+ *  `hermes -p <profile> skills install <identifier>`); the CLI cannot pin a
+ *  source for a bare name, hence the note. */
+export function skillRowAction(row, profile) {
+  const identifier = skillQualifiedId(row)
+  if (identifier) return { kind: 'install', identifier }
+  const p = shellQuote(profile)
+  const n = shellQuote(row?.name)
+  if (!p || !n) return { kind: 'none', note: "This name can't be shown as a safe command; install it from Hermes's own Skills page." }
+  return { kind: 'command', command: `hermes -p ${p} skills install ${n}`, note: SKILL_BARE_NOTE }
 }

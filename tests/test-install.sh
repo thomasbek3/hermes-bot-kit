@@ -391,6 +391,40 @@ grep -qx 'release=v2001.02.03' "${rec}" || fail "install record has the wrong re
 grep -qx 'plugins=computer-viewer grokbot-override' "${rec}" || fail "install record has the wrong plugins"
 echo "OK  install record (release + plugins)"
 
+# The record is written atomically as the last step of the rollback-protected
+# install: a normal run leaves only the record (no temp file); a failure just
+# before the rename rolls everything back and keeps the previous record.
+ahome=$(new_home)
+HERMES_HOME="${ahome}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}" >/dev/null || fail "atomic-record: first install failed"
+arec="${ahome}/desktop-plugins/.hermes-bot-kit-install"
+grep -qx 'release=local' "${arec}" || fail "atomic-record: record has no release=local"
+grep -qx 'plugins=computer-viewer grokbot-override' "${arec}" || fail "atomic-record: record has the wrong plugins"
+leftover() { find "${ahome}/desktop-plugins" -maxdepth 1 -name '.hermes-bot-kit-install.*' | grep -q .; }
+leftover && fail "atomic-record: a temp record was left after a normal install"
+printf 'release=v2000.01.01\nplugins=computer-viewer\n' > "${arec}"
+cp "${arec}" "${WORK}/prev.record"
+aplug="${ahome}/desktop-plugins/grokbot-override/plugin.js"
+printf '\n// a local edit\n' >> "${aplug}"
+cp "${aplug}" "${WORK}/prev.plugin"
+mvshim=$(mktemp -d)
+cat > "${mvshim}/mv" <<'SHIM'
+#!/bin/sh
+for last; do :; done
+case "${last}" in
+  */.hermes-bot-kit-install) echo "fake mv: refusing the record" >&2; exit 1 ;;
+esac
+exec /bin/mv "$@"
+SHIM
+chmod +x "${mvshim}/mv"
+if PATH="${mvshim}:${PATH}" HERMES_HOME="${ahome}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}" >/dev/null 2>&1; then
+  fail "atomic-record: the install succeeded although the record rename failed"
+fi
+cmp -s "${arec}" "${WORK}/prev.record" || fail "atomic-record: the previous record changed after a rollback"
+leftover && fail "atomic-record: a temp record was left after a rollback"
+cmp -s "${aplug}" "${WORK}/prev.plugin" || fail "atomic-record: the plugin was not rolled back"
+ls "${ahome}/desktop-plugins/grokbot-override" | grep -q '\.bak\.' && fail "atomic-record: rollback left a backup file"
+echo "OK  install record is atomic and rolled back with the plugins"
+
 # No automatic downgrade: v2099.01.02 installed, then the API is down (the
 # fallback is older): nothing is fetched or changed. An explicit KIT_REF does it.
 log=$(mktemp)

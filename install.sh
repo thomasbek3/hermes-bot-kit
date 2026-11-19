@@ -202,7 +202,8 @@ else
 fi
 RAW_BASE="https://raw.githubusercontent.com/${KIT_REPO}/${KIT_REF}"
 
-# What this kit installed last time (written at the end of a successful run):
+# What this kit installed last time (written atomically as the last step of a
+# successful install):
 # release=<tag or local> and plugins=<desktop plugins>.
 INSTALL_RECORD="${PLUGIN_ROOT}/.hermes-bot-kit-install"
 recorded_release() {
@@ -597,23 +598,30 @@ else
     if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
       chmod +x "${PLUGIN_ROOT}/computer-viewer/"*.sh
     fi
+    write_record
+  }
+
+  # Last action of the protected step: record what was installed (release and
+  # desktop plugins) for the verify step and the next run's downgrade check.
+  # A temp file in the same folder, then one rename: the record is either the
+  # previous one or the new one. The temp file is listed as created, so a
+  # failure before the rename rolls it back with everything else.
+  write_record() {
+    local plugins="" release="${KIT_REF}" tmp
+    [ "${KIT_SKIP_COMPUTER:-0}" != "1" ] && plugins="computer-viewer"
+    [ "${GROKBOT_INSTALLED}" = "1" ] && plugins="${plugins:+${plugins} }grokbot-override"
+    [ -n "${plugins}" ] || return 0
+    [ -n "${SOURCE_DIR}" ] && release="local"
+    tmp=$(mktemp "${PLUGIN_ROOT}/.hermes-bot-kit-install.XXXXXX")
+    printf '%s\n' "${tmp}" >> "${CREATED_FILE}"
+    printf 'release=%s\nplugins=%s\n' "${release}" "${plugins}" > "${tmp}"
+    chmod 0644 "${tmp}"
+    mv -f "${tmp}" "${INSTALL_RECORD}"
   }
 
   INSTALL_OK=0
   install_all
   INSTALL_OK=1
-
-  # Record what was installed (release and desktop plugins) for the verify
-  # step and for the next run's downgrade check.
-  installed_plugins=""
-  [ "${KIT_SKIP_COMPUTER:-0}" != "1" ] && installed_plugins="computer-viewer"
-  [ "${GROKBOT_INSTALLED}" = "1" ] && installed_plugins="${installed_plugins:+${installed_plugins} }grokbot-override"
-  if [ -n "${installed_plugins}" ]; then
-    record_release="${KIT_REF}"
-    [ -n "${SOURCE_DIR}" ] && record_release="local"
-    printf 'release=%s\nplugins=%s\n' "${record_release}" "${installed_plugins}" > "${TMP_DIR}/.record"
-    cp "${TMP_DIR}/.record" "${INSTALL_RECORD}"
-  fi
 
   if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
     echo "Computer viewer  -> ${PLUGIN_ROOT}/computer-viewer/plugin.js (+ helper scripts)"

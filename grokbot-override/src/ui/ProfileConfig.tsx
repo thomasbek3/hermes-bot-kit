@@ -9,7 +9,8 @@ import { boundedFetch, mcpNeedsSetup, modelOptionsParams, providerMatches, provi
 import { resolveBotConnectionRoute } from '../core/routing.js'
 import { Check, Field, Select } from './kit'
 import { installSkill, loadProfileConfig, request, searchSkills } from './rosterActions'
-import { skillAmbiguous, skillIdentity, skillSource } from '../core/profileConfig.js'
+import { skillRowAction, skillSource } from '../core/profileConfig.js'
+import { copyText } from './MessageActions'
 import { host, sdk } from './sdk'
 
 /** The model catalogue (model.options) for the app session: one per
@@ -194,6 +195,7 @@ function SkillsHub({ bot, onInstalled }: { bot: any; onInstalled: (name: string)
   const [results, setResults] = React.useState<null | any[]>(null)
   const [busy, setBusy] = React.useState<null | string>(null)
   const [error, setError] = React.useState<null | string>(null)
+  const [copied, setCopied] = React.useState<null | number>(null)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <form
@@ -203,6 +205,7 @@ function SkillsHub({ bot, onInstalled }: { bot: any; onInstalled: (name: string)
           if (!query.trim() || busy) return
           setBusy('search')
           setError(null)
+          setCopied(null)
           try {
             setResults(await searchSkills(query))
           } catch (err: any) {
@@ -220,38 +223,62 @@ function SkillsHub({ bot, onInstalled }: { bot: any; onInstalled: (name: string)
       </form>
       {error ? <div className="gbo-form-error">{error}</div> : null}
       {results && !results.length ? <span className="gbo-field-hint">No skills found.</span> : null}
-      {(results || []).slice(0, 8).map((r: any, index: number) => (
-        <div key={`${index}:${skillIdentity(r)}`} className="gbo-check" style={{ cursor: 'default' }}>
-          <span className="gbo-check-text" title={r.description || r.name}>
-            {r.name}
-            {skillSource(r) ? <span className="gbo-field-hint"> · {skillSource(r)}</span> : null}
-            {skillAmbiguous(results, r) ? <span className="gbo-field-hint gbo-skill-ambiguous"> · Several hub entries share this name and the hub does not say which is which; install it from Hermes's own Skills page.</span> : null}
-          </span>
-          <button
-            type="button"
-            className="gbo-btn is-small"
-            disabled={Boolean(busy) || skillAmbiguous(results, r)}
-            onClick={async () => {
-              setBusy(r.name)
-              setError(null)
-              try {
-                // Install exactly the entry shown: its full hub identifier
-                // when the hub gives one, not just the short name.
-                await installSkill(bot, skillIdentity(r))
-                onInstalled(r.name)
-              } catch (err: any) {
-                setError(String(err?.message || err))
-              } finally {
-                setBusy(null)
-              }
-            }}
-          >
-            {busy === r.name ? 'Installing…' : 'Install'}
-          </button>
-        </div>
-      ))}
+      {(results || []).slice(0, 8).map((r: any, index: number) => {
+        const action = skillRowAction(r, cliProfile(bot))
+        return (
+          <div key={`${index}:${r.name}`} className="gbo-check gbo-skill-row" style={{ cursor: 'default', flexWrap: 'wrap' }}>
+            <span className="gbo-check-text" title={r.description || r.name}>
+              {r.name}
+              {skillSource(r) ? <span className="gbo-field-hint"> · {skillSource(r)}</span> : null}
+            </span>
+            {action.kind === 'install' ? (
+              <button
+                type="button"
+                className="gbo-btn is-small"
+                disabled={Boolean(busy)}
+                onClick={async () => {
+                  setBusy(action.identifier)
+                  setError(null)
+                  try {
+                    // Exactly the entry shown: its source-qualified identifier.
+                    await installSkill(bot, action.identifier)
+                    onInstalled(r.name)
+                  } catch (err: any) {
+                    setError(String(err?.message || err))
+                  } finally {
+                    setBusy(null)
+                  }
+                }}
+              >
+                {busy === action.identifier ? 'Installing…' : 'Install'}
+              </button>
+            ) : null}
+            {action.kind === 'command' ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexBasis: '100%', minWidth: 0 }}>
+                <code className="gbo-skill-cmd" style={{ minWidth: 0, overflowWrap: 'anywhere', userSelect: 'all' }}>{action.command}</code>
+                <button
+                  type="button"
+                  className="gbo-btn is-small"
+                  onClick={() => {
+                    void copyText(action.command).then(ok => setCopied(ok ? index : null))
+                  }}
+                >
+                  {copied === index ? 'Copied' : 'Copy'}
+                </button>
+              </span>
+            ) : null}
+            {action.kind !== 'install' ? <span className="gbo-field-hint" style={{ flexBasis: '100%' }}>{action.note}</span> : null}
+          </div>
+        )
+      })}
     </div>
   )
+}
+
+/** The profile name the bot's backend knows it by, for a CLI command run there. */
+function cliProfile(bot: any) {
+  const scope = backendScope(bot)
+  return typeof scope === 'string' ? scope : scope.profile || bot.name
 }
 
 /** routing.ts:187 botBackendProfileScope */

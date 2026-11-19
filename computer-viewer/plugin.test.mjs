@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { isInsecurePublicWs, loadSettingsFrom, credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner, onFocusedOwnerChange }\n'
+        '\nglobalThis.__t = { isInsecurePublicWs, validateWsUrl, loadSettingsFrom, credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner, onFocusedOwnerChange }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -2217,4 +2217,106 @@ test('upgrade: the old auto-connecting "This Mac" seed is deselected once; a cus
   const fresh = makeCtx()
   t.loadSettingsFrom(fresh)
   assert.deepEqual(plain(t.$settings.get().endpoints), [], 'a fresh install has no seeded computer')
+})
+
+test('validateWsUrl: one parse, WebSocket schemes only, no credentials, plaintext only to private hosts', () => {
+  const { t } = loadPlugin({})
+  const ok = raw => {
+    const r = t.validateWsUrl(raw)
+    assert.equal(r.ok, true, `${raw} should pass: ${r.detail}`)
+    return r.url
+  }
+  const bad = (raw, code) => {
+    const r = t.validateWsUrl(raw)
+    assert.equal(r.ok, false, `${raw} should be refused`)
+    assert.equal(r.code, code, raw)
+    assert.equal(typeof r.detail, 'string')
+    assert.equal(r.url, undefined)
+  }
+  // Allowed, and the caller gets the normalised href.
+  assert.equal(ok('  wss://example.com/websockify  '), 'wss://example.com/websockify')
+  assert.equal(ok('WSS://Example.COM:443/x'), 'wss://example.com/x')
+  assert.equal(ok('ws://127.0.0.1:6080/websockify'), 'ws://127.0.0.1:6080/websockify')
+  assert.equal(ok('ws://192.168.1.5:6080'), 'ws://192.168.1.5:6080/')
+  assert.equal(ok('ws://box.tail1234.ts.net/x'), 'ws://box.tail1234.ts.net/x')
+  assert.equal(ok('ws://[::1]:6080/x'), 'ws://[::1]:6080/x')
+  // http(s) maps to ws(s); the plaintext rule follows the mapped scheme.
+  assert.equal(ok('https://example.com/websockify'), 'wss://example.com/websockify')
+  assert.equal(ok('http://192.168.1.4:6080/x'), 'ws://192.168.1.4:6080/x')
+  bad('http://example.com/x', 'mixed-content')
+  // Plaintext to a public host.
+  bad('ws://example.com/x', 'mixed-content')
+  bad('WS://8.8.8.8:6080/x', 'mixed-content')
+  // Other schemes, no scheme, unparsable, empty.
+  for (const raw of ['javascript:alert(1)', 'file:///etc/passwd', 'data:text/plain,hi', 'ftp://example.com/x', 'example.com:6080', '//example.com/x', 'ws://', 'not a url', '', null, undefined]) {
+    bad(raw, 'bad-ws-url')
+  }
+  // Credentials in the URL are refused, even to a private host.
+  bad('wss://user:pw@example.com/x', 'bad-ws-url')
+  bad('ws://user@127.0.0.1:6080/x', 'bad-ws-url')
+  bad('wss://:pw@example.com/x', 'bad-ws-url')
+  // An empty host (URL refuses it for ws:/wss:; the explicit check is a backstop).
+  bad('wss://:6080/x', 'bad-ws-url')
+  bad('ws://@/x', 'bad-ws-url')
+})
+
+async function sessionConnect(websocketUrl) {
+  const instances = []
+  const fetched = []
+  const { t } = loadPlugin({
+    hermesDesktop: fakeBridge(),
+    fetchImpl: async url => {
+      fetched.push(String(url))
+      return { ok: true, status: 200, type: 'basic', json: async () => ({ websocketUrl, password: 'fake-session-pw' }) }
+    },
+    importHook: async () => ({ default: fakeRfbCtorWithListeners(instances) })
+  })
+  const ctx = makeCtx()
+  ctx.os.__written = []
+  t.attachEngine(ctx)
+  const ep = t.normalizeEndpoint({ id: 'ep-session', name: 'Session box', mode: 'session-json', sessionUrl: 'https://api.example.test/session' })
+  await t.connect(ep)
+  return { t, instances, fetched, state: t.engine.state.get() }
+}
+
+test('a session API reply with an unusable address opens no RFB and says why', async () => {
+  for (const [url, code] of [
+    ['javascript:alert(1)', 'bad-ws-url'],
+    ['ws://example.com:6080/websockify', 'mixed-content'],
+    ['wss://user:pw@example.com/x', 'bad-ws-url']
+  ]) {
+    const { instances, fetched, state } = await sessionConnect(url)
+    assert.deepEqual(fetched, ['https://api.example.test/session'], url)
+    assert.equal(instances.length, 0, `no RFB for ${url}`)
+    assert.equal(state.phase, 'error', url)
+    assert.equal(state.code, code, url)
+    assert.match(state.detail, /session API/, url)
+  }
+})
+
+test('a good session API reply connects to the normalised address', async () => {
+  const seen = []
+  const instances = []
+  const { t } = loadPlugin({
+    hermesDesktop: fakeBridge(),
+    fetchImpl: async () => ({ ok: true, status: 200, type: 'basic', json: async () => ({ websocketUrl: ' HTTPS://Box.Example.com/ws ' }) }),
+    importHook: async () => ({
+      default: function RFB(target, url) {
+        seen.push(url)
+        fakeRfbCtorWithListeners(instances).call(this)
+      }
+    })
+  })
+  t.attachEngine(makeCtx())
+  await t.connect(t.normalizeEndpoint({ id: 'ep-s2', name: 'S2', mode: 'session-json', sessionUrl: 'https://api.example.test/session' }))
+  assert.deepEqual(seen, ['wss://box.example.com/ws'])
+  assert.equal(t.engine.resolvedWsUrl, 'wss://box.example.com/ws')
+})
+
+test('a configured endpoint with a bad address opens no RFB', async () => {
+  for (const wsUrl of ['javascript:alert(1)', 'ws://example.com/x', 'wss://u:p@example.com/x']) {
+    const { t, instances } = await attached({ endpoint: t => wsEndpoint(t, { wsUrl }) })
+    assert.equal(instances.length, 0, wsUrl)
+    assert.equal(t.engine.state.get().phase, 'error', wsUrl)
+  }
 })

@@ -63,11 +63,15 @@ From a clone, the same install copies from the checkout:
 
 <!-- runbook:verify -->
 ```bash
-( set -eu; D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; R="$D/.hermes-bot-kit-install"; M="$D/MANIFEST.sha256"; test -s "$R" && test -s "$M" || { echo "no install record or manifest in $D: run step 2" >&2; exit 1; }; SEL=$(sed -n 's/^plugins=//p' "$R"); test -n "$SEL" || { echo "the install record lists no plugins" >&2; exit 1; }; SUM=$(command -v sha256sum || echo "shasum -a 256"); for p in $SEL; do n=$(grep -c " $p/plugin.js\$" "$M" || true); test "$n" = 1 || { echo "$p: $n digests in $M, want exactly 1" >&2; exit 1; }; test -f "$D/$p/plugin.js" || { echo "$p: plugin.js is missing" >&2; exit 1; }; ( cd "$D" && grep " $p/plugin.js\$" MANIFEST.sha256 | $SUM -c - >/dev/null ) || { echo "$p: plugin.js does not match the manifest" >&2; exit 1; }; echo "$p: OK"; done; echo "Bot Kit installed OK ($(sed -n 's/^release=//p' "$R")): $SEL" )
+bash <<'KIT_EOF'
+set -eu; D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; R="$D/.hermes-bot-kit-install"; M="$D/MANIFEST.sha256"; test -s "$R" && test -s "$M" || { echo "no install record or manifest in $D: run step 2" >&2; exit 1; }; SEL=$(sed -n 's/^plugins=//p' "$R"); test -n "$SEL" || { echo "the install record lists no plugins" >&2; exit 1; }; SUM=$(command -v sha256sum || echo "shasum -a 256"); for p in $SEL; do n=$(grep -c " $p/plugin.js\$" "$M" || true); test "$n" = 1 || { echo "$p: $n digests in $M, want exactly 1" >&2; exit 1; }; test -f "$D/$p/plugin.js" || { echo "$p: plugin.js is missing" >&2; exit 1; }; ( cd "$D" && grep " $p/plugin.js\$" MANIFEST.sha256 | $SUM -c - >/dev/null ) || { echo "$p: plugin.js does not match the manifest" >&2; exit 1; }; echo "$p: OK"; done; echo "Bot Kit installed OK ($(sed -n 's/^release=//p' "$R")): $SEL"
+KIT_EOF
 ```
 
-It checks exactly the plugins step 2 installed (the installer records them,
-with the release, in `desktop-plugins/.hermes-bot-kit-install`). For each one
+The block runs under `bash` explicitly: its body is a quoted here-document,
+so zsh (macOS's default shell) expands nothing in it. It checks exactly the
+plugins step 2 installed (the installer records them, with the release, in
+`desktop-plugins/.hermes-bot-kit-install`). For each one
 there must be exactly one digest in the installed `MANIFEST.sha256` and a
 `plugin.js` that matches it. Expect one `<plugin>: OK` line per plugin and
 `Bot Kit installed OK (<release>): <plugins>`; anything else exits non-zero.
