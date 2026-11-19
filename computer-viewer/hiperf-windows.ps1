@@ -76,6 +76,7 @@ if (-not $InstallUser) {
     if ($env:USERDOMAIN) { $InstallUser = "$env:USERDOMAIN\$env:USERNAME" }
     else { $InstallUser = $env:USERNAME }
 }
+$InstallUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 
 if (-not $Bind) {
     try {
@@ -191,20 +192,71 @@ function New-HiperfToken {
     return -join ($bytes | ForEach-Object { $_.ToString('x2') })
 }
 
-function Get-OrCreateToken {
-    if ((Test-Path -LiteralPath $TokenFile) -and -not (Test-IsLink $TokenFile) -and (Test-OwnedByUsOrTrusted $TokenFile)) {
-        $existing = (Get-Content -LiteralPath $TokenFile -Raw -ErrorAction SilentlyContinue)
-        if ($existing) {
-            $existing = $existing.Trim()
-            if ($existing -match '^[0-9a-fA-F]{32}$') {
-                Write-Step "Reusing token stored in $TokenFile"
-                return $existing.ToLowerInvariant()
-            }
-        }
+function Get-PasswordAction([bool]$Exists, [bool]$OwnerOk, [bool]$WasReadableByOthers, [bool]$ContentOk) {
+    # (Copied from connect-windows.ps1; there is no shared module.) 'reuse'
+    # only for a stored secret nobody else could have read or set: the file
+    # exists, it is ours (no link), its ACL as found gave nobody else read,
+    # write or re-permission rights, and its content is valid. Else 'rotate'.
+    if ($Exists -and $OwnerOk -and -not $WasReadableByOthers -and $ContentOk) { return 'reuse' }
+    return 'rotate'
+}
+
+function Test-TokenAclExposed([object[]]$Rules, [string]$ReadOnlySid) {
+    # Pure: true when an Allow rule that applies to the file lets anyone
+    # other than Administrators, SYSTEM or TrustedInstaller read or change it,
+    # except $ReadOnlySid (the install user), who may read but nothing more.
+    $readMask = [long](0x1 -bor 0x10000000 -bor 0x80000000)
+    $writeMask = [long](0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+    foreach ($ace in @($Rules)) {
+        if (-not $ace -or $ace.AccessControlType -ne 'Allow') { continue }
+        if (($ace.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
+        $sid = $ace.IdentityReference.Value
+        if ($TrustedOwnerSids -contains $sid) { continue }
+        $rights = [long]$ace.FileSystemRights
+        if (($rights -band $writeMask) -ne 0) { return $true }
+        if (($sid -ne $ReadOnlySid) -and (($rights -band $readMask) -ne 0)) { return $true }
+    }
+    return $false
+}
+
+function Get-TokenState {
+    # Recorded BEFORE any ACL in the state tree is tightened (the token's
+    # ACL includes what it inherits from the state folder, which
+    # Protect-HiperfState replaces): was the existing token ours, and could
+    # anyone else read or change it?
+    $s = @{ Exists = $false; OwnerOk = $false; Exposed = $false }
+    if (-not (Get-Item -LiteralPath $TokenFile -Force -ErrorAction SilentlyContinue)) { return $s }
+    $s.Exists = $true
+    $s.OwnerOk = (-not (Test-IsLink $TokenFile)) -and (Test-OwnedByUsOrTrusted $TokenFile)
+    if ($s.OwnerOk) {
+        $rules = (Get-Acl -LiteralPath $TokenFile).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+        $s.Exposed = Test-TokenAclExposed @($rules) $InstallUserSid
+    }
+    return $s
+}
+
+function Get-OrCreateToken($State) {
+    # $State: Get-TokenState, taken before the tree was re-permissioned. A
+    # token another account owns, a link, or one others could read or change
+    # may be known: a new one is made (rotation) and printed.
+    $existing = ''
+    if ($State.Exists -and $State.OwnerOk -and -not $State.Exposed) {
+        $existing = ([string](Get-Content -LiteralPath $TokenFile -Raw -ErrorAction SilentlyContinue)).Trim()
+    }
+    $action = Get-PasswordAction -Exists $State.Exists -OwnerOk $State.OwnerOk -WasReadableByOthers $State.Exposed -ContentOk ($existing -match '^[0-9a-fA-F]{32}$')
+    if ($action -eq 'reuse') {
+        Write-Step "Reusing token stored in $TokenFile"
+        return $existing.ToLowerInvariant()
+    }
+    if ($State.Exists) {
+        $why = 'it was not created by this installer (or is a link)'
+        if ($State.OwnerOk -and $State.Exposed) { $why = 'accounts other than the install user and administrators could read or change it, so the old token may be known' }
+        elseif ($State.OwnerOk) { $why = 'it does not hold a valid token' }
+        Write-Warning "Not reusing ${TokenFile}: $why. Rotating to a new HD token; paste the one printed below into the viewer."
     }
     $tok = New-HiperfToken
-    # A new file, locked down before the token is written into it.
-    if (Test-Path -LiteralPath $TokenFile) { Remove-Item -LiteralPath $TokenFile -Force }
+    # A new file, locked down before the token is written into it (links removed as links).
+    Remove-TreeNoFollow $TokenFile
     New-Item -ItemType File -Path $TokenFile -ErrorAction Stop | Out-Null
     Set-ProtectedAcl -Path $TokenFile -Extra @(@{ Identity = $InstallUser; Rights = 'Read'; Inherit = $false })
     Set-Content -LiteralPath $TokenFile -Value $tok -Encoding ASCII
@@ -483,6 +535,8 @@ Write-Step "Using Python: $python"
 $hiperfTreeOk = $true
 if (Test-Path -LiteralPath $StateDir) {
     if ((Test-IsLink $StateDir) -or -not (Test-OwnedByUsOrTrusted $StateDir)) { Assert-TrustedTree $StateDir }
+    # A token another account owns (or a link) stops the install here, as
+    # before; Get-OrCreateToken would rotate it anyway, never reuse it.
     foreach ($p in @($HiperfDir, $TokenFile, $LogFile)) { Assert-TrustedTree $p }
     # ACLs, not just owners, recorded BEFORE Protect-HiperfState re-permissions
     # the tree: an item a non-administrator could write may have been changed,
@@ -493,11 +547,14 @@ if (Test-Path -LiteralPath $StateDir) {
         Write-Warning "$changeable could be changed by a non-administrator; the HD venv will be rebuilt."
     }
 }
+# The token's ORIGINAL ACL, recorded before Protect-HiperfState or the token's
+# own Set-ProtectedAcl tightens anything: an exposed token is rotated.
+$tokenState = Get-TokenState
 New-TrustedDir $StateDir
 New-TrustedDir $HiperfDir
 # Locked down before the venv, the agent and the token are written into it.
 Protect-HiperfState
-$token = Get-OrCreateToken
+$token = Get-OrCreateToken $tokenState
 
 $venvPython = Join-Path $VenvDir 'Scripts\python.exe'
 $venvPythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'

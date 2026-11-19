@@ -598,12 +598,21 @@ function Set-TightVncPassword([string]$Password) {
     # them back, then the caller restarts the service. A failed write or a
     # mismatch stops the install, so the password printed below is always the
     # one the server accepts, on 127.0.0.1 only.
+    # Order: the key is created if missing, then locked to Administrators and
+    # SYSTEM and checked (Protect-TightVncKey) BEFORE the new password is
+    # written into it, so it never sits under a readable ACL. The lock is
+    # checked once more after the writes.
     $want = ConvertTo-VncObfuscated $Password
-    $rp = 'HKLM:\SOFTWARE\TightVNC\Server'
+    $rp = $TightVncKey
     try {
         if (-not (Test-Path -LiteralPath $rp)) { New-Item -Path $rp -Force -ErrorAction Stop | Out-Null }
         $have = Get-ItemProperty -LiteralPath $rp -ErrorAction Stop
-        $changed = @(Get-TightVncMismatch $have $want).Count -gt 0
+    } catch {
+        throw "Could not open the TightVNC server settings at $rp ($_); not printing a password that may not work."
+    }
+    $changed = @(Get-TightVncMismatch $have $want).Count -gt 0
+    Protect-TightVncKey
+    try {
         New-ItemProperty -Path $rp -Name 'Password' -PropertyType Binary -Value $want -Force -ErrorAction Stop | Out-Null
         foreach ($n in $TightVncDwords) {
             New-ItemProperty -Path $rp -Name $n -PropertyType DWord -Value 1 -Force -ErrorAction Stop | Out-Null
@@ -615,7 +624,7 @@ function Set-TightVncPassword([string]$Password) {
     if ($bad.Count) {
         throw "TightVNC server settings did not read back as written at $rp ($($bad -join ', ')); not printing a password that may not work."
     }
-    Protect-TightVncKey
+    if (Test-TightVncKeyExposed) { throw "$rp is readable by non-administrators after the password was written; it holds the VNC password." }
     if ($changed) { Write-Step 'Set the TightVNC server password, VNC authentication and loopback-only' }
     return $changed
 }
@@ -953,15 +962,85 @@ public static class ComputerViewerDisp {
     Write-Host "    Set 1920x1080 primary rc=$rc (0=success, -99=no attached USB monitor in this session)"
 }
 
+function ConvertTo-NormalPath([string]$Path) {
+    # Pure: a Windows path in one comparable form: quotes and a \\?\ prefix
+    # dropped, / as \, repeated and trailing \ removed. Compare it ignoring case.
+    if (-not $Path) { return '' }
+    $p = $Path.Trim().Trim('"') -replace '/', '\'
+    $p = $p -replace '^\\\\\?\\', '' -replace '\\{2,}', '\'
+    return $p.TrimEnd('\')
+}
+
+function Test-SamePath([string]$A, [string]$B) {
+    $a1 = ConvertTo-NormalPath $A; $b1 = ConvertTo-NormalPath $B
+    return ($a1 -and [string]::Equals($a1, $b1, [System.StringComparison]::OrdinalIgnoreCase))
+}
+
+function Test-KitServicePath([string]$PathName, [string]$KitExe) {
+    # Pure: true when a service's PathName ("C:\...\winvnc.exe" -service, quoted
+    # or not) runs exactly $KitExe.
+    if (-not $PathName) { return $false }
+    $m = [regex]::Match($PathName, '^\s*"([^"]+)"')
+    if (-not $m.Success) { $m = [regex]::Match($PathName, '(?i)^\s*(.+?\.exe)(\s|$)') }
+    $exe = $PathName
+    if ($m.Success) { $exe = $m.Groups[1].Value }
+    return (Test-SamePath $exe $KitExe)
+}
+
+function Select-KitWinvnc([object[]]$Processes, [string]$KitExe) {
+    # Pure: the winvnc processes that run this kit's $KitExe. Any other
+    # winvnc (another UltraVNC install, or one whose path can't be read) is
+    # not the kit's and is left alone.
+    return @(@($Processes) | Where-Object { $_ -and $_.Path -and (Test-SamePath $_.Path $KitExe) })
+}
+
+function Get-PortConflict([object[]]$Listeners, [object[]]$Processes, [string[]]$AllowedExes) {
+    # Pure: the first listener whose owning process is not one of
+    # $AllowedExes, as @{ Path; Pid } ($null = no conflict). A listener whose
+    # process can't be identified is a conflict too.
+    foreach ($l in @($Listeners)) {
+        if (-not $l) { continue }
+        $owner = @(@($Processes) | Where-Object { $_ -and ($_.Id -eq $l.OwningProcess) })[0]
+        $path = $null
+        if ($owner) { $path = $owner.Path }
+        $ok = $false
+        if ($path) { foreach ($a in @($AllowedExes)) { if (Test-SamePath $path $a) { $ok = $true } } }
+        if (-not $ok) {
+            if (-not $path) { $path = 'an unidentified program' }
+            return [pscustomobject]@{ Path = $path; Pid = $l.OwningProcess }
+        }
+    }
+    return $null
+}
+
+function Get-UvncServicePath {
+    # The program uvnc_service runs ($null = no such service). A failed read throws.
+    if (-not (Get-Service -Name 'uvnc_service' -ErrorAction SilentlyContinue)) { return $null }
+    $svc = Get-CimInstance -ClassName Win32_Service -Filter "Name='uvnc_service'" -ErrorAction Stop
+    return [string]$svc.PathName
+}
+
 function Restore-TightVnc([string]$Why) {
-    # Fail closed: UltraVNC is disabled and confirmed stopped (no winvnc.exe
-    # left), then TightVNC is started and confirmed listening on loopback
-    # only. Anything that cannot be confirmed throws: setup stops rather than
-    # run TightVNC beside a live UltraVNC, or print a password for no server.
+    # Fail closed: this kit's UltraVNC (uvnc_service running
+    # $UltraVncDir\winvnc.exe, and winvnc.exe processes from that path) is
+    # disabled and confirmed stopped; any other UltraVNC is left alone. A
+    # foreign program still on :$VncPort is reported, not killed. Then
+    # TightVNC is started and confirmed listening on loopback only. Anything
+    # that cannot be confirmed throws: setup stops rather than run TightVNC
+    # beside a live UltraVNC, or print a password for no server.
     Write-Warning "$Why Not using UltraVNC; switching :5900 back to TightVNC."
-    $stopHelp = 'Stop it from an Administrator prompt (Set-Service uvnc_service -StartupType Disabled; Stop-Service uvnc_service -Force; Stop-Process -Name winvnc -Force), then re-run.'
-    $uvnc = Get-Service -Name 'uvnc_service' -ErrorAction SilentlyContinue
-    if ($uvnc) {
+    $kitExe = "$UltraVncDir\winvnc.exe"
+    $tvnExe = "${env:ProgramFiles}\TightVNC\tvnserver.exe"
+    $stopHelp = "Stop it from an Administrator prompt (Set-Service uvnc_service -StartupType Disabled; Stop-Service uvnc_service -Force; then end the winvnc.exe that runs from $kitExe), then re-run."
+    try {
+        $uvncPath = Get-UvncServicePath
+    } catch {
+        throw "Could not read which program uvnc_service runs ($_). Setup stopped so TightVNC does not run beside UltraVNC. $stopHelp"
+    }
+    if ($uvncPath -and -not (Test-KitServicePath $uvncPath $kitExe)) {
+        Write-Warning "uvnc_service runs $uvncPath, not this kit's $kitExe; leaving it alone."
+    } elseif ($uvncPath) {
+        $uvnc = Get-Service -Name 'uvnc_service' -ErrorAction SilentlyContinue
         try {
             Set-Service -Name 'uvnc_service' -StartupType Disabled -ErrorAction Stop
             if ($uvnc.Status -ne 'Stopped') { Stop-Service -Name 'uvnc_service' -Force -ErrorAction Stop }
@@ -971,13 +1050,17 @@ function Restore-TightVnc([string]$Why) {
         }
     }
     foreach ($round in 1..2) {
-        $left = @(Get-Process -Name 'winvnc' -ErrorAction SilentlyContinue)
+        $left = @(Select-KitWinvnc -Processes @(Get-Process -Name 'winvnc' -ErrorAction SilentlyContinue) -KitExe $kitExe)
         if ($left.Count -eq 0) { break }
-        if ($round -eq 2) { throw "winvnc.exe (UltraVNC) is still running after it was killed. Setup stopped so TightVNC does not run beside it. $stopHelp" }
+        if ($round -eq 2) { throw "winvnc.exe (UltraVNC, $kitExe) is still running after it was killed. Setup stopped so TightVNC does not run beside it. $stopHelp" }
         # The re-check above, not this call's result, decides.
         foreach ($p in $left) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
         Start-Sleep -Seconds 2
     }
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $VncPort -ErrorAction SilentlyContinue)
+    $owners = @($listeners | ForEach-Object { Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue })
+    $conflict = Get-PortConflict -Listeners $listeners -Processes $owners -AllowedExes @($tvnExe)
+    if ($conflict) { throw "Port $VncPort is in use by $($conflict.Path) (PID $($conflict.Pid)); stop it, then re-run." }
     try {
         Set-Service -Name 'tvnserver' -StartupType Automatic -ErrorAction Stop
         $tvn = Get-Service -Name 'tvnserver' -ErrorAction Stop
@@ -1146,20 +1229,28 @@ rdpmode=0
         if ((Test-Path -LiteralPath $old) -and -not (Test-IsLink $old)) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue }
     }
 
+    # A uvnc_service that runs another program is not this kit's: it is not
+    # reconfigured or started, and TightVNC keeps :5900.
+    $uvncPath = Get-UvncServicePath
+    if ($uvncPath -and -not (Test-KitServicePath $uvncPath $winvnc)) {
+        Write-Warning "uvnc_service runs $uvncPath, not $winvnc; leaving it alone. TightVNC keeps serving :5900."
+        return $false
+    }
+
     try {
         Stop-Service -Name 'tvnserver' -Force -ErrorAction SilentlyContinue
         Set-Service -Name 'tvnserver' -StartupType Manual -ErrorAction SilentlyContinue
         Write-Host '    Stopped TightVNC tvnserver (Manual) so it does not steal :5900'
     } catch {}
 
-    $svc = Get-Service -Name 'uvnc_service' -ErrorAction SilentlyContinue
-    if (-not $svc) {
+    if (-not $uvncPath) {
         $p = Start-Process -FilePath $winvnc -ArgumentList '-install' -WorkingDirectory $UltraVncDir -Wait -PassThru
         Write-Host "    winvnc -install exit=$($p.ExitCode)"
     }
-    try {
-        & taskkill.exe /F /IM winvnc.exe /T 2>$null | Out-Null
-    } catch {}
+    # Only this kit's winvnc.exe (e.g. a tray copy -install started); any other is left alone.
+    foreach ($p in @(Select-KitWinvnc -Processes @(Get-Process -Name 'winvnc' -ErrorAction SilentlyContinue) -KitExe $winvnc)) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    }
     Start-Sleep -Seconds 1
     try {
         Set-Service -Name 'uvnc_service' -StartupType Automatic -ErrorAction Stop

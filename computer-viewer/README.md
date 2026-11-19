@@ -428,9 +428,12 @@ stream), paste the printed token, turn on HD.
   is reused only when its `pyvenv.cfg` names the validated all-users Python
   and nothing in the HD tree was writable by a non-administrator;
   otherwise it is deleted (links removed as links, never followed) and
-  rebuilt. Anything there owned by another account stops the install. If you installed the HD agent before this, re-run `hiperf-windows.ps1` and, if
-  other people use that PC, delete `hiperf-token.txt` first so a new token is
-  made.
+  rebuilt. Anything there owned by another account stops the install. A
+  stored `hiperf-token.txt` whose ACL, as found, let anyone but the installing
+  user (read only), Administrators and SYSTEM read or change it is not reused:
+  the installer makes a new token, says so, and prints it; paste it into the
+  viewer. TightVNC's server key, which holds the VNC password, is locked to
+  Administrators and SYSTEM before the password is written into it.
 - **The control fence is a tool-level fence.** While you hold control of a
   bot-driven Mac, the bot's `computer_use` is refused and this pane sends
   input; while the bot holds it the pane sends none. It is not an OS fence:
@@ -610,7 +613,8 @@ The script self-elevates, installs TightVNC Server from official
 `tightvnc.com` (service + SAS/CAD + VNC auth), forces **loopback-only** via
 `HKLM\SOFTWARE\TightVNC\Server` (`AllowLoopback=1`, `LoopbackOnly=1`,
 `UseVncAuthentication=1`, read back on every run; setup stops if they don't
-stick), installs a machine-wide Python 3.12 if needed (above), pins
+stick; the key is locked to Administrators and SYSTEM before the password
+is written into it), installs a machine-wide Python 3.12 if needed (above), pins
 `websockify==0.13.0`, and registers a SYSTEM scheduled task at startup with `RestartCount 3` / `RestartInterval 1min` and
 **`ExecutionTimeLimit` zero** (the default would kill the task after 72
 hours). Command: `python -m websockify <bind>:6080 127.0.0.1:5900` (`<bind>`
@@ -642,10 +646,13 @@ hypervisor already provides a virtual display.
    SourceForge #1486 / #1574). The script switches **capture** to UltraVNC in
    service mode (loopback `:5900`, `PollFullScreen` + `EnableHook`), keeps
    websockify pointed at `127.0.0.1:5900`, and leaves TightVNC installed but
-   Manual. If UltraVNC fails, it is disabled and confirmed stopped (no
-   `winvnc.exe` left) and TightVNC must come back on loopback `:5900`; when
+   Manual. If UltraVNC fails, this kit's copy (the `uvnc_service` and
+   `winvnc.exe` that run `Program Files\UltraVNC\winvnc.exe`) is disabled and
+   confirmed stopped, and TightVNC must come back on loopback `:5900`; when
    either can't be confirmed, setup stops with a message instead of running
-   both.
+   both. Another UltraVNC install is left alone: if it (or anything other
+   than TightVNC) still holds `:5900`, setup names the program and its PID
+   and stops, without killing it.
 3. If the usbmmidd signature is rejected (publisher trust / `0xE0000242`),
    the script does **not** enable test-signing and does **not** import
    certificates. It prints the fallback: an HDMI or DisplayPort **dummy

@@ -245,9 +245,40 @@ $setFn = [regex]::Match($c, '(?s)function Set-TightVncPassword\(\[string\]\$Pass
 Check 'connect: Set-TightVncPassword writes every value with -ErrorAction Stop and checks the read-back' (($setFn -match "foreach \(\`$n in \`$TightVncDwords\)") -and ($setFn -match 'Get-TightVncMismatch \(Get-ItemProperty') -and ($setFn -notmatch 'SilentlyContinue'))
 Check 'connect: the 64-bit key is no longer in the best-effort loopback loop' ($c -notmatch "(?m)^\s*'HKLM:\\SOFTWARE\\TightVNC\\Server',\s*$")
 
-# --- UltraVNC recovery fails closed (round 3) ---------------------------------
-Import-ScriptFunctions $connect @('Restore-TightVnc')
+# --- UltraVNC recovery fails closed (round 3; only the kit's UltraVNC, round 4 item 7) ---
+Import-ScriptFunctions $connect @('ConvertTo-NormalPath', 'Test-SamePath', 'Test-KitServicePath', 'Select-KitWinvnc', 'Get-PortConflict', 'Get-UvncServicePath', 'Restore-TightVnc')
+$kitExe = 'C:\Program Files\UltraVNC\winvnc.exe'
+$tvnExe = 'C:\Program Files\TightVNC\tvnserver.exe'
+$kitProc = [pscustomobject]@{ Id = 4242; Name = 'winvnc'; Path = $kitExe }
+$kitProc2 = [pscustomobject]@{ Id = 4244; Name = 'winvnc'; Path = 'c:/program files//ultravnc/WINVNC.EXE' }
+$foreignProc = [pscustomobject]@{ Id = 5555; Name = 'winvnc'; Path = 'D:\Tools\UltraVNC\winvnc.exe' }
+$noPathProc = [pscustomobject]@{ Id = 5556; Name = 'winvnc'; Path = $null }
+$tvnProc = [pscustomobject]@{ Id = 900; Name = 'tvnserver'; Path = $tvnExe }
+
+# Pure: which winvnc is the kit's, which service, who holds the port.
+Check 'kit winvnc: of a kit and a foreign instance only the kit one is selected' (((@(Select-KitWinvnc -Processes @($kitProc, $foreignProc) -KitExe $kitExe) | ForEach-Object { $_.Id }) -join ',') -eq '4242')
+Check 'kit winvnc: path case, / and doubled \ differences still match' ((@(Select-KitWinvnc -Processes @($kitProc2) -KitExe $kitExe)).Count -eq 1)
+Check 'kit winvnc: a \\?\ prefixed path matches' ((@(Select-KitWinvnc -Processes @([pscustomobject]@{ Id = 1; Path = '\\?\C:\Program Files\UltraVNC\winvnc.exe' }) -KitExe $kitExe)).Count -eq 1)
+Check 'kit winvnc: a process whose path cannot be read is not selected' ((@(Select-KitWinvnc -Processes @($noPathProc) -KitExe $kitExe)).Count -eq 0)
+Check 'kit winvnc: winvnc in a sibling folder is not the kit' ((@(Select-KitWinvnc -Processes @([pscustomobject]@{ Id = 2; Path = 'C:\Program Files\UltraVNC2\winvnc.exe' }) -KitExe $kitExe)).Count -eq 0)
+Check 'kit service: quoted PathName with -service' (Test-KitServicePath '"C:\Program Files\UltraVNC\winvnc.exe" -service' $kitExe)
+Check 'kit service: unquoted PathName with -service' (Test-KitServicePath 'C:\Program Files\UltraVNC\winvnc.exe -service' $kitExe)
+Check 'kit service: a PathName pointing elsewhere is not the kit' (-not (Test-KitServicePath '"D:\Tools\UltraVNC\winvnc.exe" -service' $kitExe))
+Check 'kit service: empty PathName is not the kit' (-not (Test-KitServicePath '' $kitExe))
+$c1 = Get-PortConflict -Listeners @([pscustomobject]@{ LocalAddress = '127.0.0.1'; OwningProcess = 5555 }) -Processes @($foreignProc) -AllowedExes @($tvnExe)
+Check 'port: a foreign listener is a conflict, with its path and PID' ($c1 -and ($c1.Path -eq 'D:\Tools\UltraVNC\winvnc.exe') -and ($c1.Pid -eq 5555))
+Check 'port: a TightVNC listener is no conflict' ($null -eq (Get-PortConflict -Listeners @([pscustomobject]@{ LocalAddress = '127.0.0.1'; OwningProcess = 900 }) -Processes @($tvnProc) -AllowedExes @($tvnExe)))
+Check 'port: no listener is no conflict' ($null -eq (Get-PortConflict -Listeners @() -Processes @() -AllowedExes @($tvnExe)))
+$c2 = Get-PortConflict -Listeners @([pscustomobject]@{ LocalAddress = '0.0.0.0'; OwningProcess = 77 }) -Processes @() -AllowedExes @($tvnExe)
+Check 'port: a listener whose process is unknown is a conflict' ($c2 -and ($c2.Pid -eq 77))
+$c3 = Get-PortConflict -Listeners @([pscustomobject]@{ OwningProcess = 900 }, [pscustomobject]@{ OwningProcess = 5555 }) -Processes @($tvnProc, $foreignProc) -AllowedExes @($tvnExe)
+Check 'port: TightVNC plus a foreign listener -> the foreign one is reported' ($c3 -and ($c3.Pid -eq 5555))
+
+# Restore-TightVnc with stubbed services, processes and listeners.
 $VncPort = 5900
+$UltraVncDir = 'C:\Program Files\UltraVNC'
+$savedPf = $env:ProgramFiles
+$env:ProgramFiles = 'C:\Program Files'
 function New-Svc([string]$Name, [string]$Status) {
     $o = [pscustomobject]@{ Name = $Name; Status = $Status }
     $o | Add-Member -MemberType ScriptMethod -Name WaitForStatus -Value {
@@ -258,20 +289,28 @@ function New-Svc([string]$Name, [string]$Status) {
     return $o
 }
 function global:Get-Service { param($Name, $ErrorAction) $s = $global:Services[$Name]; if (-not $s -and $ErrorAction -eq 'Stop') { throw "no service $Name" }; $s }
+function global:Get-CimInstance { param($ClassName, $Filter, $ErrorAction) [pscustomobject]@{ Name = 'uvnc_service'; PathName = $global:UvncPathName } }
 function global:Set-Service { param($Name, $StartupType, $ErrorAction) $global:Calls += "set $Name $StartupType" }
 function global:Stop-Service { param($Name, [switch]$Force, $ErrorAction) $global:Calls += "stop $Name"; if ($global:Stuck -notcontains $Name) { $global:Services[$Name].Status = 'Stopped' } }
 function global:Start-Service { param($Name, $ErrorAction) $global:Calls += "start $Name"; $global:Services[$Name].Status = 'Running'; if ($global:ListenAfterStart) { $global:Listeners = $global:ListenAfterStart } }
-function global:Get-Process { param($Name, $ErrorAction) @($global:Procs) }
+function global:Get-Process {
+    param($Name, $Id, $ErrorAction)
+    $p = @($global:Procs)
+    if ($Name) { $p = @($p | Where-Object { $_.Name -eq $Name }) }
+    if ($null -ne $Id) { $p = @($p | Where-Object { $_.Id -eq $Id }) }
+    $p
+}
 function global:Stop-Process { param($Id, [switch]$Force, $ErrorAction) $global:Calls += "kill $Id"; if (-not $global:Unkillable) { $global:Procs = @($global:Procs | Where-Object { $_.Id -ne $Id }) } }
 function global:Start-Sleep { param($Seconds) }
 function global:Write-Warning { param($Message) $global:Warned += , $Message }
-function Reset-Vnc([string]$Uvnc = 'Running', [object[]]$Procs = @(), [string[]]$Stuck = @(), [bool]$Unkillable = $false, [bool]$Listens = $true) {
+function Reset-Vnc([string]$Uvnc = 'Running', [object[]]$Procs = @(), [string[]]$Stuck = @(), [bool]$Unkillable = $false, [bool]$Listens = $true, [string]$UvncPath = ('"' + $kitExe + '" -service'), [object[]]$Holding = @()) {
     $global:Services = @{ 'tvnserver' = (New-Svc 'tvnserver' 'Stopped') }
     if ($Uvnc) { $global:Services['uvnc_service'] = (New-Svc 'uvnc_service' $Uvnc) }
+    $global:UvncPathName = $UvncPath
     $global:Procs = $Procs; $global:Stuck = $Stuck; $global:Unkillable = $Unkillable
-    $global:Calls = @(); $global:Warned = @(); $global:Listeners = @()
+    $global:Calls = @(); $global:Warned = @(); $global:Listeners = $Holding
     $global:ListenAfterStart = $null
-    if ($Listens) { $global:ListenAfterStart = @([pscustomobject]@{ LocalAddress = '127.0.0.1' }) }
+    if ($Listens) { $global:ListenAfterStart = @([pscustomobject]@{ LocalAddress = '127.0.0.1'; OwningProcess = 900 }) }
 }
 function Invoke-Restore { try { Restore-TightVnc 'test.'; return 'ok' } catch { return "threw: $_" } }
 
@@ -283,25 +322,45 @@ Check 'restore: no uvnc_service installed is fine' ((Invoke-Restore) -eq 'ok')
 Reset-Vnc -Stuck @('uvnc_service')
 $r = Invoke-Restore
 Check 'restore: uvnc_service will not stop -> throws, TightVNC not started' (($r -like 'threw: UltraVNC (uvnc_service) could not be confirmed stopped*') -and ($global:Calls -notcontains 'start tvnserver'))
-Reset-Vnc -Procs @([pscustomobject]@{ Id = 4242; Name = 'winvnc' })
+Reset-Vnc -Procs @($kitProc)
 $r = Invoke-Restore
-Check 'restore: a leftover winvnc.exe is killed, then TightVNC starts' (($r -eq 'ok') -and ($global:Calls -contains 'kill 4242') -and ($global:Procs.Count -eq 0))
-Reset-Vnc -Procs @([pscustomobject]@{ Id = 4243; Name = 'winvnc' }) -Unkillable $true
+Check 'restore: a leftover kit winvnc.exe is killed, then TightVNC starts' (($r -eq 'ok') -and ($global:Calls -contains 'kill 4242') -and ($global:Procs.Count -eq 0))
+Reset-Vnc -Procs @($kitProc) -Unkillable $true
 $r = Invoke-Restore
-Check 'restore: winvnc.exe survives the kill -> throws, TightVNC not started' (($r -like 'threw: winvnc.exe (UltraVNC) is still running*') -and ($global:Calls -notcontains 'start tvnserver'))
+Check 'restore: kit winvnc.exe survives the kill -> throws, TightVNC not started' (($r -like 'threw: winvnc.exe (UltraVNC*is still running*') -and ($global:Calls -notcontains 'start tvnserver'))
 Reset-Vnc -Listens $false
 $r = Invoke-Restore
 Check 'restore: TightVNC not listening -> throws' ($r -like 'threw: TightVNC is running but not listening*')
 Reset-Vnc
-$global:ListenAfterStart = @([pscustomobject]@{ LocalAddress = '0.0.0.0' })
+$global:ListenAfterStart = @([pscustomobject]@{ LocalAddress = '0.0.0.0'; OwningProcess = 900 })
 $r = Invoke-Restore
 Check 'restore: TightVNC listening on every interface -> throws' ($r -like 'threw: TightVNC is running but not listening*')
 Reset-Vnc -Stuck @('tvnserver')
 $r = Invoke-Restore
 Check 'restore: TightVNC never reaches Running -> throws' ($r -like 'threw: UltraVNC is stopped but TightVNC (tvnserver) could not be started*')
-Remove-Item Function:\Get-Service, Function:\Set-Service, Function:\Stop-Service, Function:\Start-Service, Function:\Get-Process, Function:\Stop-Process, Function:\Start-Sleep, Function:\Write-Warning
+# Round 4 item 7: another UltraVNC is never stopped or killed.
+Reset-Vnc -Procs @($kitProc, $foreignProc)
+$r = Invoke-Restore
+Check 'restore: only the kit winvnc is killed; a foreign winvnc is left running' (($r -eq 'ok') -and ($global:Calls -contains 'kill 4242') -and ($global:Calls -notcontains 'kill 5555') -and (@($global:Procs | Where-Object { $_.Id -eq 5555 }).Count -eq 1))
+Reset-Vnc -Procs @($foreignProc) -Holding @([pscustomobject]@{ LocalAddress = '127.0.0.1'; OwningProcess = 5555 })
+$r = Invoke-Restore
+Check 'restore: a foreign winvnc holding :5900 is reported, not killed; TightVNC not started' (($r -eq 'threw: Port 5900 is in use by D:\Tools\UltraVNC\winvnc.exe (PID 5555); stop it, then re-run.') -and ($global:Calls -notcontains 'kill 5555') -and ($global:Calls -notcontains 'start tvnserver'))
+Reset-Vnc -UvncPath '"D:\Tools\UltraVNC\winvnc.exe" -service'
+$r = Invoke-Restore
+Check 'restore: a uvnc_service running another winvnc is not disabled or stopped' (($r -eq 'ok') -and (@($global:Calls | Where-Object { $_ -like '* uvnc_service*' }).Count -eq 0) -and ($global:Services['uvnc_service'].Status -eq 'Running') -and (@($global:Warned | Where-Object { $_ -like '*leaving it alone*' }).Count -eq 1))
+Reset-Vnc -UvncPath '"D:\Tools\UltraVNC\winvnc.exe" -service' -Procs @($foreignProc) -Holding @([pscustomobject]@{ LocalAddress = '0.0.0.0'; OwningProcess = 5555 })
+$r = Invoke-Restore
+Check 'restore: a foreign uvnc_service holding :5900 -> conflict reported, nothing touched' (($r -like 'threw: Port 5900 is in use by D:\Tools\UltraVNC\winvnc.exe (PID 5555)*') -and (@($global:Calls | Where-Object { $_ -like '*uvnc_service*' -or $_ -like 'kill*' }).Count -eq 0))
+Reset-Vnc -Holding @([pscustomobject]@{ LocalAddress = '127.0.0.1'; OwningProcess = 900 }) -Procs @($tvnProc)
+Check 'restore: TightVNC already on :5900 is no conflict' ((Invoke-Restore) -eq 'ok')
+Remove-Item Function:\Get-Service, Function:\Get-CimInstance, Function:\Set-Service, Function:\Stop-Service, Function:\Start-Service, Function:\Get-Process, Function:\Stop-Process, Function:\Start-Sleep, Function:\Write-Warning
+$env:ProgramFiles = $savedPf
 $restoreFn = [regex]::Match($c, '(?s)function Restore-TightVnc\(\[string\]\$Why\) \{(.*?)\n\}').Groups[1].Value
 Check 'connect: Restore-TightVnc does not swallow service errors' (($restoreFn -notmatch 'catch \{\}') -and ($restoreFn -notmatch "(Stop|Set|Start)-Service -Name '(uvnc_service|tvnserver)'[^\r\n]*SilentlyContinue"))
+Check 'connect: Restore-TightVnc kills only processes Select-KitWinvnc picked' (($restoreFn -match '\$left = @\(Select-KitWinvnc ') -and ($restoreFn -notmatch "Stop-Process -Name"))
+$fallbackFn = [regex]::Match($c, '(?s)function Install-UltraVncHeadlessFallback \{(.*?)\n\}').Groups[1].Value
+Check 'connect: the UltraVNC fallback no longer kills every winvnc.exe' (($fallbackFn -notmatch 'taskkill') -and ($fallbackFn -match 'Select-KitWinvnc -Processes'))
+Check 'connect: the UltraVNC fallback leaves a foreign uvnc_service alone before stopping TightVNC' (($fallbackFn -match 'Test-KitServicePath \$uvncPath \$winvnc') -and ($fallbackFn.IndexOf('Test-KitServicePath') -lt $fallbackFn.IndexOf("Stop-Service -Name 'tvnserver'")))
 Check 'connect: an UltraVNC failure is outside the non-fatal headless catch' ($c -match '(?s)\nif \(\$headless\) \{\s*#[^\n]*\n(\s*#[^\n]*\n)*\s*try \{\s*\$script:UsedUltraVnc = Install-UltraVncHeadlessFallback\s*\} catch \{\s*\$script:UsedUltraVnc = \$false\s*Restore-TightVnc')
 Check 'connect: no Remove-Item -Recurse on C:\usbmmidd_v2' ($c -notmatch 'Remove-Item -LiteralPath \$UsbmmiddDir -Recurse')
 
@@ -319,8 +378,100 @@ Check 'registry: a Deny rule for Users is not exposure' (-not (Test-AclReadableB
 Check 'registry: an inherit-only Users rule does not apply to the key' (-not (Test-AclReadableByOthers @((New-Rule $users 0x20019 'Allow' 'InheritOnly')) 'RegistryRights'))
 Check 'registry: GENERIC_READ for Users is exposed' (Test-AclReadableByOthers @((New-Rule $users 0x80000000)) 'RegistryRights')
 $c3 = Get-Content -LiteralPath $connect -Raw
-Check 'connect: the TightVNC key is locked after the read-back' ($c3 -match '(?s)if \(\$bad\.Count\) \{.*?\}\s*Protect-TightVncKey')
+# Round 4 item 5: the key is locked and checked BEFORE the new password is written.
+$setFn4 = [regex]::Match($c3, '(?s)function Set-TightVncPassword\(\[string\]\$Password\) \{(.*?)\n\}').Groups[1].Value
+$iProtect = [regex]::Match($setFn4, '(?m)^\s*Protect-TightVncKey\s*$').Index
+$iWritePw = $setFn4.IndexOf("New-ItemProperty -Path `$rp -Name 'Password'")
+Check 'connect: the TightVNC key is locked before the password is written' (($iProtect -ge 0) -and ($iWritePw -gt $iProtect) -and ($setFn4.IndexOf('New-Item -Path $rp') -lt $iProtect))
+Check 'connect: the key lock is checked again after the writes' ($setFn4 -match '(?s)if \(\$bad\.Count\) \{.*?\}\s*if \(Test-TightVncKeyExposed\) \{ throw')
 Check 'connect: an exposed TightVNC key forces a rotation' ($c3 -match '\$keyExposed = Test-TightVncKeyExposed; \$exposed = \$keyExposed')
+
+# --- Set-TightVncPassword call order (round 4, item 5) ------------------------
+Import-ScriptFunctions $connect @('Set-TightVncPassword')
+$TightVncKey = 'HKLM:\SOFTWARE\TightVNC\Server'
+function global:Test-Path { param($LiteralPath, $Path, $PathType) $global:KeyExists }
+function global:New-Item { param($Path, [switch]$Force, $ErrorAction, $ItemType) $global:Calls += 'create key' }
+function global:Get-ItemProperty { param($LiteralPath, $Name, $ErrorAction) $global:Calls += 'read'; [pscustomobject]$global:Reg }
+function global:New-ItemProperty { param($Path, $Name, $PropertyType, $Value, [switch]$Force, $ErrorAction) $global:Calls += "write $Name"; $global:Reg[$Name] = $Value }
+function global:Protect-TightVncKey { $global:Calls += 'protect'; if ($global:ProtectFails) { throw 'still readable by non-administrators' } }
+function global:Test-TightVncKeyExposed { $global:Calls += 'check'; $global:ExposedAfter }
+function global:Write-Step { param($Message) }
+function Invoke-SetPw { try { [void](Set-TightVncPassword 'password'); return 'ok' } catch { return "threw: $_" } }
+function Reset-Reg([bool]$Exists = $true) { $global:KeyExists = $Exists; $global:Reg = [ordered]@{}; $global:Calls = @(); $global:ProtectFails = $false; $global:ExposedAfter = $false }
+try {
+    Reset-Reg
+    $r = Invoke-SetPw
+    $iP = [array]::IndexOf($global:Calls, 'protect'); $iW = [array]::IndexOf($global:Calls, 'write Password')
+    Check 'set password: key locked before the password is written' (($r -eq 'ok') -and ($iP -ge 0) -and ($iW -gt $iP))
+    Check 'set password: the lock is checked again after the writes and read-back' ($global:Calls[-1] -eq 'check')
+    Reset-Reg -Exists $false
+    $r = Invoke-SetPw
+    Check 'set password: a missing key is created, then locked, then written' (($r -eq 'ok') -and ($global:Calls[0] -eq 'create key') -and ([array]::IndexOf($global:Calls, 'protect') -lt [array]::IndexOf($global:Calls, 'write Password')))
+    Reset-Reg; $global:ProtectFails = $true
+    $r = Invoke-SetPw
+    Check 'set password: a failed lock stops before anything is written' (($r -like 'threw: *still readable*') -and (@($global:Calls | Where-Object { $_ -like 'write *' }).Count -eq 0))
+    Reset-Reg; $global:ExposedAfter = $true
+    Check 'set password: a key readable after the writes throws' ((Invoke-SetPw) -like 'threw: *readable by non-administrators after the password was written*')
+} finally {
+    Remove-Item Function:\Test-Path, Function:\New-Item, Function:\Get-ItemProperty, Function:\New-ItemProperty, Function:\Protect-TightVncKey, Function:\Test-TightVncKeyExposed, Function:\Write-Step
+}
+
+# --- HD token rotation when its original ACL exposed it (round 4, item 6) ------
+Import-ScriptFunctions $hiperf @('Get-PasswordAction', 'Test-TokenAclExposed', 'Get-OrCreateToken')
+$me = 'S-1-5-21-1111111111-2222222222-3333333333-1001'
+function New-FsRule($Sid, [long]$Rights, $Type = 'Allow', $Prop = 'None') {
+    [pscustomobject]@{ AccessControlType = $Type; PropagationFlags = [System.Security.AccessControl.PropagationFlags]$Prop
+        IdentityReference = [pscustomobject]@{ Value = $Sid }; FileSystemRights = $Rights }
+}
+$adminFull = New-FsRule 'S-1-5-32-544' 0x1F01FF
+$systemFull = New-FsRule 'S-1-5-18' 0x1F01FF
+$meRead = New-FsRule $me 0x120089
+function Get-TokenDecision([object[]]$Rules, [bool]$OwnerOk = $true) {
+    $exposed = $false
+    if ($OwnerOk) { $exposed = Test-TokenAclExposed $Rules $me }
+    return (Get-PasswordAction -Exists $true -OwnerOk $OwnerOk -WasReadableByOthers $exposed -ContentOk $true)
+}
+Check 'token: admins, SYSTEM and the install user with Read -> reuse' ((Get-TokenDecision @($adminFull, $systemFull, $meRead)) -eq 'reuse')
+Check 'token: Users may read (inherited ProgramData ACL) -> rotate' ((Get-TokenDecision @($adminFull, $systemFull, $meRead, (New-FsRule 'S-1-5-32-545' 0x1200A9))) -eq 'rotate')
+Check 'token: Users may write (WriteData only) -> rotate' ((Get-TokenDecision @($adminFull, $meRead, (New-FsRule 'S-1-5-32-545' 0x2))) -eq 'rotate')
+Check 'token: the install user holds Modify, more than Read -> rotate' ((Get-TokenDecision @($adminFull, $systemFull, (New-FsRule $me 0x1301BF))) -eq 'rotate')
+Check 'token: Authenticated Users GENERIC_READ -> rotate' ((Get-TokenDecision @($adminFull, (New-FsRule 'S-1-5-11' 0x80000000))) -eq 'rotate')
+Check 'token: owned by another account -> rotate' ((Get-TokenDecision @($adminFull, $systemFull, $meRead) -OwnerOk $false) -eq 'rotate')
+Check 'token: an inherit-only Users rule does not apply to the file -> reuse' ((Get-TokenDecision @($adminFull, $meRead, (New-FsRule 'S-1-5-32-545' 0x1200A9 'Allow' 'InheritOnly'))) -eq 'reuse')
+Check 'token: a Deny rule for Users is not exposure -> reuse' ((Get-TokenDecision @($adminFull, $meRead, (New-FsRule 'S-1-5-32-545' 0x1F01FF 'Deny'))) -eq 'reuse')
+
+# Get-OrCreateToken with stubbed file operations: it decides from the recorded state.
+$TokenFile = 'C:\ProgramData\hermes-cv\hiperf-token.txt'
+$InstallUser = 'PC\someone'
+$oldTok = 'AB' * 16
+function global:Get-Content { param($LiteralPath, [switch]$Raw, $ErrorAction) $global:Calls += 'read'; $oldTok }
+function global:New-HiperfToken { 'cd' * 16 }
+function global:Remove-TreeNoFollow { param($Path) $global:Calls += 'remove' }
+function global:New-Item { param($ItemType, $Path, $ErrorAction) $global:Calls += 'create' }
+function global:Set-ProtectedAcl { param($Path, $Extra) $global:Calls += 'protect' }
+function global:Set-Content { param($LiteralPath, $Value, $Encoding) $global:Calls += 'write' }
+function global:Write-Step { param($Message) }
+function global:Write-Warning { param($Message) $global:Warned += , $Message }
+try {
+    $global:Calls = @(); $global:Warned = @()
+    $t = Get-OrCreateToken @{ Exists = $true; OwnerOk = $true; Exposed = $false }
+    Check 'token: a clean recorded state reuses the stored token' (($t -eq $oldTok.ToLowerInvariant()) -and ($global:Calls -notcontains 'write') -and ($global:Warned.Count -eq 0))
+    $global:Calls = @(); $global:Warned = @()
+    $t = Get-OrCreateToken @{ Exists = $true; OwnerOk = $true; Exposed = $true }
+    Check 'token: an exposed recorded state rotates, in one warning, created locked then written' (($t -eq ('cd' * 16)) -and ($global:Warned.Count -eq 1) -and ($global:Calls -notcontains 'read') -and (($global:Calls -join ',') -eq 'remove,create,protect,write'))
+    $global:Calls = @(); $global:Warned = @()
+    $t = Get-OrCreateToken @{ Exists = $false; OwnerOk = $false; Exposed = $false }
+    Check 'token: no token yet -> a new one, no warning' (($t -eq ('cd' * 16)) -and ($global:Warned.Count -eq 0))
+} finally {
+    Remove-Item Function:\Get-Content, Function:\New-HiperfToken, Function:\Remove-TreeNoFollow, Function:\New-Item, Function:\Set-ProtectedAcl, Function:\Set-Content, Function:\Write-Step, Function:\Write-Warning
+}
+$h4 = Get-Content -LiteralPath $hiperf -Raw
+$iState = $h4.IndexOf('$tokenState = Get-TokenState')
+$firstProtect4 = [regex]::Match($h4, '(?m)^Protect-HiperfState\s*$')
+$tokenAcl = [regex]::Match($h4, '(?m)^Set-ProtectedAcl -Path \$TokenFile')
+Check 'hiperf: the token ACL is recorded before the first tightening call' (($iState -ge 0) -and $firstProtect4.Success -and ($iState -lt $firstProtect4.Index) -and ($iState -lt $h4.IndexOf('$token = Get-OrCreateToken $tokenState')) -and $tokenAcl.Success -and ($iState -lt $tokenAcl.Index))
+$tokFn = [regex]::Match($h4, '(?s)function Get-OrCreateToken\(\$State\) \{(.*?)\n\}').Groups[1].Value
+Check 'hiperf: Get-OrCreateToken uses the recorded state, warns once, deletes without following links' (($tokFn -notmatch 'Get-Acl|Test-OwnedByUsOrTrusted') -and (([regex]::Matches($tokFn, 'Write-Warning')).Count -eq 1) -and ($tokFn -match 'Remove-TreeNoFollow \$TokenFile') -and ($tokFn -notmatch 'Remove-Item'))
 
 Write-Host ''
 Write-Host "$script:passed passed, $script:failed failed"
