@@ -161,7 +161,7 @@ function LegacySlackStatusDialog({ bot, onClose }: { bot: any; onClose: () => vo
   const served = state.key === key && Boolean(state.served)
   const name = displayName(bot, metaFor(bot))
   const [testing, setTesting] = React.useState(false)
-  const [result, setResult] = React.useState<null | { tone: string; message: string; lines: string[]; log: string }>(null)
+  const [result, setResult] = React.useState<null | { tone: string; message: string; lines: string[]; log: string; notes?: string[] }>(null)
   const alive = React.useRef(true)
   React.useEffect(() => {
     alive.current = true
@@ -234,12 +234,17 @@ function LegacySlackStatusDialog({ bot, onClose }: { bot: any; onClose: () => vo
       {message ? <div className="gbo-form-error">{message}</div> : null}
       {result ? (
         <div className={`gbo-slack-check is-${result.tone}`} role="status">
-          {/* One green line: who answered, where, and the app connection. */}
-          <div className={result.tone === 'ok' ? 'gbo-slack-ok' : 'gbo-form-error'}>
-            {[result.message, ...result.lines.filter(line => result.tone === 'ok' && !/failed/.test(line))].join(' · ')}
+          {/* One green line (amber when a required permission is missing): who answered, where, and the app connection. */}
+          <div className={result.tone === 'ok' ? 'gbo-slack-ok' : result.tone === 'warn' ? 'gbo-slack-warn' : 'gbo-form-error'}>
+            {[result.message, ...result.lines.filter(line => (result.tone === 'ok' || result.tone === 'warn') && !/failed/.test(line))].join(' · ')}
           </div>
+          {(result.notes || []).map(note => (
+            <div key={note} className="gbo-slack-note">
+              {note}
+            </div>
+          ))}
           {result.lines
-            .filter(line => result.tone !== 'ok' || /failed/.test(line))
+            .filter(line => (result.tone !== 'ok' && result.tone !== 'warn') || /failed/.test(line))
             .map(line => (
               <div key={line} className="gbo-form-error">
                 {line}

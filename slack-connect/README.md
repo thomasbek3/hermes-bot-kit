@@ -166,6 +166,44 @@ next reloads them.
   helpers and passed to it on stdin, never on a command line.
 - Each Slack app is created with only the scopes in `common/core.py`
   (`BOT_SCOPES`) and has Socket Mode and token rotation off.
+- The scope repair only ever adds a required bot scope; it never removes a
+  scope or touches user scopes, events, Socket Mode, URLs or other settings.
+
+## Missing permissions on an existing app
+
+Some Hermes features need a bot scope that older apps were created without.
+The required list is short and lives in `common/scopes.py`
+(`REQUIRED_BOT_SCOPES`); today it is `reactions:write`, which the bot needs to
+acknowledge messages with an emoji. Optional scopes are never reported.
+
+- **Check.** The bot's Slack window (**Test connection**, through
+  [slack-check](../slack-check/README.md)) and this add-on's status read the
+  scopes Slack granted the bot token. If a required one is missing they show
+  "Works, but a Slack permission is missing" with what the bot cannot do. It
+  is a warning only; nothing is blocked.
+- **Repair.** On the Hermes host, for one bot:
+
+  ```sh
+  P=~/.hermes/plugins/slack-connect/dashboard/scope_repair.py
+  python3 $P check                              # every Slack bot, read-only
+  python3 $P repair --profile helper --dry-run  # export + validate, no change
+  python3 $P repair --profile helper            # add the missing scope(s)
+  python3 $P verify --profile helper            # after the reinstall click
+  ```
+
+  `repair` exports the app's manifest with the workspace configuration token
+  this add-on keeps (rotated under its own lock, as Connect does), appends only
+  the missing required bot scopes, checks nothing else changed, saves the
+  before-manifest to `~/.hermes/slack-connect/manifest-backups/`, validates and
+  updates. Running it again changes nothing. It prints the app's reinstall page
+  (`https://api.slack.com/apps/<app id>/oauth`): Slack grants a new scope only
+  after someone clicks **Reinstall** there and then **Allow**; the bot token
+  stays the same. Then run `verify` (exit 0 when granted).
+- **Rollback.** `python3 $P restore --app-id <app id> --team <team id> --from
+  <backup file>` puts the saved manifest back.
+- The app must be manageable by the stored configuration token (created by it,
+  or its owner is a collaborator in that workspace). For any other app, add
+  the scope by hand on the app's OAuth & Permissions page.
 
 ## Troubleshooting
 

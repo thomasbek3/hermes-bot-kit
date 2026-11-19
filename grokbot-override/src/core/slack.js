@@ -495,6 +495,7 @@ export const SLACK_CHECK_PATH = '/api/plugins/slack-check/test'
 export const SLACK_CHECK_OK_TTL_MS = 5 * 60_000
 export const SLACK_CHECK_MISSING_TTL_MS = 10 * 60_000
 export const SLACK_CHECK_HINT = 'Install the Slack check add-on for a live test'
+export const SLACK_SCOPE_REPAIR_TEXT = 'Run the Slack scope repair for this bot, then reinstall the app in Slack'
 
 export function slackCheckRequest(scope) {
   return scoped(scope, { path: SLACK_CHECK_PATH, method: 'GET' })
@@ -587,8 +588,19 @@ export function slackLogLine(lastLog, testOk, now = Date.now()) {
   return ''
 }
 
-/** What the sheet shows for a check. {tone: ok | error | note, message,
- *  lines: [], log}. Every string is scrubbed of token-shaped text. */
+/** The add-on's missing_scopes ([{scope, reason}]): required bot scopes the
+ *  token lacks (the add-on lists only required ones, never optional ones). */
+export function slackMissingScopes(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(item => item && typeof item === 'object' && /^[a-z_]+(?::[a-z_.]+)*$/.test(String(item.scope ?? '')))
+    .map(item => ({ scope: String(item.scope), reason: withoutSecrets(String(item.reason ?? ''), []).trim().slice(0, 120) }))
+}
+
+/** What the sheet shows for a check. {tone: ok | warn | error | note, message,
+ *  lines: [], log, notes?}. Every string is scrubbed of token-shaped text.
+ *  warn = it works, but a required Slack permission is missing (notes say
+ *  what the bot cannot do and how to fix it); never blocks anything. */
 export function slackCheckVerdict(check, now = Date.now()) {
   if (!check) return null
   const clean = text => withoutSecrets(String(text ?? ''), []).trim()
@@ -601,7 +613,13 @@ export function slackCheckVerdict(check, now = Date.now()) {
     const lines = []
     if (result.app_token_ok === true) lines.push('App connection OK')
     else if (result.app_token_ok === false) lines.push(`App connection failed: ${slackErrorText(result.app_token_error)}`)
-    return { tone: 'ok', message: `Works · ${bot}${team ? ` in ${team}` : ''}`, lines, log }
+    const where = `${bot}${team ? ` in ${team}` : ''}`
+    const missing = slackMissingScopes(result.missing_scopes)
+    if (missing.length) {
+      const notes = missing.map(item => `Missing ${item.scope}${item.reason ? `: the bot cannot ${item.reason}` : ''}`)
+      return { tone: 'warn', message: `Works, but a Slack permission is missing · ${where}`, lines, log, notes: [...notes, SLACK_SCOPE_REPAIR_TEXT] }
+    }
+    return { tone: 'ok', message: `Works · ${where}`, lines, log }
   }
   if (result) {
     const message = result.configured === false ? 'No Slack bot token is saved for this bot' : slackErrorText(result.error)

@@ -79,7 +79,9 @@ go back to the override's tab or roster.
   was.
 - The profile panel's **Slack** card shows whether the bot is in Slack. **Test connection** asks Slack
   itself (`auth.test`) through the optional [slack-check](../slack-check/README.md) backend plugin;
-  when the backend does not have it, the card shows a short hint in place of the button.
+  when the backend does not have it, the card shows a short hint in place of the button. If the bot token
+  lacks a required Slack permission (today `reactions:write`, for the emoji acknowledgement), the result
+  reads "Works, but a Slack permission is missing" in amber with what the bot cannot do and how to repair it.
 - **One-click Add to Slack** (optional add-on, [slack-connect](../slack-connect/README.md)): pick the
   workspace and click **Connect**, click **Allow** in your browser, and the window says **Connected**; the bot
   sends you a welcome DM and the Slack card reads Connected. **Remove from Slack** deletes the app again in

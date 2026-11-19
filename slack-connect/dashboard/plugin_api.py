@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from common.config import load_config
+from common import scopes as scope_module
 
 
 def load(name):
@@ -144,7 +145,9 @@ def make_service():
             return False
         if not http_adapter_ready(home.name, env.get('SLACK_SIGNING_SECRET'), load_config(root)['gateway_url']):
             return False
-        return slack.post('auth.test', token, {}).get('ok') is True
+        # auth.test also reports the granted scopes; a missing required one is a warning only.
+        answer = scope_module.check_token(token)
+        return answer if answer.get('ok') is True else False
     return service_module.Service(root, home.name, slack,
         load_env, save, remove, lambda: notify_multiplexer_profiles_changed(home.name), lambda: slack_module.profile_icon(home), live, lifecycle,
         lambda: check_profile_idle(root, home.name), lambda: recycle_profile(root, home.name),

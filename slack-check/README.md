@@ -33,6 +33,12 @@ Response:
  "last_log": {"ts": "2026-11-08 09:00:02,200", "text": "[Slack] Socket Mode connected (1 workspace(s))"}}
 ```
 
+- `scopes_checked` / `missing_scopes`: `auth.test` also returns the scopes Slack granted the token
+  (`x-oauth-scopes`). Any REQUIRED bot scope it lacks (a short list, today `reactions:write`, which
+  the bot needs to acknowledge messages with an emoji) is listed as `{"scope", "reason"}` with a
+  `scope_warning` sentence. It is a warning: `ok` stays true, and the override shows "Works, but a
+  Slack permission is missing". Fix it with slack-connect's scope repair
+  ([slack-connect README](../slack-connect/README.md#missing-permissions-on-an-existing-app)).
 - No bot token: `{"ok": false, "configured": false}`, and Slack is not called.
 - Slack refuses the token: `{"ok": false, "configured": true, "error": "invalid_auth"}`.
 - The app token fails: `"app_token_ok": false, "app_token_error": "..."`.

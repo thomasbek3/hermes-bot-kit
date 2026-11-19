@@ -13,7 +13,9 @@ import {
   slackCheckVerdict,
   slackErrorText,
   slackLogLine,
+  slackMissingScopes,
   SLACK_CHECK_HINT,
+  SLACK_SCOPE_REPAIR_TEXT,
   SLACK_CHECK_MISSING_TTL_MS,
   SLACK_CHECK_OK_TTL_MS
 } from '../src/core/slack.js'
@@ -141,4 +143,29 @@ test('the last log line only when it helps', () => {
   assert.equal(slackLogLine({ ts: '2026-11-09 13:40:02,113', text: '[Slack] Authenticated as @k' }, false, NOV9), 'Last connected 13:40')
   assert.equal(slackLogLine(null, true, NOV9), '')
   assert.equal(slackLogLine({ ts: '', text: '[Slack] something else' }, false, NOV9), '')
+})
+
+test('a working bot missing a required Slack scope: a warning, not plain Works, never an error', () => {
+  const answer = {
+    ...OK,
+    scopes_checked: true,
+    missing_scopes: [{ scope: 'reactions:write', reason: 'acknowledge messages with an emoji' }]
+  }
+  assert.deepEqual(slackCheckVerdict({ kind: 'ok', result: answer }, NOV9), {
+    tone: 'warn',
+    message: 'Works, but a Slack permission is missing · @scholar in Acme Studio',
+    lines: ['App connection OK'],
+    log: 'Last connected 13:40',
+    notes: ['Missing reactions:write: the bot cannot acknowledge messages with an emoji', SLACK_SCOPE_REPAIR_TEXT]
+  })
+  // Nothing missing (or the add-on could not tell): plain Works, as before.
+  assert.equal(slackCheckVerdict({ kind: 'ok', result: { ...OK, scopes_checked: true, missing_scopes: [] } }, NOV9).tone, 'ok')
+  assert.equal(slackCheckVerdict({ kind: 'ok', result: { ...OK, scopes_checked: false, missing_scopes: [] } }, NOV9).message, 'Works · @scholar in Acme Studio')
+})
+
+test('missing_scopes is sanitised: odd entries dropped, token-shaped text scrubbed', () => {
+  assert.deepEqual(slackMissingScopes('reactions:write'), [])
+  const kept = slackMissingScopes([null, { scope: '<b>' }, { scope: 'reactions:write', reason: `leak ${BOT_TOKEN}` }])
+  assert.deepEqual(kept.map(item => item.scope), ['reactions:write'])
+  assert.ok(kept[0].reason.startsWith('leak ') && !kept[0].reason.includes(BOT_TOKEN))
 })

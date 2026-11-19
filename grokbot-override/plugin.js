@@ -51011,6 +51011,8 @@ var ROSTER_CSS = (
    styles-adapt.ts); only the mark's box is set here. */
 .gbo-slack-card-mark { display: grid; place-items: center; }
 .gbo-slack-ok { border-radius: 12px; padding: 9px 12px; color: var(--gbo-fg); background: color-mix(in srgb, var(--gbo-working-dot) 14%, transparent); font: var(--gbo-text-label); font-weight: 500; }
+.gbo-slack-warn { border-radius: 12px; padding: 9px 12px; color: var(--gbo-fg); background: color-mix(in srgb, var(--gbo-warning) 16%, transparent); font: var(--gbo-text-label); font-weight: 500; }
+.gbo-slack-note { padding: 0 2px; color: var(--gbo-muted-fg); font: var(--gbo-text-caption); }
 .gbo-slack-pairing { display: flex; flex-direction: column; gap: 8px; }
 .gbo-slack-check { display: flex; flex-direction: column; gap: 6px; }
 .gbo-slack-log { padding: 0 2px; color: var(--gbo-muted-fg); font: var(--gbo-text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -57126,6 +57128,7 @@ var SLACK_CHECK_PATH = "/api/plugins/slack-check/test";
 var SLACK_CHECK_OK_TTL_MS = 5 * 6e4;
 var SLACK_CHECK_MISSING_TTL_MS = 10 * 6e4;
 var SLACK_CHECK_HINT = "Install the Slack check add-on for a live test";
+var SLACK_SCOPE_REPAIR_TEXT = "Run the Slack scope repair for this bot, then reinstall the app in Slack";
 function slackCheckRequest(scope) {
   return scoped(scope, { path: SLACK_CHECK_PATH, method: "GET" });
 }
@@ -57192,6 +57195,10 @@ function slackLogLine(lastLog, testOk, now = Date.now()) {
   if (/unhealthy/.test(text3)) return testOk ? "" : `Likely reason: ${at ? `${text3} (${at})` : text3}`;
   return "";
 }
+function slackMissingScopes(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => item && typeof item === "object" && /^[a-z_]+(?::[a-z_.]+)*$/.test(String(item.scope ?? ""))).map((item) => ({ scope: String(item.scope), reason: withoutSecrets(String(item.reason ?? ""), []).trim().slice(0, 120) }));
+}
 function slackCheckVerdict(check, now = Date.now()) {
   if (!check) return null;
   const clean = (text3) => withoutSecrets(String(text3 ?? ""), []).trim();
@@ -57204,7 +57211,13 @@ function slackCheckVerdict(check, now = Date.now()) {
     const lines = [];
     if (result.app_token_ok === true) lines.push("App connection OK");
     else if (result.app_token_ok === false) lines.push(`App connection failed: ${slackErrorText(result.app_token_error)}`);
-    return { tone: "ok", message: `Works · ${bot}${team ? ` in ${team}` : ""}`, lines, log };
+    const where = `${bot}${team ? ` in ${team}` : ""}`;
+    const missing = slackMissingScopes(result.missing_scopes);
+    if (missing.length) {
+      const notes = missing.map((item) => `Missing ${item.scope}${item.reason ? `: the bot cannot ${item.reason}` : ""}`);
+      return { tone: "warn", message: `Works, but a Slack permission is missing · ${where}`, lines, log, notes: [...notes, SLACK_SCOPE_REPAIR_TEXT] };
+    }
+    return { tone: "ok", message: `Works · ${where}`, lines, log };
   }
   if (result) {
     const message = result.configured === false ? "No Slack bot token is saved for this bot" : slackErrorText(result.error);
@@ -59420,8 +59433,9 @@ function LegacySlackStatusDialog({ bot, onClose }) {
         ] }, row.label)) }) : /* @__PURE__ */ jsx19("div", { className: "gbo-sheet-note", children: state.loading ? "Loading…" : "Slack status is not known yet." }),
         message ? /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: message }) : null,
         result ? /* @__PURE__ */ jsxs18("div", { className: `gbo-slack-check is-${result.tone}`, role: "status", children: [
-          /* @__PURE__ */ jsx19("div", { className: result.tone === "ok" ? "gbo-slack-ok" : "gbo-form-error", children: [result.message, ...result.lines.filter((line) => result.tone === "ok" && !/failed/.test(line))].join(" · ") }),
-          result.lines.filter((line) => result.tone !== "ok" || /failed/.test(line)).map((line) => /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: line }, line)),
+          /* @__PURE__ */ jsx19("div", { className: result.tone === "ok" ? "gbo-slack-ok" : result.tone === "warn" ? "gbo-slack-warn" : "gbo-form-error", children: [result.message, ...result.lines.filter((line) => (result.tone === "ok" || result.tone === "warn") && !/failed/.test(line))].join(" · ") }),
+          (result.notes || []).map((note) => /* @__PURE__ */ jsx19("div", { className: "gbo-slack-note", children: note }, note)),
+          result.lines.filter((line) => result.tone !== "ok" && result.tone !== "warn" || /failed/.test(line)).map((line) => /* @__PURE__ */ jsx19("div", { className: "gbo-form-error", children: line }, line)),
           result.log ? /* @__PURE__ */ jsx19("div", { className: "gbo-slack-log", title: result.log, children: result.log }) : null
         ] }) : null,
         cache.missing ? /* @__PURE__ */ jsx19("div", { className: "gbo-slack-hint", children: SLACK_CHECK_HINT }) : null

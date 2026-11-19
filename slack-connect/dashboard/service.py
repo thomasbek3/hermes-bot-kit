@@ -249,16 +249,23 @@ class Service:
             if isinstance(item, dict) and item.get('profile') == self.profile:
                 pending = _read_json(self.data / 'pending' / (key + '.json'), {})
                 phase = pending.get('phase', 'error')
+                scope_fields = {}
                 if phase == 'installed':
                     try:
-                        if self.live(env):
+                        answer = self.live(env)
+                        if answer:
                             phase = 'connected'
+                        # live() may also report required scopes the bot token lacks.
+                        if isinstance(answer, dict) and answer.get('missing'):
+                            scope_fields = {'missing_scopes': [{'scope': m['scope'], 'reason': m['reason']}
+                                                               for m in answer['missing']],
+                                            'scope_warning': public_text(answer.get('warning'))}
                     except Exception:
                         pass
                 return {'phase':phase, 'team_name':public_text(pending.get('team_name')),
                         'bot':public_text(item.get('bot_name')), 'mode':'http',
                         'icon_result':item.get('icon_result'),
-                        'manifest_update_result':item.get('manifest_update_result')}
+                        'manifest_update_result':item.get('manifest_update_result'), **scope_fields}
         return {'phase':'none', 'mode':'http'}
 
     def delete(self):

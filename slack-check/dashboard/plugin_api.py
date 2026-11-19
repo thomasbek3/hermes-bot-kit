@@ -6,7 +6,8 @@ profile's Slack tokens live (desktop plugins never see them):
 - reads SLACK_BOT_TOKEN (first entry when comma-separated) and SLACK_APP_TOKEN from the profile the
   request is scoped to (Hermes binds that scope before this handler runs: ``?profile=`` in-process,
   or the profile's own plugin host);
-- calls Slack's read-only ``auth.test`` with the bot token;
+- calls Slack's read-only ``auth.test`` with the bot token, and reads the scopes Slack says the
+  token was granted (``x-oauth-scopes``) to warn when a REQUIRED one is missing;
 - checks the app token with ``apps.connections.open``, which only mints a Socket Mode URL and does
   not connect (the URL is discarded, never returned);
 - adds the newest Slack connection line from the profile's ``logs/gateway.log``.
@@ -35,6 +36,14 @@ LOG_TAIL_BYTES = 200 * 1024
 _TOKEN_RE = re.compile(r"\b(?:xox[a-z]|xapp)-[A-Za-z0-9-]+")
 _LOG_MATCH_RE = re.compile(r"\[Slack\] (?:Socket Mode connected|Authenticated as|.*unhealthy)")
 _LOG_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[,.]\d{1,6})?)")
+_SCOPE_RE = re.compile(r"^[a-z_]+(?::[a-z_.]+)*$")
+
+# Bot scopes without which a Hermes feature silently stops working, and what the user loses.
+# Kept short on purpose (never the full default list) and equal to slack-connect's
+# common/scopes.py REQUIRED_BOT_SCOPES; slack-check is installed on its own, so it is not imported.
+REQUIRED_BOT_SCOPES = (
+    ("reactions:write", "acknowledge messages with an emoji"),
+)
 
 
 def scrub(text: Any) -> str:
@@ -84,6 +93,25 @@ def read_tokens() -> tuple[str, str]:
 def _slack_call(method: str, token: str, opener: Optional[Callable] = None) -> dict[str, Any]:
     """POST ``method`` with ``token`` as a Bearer header (never in the URL). Returns Slack's JSON, or
     ``{"ok": False, "error": <scrubbed text>}`` on a transport/parse failure."""
+    return _slack_call_headers(method, token, opener)[0]
+
+
+def _header(resp: Any, name: str) -> Optional[str]:
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    try:
+        value = headers.get(name)
+    except Exception:
+        return None
+    if value is None and isinstance(headers, dict):
+        value = {str(k).lower(): v for k, v in headers.items()}.get(name.lower())
+    return value
+
+
+def _slack_call_headers(method: str, token: str,
+                        opener: Optional[Callable] = None) -> tuple[dict[str, Any], Optional[str]]:
+    """``_slack_call`` plus Slack's ``x-oauth-scopes`` response header (None when absent)."""
     opener = opener or urllib.request.urlopen
     req = urllib.request.Request(
         SLACK_API + method, data=b"", method="POST",
@@ -92,22 +120,41 @@ def _slack_call(method: str, token: str, opener: Optional[Callable] = None) -> d
                  "User-Agent": "hermes-slack-check/1.0"})
     try:
         with opener(req, timeout=TIMEOUT_SECS) as resp:
+            scopes = _header(resp, "x-oauth-scopes")
             raw = resp.read()
     except urllib.error.HTTPError as exc:
-        return {"ok": False, "error": scrub(f"http_{exc.code}")}
+        return {"ok": False, "error": scrub(f"http_{exc.code}")}, None
     except urllib.error.URLError as exc:
-        return {"ok": False, "error": scrub(f"network: {exc.reason}")}
+        return {"ok": False, "error": scrub(f"network: {exc.reason}")}, None
     except Exception as exc:  # timeout, ssl, anything else: one scrubbed line
-        return {"ok": False, "error": scrub(f"{type(exc).__name__}: {exc}")}
+        return {"ok": False, "error": scrub(f"{type(exc).__name__}: {exc}")}, None
     try:
         data = json.loads(raw.decode("utf-8", "replace"))
     except ValueError:
-        return {"ok": False, "error": "bad_response"}
-    return data if isinstance(data, dict) else {"ok": False, "error": "bad_response"}
+        return {"ok": False, "error": "bad_response"}, None
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "bad_response"}, None
+    return data, (str(scopes) if scopes is not None else None)
+
+
+def scope_check(header: Optional[str]) -> dict[str, Any]:
+    """Which REQUIRED bot scopes the granted-scope header lacks. Unknown (no header): nothing."""
+    if header is None:
+        return {"scopes_checked": False, "missing_scopes": []}
+    granted = {part.strip() for part in header.split(",") if _SCOPE_RE.fullmatch(part.strip())}
+    missing = [{"scope": scope, "reason": reason}
+               for scope, reason in REQUIRED_BOT_SCOPES if scope not in granted]
+    result: dict[str, Any] = {"scopes_checked": True, "missing_scopes": missing}
+    if missing:
+        names = ", ".join(m["scope"] for m in missing)
+        losses = "; ".join(m["reason"] for m in missing)
+        result["scope_warning"] = (f"This Slack app is missing {names}, so the bot cannot {losses}. "
+                                   "Run the Slack scope repair for this bot, then reinstall the app in Slack.")
+    return result
 
 
 def check_bot(token: str, opener: Optional[Callable] = None) -> dict[str, Any]:
-    data = _slack_call("auth.test", token, opener)
+    data, scopes = _slack_call_headers("auth.test", token, opener)
     if not data.get("ok"):
         return {"ok": False, "error": scrub(data.get("error") or "unknown_error")}
     user = str(data.get("user") or "")
@@ -118,6 +165,7 @@ def check_bot(token: str, opener: Optional[Callable] = None) -> dict[str, Any]:
         "team": scrub(data.get("team") or ""),
         "team_id": scrub(data.get("team_id") or ""),
         "url": scrub(data.get("url") or ""),
+        **scope_check(scopes),
     }
 
 

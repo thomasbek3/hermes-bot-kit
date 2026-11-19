@@ -161,6 +161,8 @@ export const ROSTER_CSS = /* css */ `
    styles-adapt.ts); only the mark's box is set here. */
 .gbo-slack-card-mark { display: grid; place-items: center; }
 .gbo-slack-ok { border-radius: 12px; padding: 9px 12px; color: var(--gbo-fg); background: color-mix(in srgb, var(--gbo-working-dot) 14%, transparent); font: var(--gbo-text-label); font-weight: 500; }
+.gbo-slack-warn { border-radius: 12px; padding: 9px 12px; color: var(--gbo-fg); background: color-mix(in srgb, var(--gbo-warning) 16%, transparent); font: var(--gbo-text-label); font-weight: 500; }
+.gbo-slack-note { padding: 0 2px; color: var(--gbo-muted-fg); font: var(--gbo-text-caption); }
 .gbo-slack-pairing { display: flex; flex-direction: column; gap: 8px; }
 .gbo-slack-check { display: flex; flex-direction: column; gap: 6px; }
 .gbo-slack-log { padding: 0 2px; color: var(--gbo-muted-fg); font: var(--gbo-text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

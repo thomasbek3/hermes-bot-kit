@@ -6,6 +6,7 @@ Run with Hermes's venv so the real profile helpers are used:
 from __future__ import annotations
 
 import importlib.util
+import email.message
 import io
 import json
 import os
@@ -51,10 +52,12 @@ class FakeResp(io.BytesIO):
 
 
 class FakeSlack:
-    """Records requests; answers per Slack method from ``answers`` (dict or exception)."""
+    """Records requests; answers per Slack method from ``answers`` (dict or exception), with
+    optional response ``headers`` per method (as Slack's real ``x-oauth-scopes``)."""
 
-    def __init__(self, answers):
+    def __init__(self, answers, headers=None):
         self.answers = answers
+        self.headers = headers or {}
         self.calls = []
 
     def __call__(self, req, timeout=None):
@@ -64,7 +67,13 @@ class FakeSlack:
         answer = self.answers[method]
         if isinstance(answer, BaseException):
             raise answer
-        return FakeResp(json.dumps(answer).encode())
+        resp = FakeResp(json.dumps(answer).encode())
+        if method in self.headers:
+            message = email.message.Message()  # case-insensitive, like http.client's headers
+            for key, value in self.headers[method].items():
+                message[key] = value
+            resp.headers = message
+        return resp
 
 
 AUTH_OK = {"ok": True, "url": "https://acme-workspace.slack.com/", "team": "Acme Workspace",
@@ -130,7 +139,8 @@ def test_auth_test_ok_and_app_token(home):
     result = api.run_check(fake)
     assert result == {"ok": True, "configured": True, "bot": "@intake", "bot_id": "B0BOT",
                       "team": "Acme Workspace", "team_id": "T0EXAMPLE01",
-                      "url": "https://acme-workspace.slack.com/", "app_token_ok": True}
+                      "url": "https://acme-workspace.slack.com/", "app_token_ok": True,
+                      "scopes_checked": False, "missing_scopes": []}
     assert [c["method"] for c in fake.calls] == ["auth.test", "apps.connections.open"]
     bot_call, app_call = fake.calls
     assert bot_call["auth"] == f"Bearer {FAKE_BOT}" and app_call["auth"] == f"Bearer {FAKE_APP}"
@@ -297,3 +307,42 @@ def test_hermes_discovers_manifest_with_api(tmp_path):
     assert entry["_api_file"] == "plugin_api.py" and entry["tab"]["hidden"] is True
     assert dash._plugin_api_mount_skip_reason(entry, set(), set()) == "not in plugins.enabled"
     assert dash._plugin_api_mount_skip_reason(entry, {"slack-check"}, set()) is None
+
+
+# ---------------------------------------------------------------------------
+# Required scopes (x-oauth-scopes on auth.test)
+# ---------------------------------------------------------------------------
+
+GRANTED_NO_REACTIONS = "chat:write,im:history,app_mentions:read,users:read"
+
+
+def test_missing_required_scope_is_a_warning_not_a_failure(home):
+    _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT)
+    fake = FakeSlack({"auth.test": AUTH_OK}, headers={"auth.test": {"X-OAuth-Scopes": GRANTED_NO_REACTIONS}})
+    result = api.run_check(fake)
+    assert result["ok"] is True and result["scopes_checked"] is True
+    assert result["missing_scopes"] == [{"scope": "reactions:write", "reason": "acknowledge messages with an emoji"}]
+    assert "reactions:write" in result["scope_warning"] and "repair" in result["scope_warning"]
+    assert FAKE_BOT not in json.dumps(result)
+
+
+def test_required_scope_present_means_no_warning(home):
+    _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT)
+    fake = FakeSlack({"auth.test": AUTH_OK},
+                     headers={"auth.test": {"x-oauth-scopes": GRANTED_NO_REACTIONS + ", reactions:write"}})
+    result = api.run_check(fake)
+    assert result["scopes_checked"] is True and result["missing_scopes"] == []
+    assert "scope_warning" not in result
+
+
+def test_optional_scopes_never_nag():
+    assert api.scope_check("reactions:write")["missing_scopes"] == []
+    assert api.scope_check(None) == {"scopes_checked": False, "missing_scopes": []}
+
+
+def test_required_list_matches_slack_connect():
+    path = PLUGIN_DIR.parent / "slack-connect" / "common" / "scopes.py"
+    spec = importlib.util.spec_from_file_location("slack_connect_scopes_for_check", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert tuple(api.REQUIRED_BOT_SCOPES) == tuple(mod.REQUIRED_BOT_SCOPES)

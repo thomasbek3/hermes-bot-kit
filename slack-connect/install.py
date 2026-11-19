@@ -29,6 +29,7 @@ LABEL = 'ai.hermes.slack-ingress'
 MANIFEST = 'install-manifest.json'
 PLUGIN = 'slack-connect'
 PLUGIN_FILES = ('common/__init__.py', 'common/core.py', 'common/token_store.py', 'common/config.py',
+                'common/scopes.py', 'dashboard/scope_repair.py',
                 'dashboard/manifest.json', 'dashboard/plugin_api.py', 'dashboard/service.py',
                 'dashboard/slack_api.py', 'dashboard/platform_lifecycle.py', 'dashboard/platform_selection.py',
                 'dashboard/slack_switch.py', 'dashboard/dist/index.js')
