@@ -89,6 +89,9 @@ jobs:
       - name: Installer tests
         run: bash tests/test-install.sh
 
+      - name: AGENTS.md runbook commands (offline, fake curl)
+        run: bash tests/test-agents-runbook.sh
+
   windows:
     runs-on: windows-latest
     steps:

@@ -4,7 +4,7 @@
 # Safe for agents to run unattended:
 # idempotent, no prompts, no sudo, backs up any existing copy before overwriting.
 #
-#   curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh | bash
+#   ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f"; test -s "$f"; bash "$f" )
 #
 # or from a clone:  bash install.sh
 #
@@ -45,7 +45,7 @@ usage() {
   cat <<'EOF'
 Install the Hermes Bot Kit desktop plugins.
 
-  curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh | bash
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f"; test -s "$f"; bash "$f" )
 
 or from a clone:  bash install.sh
 
@@ -202,6 +202,42 @@ else
 fi
 RAW_BASE="https://raw.githubusercontent.com/${KIT_REPO}/${KIT_REF}"
 
+# What this kit installed last time (written at the end of a successful run):
+# release=<tag or local> and plugins=<desktop plugins>.
+INSTALL_RECORD="${PLUGIN_ROOT}/.hermes-bot-kit-install"
+recorded_release() {
+  [ -f "${INSTALL_RECORD}" ] || return 1
+  sed -n 's/^release=//p' "${INSTALL_RECORD}" | head -n 1
+}
+
+# An automatic choice (no KIT_REF) never replaces a newer installed release:
+# a stale API answer or the fallback tag would otherwise downgrade it. An
+# explicit KIT_REF is the deliberate way to go back.
+if [ -z "${SOURCE_DIR}" ] && { [ -z "${KIT_REF_FROM_USER}" ] || [ "${KIT_REF_FROM_USER}" = "latest" ]; }; then
+  installed=$(recorded_release || true)
+  if [ -n "${installed}" ] && is_release_tag "${installed}" && tag_older_than "${KIT_REF}" "${installed}"; then
+    echo "Release          -- ${installed} is installed, newer than ${KIT_REF}; keeping it."
+    echo "                    To go back on purpose: KIT_REF=${KIT_REF} bash install.sh"
+    exit 0
+  fi
+fi
+
+# Downloads are bounded in time and size; a stalled or huge answer fails.
+CURL_MANIFEST=(curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 2 --max-filesize 1048576)
+CURL_PAYLOAD=(curl -fsSL --connect-timeout 10 --max-time 300 --retry 2 --retry-delay 2 --max-filesize 52428800)
+
+# The first release whose manifest lists each component. A release older than
+# that may lack it (the component is skipped); any newer manifest that lacks a
+# selected component is incomplete and nothing is installed.
+FIRST_GROKBOT_REF="v2026.11.10"
+FIRST_CARDS_REF="v2026.11.09.1"
+FIRST_NOVNC_REF="v2026.09.06"
+predates() {
+  # predates <component's first release>: the ref being installed is a
+  # release tag older than that.
+  [ -z "${SOURCE_DIR}" ] && is_release_tag "${KIT_REF}" && tag_older_than "${KIT_REF}" "$1"
+}
+
 TMP_DIR=$(mktemp -d)
 NEEDED_FILE="${TMP_DIR}/.needed"
 CREATED_FILE="${TMP_DIR}/.created"
@@ -253,7 +289,7 @@ stage_file() {
     fi
     cp "${SOURCE_DIR}/${rel}" "${out}"
   else
-    curl -fsSL "${RAW_BASE}/${rel}" -o "${out}"
+    "${CURL_PAYLOAD[@]}" "${RAW_BASE}/${rel}" -o "${out}"
   fi
 }
 
@@ -417,11 +453,24 @@ else
     fi
     cp "${SOURCE_DIR}/MANIFEST.sha256" "${MANIFEST}"
   else
-    curl -fsSL "${RAW_BASE}/MANIFEST.sha256" -o "${MANIFEST}"
+    "${CURL_MANIFEST[@]}" "${RAW_BASE}/MANIFEST.sha256" -o "${MANIFEST}"
+  fi
+  if [ ! -s "${MANIFEST}" ]; then
+    echo "install.sh: MANIFEST.sha256 for ${KIT_REF} is empty; nothing installed" >&2
+    exit 1
   fi
 
-  if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ] && manifest_has "computer-viewer/vendor/novnc-rfb.mjs"; then
-    need "computer-viewer/vendor/novnc-rfb.mjs"
+  incomplete() {
+    echo "install.sh: MANIFEST.sha256 for ${KIT_REF} does not list $1; it is incomplete, so nothing was installed" >&2
+    exit 1
+  }
+
+  if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
+    if manifest_has "computer-viewer/vendor/novnc-rfb.mjs"; then
+      need "computer-viewer/vendor/novnc-rfb.mjs"
+    elif ! predates "${FIRST_NOVNC_REF}"; then
+      incomplete "computer-viewer/vendor/novnc-rfb.mjs"
+    fi
   fi
 
   # Releases before Grokbot Override joined the installer do not list it.
@@ -429,8 +478,10 @@ else
   if grep -qxF "${GROKBOT_REL}" "${NEEDED_FILE}"; then
     if manifest_has "${GROKBOT_REL}"; then
       GROKBOT_INSTALLED=1
+    elif ! predates "${FIRST_GROKBOT_REF}"; then
+      incomplete "${GROKBOT_REL}"
     else
-      echo "install.sh: ${KIT_REF} has no Grokbot Override in its manifest; skipping it." >&2
+      echo "install.sh: ${KIT_REF} predates Grokbot Override; skipping it." >&2
       grep -vxF "${GROKBOT_REL}" "${NEEDED_FILE}" > "${NEEDED_FILE}.next" || true
       mv "${NEEDED_FILE}.next" "${NEEDED_FILE}"
     fi
@@ -441,8 +492,10 @@ else
   if grep -qxF "${CARDS_REL}" "${NEEDED_FILE}"; then
     if manifest_has "${CARDS_REL}"; then
       CARDS_INSTALLED=1
+    elif ! predates "${FIRST_CARDS_REF}"; then
+      incomplete "${CARDS_REL}"
     else
-      echo "install.sh: ${KIT_REF} has no agent-cards skill in its manifest; skipping it." >&2
+      echo "install.sh: ${KIT_REF} predates the agent-cards skill; skipping it." >&2
       grep -vxF "${CARDS_REL}" "${NEEDED_FILE}" > "${NEEDED_FILE}.next" || true
       mv "${NEEDED_FILE}.next" "${NEEDED_FILE}"
     fi
@@ -535,12 +588,13 @@ else
         printf 'Cards skill      -> %s\n' "${dest}" >> "${TMP_DIR}/.cards-report"
       done < "${TMP_DIR}/.cards-homes"
     fi
-    if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
-      # The hiperf helper scripts verify hiperf-agent.py against
-      # MANIFEST.sha256, and fall back to a local copy when the network is
-      # unavailable. Without this they had nothing to fall back to: put the
-      # manifest one level above them, at desktop-plugins/MANIFEST.sha256.
+    # The release's manifest sits next to the plugins (desktop-plugins/
+    # MANIFEST.sha256): the hiperf helper scripts fall back to it offline,
+    # and AGENTS.md's verify step checks the installed plugins against it.
+    if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ] || [ "${GROKBOT_INSTALLED}" = "1" ]; then
       install_file "${MANIFEST}" "${PLUGIN_ROOT}/MANIFEST.sha256"
+    fi
+    if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
       chmod +x "${PLUGIN_ROOT}/computer-viewer/"*.sh
     fi
   }
@@ -548,6 +602,18 @@ else
   INSTALL_OK=0
   install_all
   INSTALL_OK=1
+
+  # Record what was installed (release and desktop plugins) for the verify
+  # step and for the next run's downgrade check.
+  installed_plugins=""
+  [ "${KIT_SKIP_COMPUTER:-0}" != "1" ] && installed_plugins="computer-viewer"
+  [ "${GROKBOT_INSTALLED}" = "1" ] && installed_plugins="${installed_plugins:+${installed_plugins} }grokbot-override"
+  if [ -n "${installed_plugins}" ]; then
+    record_release="${KIT_REF}"
+    [ -n "${SOURCE_DIR}" ] && record_release="local"
+    printf 'release=%s\nplugins=%s\n' "${record_release}" "${installed_plugins}" > "${TMP_DIR}/.record"
+    cp "${TMP_DIR}/.record" "${INSTALL_RECORD}"
+  fi
 
   if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
     echo "Computer viewer  -> ${PLUGIN_ROOT}/computer-viewer/plugin.js (+ helper scripts)"

@@ -24,7 +24,7 @@ A chat-app Bot Mode screen + a live window into your bots' computers.
 
 > **Quick start**
 > 1. Tell your AI agent: **"Install https://github.com/thomasbek3/hermes-bot-kit (follow its AGENTS.md)."**
-> 2. Or yourself: `curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh | bash`
+> 2. Or yourself: `( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f"; test -s "$f"; bash "$f" )`
 > 3. Then **⌘⇧P → Reload plugins** in Hermes Desktop: the Bots tab becomes the chat-app screen, and **Computer** appears under Settings → Plugins.
 
 ---
@@ -55,8 +55,11 @@ Desktop plugins plus an optional agent plugin, one install:
 One command, the desktop plugins (idempotent, no sudo, agents can run it unattended):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh | bash
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f"; test -s "$f"; bash "$f" )
 ```
+
+(It downloads the script to a file and runs it only if the download worked, so
+a failed or empty download stops with an error instead of doing nothing.)
 
 It installs the newest release (it asks GitHub, and falls back to the release
 it came with) and checks every file against that release's `MANIFEST.sha256`
@@ -90,7 +93,7 @@ left their folders in `desktop-plugins/`, the installer says so; run it with
 profile), so it has its own one-liner:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/texting-style/install.sh | bash
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/texting-style/install.sh -o "$f"; test -s "$f"; bash "$f" )
 ```
 
 **remote-cua** is an *agent* plugin too (per bot profile, on the gateway host):

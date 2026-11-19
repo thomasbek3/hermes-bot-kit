@@ -6,11 +6,17 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 INSTALLER="${ROOT}/install.sh"
 MANIFEST="${ROOT}/MANIFEST.sha256"
 
+# Every temporary folder lives under one parent that the EXIT trap removes
+# (mktemp honours TMPDIR), including the ones made inside $(...) subshells,
+# whose CLEANUP+= updates never reach this shell.
+WORK=$(mktemp -d)
+export TMPDIR="${WORK}"
 CLEANUP=()
 cleanup() {
   if [ ${#CLEANUP[@]} -gt 0 ]; then
     rm -rf "${CLEANUP[@]}"
   fi
+  rm -rf "${WORK}"
 }
 trap cleanup EXIT
 
@@ -170,19 +176,21 @@ if [ -e "${skip_home}/desktop-plugins/grokbot-override" ]; then
 fi
 echo "OK  KIT_SKIP_GROKBOT"
 
-# A release whose manifest predates Grokbot Override installs the rest.
+# A checkout whose manifest lacks Grokbot Override is incomplete: nothing is
+# installed (only releases older than v2026.11.10 may lack it; tested below).
 old=$(mktemp -d)
-CLEANUP+=("${old}")
 copy_tree "${old}"
 grep -v ' grokbot-override/' "${old}/MANIFEST.sha256" > "${old}/MANIFEST.next"
 mv "${old}/MANIFEST.next" "${old}/MANIFEST.sha256"
 old_home=$(new_home)
-HERMES_HOME="${old_home}" KIT_SOURCE_DIR="${old}" bash "${INSTALLER}" >/dev/null 2>&1 || fail "install from an older manifest failed"
-[ -f "${old_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "older manifest: computer-viewer missing"
-if [ -e "${old_home}/desktop-plugins/grokbot-override" ]; then
-  fail "older manifest: grokbot-override was installed"
-fi
-echo "OK  older manifest without Grokbot Override"
+set +e
+out=$(HERMES_HOME="${old_home}" KIT_SOURCE_DIR="${old}" bash "${INSTALLER}" 2>&1)
+status=$?
+set -e
+[ "${status}" -ne 0 ] || fail "a manifest without Grokbot Override installed anyway"
+printf '%s\n' "${out}" | grep -q "is incomplete" || fail "no incomplete-manifest message"
+[ ! -e "${old_home}/desktop-plugins" ] || fail "an incomplete manifest installed files"
+echo "OK  incomplete manifest (no Grokbot Override) installs nothing"
 
 # Retired plugins (Bubble Mode, Task Dock, Bot Sections): an upgrade names
 # this kit's copies and leaves them alone; a folder without the kit's marker
@@ -306,17 +314,17 @@ if [ -e "${bad_cards_home}/skills" ] || [ -e "${bad_cards_home}/desktop-plugins"
 fi
 echo "OK  cards skill tamper"
 
-# A release whose manifest predates the skill installs the rest.
+# A checkout whose manifest lacks the selected cards skill is incomplete too.
 old_cards=$(mktemp -d)
-CLEANUP+=("${old_cards}")
 copy_tree "${old_cards}"
 grep -v " ${CARDS_REL}\$" "${old_cards}/MANIFEST.sha256" > "${old_cards}/MANIFEST.next"
 mv "${old_cards}/MANIFEST.next" "${old_cards}/MANIFEST.sha256"
 old_cards_home=$(new_home)
-HERMES_HOME="${old_cards_home}" KIT_SOURCE_DIR="${old_cards}" KIT_CARDS_SKILL=1 bash "${INSTALLER}" >/dev/null 2>&1 || fail "cards install from an older manifest failed"
-[ -f "${old_cards_home}/desktop-plugins/computer-viewer/plugin.js" ] || fail "older manifest: computer-viewer missing"
-[ ! -e "${old_cards_home}/skills" ] || fail "older manifest: the skill was installed"
-echo "OK  older manifest without the cards skill"
+if HERMES_HOME="${old_cards_home}" KIT_SOURCE_DIR="${old_cards}" KIT_CARDS_SKILL=1 bash "${INSTALLER}" >/dev/null 2>&1; then
+  fail "a manifest without the selected cards skill installed anyway"
+fi
+[ ! -e "${old_cards_home}/skills" ] && [ ! -e "${old_cards_home}/desktop-plugins" ] || fail "an incomplete manifest installed files"
+echo "OK  incomplete manifest (no cards skill) installs nothing"
 
 # KIT_CARDS_SKILL=remove: removes only the kit's copies and installs nothing.
 HERMES_HOME="${cards_home}" KIT_CARDS_SKILL=remove bash "${INSTALLER}" >/dev/null
@@ -343,44 +351,14 @@ CLEANUP+=("${remote_dir}")
 cp "${INSTALLER}" "${remote_dir}/install.sh"
 fake=$(mktemp -d)
 CLEANUP+=("${fake}")
-cat > "${fake}/curl" <<'EOF'
-#!/usr/bin/env bash
-# Fake curl: GitHub API per FAKE_API, raw files from FAKE_ROOT, refs logged.
-out="" url=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -o) out="$2"; shift 2 ;;
-    -H|--connect-timeout|--max-time) shift 2 ;;
-    -*) shift ;;
-    *) url="$1"; shift ;;
-  esac
-done
-case "${url}" in
-  *api.github.com*|*releases/latest*)
-    case "${FAKE_API}" in
-      ok) printf '{\n  "url": "x",\n  "tag_name": "v2099.01.02",\n  "name": "x"\n}\n' ;;
-      garbage) printf '{"tag_name": "main; rm -rf /"}\n' ;;
-      old) printf '{"tag_name": "v2020.01.01"}\n' ;;
-      *) exit 22 ;;
-    esac
-    exit 0 ;;
-  https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/*)
-    rest=${url#https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/}
-    ref=${rest%%/*}
-    rel=${rest#*/}
-    printf '%s\n' "${ref}" >> "${FAKE_LOG}"
-    [ -f "${FAKE_ROOT}/${rel}" ] || exit 22
-    if [ -n "${out}" ]; then cat "${FAKE_ROOT}/${rel}" > "${out}"; else cat "${FAKE_ROOT}/${rel}"; fi ;;
-  *) exit 22 ;;
-esac
-EOF
+cp "${ROOT}/tests/fake-curl.sh" "${fake}/curl"
 chmod +x "${fake}/curl"
 fallback=$(sed -n 's/^KIT_FALLBACK_REF="\(.*\)"/\1/p' "${INSTALLER}")
 [ -n "${fallback}" ] || fail "install.sh has no KIT_FALLBACK_REF"
 
 remote_install() {
   # remote_install <api mode> <log> <home> [KIT_REF]
-  env -i PATH="${fake}:/usr/bin:/bin" HOME="${HOME:-/tmp}" FAKE_API="$1" FAKE_LOG="$2" FAKE_ROOT="${ROOT}" \
+  env -i PATH="${fake}:/usr/bin:/bin" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR}" FAKE_API="$1" FAKE_LOG="$2" FAKE_ROOT="${FAKE_ROOT:-${ROOT}}" \
     HERMES_HOME="$3" ${4:+KIT_REF="$4"} bash "${remote_dir}/install.sh"
 }
 
@@ -406,5 +384,54 @@ rhome=$(new_home)
 remote_install ok "${log}" "${rhome}" v2001.02.03 >/dev/null || fail "remote install with KIT_REF failed"
 [ "$(sort -u "${log}")" = "v2001.02.03" ] || fail "KIT_REF was not used as given"
 echo "OK  KIT_REF overrides the newest release"
+
+# The install record names the release and the desktop plugins installed.
+rec="${rhome}/desktop-plugins/.hermes-bot-kit-install"
+grep -qx 'release=v2001.02.03' "${rec}" || fail "install record has the wrong release"
+grep -qx 'plugins=computer-viewer grokbot-override' "${rec}" || fail "install record has the wrong plugins"
+echo "OK  install record (release + plugins)"
+
+# No automatic downgrade: v2099.01.02 installed, then the API is down (the
+# fallback is older): nothing is fetched or changed. An explicit KIT_REF does it.
+log=$(mktemp)
+dhome=$(new_home)
+remote_install ok "${log}" "${dhome}" >/dev/null || fail "install of the newer release failed"
+: > "${log}"
+out=$(remote_install down "${log}" "${dhome}") || fail "the no-downgrade run exited non-zero"
+printf '%s\n' "${out}" | grep -q "v2099.01.02 is installed, newer than ${fallback}; keeping it" || fail "no keep-newer message"
+[ ! -s "${log}" ] || fail "the no-downgrade run fetched files"
+grep -qx 'release=v2099.01.02' "${dhome}/desktop-plugins/.hermes-bot-kit-install" || fail "the record changed"
+remote_install down "${log}" "${dhome}" "${fallback}" >/dev/null || fail "an explicit KIT_REF downgrade failed"
+grep -qx "release=${fallback}" "${dhome}/desktop-plugins/.hermes-bot-kit-install" || fail "explicit KIT_REF did not downgrade"
+echo "OK  no automatic downgrade; KIT_REF downgrades on purpose"
+
+# Legacy omissions are allowed only for releases older than the component.
+legacy=$(mktemp -d)
+copy_tree "${legacy}"
+grep -v ' grokbot-override/' "${legacy}/MANIFEST.sha256" > "${legacy}/MANIFEST.next"
+mv "${legacy}/MANIFEST.next" "${legacy}/MANIFEST.sha256"
+log=$(mktemp)
+lhome=$(new_home)
+FAKE_ROOT="${legacy}" remote_install ok "${log}" "${lhome}" v2026.11.09 >/dev/null 2>&1 || fail "a release that predates Grokbot Override failed"
+[ -f "${lhome}/desktop-plugins/computer-viewer/plugin.js" ] || fail "legacy release: computer-viewer missing"
+[ ! -e "${lhome}/desktop-plugins/grokbot-override" ] || fail "legacy release: grokbot-override installed"
+grep -qx 'plugins=computer-viewer' "${lhome}/desktop-plugins/.hermes-bot-kit-install" || fail "legacy record lists grokbot-override"
+lhome2=$(new_home)
+if FAKE_ROOT="${legacy}" remote_install ok "${log}" "${lhome2}" v2026.11.16 >/dev/null 2>&1; then
+  fail "a modern release whose manifest lacks Grokbot Override installed"
+fi
+[ ! -e "${lhome2}/desktop-plugins" ] || fail "an incomplete modern manifest installed files"
+echo "OK  legacy release may lack Grokbot Override; a modern one may not"
+
+# An empty manifest download installs nothing.
+empty=$(mktemp -d)
+copy_tree "${empty}"
+: > "${empty}/MANIFEST.sha256"
+ehome=$(new_home)
+if FAKE_ROOT="${empty}" remote_install ok "${log}" "${ehome}" v2026.11.16 >/dev/null 2>&1; then
+  fail "an empty manifest installed"
+fi
+[ ! -e "${ehome}/desktop-plugins" ] || fail "an empty manifest installed files"
+echo "OK  empty manifest installs nothing"
 
 echo "test-install.sh: all passed"

@@ -19,11 +19,9 @@ It is written to be run unattended on **macOS and Linux**.
 
 ## 1. Check the prerequisites
 
+<!-- runbook:prereq -->
 ```bash
-for c in bash curl grep awk; do command -v "$c" >/dev/null || { echo "missing: $c" >&2; false; break; }; done \
-  && { command -v shasum >/dev/null || command -v sha256sum >/dev/null || { echo "missing: shasum or sha256sum" >&2; false; }; } \
-  && { test -d "${HERMES_HOME:-$HOME/.hermes}" || { echo "No Hermes home at ${HERMES_HOME:-$HOME/.hermes}: install and open Hermes Desktop first (https://github.com/NousResearch/hermes-agent)" >&2; false; }; } \
-  && echo "prerequisites OK"
+( set -e; for c in bash curl grep awk sed mktemp; do command -v "$c" >/dev/null || { echo "missing: $c" >&2; exit 1; }; done; command -v shasum >/dev/null || command -v sha256sum >/dev/null || { echo "missing: shasum or sha256sum" >&2; exit 1; }; test -d "${HERMES_HOME:-$HOME/.hermes}" || { echo "No Hermes home at ${HERMES_HOME:-$HOME/.hermes}: install and open Hermes Desktop first (https://github.com/NousResearch/hermes-agent)" >&2; exit 1; }; echo "prerequisites OK" )
 ```
 
 - **Hermes Desktop 0.20.5 or newer is required.** On older builds the Computer
@@ -37,14 +35,18 @@ for c in bash curl grep awk; do command -v "$c" >/dev/null || { echo "missing: $
 
 ## 2. Install
 
+<!-- runbook:install -->
 ```bash
-f=$(mktemp) && curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f" && bash "$f"; rc=$?; rm -f "$f"; [ "$rc" -eq 0 ]
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f"; test -s "$f"; bash "$f" )
 ```
 
-The first output line names the release it installs, for example
+The script is downloaded to a file first and run only if the download
+succeeded, so a failed or empty download stops here with a non-zero exit. The
+first output line names the release it installs, for example
 `Release -> v2026.11.19 (newest GitHub release)`.
 
-Variants (same command, with a variable in front of `bash "$f"`):
+Variants (same command, with a variable in front of `bash "$f"`, for example
+`KIT_SKIP_COMPUTER=1 bash "$f"`):
 
 | Want | Put in front of `bash "$f"` |
 |---|---|
@@ -59,13 +61,18 @@ From a clone, the same install copies from the checkout:
 
 ## 3. Verify
 
+<!-- runbook:verify -->
 ```bash
-D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; SUM=$(command -v sha256sum || echo "shasum -a 256"); (cd "$D" && grep -E ' (computer-viewer/plugin.js|grokbot-override/plugin.js)$' MANIFEST.sha256 | $SUM -c -) && echo "Bot Kit installed OK"
+( set -eu; D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; R="$D/.hermes-bot-kit-install"; M="$D/MANIFEST.sha256"; test -s "$R" && test -s "$M" || { echo "no install record or manifest in $D: run step 2" >&2; exit 1; }; SEL=$(sed -n 's/^plugins=//p' "$R"); test -n "$SEL" || { echo "the install record lists no plugins" >&2; exit 1; }; SUM=$(command -v sha256sum || echo "shasum -a 256"); for p in $SEL; do n=$(grep -c " $p/plugin.js\$" "$M" || true); test "$n" = 1 || { echo "$p: $n digests in $M, want exactly 1" >&2; exit 1; }; test -f "$D/$p/plugin.js" || { echo "$p: plugin.js is missing" >&2; exit 1; }; ( cd "$D" && grep " $p/plugin.js\$" MANIFEST.sha256 | $SUM -c - >/dev/null ) || { echo "$p: plugin.js does not match the manifest" >&2; exit 1; }; echo "$p: OK"; done; echo "Bot Kit installed OK ($(sed -n 's/^release=//p' "$R")): $SEL" )
 ```
 
-Expect two `: OK` lines and `Bot Kit installed OK`. (With `KIT_SKIP_*`, only
-the plugin you installed is listed.) The folder names must stay exactly
-`computer-viewer` and `grokbot-override`, because they are the plugin ids.
+It checks exactly the plugins step 2 installed (the installer records them,
+with the release, in `desktop-plugins/.hermes-bot-kit-install`). For each one
+there must be exactly one digest in the installed `MANIFEST.sha256` and a
+`plugin.js` that matches it. Expect one `<plugin>: OK` line per plugin and
+`Bot Kit installed OK (<release>): <plugins>`; anything else exits non-zero.
+The folder names must stay exactly `computer-viewer` and `grokbot-override`,
+because they are the plugin ids.
 
 ## 4. Finish (HUMAN)
 
@@ -95,7 +102,7 @@ Offer these; install only what the person wants.
   chat; question cards work without it):
 
   ```bash
-  f=$(mktemp) && curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f" && KIT_CARDS_SKILL=1 bash "$f"; rc=$?; rm -f "$f"; [ "$rc" -eq 0 ]
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/install.sh -o "$f"; test -s "$f"; KIT_CARDS_SKILL=1 bash "$f" )
   ```
 
   It goes to `<profile home>/skills/agent-cards/SKILL.md` for the root home and
@@ -107,11 +114,11 @@ Offer these; install only what the person wants.
 - **texting-style** (bots reply in a short texting register, only in Bot Chat):
 
   ```bash
-  f=$(mktemp) && curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/texting-style/install.sh -o "$f" && bash "$f"; rc=$?; rm -f "$f"; [ "$rc" -eq 0 ]
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.16.3/texting-style/install.sh -o "$f"; test -s "$f"; bash "$f" )
   ```
 
-  Add `-s -- --profiles default,helper` style arguments after `bash "$f"` to
-  limit it. Verify: `hermes plugins list` shows `texting-style enabled`. New
+  To limit it to some profiles, pass them to the script:
+  `bash "$f" --profiles default,helper`. Verify: `hermes plugins list` shows `texting-style enabled`. New
   plugin code loads only when the agent process restarts: restart Hermes
   Desktop, or gracefully restart only that profile's `hermes --profile <name>
   serve` process after checking its owner. Never use broad process-name kills.
@@ -126,8 +133,9 @@ Offer these; install only what the person wants.
 
 ## Uninstall
 
+<!-- runbook:uninstall -->
 ```bash
-D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; for p in computer-viewer grokbot-override; do [ ! -e "$D/$p" ] || mv "$D/$p" "$D/../desktop-plugins-removed-$(date +%Y%m%d%H%M%S)-$p" || false; done && echo "moved out of $D"
+( set -e; D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; for p in computer-viewer grokbot-override; do if [ -e "$D/$p" ]; then mv "$D/$p" "$D/../desktop-plugins-removed-$(date +%Y%m%d%H%M%S)-$p"; fi; done; rm -f "$D/.hermes-bot-kit-install"; echo "moved out of $D" )
 ```
 
 This moves the two plugin folders out of `desktop-plugins/` (nothing is
@@ -141,7 +149,9 @@ under `hermes.plugin.computer-viewer.*` and `hermes.plugin.grokbot-override.*`.
 |---|---|
 | `install.sh: sha256 mismatch for …` | A downloaded file is not the released one (proxy, partial download). Nothing was installed. Re-run; if it repeats, report it and do not use `KIT_SKIP_VERIFY`. |
 | `Release -> … (GitHub API not reachable …)` | No network to api.github.com or a rate limit. The fallback release is still checked against its manifest. Fine to continue. |
-| `… has no Grokbot Override in its manifest; skipping it` | You pinned an old release with `KIT_REF`. Drop `KIT_REF`. |
+| `… predates Grokbot Override; skipping it` | You pinned an old release with `KIT_REF`. Drop `KIT_REF`. |
+| `MANIFEST.sha256 for … does not list …; it is incomplete` | That release's manifest lacks a file it should have. Nothing was installed. Report it; don't use `KIT_SKIP_VERIFY`. |
+| `Release -- vX is installed, newer than vY; keeping it` | The automatic choice would have gone backwards (a stale API answer or the fallback). Nothing changed. To go back on purpose, set `KIT_REF=vY`. |
 | The Bots tab looks unchanged after reload | The override was switched off earlier: **⌘⇧P → Grokbot Override: toggle**. |
 | The Computer pane is zero-size | Hermes Desktop is older than 0.20.5. Update the app. |
 | A plugin change "doesn't take" | Bot Chats are served by long-lived per-profile `hermes --profile <name> serve` processes that survive app restarts. Check which process it is and restart only that one gracefully. |

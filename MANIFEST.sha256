@@ -1,4 +1,4 @@
-32202daa67d16eefa3eb172c2300b01554d6bf339265fa74b1fcba59aa3004f4  computer-viewer/connect-linux.sh
+bb5cf3748861dce8e7c46473c3168271ce4d9c3f4f990c6914fa1c1e300a1b93  computer-viewer/connect-linux.sh
 d95c1e9d89941ebad13a671587b2ab35fe289da98280e7983d92987efdb6abb9  computer-viewer/connect-mac.sh
 de9011d2499a113eebc5b0b5a4fcf861a0aa51afc0bb708000d70f528f532c2c  computer-viewer/connect-windows.ps1
 b8ac63b1b052a029b46ac9bda394215e7b4c2268506c9becd86eb49190a9faf6  computer-viewer/hiperf-agent.py
