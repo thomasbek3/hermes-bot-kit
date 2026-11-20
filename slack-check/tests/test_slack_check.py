@@ -302,7 +302,7 @@ c = TestClient(app)
 r1 = c.get("/api/plugins/slack-check/test?profile=intake").json()
 print(json.dumps({{"r1": r1, "seen": [s.endswith({FAKE_BOT[-8:]!r}) for s in seen]}}))
 """
-    env = {"HERMES_HOME": str(root), "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    env = {"HERMES_HOME": str(root), "PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
     proc = subprocess.run([sys.executable, "-I", "-c", script], capture_output=True, text=True,
                           env=env, cwd=str(tmp_path), timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]

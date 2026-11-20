@@ -116,10 +116,17 @@ this release that failed is never taken as connected.
 administrator pins `SLACK_ALLOWED_USERS`, Hermes refuses the write. The window
 then shows Hermes's refusal, or *Hermes kept SLACK_ALLOWED_USERS=…
 (administrator-managed?)*, and keeps the audience it had: the kit reads the
-allowlist back the way Hermes reads it before it records any change. If that
-read-back fails, or Hermes's own settings can't be read, the change isn't
-recorded either: *Couldn't confirm Hermes applied the change; nothing was
-recorded.*
+allowlist back the way Hermes reads it before it records any change. If
+Hermes's own settings can't be read at all, nothing is written: *Couldn't read
+Hermes's settings, so nothing was changed.* If the write went through but the
+read-back fails or shows another value, the kit puts the bot's previous values
+back (a key that wasn't there is removed again, including a first Connect's
+new token) and checks that with the same reader: *…; nothing was changed.* If
+even that can't be confirmed, the window says what is left and where: *Couldn't
+undo the change: SLACK_ALLOWED_USERS is now …; set it back in
+<profile home>/.env*. A first Connect that can't be undone is left with
+`SLACK_ALLOWED_USERS=NOBODY`, so nobody can talk to the bot until you remove
+the app and connect again.
 
 How the kit does it: Hermes has no "full members only" switch.
 `SLACK_ALLOW_ALL_USERS=true` would also let guests in (Hermes refuses only
@@ -240,7 +247,11 @@ To remove the bot from Slack, use **Remove from Slack** in the same window and
 confirm. It deletes the app and the bot's Slack keys, and restores the
 allowlist the profile had before. **Cancel** or closing the window removes
 only an app that was never installed; once the bot has its Slack token, only
-the confirmed **Remove from Slack** deletes the app.
+the confirmed **Remove from Slack** deletes the app. That holds even when you
+cancel at the moment Slack finishes authorizing. Remove deletes only the
+connection the window was showing: if the bot was reconnected meanwhile (from
+another window, say), it answers *This Slack connection changed; reopen the
+window* and deletes nothing.
 
 ## Settings that matter afterwards
 

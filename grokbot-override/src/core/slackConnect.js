@@ -41,6 +41,15 @@ export async function probeSlackConnect(call, scope) {
     }
   }
 }
+/**
+ * The body of a confirmed Remove from Slack: the connection the window's last
+ * status showed (its key, app_id and record_rev). The server refuses it if
+ * this bot's connection is another one by now.
+ */
+export function removalBody(status) {
+  const pick = name => (status && typeof status === 'object' && name in status ? status[name] : null)
+  return { confirm: true, key: pick('key'), app_id: pick('app_id'), record_rev: pick('record_rev') }
+}
 /** True when no stored workspace token can be used: the window opens on adding one. */
 export function needsWorkspace(workspaces) {
   return !Array.isArray(workspaces) || !workspaces.some(w => w && w.ok !== false)

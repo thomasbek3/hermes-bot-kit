@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ACCESS_CHOICES, accessBody, accessChoices, audienceView, isSlackAuthorizationUrl, needsWorkspace, refreshTokenError, workspaceLabel } from '../core/slackConnect.js'
+import { ACCESS_CHOICES, accessBody, accessChoices, audienceView, isSlackAuthorizationUrl, needsWorkspace, refreshTokenError, removalBody, workspaceLabel } from '../core/slackConnect.js'
 import { slackError } from '../core/slack.js'
 import { Sheet } from './kit'
 import { openExternalLink, slack, slackProvisioning, slackWorkspaceProvisioning, enableSlackProvisioning, loadSlackState } from './slackActions'
@@ -33,10 +33,15 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
   const [tokenInstalled, setTokenInstalled] = React.useState(initial.status?.token_installed === true)
   const phaseRef = React.useRef(phase)
   const tokenRef = React.useRef(tokenInstalled)
+  // The last status the window showed: a confirmed Remove names its connection.
+  const shownRef = React.useRef<any>(initial.status)
   const alive = React.useRef(true)
   phaseRef.current = phase
   tokenRef.current = tokenInstalled
-  const noteToken = (status: any) => { if (typeof status?.token_installed === 'boolean') setTokenInstalled(status.token_installed) }
+  const noteToken = (status: any) => {
+    if (status && typeof status === 'object') shownRef.current = status
+    if (typeof status?.token_installed === 'boolean') setTokenInstalled(status.token_installed)
+  }
   React.useEffect(() => () => { alive.current = false }, [])
   React.useEffect(() => {
     if (phase !== 'created' && phase !== 'installed') return
@@ -68,8 +73,11 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
     if (phase !== 'connected') return
     const timer = setInterval(async () => {
       try {
-        const view = audienceView(await slackProvisioning(bot, 'audience'))
-        if (view && alive.current) setAudience(view)
+        const status: any = await slackProvisioning(bot, 'audience')
+        if (!alive.current) return
+        noteToken(status)
+        const view = audienceView(status)
+        if (view) setAudience(view)
       } catch { /* The next poll retries. */ }
     }, 20_000)
     return () => clearInterval(timer)
@@ -109,7 +117,7 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
     if (busy) return
     setBusy(true); setError('')
     try {
-      if (confirmed) await slackProvisioning(bot, 'remove', 'POST', { confirm: true })
+      if (confirmed) await slackProvisioning(bot, 'remove', 'POST', removalBody(shownRef.current))
       else await slackProvisioning(bot, 'connect', 'DELETE')
       if (!alive.current) return
       setAuthorize(''); setPhase('none'); setConfirm(false); setTokenInstalled(false); void loadSlackState(bot)
@@ -130,7 +138,7 @@ export function SlackConnect({ bot, name, initial, onClose }: Props) {
     try {
       const status: any = await slackProvisioning(bot, 'access', 'POST', who.body)
       if (!alive.current) return
-      setAudience(audienceView(status)); setChanging(false)
+      noteToken(status); setAudience(audienceView(status)); setChanging(false)
     } catch (err) { if (alive.current) setError(failure(err)) }
     finally { if (alive.current) setBusy(false) }
   }

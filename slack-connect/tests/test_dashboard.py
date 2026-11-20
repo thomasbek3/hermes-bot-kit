@@ -29,6 +29,7 @@ class Slack:
         self.delete_result = {'ok': True}
         self.fail_create = False
         self.unsupported_icon = False
+        self.app_id = 'A1'
     def rotate(self, value):
         self.calls.append('rotate')
         return {'ok':True, 'team_id':'T1', 'token':'fake-access-next', 'refresh_token':'fake-refresh-next', 'exp':int(time.time())+4000}
@@ -37,7 +38,7 @@ class Slack:
         self.created_manifest = manifest
         if self.fail_create:
             raise TimeoutError()
-        return {'ok':True, 'app_id':'A1', 'credentials':{'client_id':'C1', 'client_secret':'fake-client-secret', 'signing_secret':'fake-signing-secret'}}
+        return {'ok':True, 'app_id':self.app_id, 'credentials':{'client_id':'C1', 'client_secret':'fake-client-secret', 'signing_secret':'fake-signing-secret'}}
     def set_icon(self, token, app_id, image):
         self.calls.append('icon')
         if self.unsupported_icon:
@@ -75,6 +76,12 @@ def context(tmp_path, monkeypatch):
     app.include_router(api.router)
     with TestClient(app) as client:
         yield client, slack, vault, env, data, notifications
+
+
+def shown(client):
+    """A confirmed Remove's body: the connection the window's status showed."""
+    status = client.get('/audience').json()
+    return {'confirm': True, 'key': status.get('key'), 'app_id': status.get('app_id'), 'record_rev': status.get('record_rev')}
 
 
 def test_bootstrap_valid_unknown_traversal_and_idempotence(tmp_path, monkeypatch):
@@ -183,10 +190,10 @@ def test_removal_recycles_live_profile_and_retries_after_failure(context):
         if calls.count('recycle') == 1:
             raise api.platform_module.GatewayReloadError('retry')
     service.recycle_profile = recycle
-    assert client.post('/remove', json={'confirm': True}).status_code == 503
+    assert client.post('/remove', json=shown(client)).status_code == 503
     assert list(json.loads((data / 'apps.json').read_text()).values())[0]['recycle_pending'] is True
     slack.delete_result = {'ok':False, 'error':'app_not_found'}
-    assert client.post('/remove', json={'confirm': True}).status_code == 200
+    assert client.post('/remove', json=shown(client)).status_code == 200
     assert calls == ['idle', 'recycle', 'idle', 'recycle']
     assert json.loads((data / 'apps.json').read_text()) == {}
 
@@ -199,7 +206,7 @@ def test_busy_bot_is_not_removed(context):
     def busy():
         raise api.platform_module.GatewayReloadError('Wait for this bot to finish its work')
     service.check_idle = busy
-    assert client.post('/remove', json={'confirm': True}).status_code == 503
+    assert client.post('/remove', json=shown(client)).status_code == 503
     assert ('delete', 'A1') not in slack.calls and 'SLACK_APP_ID' in env
 
 
@@ -551,7 +558,7 @@ def test_slack_switch_script_reads_only_explicit_false(tmp_path):
             (home / 'config.yaml').unlink(missing_ok=True)
         else:
             (home / 'config.yaml').write_text(text)
-        result = sp.run([sys.executable, str(script), str(agent), 'get'], env={'HERMES_HOME': str(home), 'PATH': ''},
+        result = sp.run([sys.executable, str(script), str(agent), 'get'], env={'HERMES_HOME': str(home), 'PATH': '', 'HOME': str(tmp_path), 'USERPROFILE': str(tmp_path)},
                         capture_output=True, text=True)
         assert result.stdout == '' and result.stderr == ''
         return result.returncode
@@ -727,7 +734,7 @@ def test_a_save_that_hermes_silently_refused_commits_nothing(context):
     api.make_service().save_env = lambda values: None   # save_env_value printed a refusal and returned
     response = client.post('/access', json={'access': 'owner'})
     assert response.status_code == 409
-    assert response.json()['detail'] == 'Hermes kept SLACK_ALLOWED_USERS=U1,U2 (administrator-managed?)'
+    assert response.json()['detail'] == 'Hermes kept SLACK_ALLOWED_USERS=U1,U2 (administrator-managed?); nothing was changed'
     assert _record(data) == before and env['SLACK_ALLOWED_USERS'] == 'U1,U2'
 
 
@@ -805,7 +812,7 @@ def test_remove_needs_an_explicit_confirm(context):
         response = client.post('/remove', json=body)
         assert response.status_code == 409 and response.json()['detail'] == 'Confirm removing this Slack app'
     assert ('delete', 'A1') not in slack.calls and 'SLACK_BOT_TOKEN' in env
-    assert client.post('/remove', json={'confirm': True}).json() == {'ok': True}
+    assert client.post('/remove', json=shown(client)).json() == {'ok': True}
     assert ('delete', 'A1') in slack.calls and 'SLACK_BOT_TOKEN' not in env
     assert json.loads((data / 'apps.json').read_text()) == {}
 
@@ -868,5 +875,97 @@ def test_an_access_change_hermes_could_not_confirm_is_not_recorded(context, scop
     api.make_service().gate_scope = unconfirmed
     response = client.post('/access', json={'access': 'list', 'allowed': 'U7'})
     assert response.status_code == 409
-    assert response.json()['detail'] == "Couldn't confirm Hermes applied the change; nothing was recorded"
+    assert response.json()['detail'] == "Couldn't read Hermes's settings, so nothing was changed"
     assert _record(data) == before
+
+
+# ---- round 7: Cancel reads everything under apps.lock; Remove names its app
+
+def test_cancel_waiting_on_apps_lock_sees_the_token_the_callback_committed(context):
+    """The OAuth callback commits the token and installed_at under apps.lock.
+    A Cancel that starts while the callback holds the lock must judge the app
+    by what is there once it gets the lock: installed, so it refuses."""
+    import threading
+    client, slack, vault, env, data, _ = context
+    assert client.post('/connect', json={'team_id': 'T1'}).status_code == 200
+    key = next(iter(json.loads((data / 'apps.json').read_text())))
+    service, module = api.make_service(), api.service_module
+    waiting, result = threading.Event(), {}
+
+    class Watched(module.LockedFile):
+        def __enter__(self):
+            if self.path.name == 'apps.lock' and threading.current_thread().name == 'cancel':
+                waiting.set()   # about to block on the lock the callback holds
+            return super().__enter__()
+
+    def cancel():
+        try:
+            result['value'] = service.delete()
+        except Exception as exc:
+            result['value'] = exc
+    original = module.LockedFile
+    module.LockedFile = Watched
+    try:
+        with original(data / 'apps.lock'):   # the callback's publish_allowlist
+            worker = threading.Thread(target=cancel, name='cancel')
+            worker.start()
+            assert waiting.wait(10), 'Cancel never reached apps.lock'
+            env.update({'SLACK_BOT_TOKEN': 'xoxb-FAKE-bot', 'SLACK_TEAM_NAME': 'Acme'})
+            apps = json.loads((data / 'apps.json').read_text())
+            apps[key].update({'owner': 'U1', 'installed_at': int(time.time())})
+            (data / 'apps.json').write_text(json.dumps(apps))
+        worker.join(10)
+    finally:
+        module.LockedFile = original
+    assert not worker.is_alive()
+    assert isinstance(result['value'], module.Conflict) and str(result['value']) == module.INSTALLED, result
+    assert not any(isinstance(c, tuple) and c[0] == 'delete' for c in slack.calls), 'no Slack delete call'
+    assert key in json.loads((data / 'apps.json').read_text()) and env['SLACK_BOT_TOKEN'] == 'xoxb-FAKE-bot'
+
+
+@pytest.mark.parametrize('installed', ['installed_at', 'phase'])
+def test_cancel_refuses_an_installed_record_even_without_a_token_in_the_env(context, installed):
+    client, slack, vault, env, data, _ = context
+    key = _installed(data, env, ['U1'], installed_at=1 if installed == 'installed_at' else None)
+    if installed == 'installed_at':
+        (data / 'pending' / (key + '.json')).write_text(json.dumps({'phase': 'error', 'at': 1}))
+    env.pop('SLACK_BOT_TOKEN')
+    response = client.delete('/connect')
+    assert response.status_code == 409 and response.json()['detail'] == 'This Slack app is installed; use Remove from Slack'
+    assert not any(isinstance(c, tuple) and c[0] == 'delete' for c in slack.calls)
+
+
+def test_status_names_the_connection_and_a_matching_remove_removes_it(context):
+    client, slack, vault, env, data, _ = context
+    assert client.post('/connect', json={'team_id': 'T1'}).status_code == 200
+    key, item = next(iter(json.loads((data / 'apps.json').read_text()).items()))
+    env['SLACK_BOT_TOKEN'] = 'xoxb-FAKE-bot'
+    body = shown(client)
+    assert body == {'confirm': True, 'key': key, 'app_id': 'A1', 'record_rev': item['record_rev']}
+    assert type(item['record_rev']) is int and item['record_rev'] > 0
+    assert client.post('/remove', json=body).json() == {'ok': True}
+    assert ('delete', 'A1') in slack.calls and json.loads((data / 'apps.json').read_text()) == {}
+
+
+def test_a_confirmation_for_a_replaced_connection_removes_nothing(context):
+    """The window showed app A; meanwhile A was removed and app B connected.
+    Remove with A's identity must not delete B."""
+    client, slack, vault, env, data, _ = context
+    assert client.post('/connect', json={'team_id': 'T1'}).status_code == 200
+    seen_a = shown(client)
+    assert client.delete('/connect').json() == {'ok': True}   # A cancelled elsewhere
+    slack.app_id = 'A2'
+    assert client.post('/connect', json={'team_id': 'T1'}).status_code == 200
+    env['SLACK_BOT_TOKEN'] = 'xoxb-FAKE-bot'
+    key_b, item_b = next(iter(json.loads((data / 'apps.json').read_text()).items()))
+    seen_b = shown(client)
+    stale = [seen_a, {**seen_b, 'record_rev': seen_b['record_rev'] + 1}, {**seen_b, 'app_id': 'A1'},
+             {**seen_b, 'key': seen_a['key']}, {'confirm': True}, {'confirm': True, 'key': key_b, 'app_id': 'A2'}]
+    for body in stale:
+        response = client.post('/remove', json=body)
+        assert response.status_code == 409, body
+        assert response.json()['detail'] == 'This Slack connection changed; reopen the window'
+    assert ('delete', 'A2') not in slack.calls, 'B was never deleted'
+    assert json.loads((data / 'apps.json').read_text()) == {key_b: item_b} and env['SLACK_APP_ID'] == 'A2'
+    assert client.post('/remove', json=seen_b).json() == {'ok': True}
+    assert ('delete', 'A2') in slack.calls

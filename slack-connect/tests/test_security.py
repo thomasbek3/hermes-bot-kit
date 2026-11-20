@@ -234,7 +234,7 @@ def test_profile_helper_refuses_control_characters(tmp_path):
         '    data[key] = value\n'
         '    json.dump(data, open(OUT, "w"))\n')
     helper = ROOT / 'slack-relay' / 'profile_helper.py'
-    env = {'HERMES_AGENT_DIR': str(tmp_path / 'hermes'), 'PATH': '/usr/bin:/bin'}
+    env = {'HERMES_AGENT_DIR': str(tmp_path / 'hermes'), 'PATH': '/usr/bin:/bin', 'HOME': str(tmp_path), 'USERPROFILE': str(tmp_path)}
     run = lambda values: subprocess.run([sys.executable, '-I', str(helper)], input=json.dumps(values).encode(), env=env, capture_output=True)
     for bad in ('Team\nSLACK_ALLOWED_USERS=U666', 'a\rb', 'a\x00b', 'a\x1bb', 'a b', 'x' * 513):
         assert run({'SLACK_TEAM_NAME': bad}).returncode == 2, repr(bad[:20])

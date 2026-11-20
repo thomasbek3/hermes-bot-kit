@@ -13,13 +13,16 @@ test('Cancel or close on any screen never deletes an app whose bot token is inst
   const backend = slackBackends({ [key]: {} })
   let phase = 'none'
   const calls = []
+  // Round 7: the connection the window shows; a confirmed Remove names it.
+  const shown = { key: 'c'.repeat(32), app_id: 'A1', record_rev: 1763600000123 }
+  const removeBodies = []
   const original = backend.api
   backend.api = async req => {
     if (!req.path.startsWith('/api/plugins/slack-connect/')) return original(req)
     calls.push(`${req.method} ${req.path.split('/slack-connect/')[1]}`)
     if (req.path.endsWith('/workspaces')) return [{team_id:'T1',team_name:'Example'}]
-    if (req.path.endsWith('/status') || req.path.endsWith('/audience')) return {mode:'http',phase,team_name:'Example',token_installed:true,readiness:{infrastructure_ready:true}}
-    if (req.method === 'POST' && req.path.endsWith('/remove')) { assert.deepEqual(req.body, {confirm:true}); phase = 'none'; return {ok:true} }
+    if (req.path.endsWith('/status') || req.path.endsWith('/audience')) return {mode:'http',phase,...(phase === 'none' ? {} : shown),team_name:'Example',token_installed:true,readiness:{infrastructure_ready:true}}
+    if (req.method === 'POST' && req.path.endsWith('/remove')) { removeBodies.push(req.body); phase = 'none'; return {ok:true} }
     if (req.method === 'DELETE') return {ok:true}
     throw new Error('unexpected ' + req.method + ' ' + req.path)
   }
@@ -57,6 +60,7 @@ test('Cancel or close on any screen never deletes an app whose bot token is inst
   buttonWithText(sheet, 'Remove').click()
   await waitFor(() => removals().length === 1, 'the confirmed removal')
   assert.deepEqual(removals(), ['POST remove'])
+  assert.deepEqual(removeBodies, [{ confirm: true, ...shown }], 'Remove names the connection the window showed')
   await waitFor(() => sheet.textContent.includes('Bring Scholar to Slack'), 'removal finishes')
   sheet.querySelector('[aria-label="Close"]').click()
   await waitFor(() => !sheetEl(), 'closed')

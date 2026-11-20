@@ -148,7 +148,7 @@ def test_helper_gate_scope_attributes_sources_and_prints_only_gate_keys(tmp_path
     home.mkdir(parents=True)
     (home / 'config.yaml').write_text('platforms:\n  slack:\n    extra:\n      group_allowed_chats: [C1, C2]\n')
     out = subprocess.run([sys.executable, '-I', str(HELPER), '--gate-scope', str(home)],
-                         env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True, text=True)
+                         env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1', 'HOME': str(tmp_path), 'USERPROFILE': str(tmp_path)}, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert 'xoxb-FAKE-SECRET' not in out.stdout and 'OTHER' not in out.stdout
     assert json.loads(out.stdout) == {'complete': True, 'keys': {
@@ -192,7 +192,7 @@ def file_writer(home, writes=None):
             writes.append(dict(values))
         lines = (home / '.env').read_text().splitlines()
         kept = [l for l in lines if l.split('=')[0] not in values]
-        (home / '.env').write_text('\n'.join(kept + [f'{k}={v}' for k, v in values.items()]) + '\n')
+        (home / '.env').write_text('\n'.join(kept + [f'{k}={v}' for k, v in values.items() if v is not None]) + '\n')
     return write
 
 
@@ -420,7 +420,7 @@ def test_profile_helper_accepts_member_lists_and_nobody_and_refuses_junk(tmp_pat
 
     def run(values):
         return subprocess.run([sys.executable, '-I', str(HELPER)], input=json.dumps(values).encode(),
-                              env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True)
+                              env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1', 'HOME': str(tmp_path), 'USERPROFILE': str(tmp_path)}, capture_output=True)
     many = ','.join(f'U{i:010d}' for i in range(2000))
     assert run({'SLACK_ALLOWED_USERS': many}).returncode == 0
     assert run({'SLACK_ALLOWED_USERS': 'NOBODY'}).returncode == 0
@@ -547,6 +547,10 @@ def test_a_timed_out_profile_writer_is_killed_before_the_lock_is_released(tmp_pa
     monkeypatch.setattr(relay_module, 'WRITE_TIMEOUT', 1)
     relay = relay_module.Relay(tmp_path, sys.executable, helper, base_url='https://example.test/slack',
                                upstream='http://127.0.0.1:9999')
+
+    async def scope_reader(_profile):
+        return access.scope_from_env(env_of(home), f'{home}/.env')
+    relay.scope_reader = scope_reader
     before = (data / 'apps.json').read_text()
     with pytest.raises(RuntimeError, match='timed out'):
         asyncio.run(relay.publish(KEY, access.expect_of(record_of(data)), ['U2'], {'synced_at': NOW}))
@@ -624,7 +628,7 @@ def test_a_relay_writer_that_writes_nothing_commits_nothing(tmp_path):
     async def silent(_profile, _values):
         return None   # the helper exited 0, but Hermes wrote nothing
     relay.writer = silent
-    with pytest.raises(access.EnvNotApplied, match=r'^Hermes kept SLACK_ALLOWED_USERS=U1,U2,W9 \(administrator-managed\?\)$'):
+    with pytest.raises(access.EnvNotApplied, match=r'^Hermes kept SLACK_ALLOWED_USERS=U1,U2,W9 \(administrator-managed\?\); nothing was changed$'):
         asyncio.run(relay.sync_app(KEY, now=NOW))
     assert asyncio.run(relay.sync_members_once()) == 0
     assert record_of(data) == before and env_of(home)['SLACK_ALLOWED_USERS'] == 'U1,U2,W9'
@@ -666,12 +670,12 @@ def test_profile_helper_writes_nothing_when_hermes_refuses_a_key(tmp_path):
         f'    open({str(log)!r}, "a").write(key + "\\n")\n')
     out = subprocess.run([sys.executable, '-I', str(HELPER)],
                          input=json.dumps({'SLACK_BOT_TOKEN': 'xoxb-FAKE', 'SLACK_ALLOWED_USERS': 'U1'}).encode(),
-                         env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True)
+                         env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1', 'HOME': str(tmp_path), 'USERPROFILE': str(tmp_path)}, capture_output=True)
     assert out.returncode != 0
     assert b'Cannot set SLACK_ALLOWED_USERS: it is managed by your administrator' in out.stderr
     assert not log.exists(), 'nothing written, not even the keys before the refused one'
     ok = subprocess.run([sys.executable, '-I', str(HELPER)], input=json.dumps({'SLACK_BOT_TOKEN': 'xoxb-FAKE'}).encode(),
-                        env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1'}, capture_output=True)
+                        env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1', 'HOME': str(tmp_path), 'USERPROFILE': str(tmp_path)}, capture_output=True)
     assert ok.returncode == 0 and log.read_text() == 'SLACK_BOT_TOKEN\n'
 
 
@@ -738,7 +742,7 @@ def test_a_member_sync_during_a_callback_write_never_deadlocks(tmp_path):
     prepare(tmp_path, {'kit_format': 2})
     try:
         out = subprocess.run([sys.executable, '-I', '-c', DEADLOCK_SCRIPT, str(BASE.parent), str(tmp_path)],
-                             capture_output=True, timeout=30, env={'PYTHONDONTWRITEBYTECODE': '1'})
+                             capture_output=True, timeout=30, env={'PYTHONDONTWRITEBYTECODE': '1', 'HOME': str(tmp_path), 'USERPROFILE': str(tmp_path)})
     except subprocess.TimeoutExpired:
         pytest.fail('deadlock: the member sync took apps.lock on the event-loop thread')
     assert out.returncode == 0, out.stderr.decode()[-2000:]
@@ -768,7 +772,7 @@ def test_a_relay_read_back_that_is_not_authoritative_commits_nothing(tmp_path, s
             raise RuntimeError('the Hermes scope helper failed')
         return access.local_scope(home)   # Hermes not importable: complete is False
     relay.scope_reader = unconfirmed
-    with pytest.raises(access.EnvNotApplied, match=r"^Couldn't confirm Hermes applied the change; nothing was recorded$"):
+    with pytest.raises(access.EnvNotApplied, match=r"^Couldn't read Hermes's settings, so nothing was changed$"):
         asyncio.run(relay.sync_app(KEY, now=NOW))
     assert record_of(data) == before
 
@@ -790,8 +794,9 @@ def test_a_connect_whose_read_back_is_incomplete_is_not_committed(tmp_path):
         finally:
             await client.close()
     status, text = asyncio.run(exercise())
-    assert status == 502 and "Couldn't confirm Hermes applied the change; nothing was recorded" in text
+    assert status == 502 and "Couldn't read Hermes's settings, so nothing was changed" in text
     assert 'installed_at' not in record_of(data)
+    assert 'SLACK_BOT_TOKEN' not in env_of(home), 'round 7: nothing is written while the reader is down'
     assert json.loads((data / 'pending' / (KEY + '.json')).read_text())['phase'] == 'error'
 
 
@@ -821,3 +826,153 @@ def test_an_earlier_release_record_that_ended_in_error_is_not_adopted_unproven(t
     before = record_of(data)
     assert access.adopt(data, KEY, 'bot', lambda: env_of(home)) is None
     assert record_of(data) == before
+
+
+# ---- round 7: a failed audience change never grants access -----------------
+
+def flaky_reader(home, fault='written', sticky=False):
+    """The gate scope of the profile .env. It fails while the new list (with
+    U7) is on disk, i.e. right after the write ('written'), or on every call
+    ('always'); `sticky`: it never recovers once it failed."""
+    calls, failed = [], []
+
+    def read():
+        calls.append(1)
+        if fault == 'always' or failed and sticky or 'U7' in (env_of(home).get('SLACK_ALLOWED_USERS') or ''):
+            failed.append(1)
+            raise RuntimeError('the Hermes scope helper failed')
+        return access.scope_from_env(env_of(home), f'{home}/.env')
+    read.calls = calls
+    return read
+
+
+def flaky_writer(home, fails):
+    """file_writer that raises on the calls numbered in `fails` (1-based), writing nothing then."""
+    write, calls = file_writer(home), []
+
+    def wrapped(values):
+        calls.append(dict(values))
+        if len(calls) in fails:
+            raise OSError('disk full')
+        write(values)
+    wrapped.calls = calls
+    return wrapped
+
+
+def test_nothing_is_written_when_the_read_back_is_unavailable_before_the_write(tmp_path):
+    data, home = installed(tmp_path)
+    before, env_before = record_of(data), (home / '.env').read_text()
+    write = flaky_writer(home, ())
+    with pytest.raises(access.EnvNotApplied, match=r"^Couldn't read Hermes's settings, so nothing was changed$"):
+        access.publish_allowlist(data, KEY, access.expect_of(before), ['U1', 'U7'], write,
+                                 fields={'access_rev': 2}, read_back=flaky_reader(home, 'always'))
+    assert write.calls == [], 'nothing written'
+    assert record_of(data) == before and (home / '.env').read_text() == env_before
+
+
+@pytest.mark.parametrize('prior', ['U1', None])
+def test_a_failed_read_back_after_the_write_puts_the_allowlist_back(tmp_path, prior):
+    data, home = installed(tmp_path, allowed=prior or '')
+    if prior is None:
+        (home / '.env').write_text((home / '.env').read_text().replace('SLACK_ALLOWED_USERS=\n', ''))
+    before = record_of(data)
+    read, write = flaky_reader(home), flaky_writer(home, ())
+    with pytest.raises(access.EnvNotApplied) as caught:
+        access.publish_allowlist(data, KEY, access.expect_of(before), ['U1', 'U7'], write,
+                                 fields={'access_rev': 2}, read_back=read)
+    assert env_of(home).get('SLACK_ALLOWED_USERS') == prior, 'the previous value is back (absent stays absent)'
+    assert str(caught.value) == "Couldn't confirm Hermes applied the change; nothing was changed"
+    assert write.calls == [{'SLACK_ALLOWED_USERS': 'U1,U7'}, {'SLACK_ALLOWED_USERS': prior}]
+    assert len(read.calls) == 3, 'checked before, after the write, and after the undo'
+    assert record_of(data) == before
+
+
+def test_an_undo_that_fails_says_what_is_left_and_where(tmp_path):
+    data, home = installed(tmp_path, allowed='U1')
+    before = record_of(data)
+    write = flaky_writer(home, {2})   # the write lands, putting it back fails
+    with pytest.raises(access.EnvNotApplied) as caught:
+        access.publish_allowlist(data, KEY, access.expect_of(before), ['U1', 'U7'], write,
+                                 fields={'access_rev': 2}, read_back=flaky_reader(home))
+    assert str(caught.value) == ("Couldn't confirm Hermes applied the change. Couldn't undo the change: "
+                                 f"SLACK_ALLOWED_USERS is now U1,U7; set it back in {home}/.env")
+    assert record_of(data) == before
+
+
+def test_an_undo_the_reader_cannot_confirm_is_not_reported_as_undone(tmp_path):
+    data, home = installed(tmp_path, allowed='U1')
+    with pytest.raises(access.EnvNotApplied, match=r"Couldn't undo the change: SLACK_ALLOWED_USERS is now U1; set it back in "):
+        access.publish_allowlist(data, KEY, access.expect_of(record_of(data)), ['U1', 'U7'], flaky_writer(home, ()),
+                                 read_back=flaky_reader(home, sticky=True))
+
+
+CREDS = {'SLACK_BOT_TOKEN': 'xoxb-FAKE-bot', 'SLACK_TEAM_ID': 'T1', 'SLACK_TEAM_NAME': 'Acme'}
+
+
+def test_a_failed_first_connect_leaves_no_token_and_no_list(tmp_path):
+    data, home = prepare(tmp_path, {'kit_format': 2})
+    before = record_of(data)
+    write = flaky_writer(home, ())
+    with pytest.raises(access.EnvNotApplied, match=r"^Couldn't confirm Hermes applied the change; nothing was changed$"):
+        access.publish_allowlist(data, KEY, access.expect_of(before), ['U1', 'U2', 'U7'], write,
+                                 fields={'installed_at': NOW}, env_extra=CREDS, read_back=flaky_reader(home))
+    env = env_of(home)
+    assert not set(CREDS) & set(env) and 'SLACK_ALLOWED_USERS' not in env, env
+    assert write.calls[1] == {k: None for k in (*CREDS, 'SLACK_ALLOWED_USERS')}, 'removed, not blanked'
+    assert record_of(data) == before
+
+
+def test_a_failed_first_connect_that_cannot_be_undone_is_left_with_nobody(tmp_path):
+    data, home = prepare(tmp_path, {'kit_format': 2})
+    write = flaky_writer(home, {2})   # the undo write fails; the last resort lands
+    with pytest.raises(access.EnvNotApplied) as caught:
+        access.publish_allowlist(data, KEY, access.expect_of(record_of(data)), ['U1', 'U2', 'U7'], write,
+                                 env_extra=CREDS, read_back=flaky_reader(home))
+    assert env_of(home)['SLACK_ALLOWED_USERS'] == 'NOBODY', 'never three IDs on disk next to the token'
+    assert "Couldn't undo the change, so SLACK_ALLOWED_USERS is now NOBODY: nobody can talk to the bot" in str(caught.value)
+    assert 'installed_at' not in record_of(data)
+
+
+def test_a_relay_callback_whose_read_back_fails_after_the_write_leaves_no_token(tmp_path):
+    data, home = prepare(tmp_path, {'kit_format': 2, 'access': 'list', 'allowed': 'U7'})
+    relay = make_relay(tmp_path, home, FakeSlack())
+    read = flaky_reader(home)
+
+    async def reader(_profile):
+        return read()
+    relay.scope_reader = reader
+
+    async def exercise():
+        client = TestClient(TestServer(relay.application()))
+        await client.start_server()
+        try:
+            response = await client.get('/oauth/callback', params={'state': issue_state(b'k' * 32, 'bot', KEY, 'T1'), 'code': 'c'})
+            return response.status, await response.text()
+        finally:
+            await client.close()
+    status, text = asyncio.run(exercise())
+    assert status == 502 and "Couldn't confirm Hermes applied the change; nothing was changed" in text
+    env = env_of(home)
+    assert 'SLACK_BOT_TOKEN' not in env and 'SLACK_ALLOWED_USERS' not in env, env
+    assert 'installed_at' not in record_of(data)
+
+
+def test_profile_helper_removes_a_null_value(tmp_path):
+    fake = tmp_path / 'hermes'
+    (fake / 'hermes_cli').mkdir(parents=True)
+    (fake / 'hermes_cli' / '__init__.py').write_text('')
+    log = tmp_path / 'written.log'
+    (fake / 'hermes_cli' / 'config.py').write_text(
+        'def require_env_writable(key, action):\n'
+        f'    open({str(log)!r}, "a").write(action + " ok " + key + "\\n")\n'
+        'def save_env_value(key, value):\n'
+        f'    open({str(log)!r}, "a").write("set " + key + "\\n")\n'
+        'def remove_env_value(key):\n'
+        f'    open({str(log)!r}, "a").write("remove " + key + "\\n")\n')
+    out = subprocess.run([sys.executable, '-I', str(HELPER)],
+                         input=json.dumps({'SLACK_ALLOWED_USERS': 'U1', 'SLACK_BOT_TOKEN': None}).encode(),
+                         env={'HERMES_AGENT_DIR': str(fake), 'PYTHONDONTWRITEBYTECODE': '1', 'HOME': str(tmp_path),
+                              'USERPROFILE': str(tmp_path)}, capture_output=True)
+    assert out.returncode == 0, out.stderr
+    assert log.read_text() == ('set ok SLACK_ALLOWED_USERS\nremove ok SLACK_BOT_TOKEN\n'
+                               'set SLACK_ALLOWED_USERS\nremove SLACK_BOT_TOKEN\n')

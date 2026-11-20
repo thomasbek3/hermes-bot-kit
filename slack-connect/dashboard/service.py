@@ -34,7 +34,17 @@ class SlackRefused(Conflict):
 
 
 INSTALLED = 'This Slack app is installed; use Remove from Slack'
+CHANGED = 'This Slack connection changed; reopen the window'
 NO_OWNER = 'The installer of this bot is not known. To choose Only me, reconnect the bot.'
+
+
+def identity(key, item):
+    """The connection a window shows, which a confirmed Remove must name:
+    the record's key, its app_id and record_rev (set when Connect creates the
+    record, in ms, so a replacement record always differs; 0 on records of an
+    earlier release)."""
+    rev = item.get('record_rev')
+    return {'key': key, 'app_id': item.get('app_id'), 'record_rev': rev if type(rev) is int else 0}
 
 
 class Service:
@@ -173,7 +183,7 @@ class Service:
                          'prior_allowed_users': env.get('SLACK_ALLOWED_USERS'),
                          'access': access, 'allowed': ','.join(named), 'access_rev': 1,
                          'synced_at': None, 'sync_error': None, 'retry_after': None,
-                         'kit_format': access_module.KIT_FORMAT}
+                         'kit_format': access_module.KIT_FORMAT, 'record_rev': int(time.time() * 1000)}
             _atomic_json(apps_path, apps)
             _atomic_json(pending_path, {'phase':'pending', 'at':int(time.time())})
         app_id = None
@@ -319,10 +329,19 @@ class Service:
             fields.update(synced)
         else:
             ids = access_module.allowlist(access, owner, named=named)
-        if not access_module.publish_allowlist(self.data, key, expect, ids, self.save_env,
+        if not access_module.publish_allowlist(self.data, key, expect, ids, self.write_env,
                                                read_env=self.read_env, fields=fields, read_back=self.gate_scope):
             raise Conflict('Who can talk to the bot changed meanwhile; check the window and try again')
         return self.status()
+
+    def write_env(self, values):
+        """publish_allowlist's writer: a value of None removes the key."""
+        kept = {k: v for k, v in values.items() if v is not None}
+        if kept:
+            self.save_env(kept)
+        gone = tuple(k for k, v in values.items() if v is None)
+        if gone:
+            self.remove_env(gone)
 
     def status(self, live=True):
         """The window's state. `live=False` (the 20 s audience poll) reads only
@@ -367,7 +386,7 @@ class Service:
                                  if access_module.USER_ID.fullmatch(x))
                     audience['legacy'] = {'ids': ids,
                         'text': 'Allowed now: ' + (', '.join(ids) if ids else 'no listed member IDs') + ' (from the earlier version)'}
-                return {'phase':phase, 'team_name':public_text(pending.get('team_name')),
+                return {'phase':phase, **identity(key, item), 'team_name':public_text(pending.get('team_name')),
                         'bot':public_text(item.get('bot_name')), 'mode':'http',
                         'access': mode, 'owner_known': owner_known,
                         # Cancel never removes an app with a bot token; only Remove does.
@@ -400,17 +419,27 @@ class Service:
         _atomic_json(self.data / 'pending' / (key + '.json'), pending)
         return pending
 
-    def delete(self, confirm=False):
+    def delete(self, confirm=False, seen=None):
         """Delete this bot's Slack app. Without `confirm` (Cancel, a rollback)
-        an app whose bot token is installed is never deleted."""
-        env = self.read_env()
-        if env.get('SLACK_APP_TOKEN'):
-            raise Conflict('Socket Mode apps cannot be removed here')
+        an installed app is never deleted: a bot token in the .env,
+        `installed_at` or phase installed. The record, its pending state and
+        the .env are all read under apps.lock, the lock the OAuth callback
+        commits the token under. A confirmed Remove names the connection its
+        window showed (`seen`, see identity()); any other is refused."""
         path = self.data / 'apps.json'
         with LockedFile(self.data / 'apps.lock'):
+            env = self.read_env()
+            if env.get('SLACK_APP_TOKEN'):
+                raise Conflict('Socket Mode apps cannot be removed here')
             apps = _read_json(path, {})
             found = [(key, item) for key, item in apps.items() if isinstance(item, dict) and item.get('profile') == self.profile]
-            if found and env.get('SLACK_BOT_TOKEN') and confirm is not True:
+            if confirm is True:
+                if len(found) != 1 or identity(*found[0]) != seen:
+                    raise Conflict(CHANGED)
+            elif found and (env.get('SLACK_BOT_TOKEN') or any(
+                    type(item.get('installed_at')) is int or
+                    _read_json(self.data / 'pending' / (key + '.json'), {}).get('phase') == 'installed'
+                    for key, item in found)):
                 raise Conflict(INSTALLED)
             if not found:
                 # A rollback that could not switch Slack back off left its marker.

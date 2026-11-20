@@ -59,7 +59,9 @@ ENV_NAME = re.compile(r'^[A-Z][A-Z0-9_]{0,63}$')
 SOURCES = ('administrator-managed env', 'external secret source', 'config.yaml allow_all_users')
 EXPECT_KEYS = ('app_id', 'profile', 'access', 'access_rev')
 MISSING_USERS_READ = 'the app lacks the users:read permission'
-NOT_CONFIRMED = "Couldn't confirm Hermes applied the change; nothing was recorded"
+UNREADABLE = "Couldn't read Hermes's settings, so nothing was changed"
+NOT_CONFIRMED = "Couldn't confirm Hermes applied the change"
+UNCHANGED = '; nothing was changed'
 # Records written by this release's Connect carry this marker. Only a record
 # without it (an earlier release) can be migrated by adopt().
 KIT_FORMAT = 2
@@ -210,6 +212,73 @@ def read_env_file(path):
 
 # ---- the one write path -------------------------------------------------
 
+def _authoritative(read_back):
+    """read_back()'s gate scope if Hermes answered it completely, else None."""
+    try:
+        scope = read_back()
+    except Exception:
+        return None
+    return scope if isinstance(scope, dict) and scope.get('complete') is True else None
+
+
+def _allowed_raw(scope):
+    return (((scope or {}).get('keys') or {}).get('SLACK_ALLOWED_USERS') or {}).get('value')
+
+
+def _short(value):
+    return value if value is None or len(value) <= 80 else value[:80] + '…'
+
+
+def _not_applied(scope, ids):
+    """Why the read-back does not show `ids`, or None when it does."""
+    if scope is None:
+        return NOT_CONFIRMED
+    kept = _allowed_raw(scope)
+    if coerce_allow_set(kept) != coerce_allow_set(env_value(ids)):
+        return f'Hermes kept SLACK_ALLOWED_USERS={_short(kept)} (administrator-managed?)'
+    return None
+
+
+def _undo(why, error, prior, load, write_env, read_back, before, path):
+    """After a write that raised (`error`) or that Hermes did not confirm
+    (`why`), still under apps.lock: put every key written back to its `prior`
+    value (None: remove it), then check that with the same reader. Always
+    raises, saying what is on disk: the writer's own error or `why` once the
+    undo held, else what is left and where."""
+    try:
+        now = load()
+        back = {k: v for k, v in prior.items() if now.get(k) != v}
+        if back:
+            write_env(back)
+        after, scope = load(), _authoritative(read_back)
+        undone = (scope is not None and _allowed_raw(scope) == _allowed_raw(before)
+                  and all(after.get(k) == v for k, v in prior.items()))
+    except Exception:
+        undone = False
+    if undone:
+        if error is not None:
+            raise error
+        raise EnvNotApplied(why + UNCHANGED)
+    reason = (why or (str(error) if isinstance(error, EnvNotApplied) else '')
+              or 'The bot settings could not be written').rstrip('.')
+    if 'SLACK_BOT_TOKEN' in prior and prior['SLACK_BOT_TOKEN'] is None:
+        # A first Connect whose new token may still be on disk: never leave it
+        # next to a list of people. NOBODY matches no Slack member.
+        try:
+            write_env({'SLACK_ALLOWED_USERS': NOBODY})
+        except Exception:
+            pass
+        else:
+            raise EnvNotApplied(f"{reason}. Couldn't undo the change, so SLACK_ALLOWED_USERS is now {NOBODY}: "
+                                'nobody can talk to the bot. Remove this Slack app, then connect again')
+    try:
+        current = _short(load().get('SLACK_ALLOWED_USERS'))
+    except Exception:
+        current = None
+    raise EnvNotApplied(f"{reason}. Couldn't undo the change: SLACK_ALLOWED_USERS is now "
+                        f"{current or 'not set'}; set it back in {path}")
+
+
 def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, fields=None, env_extra=None,
                       read_back=None):
     """Write SLACK_ALLOWED_USERS (and the record `fields`) for app `key`, only
@@ -217,10 +286,14 @@ def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, f
     that app. `ids=None` updates the record only. `env_extra` are values the
     connect flow writes in the same .env write. Returns False, writing nothing,
     on any mismatch. Both checks and the write happen under apps.lock.
+    `write_env(values)` sets each key; a value of None removes the key.
     The record changes only once the value Hermes will use (`read_back()`, a
-    gate scope read through Hermes) is the one intended: a writer that refused
-    silently, an administrator-managed value, or a read-back that failed or is
-    not complete (Hermes not importable) raises EnvNotApplied."""
+    gate scope read through Hermes) is the one intended. The reader must answer
+    completely before anything is written (else nothing is). After a write that
+    a writer refused silently, an administrator-managed value, or a read-back
+    that failed, every key written is put back (removed if it was absent) and
+    that is checked with the same reader; EnvNotApplied says whether the undo
+    held. A first Connect it could not undo is left with SLACK_ALLOWED_USERS=NOBODY."""
     data = Path(data_dir)
     profile = expect.get('profile')
     if not isinstance(profile, str) or not expect.get('app_id'):
@@ -236,21 +309,28 @@ def publish_allowlist(data_dir, key, expect, ids, write_env, *, read_env=None, f
         if env.get('SLACK_APP_ID') != expect['app_id']:
             return False
         values = dict(env_extra or {})
-        if ids is not None and (values or (env.get('SLACK_ALLOWED_USERS') or '') != env_value(ids)):
-            values['SLACK_ALLOWED_USERS'] = env_value(ids)
-        if values:
-            write_env(values)
-        if ids is not None:
-            try:
-                scope = read_back()
-            except Exception:
-                scope = None
-            if not isinstance(scope, dict) or scope.get('complete') is not True:
-                raise EnvNotApplied(NOT_CONFIRMED)
-            kept = (((scope or {}).get('keys') or {}).get('SLACK_ALLOWED_USERS') or {}).get('value')
-            if coerce_allow_set(kept) != coerce_allow_set(env_value(ids)):
-                shown = kept if kept is None or len(kept) <= 80 else kept[:80] + '…'
-                raise EnvNotApplied(f'Hermes kept SLACK_ALLOWED_USERS={shown} (administrator-managed?)')
+        if ids is None:
+            if values:
+                write_env(values)
+        else:
+            before = _authoritative(read_back)
+            if before is None:
+                raise EnvNotApplied(UNREADABLE)
+            if values or (env.get('SLACK_ALLOWED_USERS') or '') != env_value(ids):
+                values['SLACK_ALLOWED_USERS'] = env_value(ids)
+            if not values:
+                why = _not_applied(before, ids)
+                if why:
+                    raise EnvNotApplied(why + UNCHANGED)
+            else:
+                why, error = None, None
+                try:
+                    write_env(values)
+                    why = _not_applied(_authoritative(read_back), ids)
+                except Exception as exc:
+                    error = exc
+                if why or error is not None:
+                    _undo(why, error, {k: env.get(k) for k in values}, load, write_env, read_back, before, path)
         item.update(fields or {})
         _atomic_json(data / 'apps.json', apps)
     return True

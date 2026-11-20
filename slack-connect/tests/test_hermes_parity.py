@@ -183,3 +183,87 @@ def test_an_administrator_managed_allowlist_is_refused_and_never_committed(herme
     with pytest.raises(access.EnvNotApplied, match='managed by your administrator'):
         api.env_saver(config.save_env_value, config)({'SLACK_ALLOWED_USERS': 'U1'})
     assert (home / '.env').read_text() == 'SLACK_APP_ID=A1\nSLACK_ALLOWED_USERS=U1,U2\n'
+
+
+# ---- round 7: a failed audience change never grants access ---------------
+
+SLACK_KEYS = ('SLACK_APP_ID', 'SLACK_BOT_TOKEN', 'SLACK_TEAM_ID', 'SLACK_TEAM_NAME')
+
+
+@pytest.fixture
+def publish(hermes, tmp_path, monkeypatch):
+    """publish_allowlist on a real profile: Hermes's own save_env_value and
+    remove_env_value write it, the real gate_scope reads it back, and the
+    reader raises while the new list (with U7) is on disk, i.e. right after the
+    write (`sticky`: from then on). Then Hermes's real reader and its real
+    allowlist decision are asked about U7."""
+    for name in access.gate_names() + SLACK_KEYS:
+        monkeypatch.setenv(name, '')
+        monkeypatch.delenv(name)   # recorded, so Hermes's own os.environ updates are undone
+    root = tmp_path / 'root'
+    home, data = root / 'profiles' / 'bot', root / 'slack-connect'
+    home.mkdir(parents=True)
+    data.mkdir()
+    monkeypatch.setenv('HERMES_HOME', str(home))
+    from hermes_cli import config
+    from agent.secret_scope import build_profile_secret_scope
+
+    def write(values):
+        for key, value in values.items():
+            if value is None:
+                config.remove_env_value(key)
+            else:
+                config.save_env_value(key, value)
+
+    def run(env_text, ids, sticky=False, env_extra=None):
+        (home / '.env').write_text(env_text)
+        config.invalidate_env_cache()
+        for line in env_text.splitlines():
+            monkeypatch.setenv(*line.split('=', 1))
+        record = {'profile': 'bot', 'app_id': 'A1', 'access': 'members', 'access_rev': 1}
+        (data / 'apps.json').write_text(json.dumps({'k' * 32: record}))
+        failed = []
+
+        def read_back():
+            if failed and sticky or 'U7' in (access.read_env_file(home / '.env').get('SLACK_ALLOWED_USERS') or ''):
+                failed.append(1)
+                raise RuntimeError('the Hermes scope helper failed')
+            return access.gate_scope(home)
+        with pytest.raises(access.EnvNotApplied) as caught:
+            access.publish_allowlist(data, 'k' * 32, access.expect_of(record), ids, write,
+                                     fields={'access_rev': 2}, env_extra=env_extra, read_back=read_back)
+        assert json.loads((data / 'apps.json').read_text()) == {'k' * 32: record}, 'nothing recorded'
+        from gateway.config import Platform
+        from gateway.run import GatewayRunner
+        from gateway.pairing import PairingStore
+        runner = object.__new__(GatewayRunner)
+        runner.pairing_store = PairingStore()
+        runner.adapters = {Platform.SLACK: SimpleNamespace(config=SimpleNamespace(extra={}))}
+        says = {u: hermes.says(runner, hermes.source(u)) for u in ('U1', 'U7')}
+        return str(caught.value), dict(build_profile_secret_scope(home)), says
+    return run
+
+
+def test_a_read_back_fault_after_the_write_leaves_hermes_allowlist_as_it_was(publish):
+    message, scope, says = publish('SLACK_APP_ID=A1\nSLACK_BOT_TOKEN=xoxb-FAKE-bot\nSLACK_ALLOWED_USERS=U1\n',
+                                   ['U1', 'U7'])
+    assert scope.get('SLACK_ALLOWED_USERS') == 'U1', 'Hermes reads the previous allowlist'
+    assert os.environ.get('SLACK_ALLOWED_USERS') == 'U1'
+    assert says == {'U1': True, 'U7': False}, 'U7 is denied by Hermes itself'
+    assert message == "Couldn't confirm Hermes applied the change; nothing was changed"
+
+
+def test_a_failed_first_connect_leaves_hermes_with_no_slack_token(publish):
+    creds = {'SLACK_BOT_TOKEN': 'xoxb-FAKE-bot', 'SLACK_TEAM_ID': 'T1', 'SLACK_TEAM_NAME': 'Acme'}
+    message, scope, says = publish('SLACK_APP_ID=A1\n', ['U1', 'U2', 'U7'], env_extra=creds)
+    assert not {'SLACK_BOT_TOKEN', 'SLACK_TEAM_ID', 'SLACK_ALLOWED_USERS'} & set(scope), scope.keys()
+    assert says['U7'] is False
+    assert message.endswith('nothing was changed')
+
+
+def test_a_first_connect_whose_undo_cannot_be_confirmed_is_left_with_nobody(publish):
+    creds = {'SLACK_BOT_TOKEN': 'xoxb-FAKE-bot', 'SLACK_TEAM_ID': 'T1', 'SLACK_TEAM_NAME': 'Acme'}
+    message, scope, says = publish('SLACK_APP_ID=A1\n', ['U1', 'U2', 'U7'], sticky=True, env_extra=creds)
+    assert scope.get('SLACK_ALLOWED_USERS') == 'NOBODY', 'never three IDs on disk'
+    assert says == {'U1': False, 'U7': False}
+    assert 'SLACK_ALLOWED_USERS is now NOBODY' in message

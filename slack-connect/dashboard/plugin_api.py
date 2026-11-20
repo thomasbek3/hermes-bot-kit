@@ -338,8 +338,11 @@ def disconnect():
 
 @router.post('/remove')
 async def remove(request: Request):
-    """Remove from Slack, after the window's confirmation step."""
+    """Remove from Slack, after the window's confirmation step. The body names
+    the connection the window showed (key, app_id, record_rev from /status);
+    the service refuses it (409) unless that is still this bot's connection."""
     body = await request_object(request)
     if body.get('confirm') is not True:
         raise HTTPException(status_code=409, detail='Confirm removing this Slack app')
-    return await run_in_threadpool(lambda: handle(lambda service: service.delete(confirm=True)))
+    seen = {name: body.get(name) for name in ('key', 'app_id', 'record_rev')}
+    return await run_in_threadpool(lambda: handle(lambda service: service.delete(confirm=True, seen=seen)))

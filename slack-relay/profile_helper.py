@@ -1,4 +1,5 @@
 """Write profile values from stdin; credentials never appear in arguments.
+A value of null removes that key (the relay putting a failed write back).
 
 --notify <profile>      tell the multiplexed gateway the profile changed
 --gate-scope <home>     print the profile's Slack gate keys (the four
@@ -28,8 +29,10 @@ else:
     from hermes_cli.config import save_env_value
     values = json.load(sys.stdin)
     allowed = {'SLACK_BOT_TOKEN', 'SLACK_TEAM_ID', 'SLACK_TEAM_NAME', 'SLACK_ALLOWED_USERS'}
-    if not isinstance(values, dict) or not set(values).issubset(allowed) or not all(isinstance(v, str) for v in values.values()):
+    if not isinstance(values, dict) or not set(values).issubset(allowed) or not all(v is None or isinstance(v, str) for v in values.values()):
         raise SystemExit(2)
+    removed = [key for key, value in values.items() if value is None]
+    values = {key: value for key, value in values.items() if value is not None}
     # A value is one .env line: refuse control characters (CR, LF, NUL, ...),
     # line separators and anything longer than a Slack value can be.
     if any(any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 or c in '  ' for c in v)
@@ -53,11 +56,15 @@ else:
     except ImportError:
         require_env_writable = None
     if require_env_writable:
-        for key in values:
+        for key, action in [(key, 'set') for key in values] + [(key, 'remove') for key in removed]:
             try:
-                require_env_writable(key, 'set')
+                require_env_writable(key, action)
             except ValueError as exc:
                 print(str(exc), file=sys.stderr)
                 raise SystemExit(3)
     for key, value in values.items():
         save_env_value(key, value)
+    if removed:
+        from hermes_cli.config import remove_env_value
+        for key in removed:
+            remove_env_value(key)
