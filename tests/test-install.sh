@@ -525,4 +525,54 @@ assert_plugin "${zhome}" "grokbot-override/plugin.js"
 grep -qx 'release=local' "${zhome}/desktop-plugins/.hermes-bot-kit-install" || fail "unpacked zip: install record is not release=local"
 echo "OK  KIT_SOURCE_DIR=\"\$PWD\" installs from a trusted unpacked zip (no .git) without downloading"
 
+# The optional HD-helper compile check never runs Apple's python3 stub (no
+# Command Line Tools: running it pops an install dialog and fails), gives any
+# other python3 a time limit, and with no working one skips the check with an
+# INFO line: the plugins are still verified and installed.
+real_py=$(command -v python3) || fail "python3 is needed for the tests"
+py_case() {
+  # py_case <xcode-select exit> <python3 body>: install with a fake python3
+  # (listed as Apple's stub) and xcode-select first on PATH; sets out, status, secs.
+  pyfake=$(mktemp -d)
+  printf '#!/bin/sh\nexit %s\n' "$1" > "${pyfake}/xcode-select"
+  printf '#!/bin/sh\n%s\n' "$2" > "${pyfake}/python3"
+  chmod +x "${pyfake}/xcode-select" "${pyfake}/python3"
+  pyhome=$(new_home)
+  start=$(date +%s)
+  set +e
+  out=$(env PATH="${pyfake}:${PATH}" KIT_CLT_STUB_PATHS="/nonexistent/python3 ${pyfake}/python3" KIT_PYTHON_TIMEOUT=2 \
+    HERMES_HOME="${pyhome}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}" 2>&1)
+  status=$?
+  set -e
+  secs=$(( $(date +%s) - start ))
+}
+py_skipped() {
+  # py_skipped <label>: the install succeeded without the Python check.
+  [ "${status}" -eq 0 ] || fail "$1: install exited ${status}:
+${out}"
+  assert_plugin "${pyhome}" "computer-viewer/plugin.js"
+  assert_plugin "${pyhome}" "computer-viewer/hiperf-agent.py"
+  assert_plugin "${pyhome}" "grokbot-override/plugin.js"
+  printf '%s\n' "${out}" | grep -q '^INFO: no working Python 3 here, so the optional compile check of computer-viewer/hiperf-agent.py' \
+    || fail "$1: no INFO line about the skipped check:
+${out}"
+}
+py_case 1 "touch '${WORK}/STUB-RAN'; exit 1"
+py_skipped "Apple's python3 stub"
+[ ! -e "${WORK}/STUB-RAN" ] || fail "Apple's python3 stub was run (it would pop the Command Line Tools dialog)"
+echo "OK  Apple's python3 stub (no Command Line Tools) is never run; install goes on with INFO"
+py_case 0 "exec sleep 1000"
+py_skipped "a python3 that hangs"
+[ "${secs}" -lt 30 ] || fail "a python3 that hangs held the install for ${secs}s"
+echo "OK  a python3 that hangs is cut off after the time limit; install goes on with INFO"
+py_case 0 "exit 1"
+py_skipped "a python3 that fails"
+echo "OK  a python3 that fails: install goes on with INFO"
+py_case 0 "echo \"\$*\" >> '${WORK}/py.log'; exec '${real_py}' \"\$@\""
+[ "${status}" -eq 0 ] || fail "working python3: install exited ${status}:
+${out}"
+grep -q -- '-m py_compile .*hiperf-agent.py' "${WORK}/py.log" || fail "working python3: the compile check did not run: $(cat "${WORK}/py.log")"
+if printf '%s\n' "${out}" | grep -q '^INFO: no working Python'; then fail "working python3: the check was reported skipped"; fi
+echo "OK  a working python3 still runs the compile check"
+
 echo "test-install.sh: all passed"

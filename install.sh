@@ -344,6 +344,40 @@ manifest_hash() {
   awk -v p="$1" '$2 == p { print $1; found=1; exit } END { if (!found) exit 1 }' "${MANIFEST}"
 }
 
+# The optional compile check of the HD helper needs a Python 3 that works.
+# Apple's /usr/bin/python3 is a stub until the Command Line Tools are
+# installed: running it pops an install dialog and fails, so it is never run
+# then. Any other python3 gets a quick probe with a time limit.
+KIT_CLT_STUB_PATHS="${KIT_CLT_STUB_PATHS:-/usr/bin/python3}"
+KIT_PYTHON_TIMEOUT="${KIT_PYTHON_TIMEOUT:-10}"
+PYTHON=""
+PYTHON_CHECKED=0
+# limited <command...>: run it with KIT_PYTHON_TIMEOUT seconds at most (macOS
+# has no timeout(1); perl's alarm survives the exec and is always there).
+limited() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${KIT_PYTHON_TIMEOUT}" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift @ARGV; exec { $ARGV[0] } @ARGV or exit 127' "${KIT_PYTHON_TIMEOUT}" "$@"
+  else
+    "$@"
+  fi
+}
+find_python() {
+  # Sets PYTHON to a python3 that runs, or "" when there is none.
+  local py stub
+  [ "${PYTHON_CHECKED}" = 1 ] && return 0
+  PYTHON_CHECKED=1
+  py=$(command -v python3 2>/dev/null) || return 0
+  if command -v xcode-select >/dev/null 2>&1 && ! xcode-select -p >/dev/null 2>&1; then
+    for stub in ${KIT_CLT_STUB_PATHS}; do
+      [ "${py}" = "${stub}" ] && return 0
+    done
+  fi
+  limited "${py}" -c 'import sys' </dev/null >/dev/null 2>&1 || return 0
+  PYTHON="${py}"
+}
+
 manifest_has() {
   awk -v p="$1" '$2 == p { found=1; exit } END { exit found ? 0 : 1 }' "${MANIFEST}"
 }
@@ -627,11 +661,14 @@ else
         fi
         ;;
       *.py)
-        if command -v python3 >/dev/null 2>&1; then
-          PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile "${staged}" || {
+        find_python
+        if [ -n "${PYTHON}" ]; then
+          PYTHONDONTWRITEBYTECODE=1 limited "${PYTHON}" -m py_compile "${staged}" </dev/null || {
             echo "install.sh: ${rel} failed python compile; aborting" >&2
             exit 1
           }
+        else
+          echo "INFO: no working Python 3 here, so the optional compile check of ${rel} (the HD helper) was skipped; the digest check does not need Python. To include it, install Python 3 or the Command Line Tools (xcode-select --install), then run the installer again."
         fi
         ;;
     esac

@@ -60,8 +60,16 @@ is new in this one.
   command is the release's pinned download-then-run one-liner, a `mv` line
   or a plain instruction. In WSL it also reads a `HERMES_HOME` set in the
   Windows registry, as Desktop does; if it can't, the home is unverified
-  (exit 2). The README's Windows check finds the same home as Desktop, and
-  Windows CI runs it as written. The installer's syntax check parses the plugins as ES
+  (exit 2), including when reading it is refused. The README's Windows check
+  finds the same home as Desktop, and Windows CI runs it as written. Every
+  doctor repair command single-quotes its folder paths, so a folder name
+  with quotes, spaces, `$(…)`, backticks or `;` is moved, never run; a name
+  with a line break gets a plain instruction instead. A new Mac without the
+  Command Line Tools no longer aborts the install: Apple's `/usr/bin/python3`
+  stub is never run (no install dialog), any other `python3` is probed with
+  a 10-second limit, and without a working Python the optional HD-helper
+  check is skipped with an INFO line while the plugins are still verified
+  and installed. The installer's syntax check parses the plugins as ES
   modules, so it no longer aborts on older Node or with ESM detection off.
   The Windows steps include copying `MANIFEST.sha256` and a one-line
   PowerShell check.
@@ -163,7 +171,16 @@ is new in this one.
   deletes an app whose bot token is installed; only a confirmed **Remove
   from Slack** does. An earlier connection left in an error state is
   checked once with Slack when its window opens. The relay's member refresh
-  no longer deadlocks with a Connect writing at the same moment. Allowlists are read exactly as Hermes parses them: a JSON list such as
+  no longer deadlocks with a Connect writing at the same moment. Cancel
+  reads the install state under the same lock the Slack authorization
+  commits under, so cancelling while Slack finishes never deletes the new
+  app; **Remove from Slack** deletes only the connection the window showed
+  (its key, app ID and revision), else "This Slack connection changed;
+  reopen the window". A change of who can talk to the bot is never left
+  half-applied: nothing is written unless Hermes's settings can be read
+  first, and if Hermes doesn't confirm it, the previous values are put back
+  and checked; a first Connect that fails leaves no Slack token (or, as a
+  last resort, `SLACK_ALLOWED_USERS=NOBODY`), and the window says which. Allowlists are read exactly as Hermes parses them: a JSON list such as
   `'["U1","U2"]'` works, and `*` in either form means anyone. Channel
   allowlists (`group_allowed_chats`) and `allow_bots` / `SLACK_ALLOW_BOTS`
   are named with their source too. `scripts/test-with-hermes.sh <checkout>`

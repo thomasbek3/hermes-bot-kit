@@ -57315,6 +57315,10 @@ async function probeSlackConnect(call, scope) {
     }
   }
 }
+function removalBody(status) {
+  const pick = (name) => status && typeof status === "object" && name in status ? status[name] : null;
+  return { confirm: true, key: pick("key"), app_id: pick("app_id"), record_rev: pick("record_rev") };
+}
 function needsWorkspace(workspaces) {
   return !Array.isArray(workspaces) || !workspaces.some((w) => w && w.ok !== false);
 }
@@ -59198,10 +59202,12 @@ function SlackConnect({ bot, name, initial, onClose }) {
   const [tokenInstalled, setTokenInstalled] = React17.useState(initial.status?.token_installed === true);
   const phaseRef = React17.useRef(phase);
   const tokenRef = React17.useRef(tokenInstalled);
+  const shownRef = React17.useRef(initial.status);
   const alive = React17.useRef(true);
   phaseRef.current = phase;
   tokenRef.current = tokenInstalled;
   const noteToken = (status) => {
+    if (status && typeof status === "object") shownRef.current = status;
     if (typeof status?.token_installed === "boolean") setTokenInstalled(status.token_installed);
   };
   React17.useEffect(() => () => {
@@ -59240,8 +59246,11 @@ function SlackConnect({ bot, name, initial, onClose }) {
     if (phase !== "connected") return;
     const timer = setInterval(async () => {
       try {
-        const view = audienceView(await slackProvisioning(bot, "audience"));
-        if (view && alive.current) setAudience(view);
+        const status = await slackProvisioning(bot, "audience");
+        if (!alive.current) return;
+        noteToken(status);
+        const view = audienceView(status);
+        if (view) setAudience(view);
       } catch {
       }
     }, 2e4);
@@ -59301,7 +59310,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
     setBusy(true);
     setError("");
     try {
-      if (confirmed) await slackProvisioning(bot, "remove", "POST", { confirm: true });
+      if (confirmed) await slackProvisioning(bot, "remove", "POST", removalBody(shownRef.current));
       else await slackProvisioning(bot, "connect", "DELETE");
       if (!alive.current) return;
       setAuthorize("");
@@ -59333,6 +59342,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
     try {
       const status = await slackProvisioning(bot, "access", "POST", who.body);
       if (!alive.current) return;
+      noteToken(status);
       setAudience(audienceView(status));
       setChanging(false);
     } catch (err2) {

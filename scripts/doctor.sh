@@ -75,15 +75,51 @@ fi
 LINES=()   # "check <id> <STATUS>" for the summary: never the message
 NFIX=0
 
-# ok|info <check id> <message>; fix <check id> <message> <fix>. The id is a
-# fixed word (letters, digits, -) and the only part that reaches the summary.
-ok()   { printf 'OK    %s\n' "$2"; LINES+=("check $1 OK"); }
-info() { printf 'INFO  %s\n' "$2"; LINES+=("check $1 INFO"); }
+# vis <text>: control characters shown as \n, \t, \r, \e (others as ?), so a
+# folder name can never break a line or start a "fix:" line of its own.
+vis() {
+  local s="$1" nl=$'\n' tab=$'\t' cr=$'\r' esc=$'\033'
+  s=${s//"${nl}"/"\\n"}; s=${s//"${tab}"/"\\t"}; s=${s//"${cr}"/"\\r"}; s=${s//"${esc}"/"\\e"}
+  printf '%s' "${s}" | LC_ALL=C tr '\000-\037\177' '?'
+}
+
+# ok|info <check id> <message>; fix <check id> <message> <fix> [<fix> ...],
+# each fix on its own "fix:" line: a command is always a line by itself. The id
+# is a fixed word (letters, digits, -) and the only part that reaches the summary.
+ok()   { printf 'OK    %s\n' "$(vis "$2")"; LINES+=("check $1 OK"); }
+info() { printf 'INFO  %s\n' "$(vis "$2")"; LINES+=("check $1 INFO"); }
 fix()  {
-  printf 'FIX   %s\n' "$2"
-  printf '      fix: %s\n' "$3"
+  local f
+  printf 'FIX   %s\n' "$(vis "$2")"
+  for f in "${@:3}"; do printf '      fix: %s\n' "$(vis "${f}")"; done
   LINES+=("check $1 FIX")
   NFIX=$((NFIX + 1))
+}
+
+# shq <path>: the path as one POSIX single-quoted word ('...', each ' written
+# '\''), which bash and zsh read back exactly. Fails when the path holds a
+# control character (a line break, tab, ESC...): no command is shown for it.
+shq() {
+  case "$1" in *[[:cntrl:]]*) return 1 ;; esac
+  printf "'%s'" "$(printf '%s' "$1" | LC_ALL=C sed "s/'/'\\\\''/g")"
+}
+# cmd <instruction> <command> <path>...: the command with each path (its %s
+# slots) quoted by shq, or, when a path has a control character, the plain
+# instruction with the same slots. Every fix that holds a path goes through it.
+cmd() {
+  local text="$1" form="$2" p q
+  local -a qs=()
+  shift 2
+  for p in "$@"; do
+    q=$(shq "${p}") || {
+      # shellcheck disable=SC2059 # our own fixed formats; paths are arguments
+      printf "${text}, using Finder or a file manager (a name has a line break or another control character, so no command is shown)" "$@"
+      return 0
+    }
+    qs+=("${q}")
+  done
+  # shellcheck disable=SC2059
+  printf "${form}" "${qs[@]}"
 }
 
 # only <extended regex> <value>: the value when it matches the whole pattern,
@@ -140,7 +176,8 @@ if [ -z "${KIT_REF}" ] && [ -n "${KIT_DIR}" ]; then
 fi
 printf '%s\n' "${KIT_REF}" | grep -Eqx 'v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{1,3})?' || KIT_REF=""
 # pinned <path in the repo> [VAR=value]: download that file from the release
-# tag to a temp file, then run it. Every fix that runs a script uses this.
+# tag to a temp file, then run it. Every fix that runs a script uses this. A
+# value holding a path comes already quoted by shq.
 pinned() {
   printf '( set -e; f=$(mktemp); trap '"'"'rm -f "$f"'"'"' EXIT; curl -fsSL https://raw.githubusercontent.com/%s/%s/%s -o "$f"; test -s "$f"; %sbash "$f" )' \
     "${KIT_REPO}" "${KIT_REF}" "$1" "${2:+$2 }"
@@ -268,6 +305,19 @@ trim() { printf '%s\n' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
 reg_value() {
   tr -d '\r' | sed -n 's/^[[:space:]]*[Hh][Ee][Rr][Mm][Ee][Ss]_[Hh][Oo][Mm][Ee][[:space:]][[:space:]]*REG_[A-Z_]*[[:space:]][[:space:]]*\(.*\)$/\1/p' | head -n 1
 }
+# reg_home_of <reg exit code> <reg output, stderr included>: the value, or ""
+# when reg says it is absent ("unable to find the specified registry key or
+# value"). Fails when reg could not tell (access denied, a timeout, any other
+# error or answer): then the home is unverified, never OK.
+reg_home_of() {
+  local v
+  v=$(printf '%s\n' "$2" | reg_value)
+  if [ -n "${v}" ]; then printf '%s\n' "${v}"; return 0; fi
+  if [ "$1" != 0 ]; then
+    case "$2" in *"unable to find the specified registry key or value"*) return 0 ;; esac
+  fi
+  return 1
+}
 
 # win_home <HERMES_HOME or ""> <LOCALAPPDATA dir> <user profile dir>: Hermes
 # Desktop's Windows order (data-paths.mjs:41-66): HERMES_HOME, else
@@ -308,7 +358,12 @@ case "${OS_KIND}" in
       if [ -n "${DOCTOR_WIN_REG_HOME+set}" ]; then
         reg_home="${DOCTOR_WIN_REG_HOME}"
       elif command -v reg >/dev/null 2>&1; then
-        reg_home=$(MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 reg query 'HKCU\Environment' /v HERMES_HOME 2>/dev/null | reg_value)
+        reg_rc=0
+        reg_out=$(MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 reg query 'HKCU\Environment' /v HERMES_HOME 2>&1) || reg_rc=$?
+        reg_home=$(reg_home_of "${reg_rc}" "${reg_out}") || {
+          HOME_VERIFIED=0
+          UNVERIFIED="unverified: Desktop may use a HERMES_HOME registry setting the doctor can't read"
+        }
       fi
       # %VAR% references expand against the environment, case-insensitively.
       reg_home=$(printf '%s\n' "${reg_home}" | awk '{ out = ""; s = $0
@@ -359,7 +414,9 @@ case "${OS_KIND}" in
       if [ -n "${DOCTOR_WIN_REG_HOME+set}" ]; then
         reg_home="${DOCTOR_WIN_REG_HOME}"
       elif command -v reg.exe >/dev/null 2>&1; then
-        reg_home=$(cd /mnt/c 2>/dev/null; ${t:-} reg.exe query 'HKCU\Environment' /v HERMES_HOME 2>/dev/null | reg_value)
+        reg_rc=0
+        reg_out=$(cd /mnt/c 2>/dev/null; ${t:-} reg.exe query 'HKCU\Environment' /v HERMES_HOME 2>&1) || reg_rc=$?
+        reg_home=$(reg_home_of "${reg_rc}" "${reg_out}") || reg_ok=0
       else
         reg_ok=0
       fi
@@ -399,8 +456,8 @@ if [ "${WIN_TARGET}" = 0 ]; then
   fi
 fi
 if [ "${HOME_CAT}" = profile-scoped ]; then
-  fix home-profile "HERMES_HOME points at a profile (${HERMES_HOME:-the registry value}); Hermes Desktop uses its parent, ${H}" \
-    "unset HERMES_HOME (or set it to ${H}) and run the installer again: $(installer_cmd)"
+  fix home-profile "HERMES_HOME points at a profile (${HERMES_HOME:-the registry value}); Hermes Desktop uses its parent, ${H}: unset HERMES_HOME (or set it to that folder), then run the installer again" \
+    "$(installer_cmd)"
 fi
 if [ "${HOME_VERIFIED}" = 0 ]; then
   info home "Hermes home: ${H} (${UNVERIFIED})"
@@ -409,7 +466,7 @@ else
 fi
 
 if [ ! -d "${H}" ]; then
-  fix home "No Hermes home at ${H}" "open Hermes Desktop once (it creates the home), then install the kit: $(installer_cmd)"
+  fix home "No Hermes home at ${H}: open Hermes Desktop once (it creates the home), then install the kit" "$(installer_cmd)"
 fi
 
 # The home a Dock or Finder launch sees on macOS (only launchctl's environment).
@@ -430,8 +487,14 @@ esac
 if [ "${GUI_KNOWN}" = 1 ]; then
   if [ -n "${GUI_RAW}" ]; then GUI_HOME=$(normalize_home "${GUI_RAW}"); else GUI_HOME="${DEFAULT_HOME}"; fi
   if [ "${GUI_HOME}" != "${H}" ]; then
-    fix gui-home "Hermes Desktop opened from the Dock or Finder uses ${GUI_HOME}, not ${H}: it does not see HERMES_HOME from your shell profile" \
-      "install into the home Desktop uses: $(installer_cmd "HERMES_HOME=${GUI_HOME}")   or make Desktop use ${H}: launchctl setenv HERMES_HOME \"${H}\", then quit and reopen Hermes Desktop"
+    if gq=$(shq "${GUI_HOME}"); then
+      gui_install=$(installer_cmd "HERMES_HOME=${gq}")
+    else
+      gui_install="install the kit with HERMES_HOME set to the folder ${GUI_HOME} (its name has a line break or another control character, so no command is shown)"
+    fi
+    fix gui-home "Hermes Desktop opened from the Dock or Finder uses ${GUI_HOME}, not ${H}: it does not see HERMES_HOME from your shell profile. Either install into the home Desktop uses (first line), or make Desktop use ${H} (second line), then quit and reopen Hermes Desktop" \
+      "${gui_install}" \
+      "$(cmd "set HERMES_HOME to %s for apps (launchctl setenv HERMES_HOME)" "launchctl setenv HERMES_HOME %s" "${H}")"
   fi
 elif [ -n "${HERMES_HOME:-}" ] && [ "${WIN_TARGET}" = 0 ]; then
   info shell-home "HERMES_HOME is set in this shell; an app launcher may not see it. If the plugins don't show, set it where your desktop session reads it (for example ~/.profile)"
@@ -483,11 +546,12 @@ for pj in "${H}"/profiles/*/desktop-plugins/*/plugin.js; do
   dir=$(dirname -- "${pj}")
   prof=$(basename -- "$(dirname -- "$(dirname -- "${dir}")")")
   if [ -f "${D}/${p}/plugin.js" ]; then
-    fix "${p}-profile" "${p}: a second copy sits in the profile folder ${dir}; Desktop loads only ${D}/${p} and never this one" \
-      "move the profile copy out: mv \"${dir}\" \"${H}/desktop-plugins-removed-${prof}-$(basename -- "${dir}")\"   then reinstall so ${D}/${p} is current: $(installer_cmd)"
+    fix "${p}-profile" "${p}: a second copy sits in the profile folder ${dir}; Desktop loads only ${D}/${p} and never this one. Move the profile copy out (first line), then reinstall so ${D}/${p} is current (second line)" \
+      "$(cmd "move the folder %s to %s" "mv %s %s" "${dir}" "${H}/desktop-plugins-removed-${prof}-$(basename -- "${dir}")")" \
+      "$(installer_cmd)"
   else
-    fix "${p}-profile" "${p}: installed in the profile folder ${dir}; desktop plugins belong to the app, in ${D}" \
-      "mkdir -p \"${D}\" && mv \"${dir}\" \"${D}/${p}\"   (Hermes also moves it itself when it next scans its plugins)"
+    fix "${p}-profile" "${p}: installed in the profile folder ${dir}; desktop plugins belong to the app, in ${D} (Hermes also moves it itself when it next scans its plugins)" \
+      "$(cmd "create the folder %s if it is missing, then move the folder %s into it as %s" "mkdir -p %s && mv %s %s" "${D}" "${dir}" "${D}/${p}")"
     PROFILE_SCOPED="${PROFILE_SCOPED}${p} "
   fi
 done
@@ -511,11 +575,11 @@ for p in ${KIT_PLUGINS}; do
     dir=$(dirname -- "${pj}")
     rel=${dir#"${D}/"}
     if [ "${found_right}" != 0 ]; then
-      fix "${p}-place" "${p}: an extra copy in desktop-plugins/${rel}; Hermes loads one plugin per id and shows the other copy as an error" \
-        "move it out: mv \"${dir}\" \"${H}/desktop-plugins-removed-${rel}\""
+      fix "${p}-place" "${p}: an extra copy in desktop-plugins/${rel}; Hermes loads one plugin per id and shows the other copy as an error. Move it out" \
+        "$(cmd "move the folder %s to %s" "mv %s %s" "${dir}" "${H}/desktop-plugins-removed-${rel}")"
     else
       fix "${p}-place" "${p}: the folder is named desktop-plugins/${rel}; it must be exactly desktop-plugins/${p} (the installer and updates use that name, and a second copy of one plugin id fails to load)" \
-        "mv \"${dir}\" \"${D}/${p}\""
+        "$(cmd "rename the folder %s to %s" "mv %s %s" "${dir}" "${D}/${p}")"
       found_right=2
     fi
   done <<< "${LOADABLE}"
@@ -531,10 +595,10 @@ for p in ${KIT_PLUGINS}; do
     stray_hit=1
     if [ "${rel%%/*}" = "${p}" ]; then
       fix "${p}-place" "${p}: nested too deep (desktop-plugins/${rel}/plugin.js); Hermes only loads desktop-plugins/<folder>/plugin.js, so it is not loaded" \
-        "mv \"${D}/${p}\" \"${D}/${p}.nested\" && mv \"${D}/${p}.nested/${rel#*/}\" \"${D}/${p}\""
+        "$(cmd "rename the folder %s to %s, then move the folder %s to %s" "mv %s %s && mv %s %s" "${D}/${p}" "${D}/${p}.nested" "${D}/${p}.nested/${rel#*/}" "${D}/${p}")"
     else
       fix "${p}-place" "${p}: nested too deep (desktop-plugins/${rel}/plugin.js); Hermes only loads desktop-plugins/<folder>/plugin.js, so it is not loaded" \
-        "mv \"${dir}\" \"${D}/${p}\""
+        "$(cmd "move the folder %s to %s" "mv %s %s" "${dir}" "${D}/${p}")"
     fi
     found_right=2
   done <<< "${DEEPER}"
@@ -598,10 +662,12 @@ done
 if [ -n "${retired}" ]; then
   if [ "${WIN_TARGET}" = 1 ]; then
     retired_fix="move those folders out of ${D} (nothing else needs them)"
+    retired_note=""
   else
-    retired_fix="$(installer_cmd KIT_REMOVE_RETIRED=1)   (moves exactly those to desktop-plugins-retired-<date>/; nothing is deleted)"
+    retired_fix="$(installer_cmd KIT_REMOVE_RETIRED=1)"
+    retired_note=". This moves exactly those to desktop-plugins-retired-<date>/; nothing is deleted"
   fi
-  fix retired "Retired kit plugins are still installed:${retired} (Bubble Mode, Task Dock and Bot Sections were retired on 2026-11-10 and can fight Grokbot Override)" \
+  fix retired "Retired kit plugins are still installed:${retired} (Bubble Mode, Task Dock and Bot Sections were retired on 2026-11-10 and can fight Grokbot Override)${retired_note}" \
     "${retired_fix}"
 fi
 orgo=""
@@ -610,11 +676,13 @@ for d in "${H}" "${H}"/profiles/*; do
 done
 if [ -n "${orgo}" ]; then
   if [ -n "${KIT_REF}" ]; then
-    rm_cmd="$(pinned computer-viewer/remove-orgo-computer.sh)   (a dry run; add --yes after \"\$f\" to move it out, nothing is deleted)"
+    rm_cmd="$(pinned computer-viewer/remove-orgo-computer.sh)"
+    rm_note=". The command is a dry run; add --yes after \"\$f\" to move it out (nothing is deleted)"
   else
     rm_cmd="move each plugins/orgo-computer folder out of its Hermes home, and take orgo-computer out of plugins.enabled in that home's config.yaml"
+    rm_note=""
   fi
-  fix orgo "The retired orgo-computer agent plugin is still installed (in${orgo})" "${rm_cmd}"
+  fix orgo "The retired orgo-computer agent plugin is still installed (in${orgo})${rm_note}" "${rm_cmd}"
 fi
 [ -z "${retired}" ] && [ -z "${orgo}" ] && ok retired "No retired kit plugins"
 

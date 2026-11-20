@@ -112,7 +112,7 @@ mv "${D}/grokbot-override" "${D}/grokbot-override-main"
 doctor "${U}"
 [ "${RC}" -eq 1 ] || fail "wrong name: exit ${RC}, want 1"
 has "FIX   grokbot-override: the folder is named desktop-plugins/grokbot-override-main" "wrong name"
-has "fix: mv \"${D}/grokbot-override-main\" \"${D}/grokbot-override\"" "wrong name"
+has "fix: mv '${D}/grokbot-override-main' '${D}/grokbot-override'" "wrong name"
 hasnt "grokbot-override: not installed" "wrong name"
 ok "wrong folder name: FIX with the rename"
 
@@ -125,7 +125,7 @@ mv "${D}/computer-viewer" "${D}/hermes-bot-kit/computer-viewer"
 doctor "${U}"
 [ "${RC}" -eq 1 ] || fail "nested: exit ${RC}, want 1"
 has "FIX   computer-viewer: nested too deep (desktop-plugins/hermes-bot-kit/computer-viewer/plugin.js)" "nested"
-has "fix: mv \"${D}/hermes-bot-kit/computer-viewer\" \"${D}/computer-viewer\"" "nested"
+has "fix: mv '${D}/hermes-bot-kit/computer-viewer' '${D}/computer-viewer'" "nested"
 ok "nested too deep: FIX with the move"
 
 # 4. A profile-scoped install (HERMES_HOME=<home>/profiles/x).
@@ -136,7 +136,7 @@ doctor "${U}"
 [ "${RC}" -eq 1 ] || fail "profile-scoped: exit ${RC}, want 1"
 P="${U}/.hermes/profiles/x/desktop-plugins"
 has "FIX   grokbot-override: installed in the profile folder ${P}/grokbot-override" "profile-scoped"
-has "fix: mkdir -p \"${U}/.hermes/desktop-plugins\" && mv \"${P}/grokbot-override\" \"${U}/.hermes/desktop-plugins/grokbot-override\"" "profile-scoped"
+has "fix: mkdir -p '${U}/.hermes/desktop-plugins' && mv '${P}/grokbot-override' '${U}/.hermes/desktop-plugins/grokbot-override'" "profile-scoped"
 has "FIX   computer-viewer: installed in the profile folder" "profile-scoped"
 hasnt "grokbot-override: not installed" "profile-scoped (one FIX per plugin, not two)"
 PROFILE_OUT="${OUT}"
@@ -431,7 +431,7 @@ doctor "${U}"
 [ "${RC}" -eq 0 ] || fail "nested backup: exit ${RC}, want 0:
 ${OUT}"
 hasnt "FIX" "nested backup"
-hasnt "mv \"${D}/grokbot-override\"" "nested backup (no move of the working folder)"
+hasnt "mv '${D}/grokbot-override'" "nested backup (no move of the working folder)"
 has "OK    grokbot-override: plugin.js matches MANIFEST.sha256" "nested backup"
 ok "nested backup copy: no FIX, exit 0"
 
@@ -493,6 +493,47 @@ ${OUT}"
 done
 ok "WSL: a registry HERMES_HOME is used; an unreadable one is unverified, exit 2"
 
+# 13c. A real reg.exe (faked): "Access is denied" (or any other error) leaves
+# the home unverified, exit 2; "unable to find" means absent, so Desktop's order
+# goes on to %LOCALAPPDATA%; a value is used. The same on Windows (reg).
+fakereg="${WORK}/fakereg"
+mkdir -p "${fakereg}"
+make_reg() {
+  # make_reg <denied|absent|value>: reg.exe and reg answering like Windows does.
+  case "$1" in
+    denied) printf '#!/bin/sh\necho "ERROR: Access is denied." >&2\nexit 1\n' ;;
+    absent) printf '#!/bin/sh\necho "ERROR: The system was unable to find the specified registry key or value." >&2\nexit 1\n' ;;
+    value) printf '#!/bin/sh\nprintf '"'"'\\r\\nHKEY_CURRENT_USER\\\\Environment\\r\\n    HERMES_HOME    REG_EXPAND_SZ    C:\\\\Users\\\\Win User\\\\hermes-reg\\r\\n\\r\\n'"'"'\n' ;;
+  esac > "${fakereg}/reg.exe"
+  chmod +x "${fakereg}/reg.exe"
+  cp "${fakereg}/reg.exe" "${fakereg}/reg"
+}
+make_reg denied
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" PATH="${fakereg}:/usr/bin:/bin" "${WSL_VARS}"
+[ "${RC}" -eq 2 ] || fail "WSL, reg.exe access denied: exit ${RC}, want 2:
+${OUT}"
+has "INFO  Hermes home: ${WIN_LAD}/hermes (unverified: Desktop may use a HERMES_HOME registry setting" "WSL reg.exe access denied"
+hasnt "OK    Hermes home" "WSL reg.exe access denied"
+make_reg absent
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" PATH="${fakereg}:/usr/bin:/bin" "${WSL_VARS}"
+[ "${RC}" -eq 0 ] || fail "WSL, no registry value: exit ${RC}, want 0:
+${OUT}"
+has "OK    Hermes home: ${WIN_LAD}/hermes (%LOCALAPPDATA%\\hermes, the Windows default)" "WSL reg.exe absent"
+make_reg value
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" PATH="${fakereg}:/usr/bin:/bin" "${WSL_VARS}"
+has "OK    Hermes home: ${REG_HOME} (from HERMES_HOME in the registry" "WSL reg.exe value"
+WU=$(new_user)
+mkdir -p "${WU}/AppData/Local/hermes"
+make_reg denied
+doctor "${WU}" DOCTOR_OS=windows LOCALAPPDATA="${WU}/AppData/Local" USERPROFILE="${WU}" PATH="${fakereg}:/usr/bin:/bin"
+[ "${RC}" -ne 0 ] || fail "Windows, reg access denied: exit 0"
+has "INFO  Hermes home: ${WU}/AppData/Local/hermes (unverified: Desktop may use a HERMES_HOME registry setting" "Windows reg access denied"
+hasnt "OK    Hermes home" "Windows reg access denied"
+make_reg absent
+doctor "${WU}" DOCTOR_OS=windows LOCALAPPDATA="${WU}/AppData/Local" USERPROFILE="${WU}" PATH="${fakereg}:/usr/bin:/bin"
+has "OK    Hermes home: ${WU}/AppData/Local/hermes (%LOCALAPPDATA%" "Windows reg absent"
+ok "WSL and Windows: reg access denied is unverified (exit 2); absent goes on to %LOCALAPPDATA%"
+
 # 14. Windows (Git Bash): Desktop's order. HERMES_HOME, then the registry
 # value, then %LOCALAPPDATA%\hermes, then a legacy ~/.hermes only when the
 # first is missing.
@@ -514,5 +555,79 @@ has "OK    Hermes home: ${U}/.hermes (from HERMES_HOME in the registry" "Windows
 win HERMES_HOME= DOCTOR_WIN_REG_HOME="${U}/.hermes"
 has "OK    Hermes home: ${U}/AppData/Local/hermes" "Windows: an empty HERMES_HOME skips the registry"
 ok "Windows: HERMES_HOME, registry, %LOCALAPPDATA%, legacy, in Desktop's order"
+
+# 15. Folder names are data, never code. Homes, misnamed plugin folders and
+# profiles named with quotes, spaces, $(...), backticks and ';': every command
+# 'fix:' line parses under bash -n and zsh -n, and running the fixes (in bash,
+# then again in zsh) moves exactly the folders and runs nothing else. A name
+# with a line break gets a plain instruction, shown with \n, never a command,
+# and can't start a 'fix:' line of its own.
+command -v zsh >/dev/null 2>&1 || fail "zsh is needed for the fix-quoting test (CI installs it on Linux)"
+is_cmd() { case "$1" in "mv "*|"mkdir "*|"launchctl "*|"( set -e;"*) return 0 ;; esac; return 1; }
+NL=$'\n'
+QU=$(new_user)
+i=0
+for evil in "it's" 'say "hi"' 'two  spaces' '$(touch PWNED)' '`touch PWNED2`' ';rm -rf x' "nl${NL}      fix: touch PWNED3"; do
+  i=$((i + 1))
+  for sh in bash zsh; do
+    T="${WORK}/q${i}-${sh}"
+    case "${evil}" in
+      *"${NL}"*) QH="${T}/hh/.hermes" ;;   # find(1) output is line-based; keep the home itself plain
+      *) QH="${T}/hh ${evil}/.hermes" ;;
+    esac
+    mkdir -p "${QH}" "${T}/cwd/x"
+    install_into "${QH}"
+    QD="${QH}/desktop-plugins"
+    mv "${QD}/grokbot-override" "${QD}/grokbot-override-${evil}"
+    mkdir -p "${QH}/profiles/${evil}/desktop-plugins"
+    mv "${QD}/computer-viewer" "${QH}/profiles/${evil}/desktop-plugins/computer-viewer"
+    doctor "${QU}" HERMES_HOME="${QH}" DOCTOR_GUI_HERMES_HOME="${T}/gui ${evil}" DOCTOR_KIT_REF="${fallback}"
+    [ "${RC}" -eq 1 ] || fail "quoting (${evil}): exit ${RC}, want 1:
+${OUT}"
+    if printf '%s\n' "${OUT}" | grep -q '^ *fix: touch'; then fail "quoting (${evil}): a folder name started its own fix line:
+${OUT}"; fi
+    fixes=$(printf '%s\n' "${OUT}" | sed -n 's/^      fix: //p')
+    runs=()
+    while IFS= read -r l; do
+      is_cmd "${l}" || continue
+      bash -n -c "${l}" || fail "quoting (${evil}): bash -n rejects: ${l}"
+      zsh -n -c "${l}" || fail "quoting (${evil}): zsh -n rejects: ${l}"
+      case "${l}" in mv*|mkdir*) runs+=("${l}") ;; esac
+    done <<< "${fixes}"
+    case "${evil}" in
+      *"${NL}"*)
+        [ ${#runs[@]} -eq 0 ] || fail "quoting (line break): a command for a name with a line break: ${runs[*]}"
+        printf '%s\n' "${fixes}" | grep -qF 'move the folder' || fail "quoting (line break): no plain instruction:
+${OUT}"
+        printf '%s\n' "${fixes}" | grep -qF 'nl\n      fix: touch PWNED3' || fail "quoting (line break): the name is not shown with \\n:
+${OUT}"
+        printf '%s\n' "${fixes}" | grep -qF 'using Finder or a file manager' || fail "quoting (line break): no Finder hint"
+        if printf '%s\n' "${fixes}" | grep -q '^launchctl setenv .*gui'; then fail "quoting (line break): a launchctl command for it"; fi
+        ;;
+      *)
+        [ ${#runs[@]} -eq 2 ] || fail "quoting (${evil}): want 2 mv/mkdir fixes, got ${#runs[@]}:
+${OUT}"
+        printf '%s\n' "${fixes}" | grep -q "^launchctl setenv HERMES_HOME '" || fail "quoting (${evil}): no quoted launchctl fix:
+${OUT}"
+        printf '%s\n' "${fixes}" | grep -q "HERMES_HOME='.*' bash \"\\\$f\" )\$" || fail "quoting (${evil}): no quoted HERMES_HOME installer fix:
+${OUT}"
+        for l in "${runs[@]}"; do
+          (cd "${T}/cwd" && env HOME="${T}" "${sh}" -c "${l}") || fail "quoting (${evil}, ${sh}): the fix failed: ${l}"
+        done
+        grep -q "PLUGIN_ID = ['\"]grokbot-override" "${QD}/grokbot-override/plugin.js" || fail "quoting (${evil}, ${sh}): grokbot-override was not moved into place"
+        grep -q "PLUGIN_ID = ['\"]computer-viewer" "${QD}/computer-viewer/plugin.js" || fail "quoting (${evil}, ${sh}): computer-viewer was not moved into place"
+        [ ! -e "${QD}/grokbot-override-${evil}" ] || fail "quoting (${evil}, ${sh}): the misnamed folder is still there"
+        [ ! -e "${QH}/profiles/${evil}/desktop-plugins/computer-viewer" ] || fail "quoting (${evil}, ${sh}): the profile copy is still there"
+        [ -d "${T}/cwd/x" ] || fail "quoting (${evil}, ${sh}): something removed x"
+        doctor "${QU}" HERMES_HOME="${QH}" DOCTOR_GUI_HERMES_HOME="${QH}" DOCTOR_KIT_REF="${fallback}"
+        [ "${RC}" -eq 0 ] || fail "quoting (${evil}, ${sh}): after the fixes, exit ${RC}:
+${OUT}"
+        ;;
+    esac
+  done
+done
+pwned=$(find "${WORK}" -name 'PWNED*')
+[ -z "${pwned}" ] || fail "a folder name ran code: ${pwned}"
+ok "fix lines: names with quotes, spaces, \$(), backticks, ; are quoted (bash -n, zsh -n, executed); a line break gets an instruction"
 
 echo "test-doctor.sh: all passed"

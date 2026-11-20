@@ -93,9 +93,14 @@ jobs:
       - name: Installer tests
         run: bash tests/test-install.sh
 
-      # Throwaway Hermes homes and a fake app; never the runner's own.
+      # Throwaway Hermes homes and a fake app; never the runner's own. The fix
+      # lines are parsed under bash and zsh, so Linux needs zsh.
       - name: Doctor tests
-        run: bash tests/test-doctor.sh
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && ! command -v zsh >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq zsh
+          fi
+          bash tests/test-doctor.sh
 
       # The runbook blocks run under bash and zsh (macOS's default shell).
       - name: AGENTS.md runbook commands (offline, fake curl; bash and zsh)
