@@ -59195,9 +59195,15 @@ function SlackConnect({ bot, name, initial, onClose }) {
   const [allowed, setAllowed] = React17.useState("");
   const [audience, setAudience] = React17.useState(audienceView(initial.status));
   const [changing, setChanging] = React17.useState(false);
+  const [tokenInstalled, setTokenInstalled] = React17.useState(initial.status?.token_installed === true);
   const phaseRef = React17.useRef(phase);
+  const tokenRef = React17.useRef(tokenInstalled);
   const alive = React17.useRef(true);
   phaseRef.current = phase;
+  tokenRef.current = tokenInstalled;
+  const noteToken = (status) => {
+    if (typeof status?.token_installed === "boolean") setTokenInstalled(status.token_installed);
+  };
   React17.useEffect(() => () => {
     alive.current = false;
   }, []);
@@ -59215,6 +59221,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
         const status = await slackProvisioning(bot, "status");
         if (stopped) return;
         if (status?.team_name) setTeamName(status.team_name);
+        noteToken(status);
         const view = audienceView(status);
         if (view) setAudience(view);
         if (["created", "installed", "connected", "denied", "error"].includes(status?.phase)) setPhase(status.phase);
@@ -59289,16 +59296,18 @@ function SlackConnect({ bot, name, initial, onClose }) {
       if (alive.current) setBusy(false);
     }
   };
-  const remove = async (close2 = false) => {
+  const remove = async (close2 = false, confirmed = false) => {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
-      await slackProvisioning(bot, "connect", "DELETE");
+      if (confirmed) await slackProvisioning(bot, "remove", "POST", { confirm: true });
+      else await slackProvisioning(bot, "connect", "DELETE");
       if (!alive.current) return;
       setAuthorize("");
       setPhase("none");
       setConfirm(false);
+      setTokenInstalled(false);
       void loadSlackState(bot);
       if (close2) onClose();
     } catch (err2) {
@@ -59309,7 +59318,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
   };
   const close = () => {
     setRefresh("");
-    if (["created", "denied", "error"].includes(phaseRef.current)) void remove(true);
+    if (["created", "denied", "error"].includes(phaseRef.current) && !tokenRef.current) void remove(true);
     else onClose();
   };
   const applyAccess = async (mode = access, list = allowed) => {
@@ -59352,6 +59361,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
       /* @__PURE__ */ jsx18("span", { children: "Member IDs" }),
       /* @__PURE__ */ jsx18("input", { className: "gbo-input gbo-slack-access-list", spellCheck: false, value: allowed, onChange: (e2) => setAllowed(e2.target.value), placeholder: "U0123ABCD, U0456EFGH" })
     ] }) : null,
+    audience && !audience.ownerKnown ? /* @__PURE__ */ jsx18("p", { className: "gbo-field-hint gbo-slack-reconnect-hint", children: "To choose Only me, reconnect the bot." }) : null,
     /* @__PURE__ */ jsxs17("p", { className: "gbo-field-hint", children: [
       "Anyone who can talk to ",
       name,
@@ -59377,7 +59387,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
   const legacyChoices = audience?.legacy ? /* @__PURE__ */ jsxs17("div", { className: "gbo-slack-legacy-choices", children: [
     audience.legacy.ids.length ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-legacy-keep", disabled: busy, onClick: () => void applyAccess("list", audience.legacy.ids.join(",")), children: "Keep these people" }) : null,
     /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-legacy-members", disabled: busy, onClick: () => void applyAccess("members", ""), children: "Everyone in the workspace" }),
-    audience.ownerKnown ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-legacy-owner", disabled: busy, onClick: () => void applyAccess("owner", ""), children: "Only me" }) : null
+    audience.ownerKnown ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-link-btn gbo-slack-legacy-owner", disabled: busy, onClick: () => void applyAccess("owner", ""), children: "Only me" }) : /* @__PURE__ */ jsx18("p", { className: "gbo-field-hint gbo-slack-reconnect-hint", children: "To choose Only me, reconnect the bot." })
   ] }) : null;
   const testConnection = async () => {
     if (busy) return;
@@ -59387,6 +59397,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
     try {
       const status = await slackProvisioning(bot, "status");
       if (!alive.current) return;
+      noteToken(status);
       setTestResult(status?.phase === "connected" ? "Slack authentication and the bot’s events endpoint are working." : "Slack could not confirm the bot’s connection. Try again shortly.");
       void loadSlackState(bot);
     } catch (err2) {
@@ -59410,7 +59421,7 @@ function SlackConnect({ bot, name, initial, onClose }) {
     ] });
     footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,
-      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary gbo-slack-remove-primary", disabled: busy, onClick: () => void remove(), children: "Remove" })
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary gbo-slack-remove-primary", disabled: busy, onClick: () => void remove(false, true), children: "Remove" })
     ] });
   } else if (connected) {
     body = /* @__PURE__ */ jsxs17(Fragment11, { children: [
@@ -59449,11 +59460,12 @@ function SlackConnect({ bot, name, initial, onClose }) {
   } else if (phase === "denied" || phase === "error") {
     body = /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-note", children: [
       phase === "denied" ? "Slack install was cancelled." : "Slack setup needs attention.",
-      " Remove the incomplete app before trying again."
+      " ",
+      tokenInstalled ? "The bot’s Slack token is installed, so Cancel keeps the app. Remove from Slack deletes it." : "Remove the incomplete app before trying again."
     ] });
     footer = /* @__PURE__ */ jsxs17(Fragment11, { children: [
       cancel,
-      /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: () => void remove(), children: "Remove and try again" })
+      tokenInstalled ? /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary gbo-slack-remove", disabled: busy, onClick: () => setConfirm(true), children: "Remove from Slack" }) : /* @__PURE__ */ jsx18("button", { type: "button", className: "gbo-sheet-primary", disabled: busy, onClick: () => void remove(), children: "Remove and try again" })
     ] });
   } else if (adding) {
     body = /* @__PURE__ */ jsxs17("div", { className: "gbo-sheet-form", children: [

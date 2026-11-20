@@ -240,7 +240,7 @@ WIN_USER=SomeName
 WINHOME="${MNT}/c/Users/${WIN_USER}/AppData/Local/hermes"
 mkdir -p "$(dirname -- "${WINHOME}")"
 cp -R "${U}/.hermes" "${WINHOME}"
-doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" 'DOCTOR_WIN_VARS=%HERMES_HOME%?C:\Users\SomeName\AppData\Local?C:\Users\SomeName'
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" DOCTOR_WIN_REG_HOME= 'DOCTOR_WIN_VARS=%HERMES_HOME%?C:\Users\SomeName\AppData\Local?C:\Users\SomeName'
 has "Hermes home: ${WINHOME}" "privacy, WSL (the local output names the Windows home)"
 check_summary "privacy, WSL"
 summary | grep -qx 'hermes home: windows-localappdata' || fail "privacy: no windows-localappdata category"
@@ -346,6 +346,63 @@ hasnt "LOCAL-EDIT" "checkout doctor that does not match its manifest"
 [ -s "${WORK}/fake.log" ] || fail "checkout doctor (edited): the release doctor was not downloaded"
 ok "install.sh --doctor: a neighbouring doctor.sh runs only in a real checkout and only when it matches"
 
+# 10c. No fix ever runs a local file: every fix line is the release's pinned
+# download-then-run one-liner, a mv/mkdir line, or plain text. Checked through
+# install.sh --doctor in a checkout, fetched alone, the doctor run from a
+# clone, and the doctor fetched alone (no tag known: plain text, no URL).
+PINNED='\( set -e; f=\$\(mktemp\); trap '"'"'rm -f "\$f"'"'"' EXIT; curl -fsSL https://raw\.githubusercontent\.com/thomasbek3/hermes-bot-kit/v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{1,3})?/(install\.sh|computer-viewer/remove-orgo-computer\.sh) -o "\$f"; test -s "\$f"; ([A-Z_]+=[^ ]+ )?bash "\$f" \)'
+check_fixes() {
+  # check_fixes <label> <want pinned: 1|0>: every 'fix:' line passes the allowlist.
+  local fixes rest n=0
+  fixes=$(printf '%s\n' "${OUT}" | sed -n 's/^      fix: //p')
+  [ -n "${fixes}" ] || fail "$1: no fix lines:
+${OUT}"
+  while IFS= read -r l; do
+    rest=$(printf '%s\n' "${l}" | sed -E "s#${PINNED}#PINNED#g")
+    [ "${rest}" != "${l}" ] && n=$((n + 1))
+    case "${rest}" in
+      *'bash "'*|*"bash '"*|*'bash /'*|*'bash ~'*|*'bash .'*|*'bash $'*|*.sh*|*scripts/*|*master*|*raw.githubusercontent*|*"${ROOT}"*|*"${WORK}/checkout"*|*"${WORK}/alone"*|*"${WORK}/lone"*)
+        fail "$1: a fix that is not the pinned one-liner, mv/mkdir or plain text: ${l}" ;;
+    esac
+  done <<< "${fixes}"
+  if [ "$2" = 1 ]; then [ "${n}" -gt 0 ] || fail "$1: no pinned one-liner in the fixes:
+${fixes}"
+  else [ "${n}" = 0 ] || fail "$1: a pinned one-liner without a known tag:
+${fixes}"; fi
+  printf '%s\n' "${fixes}" | grep -q 'remove-orgo-computer\|plugins/orgo-computer' || fail "$1: no orgo fix"
+}
+U=$(new_user)
+install_into "${U}/.hermes"
+mv "${U}/.hermes/desktop-plugins/grokbot-override" "${WORK}/gone-fixes"
+mkdir -p "${U}/.hermes/plugins/orgo-computer" "${U}/.hermes/desktop-plugins/bubble-mode"
+printf 'const STYLE_ID = "hermes-bubble-mode-style"\n' > "${U}/.hermes/desktop-plugins/bubble-mode/plugin.js"
+fix_env=(env -i PATH="${fake}:/usr/bin:/bin" HOME="${U}" USER=kitdoc TMPDIR="${WORK}" FAKE_ROOT="${ROOT}" FAKE_LOG="${WORK}/fake.log"
+  DOCTOR_APP_PATH="${U}/Applications/Hermes.app" DOCTOR_GUI_HERMES_HOME="${U}/elsewhere")
+set +e
+OUT=$("${fix_env[@]}" bash "${INSTALLER}" --doctor 2>&1)
+set -e
+check_fixes "install.sh --doctor in a checkout" 1
+has "fix: ( set -e; f=\$(mktemp); trap 'rm -f \"\$f\"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${fallback}/computer-viewer/remove-orgo-computer.sh -o \"\$f\"; test -s \"\$f\"; bash \"\$f\" )" "orgo fix pinned (checkout)"
+set +e
+OUT=$("${fix_env[@]}" bash "${alone}/install.sh" --doctor 2>&1)
+set -e
+check_fixes "install.sh --doctor fetched alone" 1
+has "/${fallback}/computer-viewer/remove-orgo-computer.sh -o" "orgo fix pinned (alone)"
+set +e
+OUT=$("${fix_env[@]}" bash "${DOCTOR}" 2>&1)
+set -e
+check_fixes "doctor.sh from a clone" 1
+lone="${WORK}/lone"
+mkdir -p "${lone}"
+cp "${DOCTOR}" "${lone}/doctor.sh"
+cp "${INSTALLER}" "${lone}/install.sh"   # a planted install.sh beside it is never read
+set +e
+OUT=$("${fix_env[@]}" bash "${lone}/doctor.sh" 2>&1)
+set -e
+check_fixes "doctor.sh fetched alone" 0
+has "re-run the install one-liner from the README" "doctor.sh fetched alone"
+ok "fix lines: only the pinned one-liner, mv/mkdir or plain text, never a local file"
+
 # 11. Every runtime file of a plugin is checked against the manifest.
 U=$(new_user)
 install_into "${U}/.hermes"
@@ -388,7 +445,7 @@ WIN_LAD="${MNT}/c/Users/${WIN_USER}/AppData/Local"
 mkdir -p "${WIN_LAD}" "${MNT}/c/Users/${OTHER_ACCOUNT}/AppData/Local/hermes/desktop-plugins"
 install_into "${WIN_LAD}/hermes"
 WSL_VARS='DOCTOR_WIN_VARS=%HERMES_HOME%?C:\Users\Win User\AppData\Local?C:\Users\Win User'
-doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" "${WSL_VARS}"
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" DOCTOR_WIN_REG_HOME= "${WSL_VARS}"
 [ "${RC}" -eq 0 ] || fail "WSL with a Windows home: exit ${RC}:
 ${OUT}"
 has "WSL: diagnosing Hermes Desktop for Windows" "WSL windows home"
@@ -397,7 +454,7 @@ has "OK    grokbot-override: plugin.js matches" "WSL windows home"
 hasnt "${OTHER_ACCOUNT}" "WSL (another account's folder listed)"
 # The Windows home without the kit: the fix is the Windows copy step.
 mv "${WIN_LAD}/hermes/desktop-plugins/grokbot-override" "${WORK}/gone-wsl"
-doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" "${WSL_VARS}"
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" DOCTOR_WIN_REG_HOME= "${WSL_VARS}"
 [ "${RC}" -eq 1 ] || fail "WSL, Windows home missing a plugin: exit ${RC}"
 has "fix: on Windows: copy the grokbot-override and computer-viewer folders and MANIFEST.sha256" "WSL fix text"
 # Windows side not visible, a good WSL-only install: unverified, exit 2.
@@ -410,6 +467,31 @@ hasnt "OK    Hermes home" "WSL unverified"
 hasnt "Nothing to fix. If" "WSL unverified"
 summary | grep -qx 'hermes home: wsl' || fail "WSL unverified: no wsl category"
 ok "WSL: Windows home checked when visible; otherwise unverified, exit 2"
+
+# 13b. WSL: like Desktop, a HERMES_HOME only in the registry (HKCU\Environment,
+# a setx cmd.exe missed) is the home; one the doctor can't read or map leaves
+# the home unverified: never OK, exit 2.
+mv "${WORK}/gone-wsl" "${WIN_LAD}/hermes/desktop-plugins/grokbot-override"
+REG_HOME="${MNT}/c/Users/${WIN_USER}/hermes-reg"
+install_into "${REG_HOME}"
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" 'DOCTOR_WIN_REG_HOME=C:\Users\Win User\hermes-reg' "${WSL_VARS}"
+[ "${RC}" -eq 0 ] || fail "WSL registry home: exit ${RC}:
+${OUT}"
+has "OK    Hermes home: ${REG_HOME} (from HERMES_HOME in the registry" "WSL registry home"
+mv "${REG_HOME}/desktop-plugins/grokbot-override" "${WORK}/gone-wsl-reg"
+doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" 'DOCTOR_WIN_REG_HOME=C:\Users\Win User\hermes-reg' "${WSL_VARS}"
+[ "${RC}" -eq 1 ] || fail "WSL registry home missing a plugin: exit ${RC}"
+has "FIX   grokbot-override: not installed (no ${REG_HOME}/desktop-plugins/grokbot-override/plugin.js)" "WSL registry home"
+for reg in '' 'DOCTOR_WIN_REG_HOME=%USERPROFILE%\hermes-reg' 'DOCTOR_WIN_REG_HOME=\\server\share\hermes'; do
+  # '' = no reg.exe on PATH (and no override): the registry can't be read.
+  doctor "${U}" DOCTOR_OS=wsl DOCTOR_WSL_MNT="${MNT}" ${reg:+"${reg}"} "${WSL_VARS}"
+  [ "${RC}" -eq 2 ] || fail "WSL, registry not readable (${reg:-no reg.exe}): exit ${RC}, want 2:
+${OUT}"
+  has "INFO  Hermes home: ${WIN_LAD}/hermes (unverified: Desktop may use a HERMES_HOME registry setting" "WSL registry unreadable (${reg:-no reg.exe})"
+  hasnt "OK    Hermes home" "WSL registry unreadable (${reg:-no reg.exe})"
+  hasnt "Nothing to fix. If" "WSL registry unreadable (${reg:-no reg.exe})"
+done
+ok "WSL: a registry HERMES_HOME is used; an unreadable one is unverified, exit 2"
 
 # 14. Windows (Git Bash): Desktop's order. HERMES_HOME, then the registry
 # value, then %LOCALAPPDATA%\hermes, then a legacy ~/.hermes only when the

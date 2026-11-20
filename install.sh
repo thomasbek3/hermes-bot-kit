@@ -98,6 +98,11 @@ sha256_of() {
 # that release's MANIFEST.sha256.
 if [ "${1:-}" = "--doctor" ]; then
   shift
+  # The doctor's fixes name only this release's pinned one-liners, never a
+  # local file: it is told the tag and never looks for a checkout itself.
+  doc_ref="${KIT_REF_FROM_USER:-${KIT_FALLBACK_REF}}"
+  [ "${doc_ref}" = "latest" ] && doc_ref="${KIT_FALLBACK_REF}"
+  export DOCTOR_KIT_REF="${doc_ref}" DOCTOR_NO_CHECKOUT=1
   doc_dir=""
   if [ -n "${KIT_SOURCE_DIR:-}" ]; then
     doc_dir=$(CDPATH= cd -- "${KIT_SOURCE_DIR}" && pwd)
@@ -110,8 +115,6 @@ if [ "${1:-}" = "--doctor" ]; then
       exec bash "${doc_dir}/scripts/doctor.sh" "$@"
     fi
   fi
-  doc_ref="${KIT_REF_FROM_USER:-${KIT_FALLBACK_REF}}"
-  [ "${doc_ref}" = "latest" ] && doc_ref="${KIT_FALLBACK_REF}"
   doc_tmp=$(mktemp -d)
   trap 'rm -rf "${doc_tmp}"' EXIT
   doc_base="https://raw.githubusercontent.com/${KIT_REPO}/${doc_ref}"
@@ -135,7 +138,7 @@ if [ "${1:-}" = "--doctor" ]; then
     exit 1
   fi
   doc_rc=0
-  DOCTOR_KIT_REF="${doc_ref}" bash "${doc_tmp}/doctor.sh" "$@" || doc_rc=$?
+  bash "${doc_tmp}/doctor.sh" "$@" || doc_rc=$?
   exit "${doc_rc}"
 fi
 

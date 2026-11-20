@@ -45,6 +45,10 @@
 #                          launchctl ("" = not set)
 #   DOCTOR_KIT_REF         the kit release for the fix commands (install.sh
 #                          --doctor sets it)
+#   DOCTOR_NO_CHECKOUT=1   never look for a checkout beside this script
+#                          (install.sh --doctor sets it)
+#   DOCTOR_WIN_REG_HOME    the HKCU\Environment HERMES_HOME (Windows and WSL)
+#                          instead of asking reg ("" = not set)
 #   DOCTOR_OS              mac, linux, wsl or windows instead of asking uname
 set -uo pipefail
 
@@ -58,9 +62,13 @@ KIT_PLUGINS="computer-viewer grokbot-override"
 # Keep in step with RETIRED_PLUGINS in install.sh (tests/test-doctor.sh checks).
 RETIRED_PLUGINS="bubble-mode:hermes-bubble-mode-style task-dock:hermes-task-dock-style bot-sections:hermes-bot-sections-style"
 
+# The checkout this script sits in (a .git you own beside install.sh), read
+# only for the release tag. Never when install.sh --doctor runs it
+# (DOCTOR_NO_CHECKOUT=1) or when it was fetched alone: no fix ever runs a
+# local file.
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 KIT_DIR=""
-if [ -f "${SELF_DIR}/../install.sh" ] && [ -f "${SELF_DIR}/../computer-viewer/plugin.js" ]; then
+if [ "${DOCTOR_NO_CHECKOUT:-}" != 1 ] && [ -f "${SELF_DIR}/../install.sh" ] && [ -O "${SELF_DIR}/../.git" ]; then
   KIT_DIR=$(CDPATH= cd -- "${SELF_DIR}/.." && pwd)
 fi
 
@@ -123,24 +131,29 @@ normalize_home() {
   printf '%s\n' "${h}"
 }
 
-# The release for the fix commands: install.sh --doctor passes it; a clone's
-# own install.sh names the release it came with.
+# The release tag for the fix commands: install.sh --doctor passes its
+# KIT_FALLBACK_REF (or KIT_REF); a clone's own install.sh names the release it
+# came with. Only a release tag is used: anything else gives a plain instruction.
 KIT_REF="${DOCTOR_KIT_REF:-}"
 if [ -z "${KIT_REF}" ] && [ -n "${KIT_DIR}" ]; then
   KIT_REF=$(sed -n 's/^KIT_FALLBACK_REF="\(.*\)"/\1/p' "${KIT_DIR}/install.sh" | head -n 1)
 fi
+printf '%s\n' "${KIT_REF}" | grep -Eqx 'v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{1,3})?' || KIT_REF=""
+# pinned <path in the repo> [VAR=value]: download that file from the release
+# tag to a temp file, then run it. Every fix that runs a script uses this.
+pinned() {
+  printf '( set -e; f=$(mktemp); trap '"'"'rm -f "$f"'"'"' EXIT; curl -fsSL https://raw.githubusercontent.com/%s/%s/%s -o "$f"; test -s "$f"; %sbash "$f" )' \
+    "${KIT_REPO}" "${KIT_REF}" "$1" "${2:+$2 }"
+}
 WIN_TARGET=0   # 1 when the home checked is Hermes Desktop for Windows' own
 installer_cmd() {
   # installer_cmd [VAR=value]: the exact command that (re)installs the kit.
-  local pre="${1:+$1 }"
   if [ "${WIN_TARGET}" = 1 ]; then
     printf 'on Windows: copy the grokbot-override and computer-viewer folders and MANIFEST.sha256 from the release'"'"'s source zip into %s, then reload (README: Troubleshooting, Hermes Desktop on Windows)' "${H}/desktop-plugins"
-  elif [ -n "${KIT_DIR}" ]; then
-    printf '%sbash "%s/install.sh"' "${pre}" "${KIT_DIR}"
   elif [ -n "${KIT_REF}" ]; then
-    printf '( set -e; f=$(mktemp); trap '"'"'rm -f "$f"'"'"' EXIT; curl -fsSL https://raw.githubusercontent.com/%s/%s/install.sh -o "$f"; test -s "$f"; %sbash "$f" )' "${KIT_REPO}" "${KIT_REF}" "${pre}"
+    pinned install.sh "${1:-}"
   else
-    printf 'the install command in https://github.com/%s#install%s' "${KIT_REPO}" "${1:+, with $1 in front of bash}"
+    printf 're-run the install one-liner from the README%s' "${1:+, with $1 in front of bash}"
   fi
 }
 
@@ -240,14 +253,21 @@ fi
 # --- The Hermes home ------------------------------------------------------------
 # HOME_CAT is the home's path category for the summary. HOME_VERIFIED=0 when
 # the home Hermes Desktop reads could not be seen (WSL without a view of the
-# Windows side): then nothing says OK for the home and the exit code is 2.
+# Windows side, or of its registry HERMES_HOME): then nothing says OK for the
+# home and the exit code is 2.
 DEFAULT_HOME="${HOME}/.hermes"
 HOME_CAT=default-home
 HOME_SRC="the default; HERMES_HOME is not set"
 HOME_VERIFIED=1
+UNVERIFIED=""   # why, when HOME_VERIFIED=0
 H=""
 
 trim() { printf '%s\n' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+# reg_value: the HERMES_HOME value in `reg query HKCU\Environment /v HERMES_HOME`
+# output on stdin (windows-user-env.ts parseRegQueryValue).
+reg_value() {
+  tr -d '\r' | sed -n 's/^[[:space:]]*[Hh][Ee][Rr][Mm][Ee][Ss]_[Hh][Oo][Mm][Ee][[:space:]][[:space:]]*REG_[A-Z_]*[[:space:]][[:space:]]*\(.*\)$/\1/p' | head -n 1
+}
 
 # win_home <HERMES_HOME or ""> <LOCALAPPDATA dir> <user profile dir>: Hermes
 # Desktop's Windows order (data-paths.mjs:41-66): HERMES_HOME, else
@@ -288,8 +308,7 @@ case "${OS_KIND}" in
       if [ -n "${DOCTOR_WIN_REG_HOME+set}" ]; then
         reg_home="${DOCTOR_WIN_REG_HOME}"
       elif command -v reg >/dev/null 2>&1; then
-        reg_home=$(MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 reg query 'HKCU\Environment' /v HERMES_HOME 2>/dev/null | tr -d '\r' |
-          sed -n 's/^[[:space:]]*[Hh][Ee][Rr][Mm][Ee][Ss]_[Hh][Oo][Mm][Ee][[:space:]][[:space:]]*REG_[A-Z_]*[[:space:]][[:space:]]*\(.*\)$/\1/p' | head -n 1)
+        reg_home=$(MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 reg query 'HKCU\Environment' /v HERMES_HOME 2>/dev/null | reg_value)
       fi
       # %VAR% references expand against the environment, case-insensitively.
       reg_home=$(printf '%s\n' "${reg_home}" | awk '{ out = ""; s = $0
@@ -332,12 +351,36 @@ case "${OS_KIND}" in
     if [ -n "${w_hh}" ] && [ "${w_hh}" != "%HERMES_HOME%" ]; then
       wh=$(win2wsl "${w_hh}") || wl=""
       HOME_SRC="from HERMES_HOME on the Windows side"
+    elif [ -n "${wl}" ]; then
+      # Like Desktop, fall back to HKCU\Environment (a setx this cmd.exe
+      # missed). A value the doctor can't read or map leaves the home unverified.
+      reg_home=""
+      reg_ok=1
+      if [ -n "${DOCTOR_WIN_REG_HOME+set}" ]; then
+        reg_home="${DOCTOR_WIN_REG_HOME}"
+      elif command -v reg.exe >/dev/null 2>&1; then
+        reg_home=$(cd /mnt/c 2>/dev/null; ${t:-} reg.exe query 'HKCU\Environment' /v HERMES_HOME 2>/dev/null | reg_value)
+      else
+        reg_ok=0
+      fi
+      reg_home=$(trim "${reg_home}")
+      if [ -n "${reg_home}" ]; then
+        wh=$(win2wsl "${reg_home}") || reg_ok=0
+        case "${reg_home}" in *%*) reg_ok=0 ;; esac
+        HOME_SRC="from HERMES_HOME in the registry (HKCU\\Environment)"
+      fi
+      if [ "${reg_ok}" = 0 ]; then
+        wh=""
+        HOME_VERIFIED=0
+        UNVERIFIED="unverified: Desktop may use a HERMES_HOME registry setting the doctor can't read"
+      fi
     fi
     if [ -n "${wl}" ] && [ -d "${wl}" ]; then
       win_home "${wh}" "${wl}" "${wu}"
       info wsl "WSL: diagnosing Hermes Desktop for Windows; its home, seen from WSL, is ${H}"
     else
       HOME_VERIFIED=0
+      UNVERIFIED="WSL's; unverified: Windows Desktop reads its own home, not WSL's"
       info wsl "WSL: diagnosing WSL's own Linux home only. Hermes Desktop for Windows reads its own home (%LOCALAPPDATA%\\hermes on the Windows side), which this doctor could not see from here"
     fi
     ;;
@@ -360,7 +403,7 @@ if [ "${HOME_CAT}" = profile-scoped ]; then
     "unset HERMES_HOME (or set it to ${H}) and run the installer again: $(installer_cmd)"
 fi
 if [ "${HOME_VERIFIED}" = 0 ]; then
-  info home "Hermes home: ${H} (WSL's; unverified: Windows Desktop reads its own home, not WSL's)"
+  info home "Hermes home: ${H} (${UNVERIFIED})"
 else
   ok home "Hermes home: ${H} (${HOME_SRC})"
 fi
@@ -566,16 +609,12 @@ for d in "${H}" "${H}"/profiles/*; do
   [ -d "${d}/plugins/orgo-computer" ] && orgo="${orgo} ${d}"
 done
 if [ -n "${orgo}" ]; then
-  if [ -n "${KIT_DIR}" ]; then
-    rm_cmd="bash \"${KIT_DIR}/computer-viewer/remove-orgo-computer.sh\""
-  elif [ -n "${KIT_REF}" ]; then
-    # Downloaded to a file first and pinned to the release, like the installer.
-    rm_cmd="( set -e; f=\$(mktemp); trap 'rm -f \"\$f\"' EXIT; curl -fsSL https://raw.githubusercontent.com/${KIT_REPO}/${KIT_REF}/computer-viewer/remove-orgo-computer.sh -o \"\$f\"; test -s \"\$f\"; bash \"\$f\" )"
+  if [ -n "${KIT_REF}" ]; then
+    rm_cmd="$(pinned computer-viewer/remove-orgo-computer.sh)   (a dry run; add --yes after \"\$f\" to move it out, nothing is deleted)"
   else
-    rm_cmd="bash computer-viewer/remove-orgo-computer.sh   (from a clone of the kit: git clone https://github.com/${KIT_REPO})"
+    rm_cmd="move each plugins/orgo-computer folder out of its Hermes home, and take orgo-computer out of plugins.enabled in that home's config.yaml"
   fi
-  fix orgo "The retired orgo-computer agent plugin is still installed (in${orgo})" \
-    "${rm_cmd}   (a dry run; add --yes to move it out, nothing is deleted)"
+  fix orgo "The retired orgo-computer agent plugin is still installed (in${orgo})" "${rm_cmd}"
 fi
 [ -z "${retired}" ] && [ -z "${orgo}" ] && ok retired "No retired kit plugins"
 
@@ -601,7 +640,9 @@ case "${OS_KIND}" in
 esac
 
 echo
-if [ "${NFIX}" -eq 0 ] && [ "${HOME_VERIFIED}" = 0 ]; then
+if [ "${NFIX}" -eq 0 ] && [ "${HOME_VERIFIED}" = 0 ] && [ "${WIN_TARGET}" = 1 ]; then
+  echo "Nothing to fix in ${H}, but Hermes Desktop for Windows may read another home (a HERMES_HOME in the registry): run the README's PowerShell check on Windows (README: Troubleshooting, Hermes Desktop on Windows). Exit code 2."
+elif [ "${NFIX}" -eq 0 ] && [ "${HOME_VERIFIED}" = 0 ]; then
   echo "Nothing to fix in WSL's home, but that is not the home Hermes Desktop for Windows reads: check %LOCALAPPDATA%\\hermes\\desktop-plugins on Windows (README: Troubleshooting, Hermes Desktop on Windows). Exit code 2."
 elif [ "${NFIX}" -eq 0 ]; then
   echo "Nothing to fix. If the plugins still don't show, reload them (above) and check Capabilities -> Plugins."

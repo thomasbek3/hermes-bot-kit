@@ -53,9 +53,15 @@ is new in this one.
   OK/FIX/INFO per check: no paths, usernames, tokens or file contents.
   **Downloaded alone, `install.sh` never uses files beside it** (the
   one-liner's temp dir can be a shared `/tmp`): it copies from a local tree
-  only in a git checkout you own (or with `KIT_SOURCE_DIR`), and
+  only in a git checkout you own (or with `KIT_SOURCE_DIR`; from an
+  unpacked zip you trust: `KIT_SOURCE_DIR="$PWD" bash install.sh`), and
   `--doctor` runs a local doctor only there, else it downloads and verifies
-  the release copy. The installer's syntax check parses the plugins as ES
+  the release copy. The doctor's fixes never run a local file: every repair
+  command is the release's pinned download-then-run one-liner, a `mv` line
+  or a plain instruction. In WSL it also reads a `HERMES_HOME` set in the
+  Windows registry, as Desktop does; if it can't, the home is unverified
+  (exit 2). The README's Windows check finds the same home as Desktop, and
+  Windows CI runs it as written. The installer's syntax check parses the plugins as ES
   modules, so it no longer aborts on older Node or with ESM detection off.
   The Windows steps include copying `MANIFEST.sha256` and a one-line
   PowerShell check.
@@ -149,7 +155,15 @@ is new in this one.
   On a managed Hermes, or when an administrator pins `SLACK_ALLOWED_USERS`,
   a change now fails with Hermes's own refusal instead of claiming
   success: the kit reads the allowlist back the way Hermes does before it
-  records anything. Allowlists are read exactly as Hermes parses them: a JSON list such as
+  records anything, and if that read-back is incomplete it records nothing
+  ("Couldn't confirm Hermes applied the change; nothing was recorded"). A
+  bot connected by v2026.11.16.3 keeps its list as it was ("Allowed now: …
+  (from the earlier version)"); **Only me** needs a reconnect, because the
+  kit doesn't guess who added the bot. Cancel or closing the window never
+  deletes an app whose bot token is installed; only a confirmed **Remove
+  from Slack** does. An earlier connection left in an error state is
+  checked once with Slack when its window opens. The relay's member refresh
+  no longer deadlocks with a Connect writing at the same moment. Allowlists are read exactly as Hermes parses them: a JSON list such as
   `'["U1","U2"]'` works, and `*` in either form means anyone. Channel
   allowlists (`group_allowed_chats`) and `allow_bots` / `SLACK_ALLOW_BOTS`
   are named with their source too. `scripts/test-with-hermes.sh <checkout>`

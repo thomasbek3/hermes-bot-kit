@@ -508,4 +508,21 @@ fi
 [ -s "${log}" ] || fail "the fetched-alone install did not download the release"
 echo "OK  planted files beside a fetched-alone install.sh are never used"
 
+# A trusted unpacked zip (no .git) installs from its own files only when asked
+# to on purpose: KIT_SOURCE_DIR="$PWD" bash install.sh, run inside it (README).
+zipdir=$(mktemp -d)
+CLEANUP+=("${zipdir}")
+copy_tree "${zipdir}/hermes-bot-kit-main"
+[ ! -e "${zipdir}/hermes-bot-kit-main/.git" ] || fail "zip-like copy has a .git"
+log=$(mktemp)
+CLEANUP+=("${log}")
+zhome=$(new_home)
+( cd "${zipdir}/hermes-bot-kit-main" && env -i PATH="${fake}:/usr/bin:/bin" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR}" FAKE_API=ok FAKE_LOG="${log}" \
+  FAKE_ROOT="${ROOT}" HERMES_HOME="${zhome}" KIT_SOURCE_DIR="$PWD" bash install.sh >/dev/null 2>&1 ) || fail "install from an unpacked zip failed"
+[ ! -s "${log}" ] || fail "install from an unpacked zip downloaded the release instead"
+assert_plugin "${zhome}" "computer-viewer/plugin.js"
+assert_plugin "${zhome}" "grokbot-override/plugin.js"
+grep -qx 'release=local' "${zhome}/desktop-plugins/.hermes-bot-kit-install" || fail "unpacked zip: install record is not release=local"
+echo "OK  KIT_SOURCE_DIR=\"\$PWD\" installs from a trusted unpacked zip (no .git) without downloading"
+
 echo "test-install.sh: all passed"
