@@ -28,14 +28,14 @@ from common.config import DEFAULT_PORT, config_path, load_config, normalize_publ
 LABEL = 'ai.hermes.slack-ingress'
 MANIFEST = 'install-manifest.json'
 PLUGIN = 'slack-connect'
-PLUGIN_FILES = ('common/__init__.py', 'common/core.py', 'common/token_store.py', 'common/config.py', 'common/access.py',
+PLUGIN_FILES = ('common/__init__.py', 'common/core.py', 'common/token_store.py', 'common/config.py',
                 'common/scopes.py', 'dashboard/scope_repair.py',
                 'dashboard/manifest.json', 'dashboard/plugin_api.py', 'dashboard/service.py',
                 'dashboard/slack_api.py', 'dashboard/platform_lifecycle.py', 'dashboard/platform_selection.py',
                 'dashboard/slack_switch.py', 'dashboard/dist/index.js')
 PLATFORM_FILES = ('plugin.yaml', '__init__.py', 'http_adapter.py')
 RELAY_FILES = ('relay.py', 'run.py', 'profile_helper.py')
-COMMON_FILES = ('__init__.py', 'core.py', 'token_store.py', 'config.py', 'access.py')
+COMMON_FILES = ('__init__.py', 'core.py', 'token_store.py', 'config.py')
 TAILSCALE_APP = '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
 HEALTH_WAIT = 15
 
@@ -462,9 +462,7 @@ def install(args, host):
         manifest['funnel'] = {'dns': g['funnel']['dns'], 'path': '/slack', 'target': funnel_target(config['relay_port'])}
     write_private(root / 'slack-connect' / MANIFEST, json.dumps(manifest, indent=2, sort_keys=True).encode())
     out('Installed. Hermes was not restarted.')
-    # The install itself succeeded; --check is the command that fails when not Ready.
-    self_check(args, host, config)
-    return 0
+    return self_check(args, host, config)
 
 
 def wait_health(host, config):
@@ -512,7 +510,7 @@ def self_check(args, host, config):
         if isinstance(readiness, dict) and not readiness.get('workspace_ready'):
             missing.append('a workspace configuration token: open a bot\'s Slack window in Hermes and add one')
     out('Ready' if not missing else 'Not ready yet. Missing: ' + '; '.join(missing))
-    return 0 if not missing else 1
+    return 0
 
 
 def bootstrap_status(host, base):
@@ -628,8 +626,6 @@ def parser():
     p.add_argument('--adopt', action='store_true', help='back up and replace files from an earlier manual install')
     p.add_argument('--dry-run', action='store_true', help='show what would change; change nothing')
     p.add_argument('--uninstall', action='store_true', help='remove what this installer installed')
-    p.add_argument('--check', action='store_true',
-                   help='only run the self-check of an installed add-on; exit 1 unless Ready')
     return p
 
 
@@ -660,12 +656,6 @@ def main(argv=None, host=None, platform=None):
             raise InstallError('HERMES_HOME points at a profile; run this against the Hermes root home')
         python = Path(args.hermes_python) if args.hermes_python else root / 'hermes-agent/venv/bin/python'
         host = Host(kind, home, root, python)
-    if args.check:
-        config_file = config_path(host.root)
-        if not config_file.is_file():
-            print('Not installed: no ' + str(config_file), file=sys.stderr)
-            return 1
-        return self_check(args, host, load_config(host.root))
     return uninstall(args, host) if args.uninstall else install(args, host)
 
 

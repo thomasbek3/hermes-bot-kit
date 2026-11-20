@@ -17,7 +17,6 @@ from aiohttp.test_utils import TestClient, TestServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.core import issue_state
-from common import access
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -36,11 +35,6 @@ KEY = 'a' * 32
 SECRET = 'test-secret'
 
 
-def append_env(root, values):
-    with open(root / 'profiles' / 'test-profile' / '.env', 'a') as env:
-        env.write(''.join(f'{k}={v}\n' for k, v in values.items()))
-
-
 def prepare(tmp_path):
     data = tmp_path / 'slack-connect'
     (data / 'pending').mkdir(parents=True)
@@ -48,16 +42,8 @@ def prepare(tmp_path):
     (data / 'apps.json').write_text(json.dumps({KEY: {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Test Bot'}}))
     profile = tmp_path / 'profiles' / 'test-profile'
     profile.mkdir(parents=True)
-    (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\nSLACK_APP_ID=A1\n')
+    (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\n')
     return data
-
-
-def env_scope(root):
-    """Test-only stand-in for Hermes's read-back: the profile .env, complete."""
-    async def read(profile):
-        home = root / 'profiles' / profile
-        return access.scope_from_env(access.read_env_file(home / '.env'), f'{home}/.env')
-    return read
 
 
 def signed(body, **extra):
@@ -95,13 +81,12 @@ def test_exhausted_bucket_never_blocks_signed_events_or_valid_callbacks(tmp_path
             if method == 'oauth.v2.access':
                 return {'ok': True, 'app_id': 'A1', 'team': {'id': 'T1', 'name': 'Test Team'}, 'authed_user': {'id': 'U1'}, 'access_token': 'fake-bot'}
             return {'ok': True}
-        async def writer(_profile, values):
-            append_env(tmp_path, values)   # the allowlist is read back before the record changes
+        async def writer(*_):
+            return None
         async def notify(*_):
             return True
         relay = relay_module.Relay(tmp_path, 'python', 'helper', base_url='https://example.test/slack',
-                                   upstream=str(upstream.make_url('/')).rstrip('/'), slack=slack, writer=writer, notifier=notify,
-                                   scope_reader=env_scope(tmp_path))
+                                   upstream=str(upstream.make_url('/')).rstrip('/'), slack=slack, writer=writer, notifier=notify)
         client = TestClient(TestServer(relay.application()))
         await client.start_server()
         attacker = {'X-Forwarded-For': '198.51.100.1'}
@@ -200,11 +185,10 @@ def test_callback_writes_a_cleaned_team_name_and_refuses_an_odd_owner(tmp_path):
             return {'ok': True}
         async def writer(profile, values):
             writes.append(values)
-            append_env(root, values)
         async def notify(*_):
             return True
         relay = relay_module.Relay(root, 'python', 'helper', base_url='https://example.test/slack', upstream='http://127.0.0.1:9',
-                                   slack=slack, writer=writer, notifier=notify, scope_reader=env_scope(root))
+                                   slack=slack, writer=writer, notifier=notify)
         client = TestClient(TestServer(relay.application()))
         await client.start_server()
         try:
@@ -234,7 +218,7 @@ def test_profile_helper_refuses_control_characters(tmp_path):
         '    data[key] = value\n'
         '    json.dump(data, open(OUT, "w"))\n')
     helper = ROOT / 'slack-relay' / 'profile_helper.py'
-    env = {'HERMES_AGENT_DIR': str(tmp_path / 'hermes'), 'PATH': '/usr/bin:/bin', 'HOME': str(tmp_path), 'USERPROFILE': str(tmp_path)}
+    env = {'HERMES_AGENT_DIR': str(tmp_path / 'hermes'), 'PATH': '/usr/bin:/bin'}
     run = lambda values: subprocess.run([sys.executable, '-I', str(helper)], input=json.dumps(values).encode(), env=env, capture_output=True)
     for bad in ('Team\nSLACK_ALLOWED_USERS=U666', 'a\rb', 'a\x00b', 'a\x1bb', 'a b', 'x' * 513):
         assert run({'SLACK_TEAM_NAME': bad}).returncode == 2, repr(bad[:20])

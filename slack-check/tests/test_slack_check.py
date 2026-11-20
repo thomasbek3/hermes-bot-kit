@@ -1,8 +1,7 @@
 """slack-check backend tests. No network: every Slack call goes through a fake opener.
 
-The tests marked needs_hermes use the real profile helpers; run them against a Hermes checkout with
-    scripts/test-with-hermes.sh <hermes checkout>
-Without Hermes on the path they skip.
+Run with Hermes's venv so the real profile helpers are used:
+    ~/.hermes/hermes-agent/venv/bin/python -m pytest -p no:cacheprovider slack-check/tests
 """
 from __future__ import annotations
 
@@ -25,9 +24,6 @@ HERMES_SRC = Path(os.environ.get("HERMES_AGENT_DIR", Path.home() / ".hermes" / "
 if (HERMES_SRC / "hermes_cli").is_dir() and str(HERMES_SRC) not in sys.path:
     sys.path.insert(0, str(HERMES_SRC))
 API_FILE = PLUGIN_DIR / "dashboard" / "plugin_api.py"
-# These tests read the profile through Hermes's own helpers; without Hermes on the path they skip.
-needs_hermes = pytest.mark.skipif(importlib.util.find_spec("hermes_constants") is None,
-                                  reason="needs Hermes: run scripts/test-with-hermes.sh <hermes checkout>")
 
 FAKE_BOT = "xoxb-1111-2222-FAKEbotTOKENvalue"
 FAKE_BOT_2 = "xoxb-3333-4444-SECONDtokenVALUE"
@@ -103,19 +99,16 @@ def _write_env(home: Path, **values):
 
 # --- profile env resolution ----------------------------------------------------------------
 
-@needs_hermes
 def test_reads_tokens_from_profile_env(home):
     _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT, SLACK_APP_TOKEN=FAKE_APP)
     assert api.read_tokens() == (FAKE_BOT, FAKE_APP)
 
 
-@needs_hermes
 def test_bot_token_first_comma_entry(home):
     _write_env(home, SLACK_BOT_TOKEN=f"{FAKE_BOT},{FAKE_BOT_2}")
     assert api.read_tokens() == (FAKE_BOT, "")
 
 
-@needs_hermes
 def test_scoped_profile_home_wins_over_root(home):
     """Under Hermes's per-request home override (what the profile scope sets), the TARGET profile's
     .env is read, not the root's."""
@@ -134,14 +127,12 @@ def test_scoped_profile_home_wins_over_root(home):
 
 # --- endpoint logic ------------------------------------------------------------------------
 
-@needs_hermes
 def test_missing_token_makes_no_call(home):
     fake = FakeSlack({})
     assert api.run_check(fake) == {"ok": False, "configured": False}
     assert fake.calls == []
 
 
-@needs_hermes
 def test_auth_test_ok_and_app_token(home):
     _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT, SLACK_APP_TOKEN=FAKE_APP)
     fake = FakeSlack({"auth.test": AUTH_OK, "apps.connections.open": APPS_OK})
@@ -159,7 +150,6 @@ def test_auth_test_ok_and_app_token(home):
     assert FAKE_BOT not in dumped and FAKE_APP not in dumped and "wss://" not in dumped
 
 
-@needs_hermes
 def test_auth_test_error(home):
     _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT)
     fake = FakeSlack({"auth.test": {"ok": False, "error": "invalid_auth"}})
@@ -167,7 +157,6 @@ def test_auth_test_error(home):
     assert len(fake.calls) == 1  # no app token -> no apps.connections.open
 
 
-@needs_hermes
 def test_app_token_error_reported(home):
     _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT, SLACK_APP_TOKEN=FAKE_APP)
     fake = FakeSlack({"auth.test": AUTH_OK, "apps.connections.open": {"ok": False, "error": "invalid_auth"}})
@@ -176,7 +165,6 @@ def test_app_token_error_reported(home):
     assert result["app_token_error"] == "invalid_auth"
 
 
-@needs_hermes
 def test_transport_errors_are_scrubbed(home):
     _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT)
     fake = FakeSlack({"auth.test": urllib.error.URLError(f"boom near {FAKE_BOT}")})
@@ -189,7 +177,6 @@ def test_transport_errors_are_scrubbed(home):
     assert FAKE_APP not in json.dumps(result) and result["error"].startswith("TimeoutError")
 
 
-@needs_hermes
 def test_slack_error_text_is_scrubbed(home):
     _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT)
     fake = FakeSlack({"auth.test": {"ok": False, "error": f"weird {FAKE_BOT}"}})
@@ -238,7 +225,6 @@ def test_last_log_missing_file(home):
     assert api.last_log_line(home / "logs" / "nope.log") is None
 
 
-@needs_hermes
 def test_run_check_includes_last_log(home):
     (home / "logs" / "gateway.log").write_text(LOG.format(tok="x"))
     result = api.run_check(FakeSlack({}))
@@ -247,7 +233,6 @@ def test_run_check_includes_last_log(home):
 
 # --- router mounting -----------------------------------------------------------------------
 
-@needs_hermes
 def test_router_mounts_and_serves(home, monkeypatch):
     testclient = pytest.importorskip("fastapi.testclient")
     from fastapi import FastAPI
@@ -263,7 +248,6 @@ def test_router_mounts_and_serves(home, monkeypatch):
     assert FAKE_BOT not in resp.text and len(fake.calls) == 1
 
 
-@needs_hermes
 def test_route_honours_profile_scope_dependency(tmp_path, monkeypatch):
     """Mounted like Hermes mounts it (a dependency entering ``_config_profile_scope(profile)``), a
     ``?profile=`` request reads that profile's token. Isolated in a subprocess: entering another
@@ -302,7 +286,7 @@ c = TestClient(app)
 r1 = c.get("/api/plugins/slack-check/test?profile=intake").json()
 print(json.dumps({{"r1": r1, "seen": [s.endswith({FAKE_BOT[-8:]!r}) for s in seen]}}))
 """
-    env = {"HERMES_HOME": str(root), "PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
+    env = {"HERMES_HOME": str(root), "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
     proc = subprocess.run([sys.executable, "-I", "-c", script], capture_output=True, text=True,
                           env=env, cwd=str(tmp_path), timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]
@@ -332,7 +316,6 @@ def test_hermes_discovers_manifest_with_api(tmp_path):
 GRANTED_NO_REACTIONS = "chat:write,im:history,app_mentions:read,users:read"
 
 
-@needs_hermes
 def test_missing_required_scope_is_a_warning_not_a_failure(home):
     _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT)
     fake = FakeSlack({"auth.test": AUTH_OK}, headers={"auth.test": {"X-OAuth-Scopes": GRANTED_NO_REACTIONS}})
@@ -343,7 +326,6 @@ def test_missing_required_scope_is_a_warning_not_a_failure(home):
     assert FAKE_BOT not in json.dumps(result)
 
 
-@needs_hermes
 def test_required_scope_present_means_no_warning(home):
     _write_env(home, SLACK_BOT_TOKEN=FAKE_BOT)
     fake = FakeSlack({"auth.test": AUTH_OK},

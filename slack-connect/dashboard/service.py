@@ -11,7 +11,6 @@ from urllib.parse import urlencode
 from common.core import BOT_SCOPES, ENV_KEYS, LockedFile, _atomic_json, _read_json, issue_state, manifest
 from common.token_store import TokenStore, TokenExpired
 from common.config import load_config
-from common import access as access_module
 
 LOG = logging.getLogger(__name__)
 
@@ -33,23 +32,9 @@ class SlackRefused(Conflict):
     pass
 
 
-INSTALLED = 'This Slack app is installed; use Remove from Slack'
-CHANGED = 'This Slack connection changed; reopen the window'
-NO_OWNER = 'The installer of this bot is not known. To choose Only me, reconnect the bot.'
-
-
-def identity(key, item):
-    """The connection a window shows, which a confirmed Remove must name:
-    the record's key, its app_id and record_rev (set when Connect creates the
-    record, in ms, so a replacement record always differs; 0 on records of an
-    earlier release)."""
-    rev = item.get('record_rev')
-    return {'key': key, 'app_id': item.get('app_id'), 'record_rev': rev if type(rev) is int else 0}
-
-
 class Service:
     def __init__(self, root, profile, slack, read_env, save_env, remove_env, notify, icon, live=None, lifecycle=None,
-                 check_idle=None, recycle_profile=None, slack_switch=None, gate_scope=None, auth_test=None):
+                 check_idle=None, recycle_profile=None, slack_switch=None):
         self.root, self.profile = Path(root), profile
         if not PROFILE.fullmatch(profile) or profile == 'default':
             raise ValueError('a named profile is required')
@@ -62,10 +47,6 @@ class Service:
         self.recycle_profile = recycle_profile or (lambda: None)
         # Reads and sets only platforms.slack.enabled in this profile's config.
         self.slack_switch = slack_switch
-        # The profile's gate keys as Hermes reads them (see access.gate_scope).
-        self.gate_scope = gate_scope or (lambda: access_module.gate_scope(self.root / 'profiles' / self.profile))
-        # Slack's auth.test for a bot token (scopes.check_token): {ok, team_id, ...}.
-        self.auth_test = auth_test
         self.base = None
         self.tokens = TokenStore(self.data / 'config-tokens.json')
 
@@ -155,13 +136,7 @@ class Service:
             _atomic_json(apps_path, apps)
             pending_path.unlink(missing_ok=True)
 
-    def connect(self, team, bot_name, access='members', allowed=None):
-        access = str(access or 'members').strip().lower()
-        if access not in access_module.MODES:
-            raise ValueError('invalid access choice')
-        named = access_module.parse_ids(allowed or '') if access == 'list' else []
-        if access == 'list' and not named:
-            raise ValueError('name at least one Slack member ID')
+    def connect(self, team, bot_name):
         self.base = load_config(self.root)['public_url']
         if not self.base:
             raise Conflict('Configure a public HTTPS address before connecting Slack')
@@ -180,10 +155,7 @@ class Service:
             if any(isinstance(v, dict) and v.get('profile') == self.profile for v in apps.values()):
                 raise Conflict('profile already has an app in progress')
             apps[key] = {'profile': self.profile, 'team_id': team, 'bot_name': bot_name,
-                         'prior_allowed_users': env.get('SLACK_ALLOWED_USERS'),
-                         'access': access, 'allowed': ','.join(named), 'access_rev': 1,
-                         'synced_at': None, 'sync_error': None, 'retry_after': None,
-                         'kit_format': access_module.KIT_FORMAT, 'record_rev': int(time.time() * 1000)}
+                         'prior_allowed_users': env.get('SLACK_ALLOWED_USERS')}
             _atomic_json(apps_path, apps)
             _atomic_json(pending_path, {'phase':'pending', 'at':int(time.time())})
         app_id = None
@@ -269,98 +241,16 @@ class Service:
                 _atomic_json(pending_path, {'phase':'error', 'at':int(time.time())})
             raise RuntimeError('Slack app creation could not be completed') from None
 
-    def _record(self):
-        for key, item in _read_json(self.data / 'apps.json', {}).items():
-            if isinstance(item, dict) and item.get('profile') == self.profile:
-                return key, item
-        return None, None
-
-    def audience(self, env=None, key=None, item=None):
-        """The one effective-access result (access.effective_access) for this
-        bot, as the window shows it. Never claims less than the truth."""
-        env = self.read_env() if env is None else env
-        if key is None:
-            key, item = self._record()
-        pending = _read_json(self.data / 'pending' / (key + '.json'), {}) if key else {}
-        item = {**(item or {}), 'owner': access_module.owner_of(item, pending)}
-        result = access_module.effective_access(self.gate_scope(),
-            access_module.pairing_approved(self.root / 'profiles' / self.profile), item,
-            team_name=public_text(env.get('SLACK_TEAM_NAME') or 'the workspace'))
-        result.pop('ids')   # a whole workspace; the window needs only the count
-        return result
-
-    def set_access(self, access, allowed=None):
-        """Change who can talk to a connected bot: 'members' (verified full
-        members of the workspace), 'owner' (only the installer) or 'list'
-        (named IDs, the installer included). The new mode, list and revision
-        are committed in publish_allowlist together with the .env write, after
-        it succeeded: a failed write leaves the record as it was. The bumped
-        revision then refuses any member sync that started before."""
-        access = str(access or '').strip().lower()
-        if access not in access_module.MODES:
-            raise ValueError('invalid access choice')
-        named = access_module.parse_ids(allowed or '') if access == 'list' else []
-        if access == 'list' and not named:
-            raise ValueError('name at least one Slack member ID')
-        key, item = self._record()
-        pending = _read_json(self.data / 'pending' / (key + '.json'), {}) if key else {}
-        # A connection from an earlier release is migrated here (audience unchanged).
-        item = access_module.adopt(self.data, key, self.profile, self.read_env) if key else None
-        env = self.read_env()
-        if not item or not env.get('SLACK_BOT_TOKEN') or not item.get('app_id'):
-            raise Conflict('Connect the bot to Slack first')
-        owner = access_module.owner_of(item, pending)
-        if access == 'owner' and not owner:
-            raise Conflict(NO_OWNER)
-        expect = access_module.expect_of(item)
-        fields = {'access': access, 'allowed': ','.join(named), 'access_rev': access_module.rev_of(item) + 1,
-                  'synced_at': None, 'sync_error': None, 'retry_after': None, **({'owner': owner} if owner else {})}
-        if access == 'members':
-            # Read outside the lock; publish checks the revision is still ours.
-            # The new audience has no member list yet, so a failed read is judged as never read.
-            now = time.time()
-            try:
-                members = access_module.full_members(self.slack.users_list(env['SLACK_BOT_TOKEN']), item.get('team_id'))
-                ids, synced = access_module.sync_success(owner, members, now)
-            except Exception as exc:
-                exc = exc if isinstance(exc, access_module.SlackReadError) else access_module.SlackReadError()
-                LOG.warning('Slack member list could not be read: %s', exc.error)
-                ids, synced = access_module.sync_failure({**item, 'synced_at': None}, owner, exc, now)
-            fields.update(synced)
-        else:
-            ids = access_module.allowlist(access, owner, named=named)
-        if not access_module.publish_allowlist(self.data, key, expect, ids, self.write_env,
-                                               read_env=self.read_env, fields=fields, read_back=self.gate_scope):
-            raise Conflict('Who can talk to the bot changed meanwhile; check the window and try again')
-        return self.status()
-
-    def write_env(self, values):
-        """publish_allowlist's writer: a value of None removes the key."""
-        kept = {k: v for k, v in values.items() if v is not None}
-        if kept:
-            self.save_env(kept)
-        gone = tuple(k for k, v in values.items() if v is None)
-        if gone:
-            self.remove_env(gone)
-
-    def status(self, live=True):
-        """The window's state. `live=False` (the 20 s audience poll) reads only
-        local state: no Slack call and no connection test, so an installed
-        bot stays 'installed' rather than proven 'connected'."""
+    def status(self):
         env = self.read_env()
         if env.get('SLACK_APP_TOKEN'):
             return {'phase':'none', 'mode':'socket'}
         for key, item in _read_json(self.data / 'apps.json', {}).items():
             if isinstance(item, dict) and item.get('profile') == self.profile:
                 pending = _read_json(self.data / 'pending' / (key + '.json'), {})
-                if live and pending.get('phase') != 'installed':
-                    pending = self._reconcile(key, item, env, pending)
                 phase = pending.get('phase', 'error')
-                # First sight of a connection from an earlier release migrates it.
-                if not access_module.committed(item):
-                    item = access_module.adopt(self.data, key, self.profile, lambda: env) or item
                 scope_fields = {}
-                if phase == 'installed' and live:
+                if phase == 'installed':
                     try:
                         answer = self.live(env)
                         if answer:
@@ -372,75 +262,20 @@ class Service:
                                             'scope_warning': public_text(answer.get('warning'))}
                     except Exception:
                         pass
-                audience = {}
-                if phase in ('installed', 'connected'):
-                    try:
-                        audience = {'audience': self.audience(env, key, item)}
-                    except Exception:
-                        audience = {}
-                mode = access_module.mode_of(item.get('access'))
-                owner_known = bool(access_module.owner_of(item, pending))
-                if mode == access_module.LEGACY and audience:
-                    # Connected before team access: shown as it is, until the owner chooses.
-                    ids = sorted(x for x in access_module.coerce_allow_set(env.get('SLACK_ALLOWED_USERS'))
-                                 if access_module.USER_ID.fullmatch(x))
-                    audience['legacy'] = {'ids': ids,
-                        'text': 'Allowed now: ' + (', '.join(ids) if ids else 'no listed member IDs') + ' (from the earlier version)'}
-                return {'phase':phase, **identity(key, item), 'team_name':public_text(pending.get('team_name')),
+                return {'phase':phase, 'team_name':public_text(pending.get('team_name')),
                         'bot':public_text(item.get('bot_name')), 'mode':'http',
-                        'access': mode, 'owner_known': owner_known,
-                        # Cancel never removes an app with a bot token; only Remove does.
-                        'token_installed': bool(env.get('SLACK_BOT_TOKEN')),
                         'icon_result':item.get('icon_result'),
-                        **({'welcome': 'failed', 'welcome_error': public_text(item.get('welcome_error') or 'unknown')}
-                           if item.get('welcome') == 'failed' else {}),
-                        'manifest_update_result':item.get('manifest_update_result'), **scope_fields, **audience}
+                        'manifest_update_result':item.get('manifest_update_result'), **scope_fields}
         return {'phase':'none', 'mode':'http'}
 
-    def _reconcile(self, key, item, env, pending):
-        """An earlier release's connection whose Connect did not end
-        'installed' although its token was saved (that release wrote the
-        phase only after the welcome DM): one live auth.test with that token,
-        on the window's live status only. If it passes for this team, the
-        connection reads as installed and is migrated; otherwise nothing
-        changes. Returns the pending state to show."""
-        token = env.get('SLACK_BOT_TOKEN')
-        if (self.auth_test is None or 'kit_format' in item or access_module.committed(item) or
-                not token or not item.get('app_id') or env.get('SLACK_APP_ID') != item['app_id']):
-            return pending
-        try:
-            answer = self.auth_test(token)
-        except Exception:
-            return pending
-        if not isinstance(answer, dict) or answer.get('ok') is not True or answer.get('team_id') != item.get('team_id'):
-            return pending
-        pending = {**pending, 'phase': 'installed', 'at': int(time.time()),
-                   'team_name': pending.get('team_name') or env.get('SLACK_TEAM_NAME') or ''}
-        _atomic_json(self.data / 'pending' / (key + '.json'), pending)
-        return pending
-
-    def delete(self, confirm=False, seen=None):
-        """Delete this bot's Slack app. Without `confirm` (Cancel, a rollback)
-        an installed app is never deleted: a bot token in the .env,
-        `installed_at` or phase installed. The record, its pending state and
-        the .env are all read under apps.lock, the lock the OAuth callback
-        commits the token under. A confirmed Remove names the connection its
-        window showed (`seen`, see identity()); any other is refused."""
+    def delete(self):
+        env = self.read_env()
+        if env.get('SLACK_APP_TOKEN'):
+            raise Conflict('Socket Mode apps cannot be removed here')
         path = self.data / 'apps.json'
         with LockedFile(self.data / 'apps.lock'):
-            env = self.read_env()
-            if env.get('SLACK_APP_TOKEN'):
-                raise Conflict('Socket Mode apps cannot be removed here')
             apps = _read_json(path, {})
             found = [(key, item) for key, item in apps.items() if isinstance(item, dict) and item.get('profile') == self.profile]
-            if confirm is True:
-                if len(found) != 1 or identity(*found[0]) != seen:
-                    raise Conflict(CHANGED)
-            elif found and (env.get('SLACK_BOT_TOKEN') or any(
-                    type(item.get('installed_at')) is int or
-                    _read_json(self.data / 'pending' / (key + '.json'), {}).get('phase') == 'installed'
-                    for key, item in found)):
-                raise Conflict(INSTALLED)
             if not found:
                 # A rollback that could not switch Slack back off left its marker.
                 self._restore_slack_switch(strict=True)

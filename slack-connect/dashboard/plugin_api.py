@@ -119,26 +119,6 @@ def recycle_profile(root, profile):
         raise platform_module.GatewayReloadError('Could not confirm this bot restarted after removing Slack. Try again.')
 
 
-def env_saver(save_env_value, config=None):
-    """save_env for the service. Hermes's save_env_value refuses a locked key
-    (managed Hermes, an administrator-pinned key) by printing and returning;
-    require_env_writable (newer Hermes) raises that refusal instead, so every
-    key is checked first and a refusal writes nothing and fails the save."""
-    if config is None:
-        import hermes_cli.config as config
-    require = getattr(config, 'require_env_writable', None)
-    def save(values):
-        if require:
-            for key in values:
-                try:
-                    require(key, 'set')
-                except ValueError as exc:
-                    raise service_module.access_module.EnvNotApplied(str(exc)) from None
-        for key, value in values.items():
-            save_env_value(key, value)
-    return save
-
-
 def make_service():
     from hermes_constants import get_default_hermes_root, get_hermes_home
     from hermes_cli.config import load_env, save_env_value, remove_env_value
@@ -148,7 +128,9 @@ def make_service():
     root = Path(get_default_hermes_root())
     if home.parent != root / 'profiles':
         raise ValueError('a named profile is required')
-    save = env_saver(save_env_value)
+    def save(values):
+        for key, value in values.items():
+            save_env_value(key, value)
     def remove(keys):
         for key in keys:
             remove_env_value(key)
@@ -169,7 +151,7 @@ def make_service():
     return service_module.Service(root, home.name, slack,
         load_env, save, remove, lambda: notify_multiplexer_profiles_changed(home.name), lambda: slack_module.profile_icon(home), live, lifecycle,
         lambda: check_profile_idle(root, home.name), lambda: recycle_profile(root, home.name),
-        SlackSwitch(home, root), auth_test=scope_module.check_token)
+        SlackSwitch(home, root))
 
 
 def homes():
@@ -215,9 +197,6 @@ def handle(action, factory=None):
         raise HTTPException(status_code=409, detail='Slack setup token expired, add a new one') from None
     except service_module.Conflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    except service_module.access_module.EnvNotApplied as exc:
-        # Hermes's own refusal or what it kept: names a key and a file, never a secret.
-        raise HTTPException(status_code=409, detail=service_module.public_text(exc)) from None
     except platform_module.GatewayReloadError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
     except ValueError:
@@ -247,20 +226,9 @@ async def bootstrap(request: Request):
 async def connect(request: Request):
     body = await request_object(request)
     team, name = body.get('team_id'), body.get('bot_name', 'Hermes')
-    access, allowed = body.get('access', 'members'), body.get('allowed', '')
-    if not isinstance(team, str) or not isinstance(name, str) or not isinstance(access, str) or not isinstance(allowed, (str, list)):
+    if not isinstance(team, str) or not isinstance(name, str):
         raise HTTPException(status_code=400, detail='Invalid Slack connection request')
-    return await run_in_threadpool(lambda: handle(lambda service: service.connect(team, name, access, allowed)))
-
-
-@router.post('/access')
-async def set_access(request: Request):
-    """Who can talk to the bot: access = members | owner | list (+ allowed IDs)."""
-    body = await request_object(request)
-    access, allowed = body.get('access'), body.get('allowed', '')
-    if not isinstance(access, str) or not isinstance(allowed, (str, list)):
-        raise HTTPException(status_code=400, detail='Invalid Slack access request')
-    return await run_in_threadpool(lambda: handle(lambda service: service.set_access(access, allowed)))
+    return await run_in_threadpool(lambda: handle(lambda service: service.connect(team, name)))
 
 
 _infrastructure_cache = {}
@@ -319,30 +287,6 @@ def status():
     return {**result, 'readiness': readiness(root)}
 
 
-@router.get('/audience')
-def audience():
-    """Who can talk to the bot, from local state only (the record, the gate
-    scope, pairing): no Slack call and no connection test. The window polls
-    this; /status (live checks) runs on open and on Test connection."""
-    root, home = homes()
-    if home == root:
-        return {'phase': 'none', 'mode': 'bootstrap'}
-    return handle(lambda service: service.status(live=False))
-
-
 @router.delete('/connect')
 def disconnect():
-    """Cancel: removes an incomplete app only, never one with a bot token."""
     return handle(lambda service: service.delete())
-
-
-@router.post('/remove')
-async def remove(request: Request):
-    """Remove from Slack, after the window's confirmation step. The body names
-    the connection the window showed (key, app_id, record_rev from /status);
-    the service refuses it (409) unless that is still this bot's connection."""
-    body = await request_object(request)
-    if body.get('confirm') is not True:
-        raise HTTPException(status_code=409, detail='Confirm removing this Slack app')
-    seen = {name: body.get(name) for name in ('key', 'app_id', 'record_rev')}
-    return await run_in_threadpool(lambda: handle(lambda service: service.delete(confirm=True, seen=seen)))

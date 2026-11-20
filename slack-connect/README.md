@@ -6,25 +6,6 @@ Slack's Allow page, and when you click Allow the bot is in Slack. It answers
 DMs and @mentions with the same plugins, context and memories it uses in
 Hermes. **Remove from Slack** deletes the app again.
 
-**Who can talk to it:** by default every full member of the workspace that
-Slack's member list confirms (not guests, not Slack Connect users from other
-companies); or only you, or named people, chosen in the same window. The kit
-writes that list into the bot's `SLACK_ALLOWED_USERS` and the relay refreshes it
-from Slack's `users.list` every 15 minutes (all pages or nothing; it honours
-`Retry-After`, which never stretches the 24 hours below). If Slack can't be read for more than 24 hours the bot falls back
-to only you (if Slack last listed you as a full member) or to nobody
-(`SLACK_ALLOWED_USERS=NOBODY`). The window, the confirmation page and the
-welcome DM show the **effective** audience, read the way Hermes reads the
-profile's settings (`SLACK_ALLOWED_USERS`, `SLACK_ALLOW_ALL_USERS`,
-`GATEWAY_ALLOWED_USERS`, `GATEWAY_ALLOW_ALL_USERS`, pairing approvals, each list
-parsed as Hermes parses it, JSON list or comma list; never the root `.env`), plus
-the channel and bot grants Hermes checks first (`group_allowed_chats`,
-`SLACK_ALLOW_BOTS` / `allow_bots`). Any other grant is named with where it is set and how to change
-it; the kit changes only `SLACK_ALLOWED_USERS`. Bots connected by an earlier
-release keep their list until you choose. Anyone who can talk to the bot can use
-its tools with the bot's access: see
-[docs/SLACK.md](../docs/SLACK.md#who-can-talk-to-the-bot).
-
 <p align="center">
   <img src="../grokbot-override/screenshots/slack-strip.png" alt="Add to Slack in three steps: the Add to Slack window with the Acme Team workspace and Connect, the Connected to Acme Team Slack window, and the Slack card reading Connected" width="860">
 </p>
@@ -120,8 +101,7 @@ installer leaves to you.
    Configuration Tokens*, click **Generate Token** for your workspace and paste
    the **Refresh token** (`xoxe-…`). This is done once per workspace.
 3. Pick the workspace and click **Connect**. Slack opens; click **Allow**.
-4. The window shows *Connected*, and the bot sends you a welcome DM in Slack. If
-   the DM fails, the bot is connected anyway and the window names Slack's reason.
+4. The window shows *Connected*, and the bot sends you a welcome DM in Slack.
 
 Connect changes only that bot's profile: it adds the Slack credentials to its
 `.env`, turns on the bot's own Slack platform plugin, and, if the bot's
@@ -177,12 +157,6 @@ next reloads them.
   quotes, backslash, backtick or `$`, at most 100 characters) and the
   installer's user id must be a plain Slack id before either is written to the
   bot's `.env`.
-- The dashboard and the relay write `SLACK_ALLOWED_USERS` through one function
-  (`common/access.py` `publish_allowlist`). Under `slack-connect/apps.lock` it
-  re-checks the app's record (its audience and revision) and that the profile's
-  `SLACK_APP_ID` is that app, and only then writes. A member refresh that
-  started before you changed the audience is refused, and no other profile or
-  app is ever written.
 - The relay logs only the method, a sanitized path,
   the status and whether the request was a URL check. It never logs bodies,
   query strings or tokens. Log: `~/Library/Logs/hermes-slack-ingress.log`

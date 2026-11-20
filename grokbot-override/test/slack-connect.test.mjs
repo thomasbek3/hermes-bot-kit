@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bootstrapSlackConnect, connectRequest, isSlackAuthorizationUrl, needsWorkspace, probeSlackConnect, refreshTokenError, removalBody, slackConnectReady, workspaceLabel } from '../src/core/slackConnect.js'
+import { bootstrapSlackConnect, connectRequest, isSlackAuthorizationUrl, needsWorkspace, probeSlackConnect, refreshTokenError, slackConnectReady, workspaceLabel } from '../src/core/slackConnect.js'
 import { withoutSecrets } from '../src/core/slack.js'
 import { READY, waitFor } from './loader-boot.mjs'
 import { buttonWithText } from './loader-surfaces.mjs'
@@ -54,8 +54,7 @@ test('Slack provisioning confirms removal and cancels a created app', { skip: !R
     assert.equal(`${req.connectionId}::${req.profile}`, key)
     calls.push(`${req.method} ${req.path}`)
     if (req.path.endsWith('/workspaces')) return [{team_id:'T1',team_name:'Example'}]
-    if (req.path.endsWith('/status')) return {mode:'http',phase,...(phase === 'none' ? {} : {key:'d'.repeat(32),app_id:'A1',record_rev:7}),team_name:'Example',readiness:{infrastructure_ready:true}}
-    if (req.method === 'POST' && req.path.endsWith('/remove')) { assert.deepEqual(req.body, {confirm:true,key:'d'.repeat(32),app_id:'A1',record_rev:7}); phase = 'none'; return {ok:true} }
+    if (req.path.endsWith('/status')) return {mode:'http',phase,team_name:'Example',readiness:{infrastructure_ready:true}}
     if (req.method === 'POST') { phase = 'created'; return {authorize_url:'https://slack.com/oauth/v2/authorize?fake=1',app_id:'A1'} }
     if (req.method === 'DELETE') { phase = 'none'; return {ok:true} }
     throw new Error('unexpected')
@@ -85,8 +84,7 @@ test('Slack provisioning confirms removal and cancels a created app', { skip: !R
   buttonWithText(sheet, 'Remove from Slack').click()
   await waitFor(() => sheet.textContent.includes('This deletes the app'), 'confirmation again')
   buttonWithText(sheet, 'Remove').click()
-  await waitFor(() => calls.includes('POST /api/plugins/slack-connect/remove'), 'confirmed deletion')
-  assert.equal(calls.filter(x => x.startsWith('DELETE')).length, 1, 'Remove is its own confirmed route')
+  await waitFor(() => calls.filter(x => x.startsWith('DELETE')).length === 2, 'confirmed deletion')
   await waitFor(() => sheet.textContent.includes('Bring Scholar to Slack'), 'removal finishes')
   sheet.querySelector('[aria-label="Close"]').click()
   await waitFor(() => !sheetEl(), 'sheet closes after removal')
@@ -95,7 +93,7 @@ test('Slack provisioning confirms removal and cancels a created app', { skip: !R
   sheet = await waitFor(() => sheetEl()?.textContent.includes('Slack install was cancelled') ? sheetEl() : null, 'denied dialog')
   buttonWithText(sheet, 'Cancel').click()
   await waitFor(() => !sheetEl(), 'denied cancel cleans up and closes')
-  assert.equal(calls.filter(x => x.startsWith('DELETE')).length, 2)
+  assert.equal(calls.filter(x => x.startsWith('DELETE')).length, 3)
 })
 
 test('readiness picks one-click, add-a-workspace or the paste-tokens dialog', async () => {
@@ -123,39 +121,4 @@ test('readiness picks one-click, add-a-workspace or the paste-tokens dialog', as
     : missing()
   assert.equal((await probeSlackConnect(viaDefault(false), scope)).kind, 'missing')
   assert.equal((await probeSlackConnect(viaDefault(true), scope)).bootstrap, true)
-})
-
-test('access choice: the whole team by default, restrictions validated', async () => {
-  const { accessBody, accessChoices, audienceView, ACCESS_CHOICES } = await import('../src/core/slackConnect.js')
-  assert.equal(ACCESS_CHOICES[0].id, 'members', 'the team is the default')
-  assert.match(ACCESS_CHOICES[0].hint, /not guests/)
-  assert.deepEqual(accessBody('members', ''), { body: { access: 'members' } })
-  assert.deepEqual(accessBody('owner', 'U1'), { body: { access: 'owner' } })
-  assert.deepEqual(accessBody('list', ' U01AB, U02CD '), { body: { access: 'list', allowed: 'U01AB,U02CD' } })
-  assert.ok(accessBody('list', '').error)
-  assert.ok(accessBody('list', 'U1, bob').error)
-  assert.deepEqual(accessBody('nonsense'), { body: { access: 'members' } })
-  assert.equal(audienceView({}), null)
-  const view = audienceView({ owner_known: false, legacy: { ids: ['U1', 'bad'], text: 'Connected before team access: it allows U1.' },
-    audience: { text: 'Anyone …', open: true, sync: { text: 'Member list never read.', stale: true },
-      grants: [{ what: 'SLACK_ALLOW_ALL_USERS=true', source: '/h/.env', ids: null, how_to_change: 'remove it' }, { what: 'GATEWAY_ALLOWED_USERS', source: 'external secret source', ids: ['U9'], how_to_change: 'edit it' }] } })
-  assert.equal(view.open, true)
-  assert.equal(view.stale, true)
-  assert.equal(view.sync, 'Member list never read.')
-  assert.deepEqual(view.grants[1], { what: 'GATEWAY_ALLOWED_USERS', source: 'external secret source', how: 'edit it' })
-  assert.deepEqual(view.legacy.ids, ['U1'])
-  assert.equal(view.ownerKnown, false)
-  assert.equal('fixable' in view, false, 'nothing is offered as a one-click fix')
-  assert.deepEqual(accessChoices(false).map(c => c.id), ['members', 'list'])
-  assert.deepEqual(accessChoices(true).map(c => c.id), ['members', 'owner', 'list'])
-})
-
-
-// Round 7: a confirmed Remove names the connection the window showed; the
-// server refuses it (409) if that is no longer this bot's connection.
-test('Remove from Slack sends the key, app_id and record_rev of the status shown', () => {
-  const status = { phase: 'connected', key: 'c'.repeat(32), app_id: 'A1', record_rev: 1763600000123, token_installed: true }
-  assert.deepEqual(removalBody(status), { confirm: true, key: 'c'.repeat(32), app_id: 'A1', record_rev: 1763600000123 })
-  assert.deepEqual(removalBody({ phase: 'none' }), { confirm: true, key: null, app_id: null, record_rev: null })
-  assert.deepEqual(removalBody(undefined), { confirm: true, key: null, app_id: null, record_rev: null })
 })

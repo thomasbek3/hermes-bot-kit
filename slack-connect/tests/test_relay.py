@@ -15,7 +15,6 @@ from aiohttp.test_utils import TestClient, TestServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.core import issue_state
-from common import access
 path = Path(__file__).resolve().parents[2] / 'slack-relay' / 'relay.py'
 spec = importlib.util.spec_from_file_location('relay_test', path)
 relay_module = importlib.util.module_from_spec(spec)
@@ -30,11 +29,10 @@ def prepare(tmp_path):
     pending = data / 'pending'
     pending.mkdir(parents=True)
     (data / 'state.key').write_bytes(b'k' * 32)
-    (data / 'apps.json').write_text(json.dumps({KEY: {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Test Bot',
-                                                      'access': 'members', 'access_rev': 1}}))
+    (data / 'apps.json').write_text(json.dumps({KEY: {'profile': 'test-profile', 'app_id': 'A1', 'team_id': 'T1', 'bot_name': 'Test Bot'}}))
     profile = tmp_path / 'profiles' / 'test-profile'
     profile.mkdir(parents=True)
-    (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\nSLACK_APP_ID=A1\n')
+    (profile / '.env').write_text('SLACK_SIGNING_SECRET=test-secret\nSLACK_CLIENT_ID=test-client\nSLACK_CLIENT_SECRET=test-client-secret\n')
     return data
 
 
@@ -110,33 +108,22 @@ def test_oauth_success_denial_and_single_use(tmp_path):
             calls.append((method, values, token))
             if method == 'oauth.v2.access':
                 return {'ok': True, 'app_id':'A1', 'team':{'id':'T1','name':'Test Team'}, 'authed_user':{'id':'U1'}, 'access_token':'fake-bot', 'bot_user_id':'B1'}
-            if method == 'users.list':
-                return {'ok': True, 'members': [{'id': 'U1', 'team_id': 'T1'}]}
             return {'ok': True}
         async def writer(profile, values):
             writes.append((profile, values))
-            with open(tmp_path / 'profiles' / profile / '.env', 'a') as env:   # read back before the record changes
-                env.write(''.join(f'{k}={v}\n' for k, v in values.items()))
         async def notify(profile):
             notifications.append(profile)
-        async def scope_reader(profile):   # test-only stand-in for Hermes's read-back
-            home = tmp_path / 'profiles' / profile
-            return access.scope_from_env(access.read_env_file(home / '.env'), f'{home}/.env')
-        relay = relay_module.Relay(tmp_path, 'python', 'helper', base_url='https://example.test/slack', upstream='http://127.0.0.1:9999', slack=slack, writer=writer, notifier=notify,
-                                   scope_reader=scope_reader)
+        relay = relay_module.Relay(tmp_path, 'python', 'helper', base_url='https://example.test/slack', upstream='http://127.0.0.1:9999', slack=slack, writer=writer, notifier=notify)
         client = TestClient(TestServer(relay.application()))
         await client.start_server()
         try:
             state = issue_state(b'k' * 32, 'test-profile', KEY, 'T1')
             response = await client.get('/oauth/callback', params={'state':state, 'code':'fake-code'})
             assert response.status == 200
-            # Default audience: the workspace's verified full members
-            # (users.list); the fake lists only the installer.
             assert writes[0][0] == 'test-profile' and writes[0][1]['SLACK_ALLOWED_USERS'] == 'U1'
             assert notifications == ['test-profile']
-            assert calls[1][0] == 'users.list'
-            assert calls[2][0] == 'chat.postMessage' and calls[2][1]['channel'] == 'U1'
-            assert len(json.loads(calls[2][1]['blocks'])) == 2
+            assert calls[1][0] == 'chat.postMessage' and calls[1][1]['channel'] == 'U1'
+            assert len(json.loads(calls[1][1]['blocks'])) == 2
             assert json.loads((data / 'pending' / (KEY + '.json')).read_text())['phase'] == 'installed'
             assert (await client.get('/oauth/callback', params={'state':state, 'code':'fake-code'})).status == 400
             denied = issue_state(b'k' * 32, 'test-profile', KEY, 'T1')

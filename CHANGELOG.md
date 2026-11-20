@@ -134,70 +134,14 @@ is new in this one.
     name, its source and a copyable, safely quoted
     `hermes -p '<profile>' skills install '<name>'`, with a pointer to
     `hermes skills search` to check the source first.
-- **Slack: your team can talk to the bot (2026-11-19).** One-click Add to
-  Slack now lets every **full member** of the workspace DM and @mention the bot
-  by default; guests and Slack Connect users are left out. Hermes has no
-  members-only switch (`SLACK_ALLOW_ALL_USERS` would admit guests), so the kit
-  writes the member list into the bot's `SLACK_ALLOWED_USERS` and the relay
-  refreshes it every 15 minutes. Only people Slack lists as full members are
-  in it (the installer too); a failed read keeps the last list for at most 24
-  hours, then falls back to the installer (if Slack last listed them as a full
-  member) or to nobody, and the window says the list is stale. Slack's
-  `Retry-After` is honoured and a missing `users:read` permission is named.
-  Nobody is written as `NOBODY`, never as an empty value (Hermes reads an empty
-  allowlist as "no allowlist"). **Only me** and **Only these people** are
-  explicit choices, before Connect or later. Every change carries a revision,
-  and a refresh that started before your change is discarded, so it can't
-  undo **Only me**. The Slack window (which refreshes itself), Slack's
-  confirmation page and the welcome DM show one result: who can actually talk
-  to the bot, worked out the way a multiplexed Hermes gateway reads that
-  profile (`SLACK_ALLOWED_USERS`, `SLACK_ALLOW_ALL_USERS`,
-  `GATEWAY_ALLOWED_USERS`, `GATEWAY_ALLOW_ALL_USERS` and pairing approvals),
-  with every extra grant named with its source and how to change it. The kit
-  changes only that bot's `SLACK_ALLOWED_USERS`. Bots connected by an earlier
-  release keep their list until you pick **Keep these people**, **Everyone in
-  the workspace** or **Only me**. Bots connected by v2026.11.16.3 or an earlier
-  build of this release are recognised after the upgrade (by their app,
-  profile and installed credentials): their audience can be changed and
-  members bots are refreshed, with nothing changed until the owner chooses.
-  On a managed Hermes, or when an administrator pins `SLACK_ALLOWED_USERS`,
-  a change now fails with Hermes's own refusal instead of claiming
-  success: the kit reads the allowlist back the way Hermes does before it
-  records anything, and if that read-back is incomplete it records nothing
-  ("Couldn't confirm Hermes applied the change; nothing was recorded"). A
-  bot connected by v2026.11.16.3 keeps its list as it was ("Allowed now: …
-  (from the earlier version)"); **Only me** needs a reconnect, because the
-  kit doesn't guess who added the bot. Cancel or closing the window never
-  deletes an app whose bot token is installed; only a confirmed **Remove
-  from Slack** does. An earlier connection left in an error state is
-  checked once with Slack when its window opens. The relay's member refresh
-  no longer deadlocks with a Connect writing at the same moment. Cancel
-  reads the install state under the same lock the Slack authorization
-  commits under, so cancelling while Slack finishes never deletes the new
-  app; **Remove from Slack** deletes only the connection the window showed
-  (its key, app ID and revision), else "This Slack connection changed;
-  reopen the window". A change of who can talk to the bot is never left
-  half-applied: nothing is written unless Hermes's settings can be read
-  first, and if Hermes doesn't confirm it, the previous values are put back
-  and checked; a first Connect that fails leaves no Slack token (or, as a
-  last resort, `SLACK_ALLOWED_USERS=NOBODY`), and the window says which. Allowlists are read exactly as Hermes parses them: a JSON list such as
-  `'["U1","U2"]'` works, and `*` in either form means anyone. Channel
-  allowlists (`group_allowed_chats`) and `allow_bots` / `SLACK_ALLOW_BOTS`
-  are named with their source too. `scripts/test-with-hermes.sh <checkout>`
-  checks that verdict against Hermes's own gateway authorization and runs
-  slack-check's full suite against a Hermes checkout (a local step: CI never
-  imports upstream Hermes). A welcome DM that can't be sent no longer leaves
-  the bot half-connected: it is kept current as soon as its credentials and
-  access are saved, and the window says the welcome failed. A changed
-  audience is saved only together with the bot's `.env`, so a failed save
-  changes nothing, and a profile write that times out is stopped before its
-  lock is released. While Slack asks the relay to wait, a list older than 24
-  hours still falls back on time. The open window refreshes who can talk to
-  the bot from local settings only; it asks Slack only when opened and on
-  **Test connection**.
-  `slack-connect/install.py --check` exits non-zero until the add-on is
-  ready. Anyone who can message a bot uses it with the bot's own access:
-  `docs/SLACK.md` says so and how to restrict it.
+- **Slack: who can talk to the bot (2026-11-19).** Unchanged in this release:
+  after one-click **Connect**, only the person who clicked **Allow** can talk
+  to the bot (`SLACK_ALLOWED_USERS` = that member). To let teammates in, add
+  their Slack member IDs to `SLACK_ALLOWED_USERS` in the bot's profile `.env`
+  (`~/.hermes/profiles/<bot profile>/.env`) and restart or reload the bot;
+  `docs/SLACK.md` has the step, and says that anyone on the list can make the
+  bot act with its own access. Team-wide access by default is coming in the
+  next release.
 - **Install: no downgrades, complete manifests, timeouts (2026-11-19).**
   `install.sh` records the installed release
   (`desktop-plugins/.hermes-bot-kit-install`) and, when it picked the release

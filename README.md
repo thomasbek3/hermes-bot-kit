@@ -207,7 +207,10 @@ automatically.)
 
 **Putting a bot in Slack?** [docs/SLACK.md](docs/SLACK.md) is a step-by-step
 runbook (for you or your agent): Socket Mode with two tokens, or one-click
-**Add to Slack** with the kit's relay, and which steps only you can do.
+**Add to Slack** with the kit's relay, and which steps only you can do. After
+Connect only you can talk to the bot; the runbook shows how to add teammates
+(their member IDs in the bot's `SLACK_ALLOWED_USERS`). Team-wide access by
+default is coming in the next release.
 
 ## New: Grokbot Override
 

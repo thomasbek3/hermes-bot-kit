@@ -329,18 +329,3 @@ def test_missing_gateway_listener_is_reported_and_stops_a_real_install(tmp_path)
     assert not (host.root / 'plugins').exists()
     assert run(host, '--gateway-url', 'http://127.0.0.1:8642', '--public-url', 'https://your-host.example.test') == 0
     assert json.loads((host.root / 'slack-connect/config.json').read_text())['gateway_url'] == 'http://127.0.0.1:8642'
-
-
-
-def test_check_mode_exits_nonzero_unless_ready(tmp_path):
-    host = FakeHost(tmp_path / 'none', workspace=True)
-    assert run(host, '--check') == 1, 'not installed: --check fails'
-    host = FakeHost(tmp_path / 'ok', workspace=True)
-    assert run(host, '--public-url', 'https://your-host.example.test/slack') == 0
-    host.lines.clear()
-    assert run(host, '--check') == 0 and 'Ready' in host.lines
-    broken = FakeHost(tmp_path / 'bad', workspace=True, public_ok=False)
-    assert run(broken, '--public-url', 'https://your-host.example.test/slack') == 0, 'install still succeeds'
-    broken.lines.clear()
-    assert run(broken, '--check') == 1
-    assert any(line.startswith('Not ready yet') for line in broken.lines)

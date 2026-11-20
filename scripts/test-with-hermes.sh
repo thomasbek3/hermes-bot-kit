@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the tests that need real Hermes code against a Hermes checkout:
-# slack-check/tests and slack-connect/tests/test_hermes_parity.py.
+# slack-check/tests.
 #
 #   scripts/test-with-hermes.sh <hermes checkout>
 #
@@ -39,7 +39,7 @@ uv pip install --quiet --python "${VENV}/bin/python" pytest fastapi httpx aiohtt
 mkdir -p "${WORK}/hermes-home" "${WORK}/home"
 run() {
   env -i PATH="${VENV}/bin:/usr/bin:/bin" HOME="${WORK}/home" TMPDIR="${WORK}" \
-    HERMES_HOME="${WORK}/hermes-home" HERMES_AGENT_DIR="${CHECKOUT}" HERMES_PARITY_CHECKOUT="${CHECKOUT}" \
+    HERMES_HOME="${WORK}/hermes-home" HERMES_AGENT_DIR="${CHECKOUT}" \
     PYTHONPATH="${CHECKOUT}" PYTHONDONTWRITEBYTECODE=1 HERMES_DISABLE_LAZY_INSTALLS=1 \
     "${VENV}/bin/python" -m pytest -p no:cacheprovider -q --rootdir "${KIT}" "$@"
 }
@@ -48,6 +48,4 @@ status=0
 cd "${KIT}"
 echo "== slack-check against ${CHECKOUT}"
 run slack-check/tests || status=1
-echo "== slack-connect parity with Hermes's gateway authorization"
-run slack-connect/tests/test_hermes_parity.py || status=1
 exit "${status}"

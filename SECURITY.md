@@ -47,10 +47,10 @@ within a few days.
 - HD mode tokens and session-API bearer tokens are stored locally by design
   (`.env` / plugin storage, `0600`). They are never transmitted anywhere
   except to the endpoint you configure.
-- A Slack bot connected with one-click Add to Slack answers every full member
-  of the workspace by default, and its tools act with the bot's own access
-  for anyone who can message it. The bot's Slack window shows who can, and
-  where each grant comes from; `docs/SLACK.md` says how to restrict it.
+- A Slack bot connected with one-click Add to Slack answers only the person
+  who installed it (`SLACK_ALLOWED_USERS`). Anyone you add to that list can
+  make the bot act with its own access (its tools, accounts and files);
+  `docs/SLACK.md` says how to add people.
 - Social-engineering reports ("the AI told me to run...") are out of scope
   here — file them with Hermes Agent core.
 
