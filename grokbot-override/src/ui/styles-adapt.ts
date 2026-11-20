@@ -103,16 +103,47 @@ const ADAPT_SRC = /* css */ `
 .gbo-row-line > svg, .gbo-row-line .gbo-attn, .gbo-row-line .gbo-row-flag { width: 12px; height: 12px; flex: none; color: var(--color-text-tertiary); }
 .gbo-row-line .gbo-attn { color: var(--color-warn); }
 .gbo-row-line .gbo-attn svg, .gbo-row-line .gbo-row-flag svg { width: 100%; height: 100%; display: block; }
-/* The live status (unread, working, needs input) is Hermes's own dot,
-   placed as the reference's status dot: the avatar's top right, ringed in
-   the sidebar colour. Its idle and draft dots carry no live state (no
-   role="status") and are not drawn. */
-.bot-row__avatar .gbo-row-dot, .pinned__avatar .gbo-row-dot { position: absolute; right: -1px; top: -1px; line-height: 0; }
-.pinned__avatar .gbo-row-dot { right: 4px; top: 4px; }
-.gbo-row-face .gbo-row-dot:not(:has([role="status"])) { display: none; }
-.gbo-row-face .gbo-row-dot [role="status"] { width: 8px; height: 8px; border-width: 0; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
-.bot-row:hover .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
-.bot-row.is-selected .gbo-row-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
+/* The unread dot, Grok Bot's look: Hermes's own status dot (Unread.tsx) at
+   the row's right edge, vertically centred, as a small blue dot. Only its
+   unread state (painted blue) and its needs-input state (Hermes's amber)
+   draw (working, idle and draft are the running cue's, below). A pinned tile has no
+   right edge: the same dot sits on its avatar, ringed in the sidebar colour.
+   The hover ⋯ button covers the row's dot while it shows. */
+.gbo-unread-dot { display: none; flex: none; align-items: center; justify-content: center; width: 8px; height: 8px; margin: 0 4px 0 2px; line-height: 0; }
+.gbo-unread-dot:has([role="status"][class*="ui-success"]), .gbo-unread-dot:has([role="status"][class*="amber"]) { display: inline-flex; }
+.gbo-unread-dot > span { display: inline-flex; line-height: 0; }
+.gbo-unread-dot [role="status"] { display: block; width: 8px; height: 8px; border-radius: 50%; border-width: 0; }
+.gbo-unread-dot [role="status"][class*="ui-success"] { background: var(--color-bot-blue); }
+/* Hermes's running cue (RunningDot): the same status dot in its working,
+   stalled or background state, on the avatar's top right, ringed in the
+   sidebar colour; independent of the unread dot. */
+.gbo-run-dot { display: none; position: absolute; right: -1px; top: -1px; line-height: 0; }
+.gbo-run-dot:has([role="status"][class*="ui-accent"]), .gbo-run-dot:has([role="status"][class*="ui-text-tertiary"]) { display: inline-flex; }
+.gbo-run-dot > span { display: inline-flex; line-height: 0; }
+.pinned__avatar .gbo-run-dot { right: auto; left: 4px; top: 4px; }
+.gbo-run-dot [role="status"] { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
+.bot-row:hover .gbo-run-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
+.bot-row.is-selected .gbo-run-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
+.pinned__avatar .gbo-unread-dot { position: absolute; right: 4px; top: 4px; margin: 0; }
+.pinned__avatar .gbo-unread-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
+.gbo-pin:hover .gbo-unread-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-hover-solid); }
+.gbo-pin.is-selected .gbo-unread-dot [role="status"] { box-shadow: 0 0 0 2.5px var(--color-row-selected-solid); }
+/* "More unreads": a floating blue pill over the roster's scroll area while
+   an unread row is scrolled out of view above (top) or below (bottom); a
+   click scrolls to the nearest one (UnreadPill.tsx). Its fill is a darker
+   blue than the dot so white text reads at 5.4:1 (hover 6.6:1); the dot
+   keeps the accent blue. */
+.gbo-unread-pill {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 6; top: 8px;
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 13px 0 10px; border: 0; border-radius: 999px;
+  background: #1366D6; color: #FFFFFF; font-size: 13px; font-weight: 500; line-height: 18px; letter-spacing: -0.08px; white-space: nowrap;
+  box-shadow: 0 2px 10px #1366D64D, 0 0 0 0.5px #0000001A; cursor: pointer;
+}
+.gbo-unread-pill.is-down { top: auto; bottom: 8px; }
+.gbo-unread-pill:hover { background: #0B59BE; }
+.gbo-unread-pill:focus-visible { outline: 2px solid #FFFFFF; outline-offset: -4px; }
+.gbo-unread-pill svg { width: 14px; height: 14px; flex: none; }
+.gbo-unread-pill-down { display: inline-flex; transform: rotate(180deg); }
 .gbo-room-row .bot-row__avatar { width: 36px; justify-content: center; }
 .gbo-row-more {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; opacity: 0;

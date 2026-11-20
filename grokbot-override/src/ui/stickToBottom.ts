@@ -27,7 +27,8 @@ export const ANCHOR_ATTR = 'data-gbo-key'
 
 const fromBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight
 
-function reducedMotion(): boolean {
+/** The reader asked for reduced motion (also the roster's unread pill). */
+export function reducedMotion(): boolean {
   try {
     const mm = (globalThis as any).window?.matchMedia ?? (globalThis as any).matchMedia
     return typeof mm === 'function' && Boolean(mm('(prefers-reduced-motion: reduce)')?.matches)

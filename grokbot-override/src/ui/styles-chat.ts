@@ -116,7 +116,6 @@ export const CHAT_CSS = /* css */ `
 .gbo-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: var(--gbo-text-body-sm); color: var(--gbo-muted-fg); }
 
 /* ── R16 row dot ────────────────────────────────────────────────────── */
-.gbo-row-dot { display: inline-flex; align-items: center; flex: none; }
 
 /* ── R14 group chats ────────────────────────────────────────────────── */
 .gbo-section-head.is-rooms { display: flex; align-items: center; padding-right: 6px; }

@@ -31,12 +31,15 @@ type Props = Omit<React.HTMLAttributes<HTMLElement>, 'ref'> & {
   /** Drawn over the scroll area, outside the scroller (the jump-to-latest
    *  button): it stays put while the content scrolls. */
   overlay?: React.ReactNode
+  /** Like `overlay`, but placed BEFORE the scroller in the DOM, so it comes
+   *  first in tab order (the roster's "More unreads" pills). */
+  before?: React.ReactNode
   /** The reader grabbed the thumb: their own scrolling starts (the
    *  transcript ends a jump-to-latest in flight; stickToBottom.ts). */
   onReaderInput?: () => void
 }
 
-export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, onReaderInput, children, ...rest }: Props) {
+export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className, onScroll, onContentResize, overlay, before, onReaderInput, children, ...rest }: Props) {
   const scroller = React.useRef<HTMLElement | null>(null)
   const thumb = React.useRef<HTMLDivElement | null>(null)
   const [dragging, setDragging] = React.useState(false)
@@ -130,6 +133,7 @@ export function OverlayScroll({ as = 'div', wrapClassName, scrollRef, className,
 
   return (
     <div className={`gbo-oscroll${wrapClassName ? ` ${wrapClassName}` : ''}${dragging ? ' is-dragging' : ''}`}>
+      {before}
       {React.createElement(
         as,
         {
