@@ -15,7 +15,8 @@
   installs the newest release when it is newer than
   `<home>/hermes-bot-kit/installed-release` (now written by every install),
   with `KIT_REF=<tag>`, after checking that tag's `install.sh` against its
-  `MANIFEST.sha256` (which now lists `install.sh`). Single-instance lock,
+  `MANIFEST.sha256` (which now lists `install.sh`). Single instance via a
+  kernel lock (`flock(1)`, or perl on macOS; released when a run exits),
   network failure = log and exit 0, one log line per run in
   `<home>/logs/hermes-bot-kit-update.log` (rotated at 1 MB). It never restarts
   Hermes. Optional: refresh texting-style copies (never through a symlink
@@ -23,10 +24,12 @@
   hook (owner-only file in owner-only folders; a private copy is what runs).
   The updater copy is only replaced by an installer that has auto-update
   (`KIT_AUTO_UPDATE_API=1`); an older release is installed but not used as
-  the updater. Stale-lock recovery is serialised (a recovery left by a crash
-  is cleared after ten minutes); `HERMES_HOME` is resolved to its physical
+  the updater. `on` saves the settings and updater before it loads the job,
+  and `run` does nothing without saved settings. `HERMES_HOME` is resolved to its physical
   path for every subcommand, so a symlinked home is one home; `off` fails
-  while a job for the home remains and a retry unloads it. The hook's
+  while a job for the home remains (every `launchctl`/`systemctl` result is
+  checked) and a retry finishes it. A texting-style copy that can't be
+  refreshed is logged per profile as `texting-style FAILED`. The hook's
   folders are checked on its path as written and as resolved. The doctor reports
   the auto-update state. Tests: `tests/test-auto-update.sh` (fake launchctl,
   systemctl and curl).

@@ -64,6 +64,12 @@ printf '%s\n' "$*" >> "${FAKE_SYSTEMCTL_LOG}"
 case "$2" in
   show-environment) [ "${FAKE_SYSTEMD:-ok}" = ok ] || exit 1 ;;
 esac
+case " ${FAKE_SYSTEMCTL_FAIL:-} " in *" $2 "*) exit 1 ;; esac
+case "$2" in
+  enable) touch "${FAKE_SYSTEMCTL_LOG}.enabled" ;;
+  disable) rm -f "${FAKE_SYSTEMCTL_LOG}.enabled" ;;
+  is-active|is-enabled) [ -e "${FAKE_SYSTEMCTL_LOG}.enabled" ] || exit 3 ;;
+esac
 exit 0
 EOF
 chmod +x "${FAKE}/curl" "${FAKE}/launchctl" "${FAKE}/systemctl"
@@ -91,6 +97,21 @@ kit() {
     FAKE_API="${API:-ok}" FAKE_ROOT="${FROOT:-${REL}}" FAKE_LOG="${LOGS}/curl" "$@"
 }
 job() { kit "$@" bash "${STATE}/update.sh" --auto-update run; }
+# hold_lock: a background process holds the updater's flock until killed.
+hold_lock() {
+  mkdir -p "${STATE}"
+  rm -f "${M}/held"
+  perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; open(my $r, ">", $ARGV[1]) or die; close $r; sleep 300' \
+    "${STATE}/update.flock" "${M}/held" &
+  SLEEPER=$!
+  until [ -e "${M}/held" ]; do sleep 0.05; done
+  printf '%s\n' "${SLEEPER}" > "${STATE}/update.flock.pid"
+}
+drop_lock() {
+  kill -9 "${SLEEPER}" 2>/dev/null || true
+  wait "${SLEEPER}" 2>/dev/null || true
+  SLEEPER=""
+}
 
 # --- Regression tests (review of fad9c31) ---------------------------------------
 # AU_TEST_ONLY=<name> runs just that one after the shared setup.
@@ -131,42 +152,30 @@ reg_hook_toctou() {
   ok "regression: hook folders above it checked (on and run); a private 0700 copy runs, then is removed"
 }
 
-# 2. Stale-lock recovery never removes a fresh lock: a fake ps reports the
-# old PID dead and, at that moment, plays the other contender (which already
-# recovered the stale lock and holds a fresh one with a live PID).
+# 2 (round 3: replaces the lock-folder race test). The lock is a kernel lock:
+# while a live process holds it, no run takes over, whatever stale-looking
+# leftovers (an old lock folder with a dead PID, an old .recover guard) lie
+# around; this is the state in which two contenders used to race.
 reg_lock_race() {
   new_machine
-  mkdir -p "${STATE}/update.lock"
+  kit bash "${DL}/install.sh" --auto-update on >/dev/null
   printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
-  sleep 300 &
-  SLEEPER=$!
   sleep 0.1 &
   local dead=$!
   wait "${dead}" 2>/dev/null || true
+  mkdir -p "${STATE}/update.lock" "${STATE}/update.lock.recover"
   printf '%s\n' "${dead}" > "${STATE}/update.lock/pid"
-  local psdir="${M}/psbin"
-  mkdir -p "${psdir}"
-  cat > "${psdir}/ps" <<EOF
-#!/usr/bin/env bash
-if [ ! -e "${M}/ps-swapped" ]; then
-  touch "${M}/ps-swapped"
-  rm -rf "${STATE}/update.lock"
-  mkdir "${STATE}/update.lock"
-  printf '%s\n' "${SLEEPER}" > "${STATE}/update.lock/pid"
-  exit 1
-fi
-exec /bin/ps "\$@"
-EOF
-  chmod +x "${psdir}/ps"
-  out=$(XPATH="${psdir}" kit bash "${DL}/install.sh" --auto-update run) || fail "lock race: run exited non-zero"
-  [ -e "${M}/ps-swapped" ] || fail "lock race: the fake ps was never asked (test is not exercising recovery)"
-  [ "$(cat "${STATE}/update.lock/pid" 2>/dev/null)" = "${SLEEPER}" ] || fail "lock race: the other contender's fresh lock was removed"
-  [ "$(cat "${STATE}/installed-release")" = "${CUR_TAG}" ] || fail "lock race: updated while another contender held the lock"
-  tail -n 1 "${ULOG}" | grep -q "skipped: another update is running (pid ${SLEEPER})" || fail "lock race log: $(tail -n 1 "${ULOG}")"
-  kill "${SLEEPER}" 2>/dev/null || true
-  wait "${SLEEPER}" 2>/dev/null || true
-  SLEEPER=""
-  ok "regression: stale-lock recovery is serialised and never removes a fresh lock"
+  touch -t 202001010000 "${STATE}/update.lock.recover"
+  hold_lock
+  local i
+  for i in 1 2 3; do
+    kit bash "${DL}/install.sh" --auto-update run >/dev/null 2>&1 &
+  done
+  wait $(jobs -p | grep -vx "${SLEEPER}") 2>/dev/null || true
+  [ "$(cat "${STATE}/installed-release")" = "${CUR_TAG}" ] || fail "lock race: a run took over a lock a live process holds"
+  [ "$(grep -c "skipped: another update is running (pid ${SLEEPER})" "${ULOG}")" = 3 ] || fail "lock race: not every contender waited: $(cat "${ULOG}")"
+  drop_lock
+  ok "regression: a held lock is never taken over by any number of contenders, whatever leftovers exist"
 }
 
 # 3. texting-style: a symlink anywhere above the plugin (plugins/ -> elsewhere)
@@ -256,29 +265,19 @@ reg_hook_symlinked_ancestor() {
   ok "regression: a hook behind a symlinked folder is checked on its resolved path too (on and run)"
 }
 
-# 7. A .recover folder left by a crashed recovery is cleared and the stale
-# lock is recovered in the same run.
+# 7. A holder that crashes (kill -9) frees the lock at once: the next run
+# proceeds, and leftovers of the old lock folders don't block it.
 reg_lock_crashed_recover() {
   new_machine
-  mkdir -p "${STATE}/update.lock" "${STATE}/update.lock.recover"
+  kit bash "${DL}/install.sh" --auto-update on >/dev/null
   printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
-  sleep 0.1 &
-  local dead=$!
-  wait "${dead}" 2>/dev/null || true
-  printf '%s\n' "${dead}" > "${STATE}/update.lock/pid"
-  touch -t 202001010000 "${STATE}/update.lock.recover"
-  kit bash "${DL}/install.sh" --auto-update run >/dev/null || fail "crashed recover: run failed"
-  [ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "crashed recover: not updated: $(tail -n 1 "${ULOG}")"
-  [ ! -e "${STATE}/update.lock.recover" ] || fail "crashed recover: .recover left behind"
-  [ ! -e "${STATE}/update.lock" ] || fail "crashed recover: lock left behind"
-  # A fresh .recover (someone is recovering right now) still means wait.
+  hold_lock
   mkdir -p "${STATE}/update.lock" "${STATE}/update.lock.recover"
-  printf '%s\n' "${dead}" > "${STATE}/update.lock/pid"
-  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
-  kit bash "${DL}/install.sh" --auto-update run >/dev/null || fail "fresh recover: run failed"
-  [ "$(cat "${STATE}/installed-release")" = "${CUR_TAG}" ] || fail "fresh recover: ran during someone else's recovery"
-  [ -d "${STATE}/update.lock.recover" ] || fail "fresh recover: removed someone else's recovery"
-  ok "regression: a crashed .recover is cleared and recovered in the same run; a fresh one is waited for"
+  printf '%s\n' "${SLEEPER}" > "${STATE}/update.lock/pid"
+  drop_lock
+  kit bash "${DL}/install.sh" --auto-update run >/dev/null || fail "crashed holder: run failed: $(tail -n 1 "${ULOG}")"
+  [ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "crashed holder: not updated: $(tail -n 1 "${ULOG}")"
+  ok "regression: a crashed lock holder never blocks the next run (kernel lock, no stale state)"
 }
 
 # 8. off retried after a failed unload: unloads the still-loaded job, then
@@ -323,7 +322,89 @@ reg_symlinked_home() {
   ok "regression: a symlinked HERMES_HOME and its target are one home for on/off/status/run"
 }
 
-REGRESSIONS="reg_hook_toctou reg_lock_race reg_texting_ancestor_link reg_off_normalise reg_legacy_driver reg_hook_symlinked_ancestor reg_lock_crashed_recover reg_off_retry reg_symlinked_home"
+# Round 3. 10. on saves the settings and the updater BEFORE the job is
+# installed: a job fired by bootstrap / enable already sees the knobs. And a
+# run without settings does nothing.
+reg_on_order() {
+  new_machine
+  cat > "${M}/launchctl" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = bootstrap ]; then
+  grep -qx 'KIT_SKIP_GROKBOT=1' "${STATE}/auto-update.env" 2>/dev/null && [ -f "${STATE}/update.sh" ] && echo saved > "${M}/at-bootstrap" || echo missing > "${M}/at-bootstrap"
+fi
+exec "${FAKE}/launchctl" "\$@"
+EOF
+  chmod +x "${M}/launchctl"
+  kit KIT_LAUNCHCTL="${M}/launchctl" KIT_SKIP_GROKBOT=1 bash "${DL}/install.sh" --auto-update on >/dev/null || fail "on order: on failed"
+  [ "$(cat "${M}/at-bootstrap")" = saved ] || fail "on order (mac): the job was loaded before the settings were saved"
+  new_machine
+  cat > "${M}/systemctl" <<EOF
+#!/usr/bin/env bash
+if [ "\$2" = enable ]; then
+  grep -qx 'KIT_SKIP_GROKBOT=1' "${STATE}/auto-update.env" 2>/dev/null && [ -f "${STATE}/update.sh" ] && echo saved > "${M}/at-enable" || echo missing > "${M}/at-enable"
+fi
+exec "${FAKE}/systemctl" "\$@"
+EOF
+  chmod +x "${M}/systemctl"
+  OS=linux kit KIT_SYSTEMCTL="${M}/systemctl" KIT_SKIP_GROKBOT=1 bash "${DL}/install.sh" --auto-update on >/dev/null || fail "on order: on (linux) failed"
+  [ "$(cat "${M}/at-enable")" = saved ] || fail "on order (linux): the timer was enabled before the settings were saved"
+  new_machine
+  mkdir -p "${STATE}"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  kit bash "${DL}/install.sh" --auto-update run >/dev/null || fail "no settings: run exited non-zero"
+  [ "$(cat "${STATE}/installed-release")" = "${CUR_TAG}" ] || fail "no settings: run installed without saved settings"
+  [ ! -e "${HH}/desktop-plugins" ] || fail "no settings: run installed plugins"
+  tail -n 1 "${ULOG}" | grep -q 'skipped: auto-update is off (no ' || fail "no settings log: $(tail -n 1 "${ULOG}")"
+  ok "regression: on saves settings and updater before loading the job; run without settings does nothing"
+}
+
+# 11. Linux off checks every systemctl result: a failed disable keeps the
+# units and settings, prints the command and exits non-zero; a retry works.
+reg_systemd_off_failure() {
+  new_machine
+  OS=linux kit bash "${DL}/install.sh" --auto-update on >/dev/null
+  if out=$(OS=linux kit FAKE_SYSTEMCTL_FAIL=disable bash "${DL}/install.sh" --auto-update off 2>&1); then
+    fail "systemd off: reported off although disable failed"
+  fi
+  printf '%s\n' "${out}" | grep -qF 'systemctl --user disable --now hermes-bot-kit-update.timer' || fail "systemd off: no command printed: ${out}"
+  [ -f "${UNITS}/hermes-bot-kit-update.timer" ] && [ -f "${UNITS}/hermes-bot-kit-update.service" ] || fail "systemd off: units removed after a failed disable"
+  [ -f "${STATE}/auto-update.env" ] || fail "systemd off: settings removed after a failed disable"
+  if OS=linux kit FAKE_SYSTEMCTL_FAIL=daemon-reload bash "${DL}/install.sh" --auto-update off >/dev/null 2>&1; then
+    fail "systemd off: reported off although daemon-reload failed"
+  fi
+  [ -f "${STATE}/auto-update.env" ] || fail "systemd off: settings removed after a failed daemon-reload"
+  OS=linux kit bash "${DL}/install.sh" --auto-update off >/dev/null 2>&1 || fail "systemd off: the retry failed"
+  [ ! -e "${UNITS}/hermes-bot-kit-update.timer" ] && [ ! -e "${STATE}/auto-update.env" ] || fail "systemd off: retry left state"
+  [ ! -e "${LOGS}/systemctl.enabled" ] || fail "systemd off: timer still enabled"
+  ok "regression: Linux off checks disable, is-active/is-enabled and daemon-reload; failures keep everything; a retry finishes"
+}
+
+# 12. texting-style refresh failures (an unwritable copy) are logged per
+# profile as FAILED, not "refreshed"; the update itself still stands.
+reg_texting_copy_failure() {
+  [ "${UIDN}" != 0 ] || { ok "regression: texting-style copy failure (skipped as root)"; return 0; }
+  new_machine
+  mkdir -p "${HH}/plugins/texting-style" "${HH}/profiles/ok/plugins/texting-style"
+  printf 'old\n' > "${HH}/plugins/texting-style/plugin.yaml"
+  printf '# old texting-style.sms-register\n' > "${HH}/plugins/texting-style/__init__.py"
+  cp "${HH}/plugins/texting-style/"* "${HH}/profiles/ok/plugins/texting-style/"
+  chmod 0444 "${HH}/plugins/texting-style/"*
+  chmod 0555 "${HH}/plugins/texting-style"
+  kit KIT_TEXTING_STYLE=1 bash "${DL}/install.sh" --auto-update on >/dev/null
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  job >/dev/null || fail "texting failure: run failed"
+  chmod 0755 "${HH}/plugins/texting-style"
+  chmod 0644 "${HH}/plugins/texting-style/"*
+  [ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "texting failure: the update did not stand"
+  tail -n 1 "${ULOG}" | grep -qF "texting-style FAILED: could not refresh 1 profile(s) (${HH}/plugins/texting-style: plugin.yaml (backup failed)" || fail "texting failure log: $(tail -n 1 "${ULOG}")"
+  tail -n 1 "${ULOG}" | grep -q 'refreshed in 1 profile(s)' || fail "texting failure: the writable profile was not counted"
+  cmp -s "${HH}/profiles/ok/plugins/texting-style/plugin.yaml" "${REL}/texting-style/plugin.yaml" || fail "texting failure: the writable profile was not refreshed"
+  out=$(kit bash "${DL}/install.sh" --auto-update status)
+  printf '%s\n' "${out}" | grep -q '^Last run         : .*texting-style FAILED' || fail "texting failure: status does not show it: ${out}"
+  ok "regression: texting-style copy failures are logged per profile as FAILED and shown by status"
+}
+
+REGRESSIONS="reg_hook_toctou reg_lock_race reg_texting_ancestor_link reg_off_normalise reg_legacy_driver reg_hook_symlinked_ancestor reg_lock_crashed_recover reg_off_retry reg_symlinked_home reg_on_order reg_systemd_off_failure reg_texting_copy_failure"
 if [ -n "${AU_TEST_ONLY:-}" ]; then
   "${AU_TEST_ONLY}"
   echo "test-auto-update.sh: ${AU_TEST_ONLY} passed"
@@ -489,6 +570,7 @@ cp -R "${REL}" "${TAMP}"
 printf '\ntouch "%s/TAMPERED-RAN"\n' "${WORK}" >> "${TAMP}/install.sh"
 new_machine
 API=down FROOT="${ROOT}" kit bash "${DL}/install.sh" >/dev/null 2>&1
+kit bash "${DL}/install.sh" --auto-update on >/dev/null
 if out=$(FROOT="${TAMP}" kit bash "${DL}/install.sh" --auto-update run); then fail "tampered run succeeded"; fi
 [ ! -e "${WORK}/TAMPERED-RAN" ] || fail "the tampered install.sh ran"
 tail -n 1 "${ULOG}" | grep -q 'FAILED: .* install.sh does not match its MANIFEST.sha256' || fail "tamper log: $(tail -n 1 "${ULOG}")"
@@ -503,26 +585,18 @@ FROOT="${TAMP}" kit bash "${DL}/install.sh" --auto-update run >/dev/null || fail
 [ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "unlisted install.sh: not updated"
 ok "run: install.sh checked against the tag's manifest when listed (tampered = nothing runs), else must name the tag"
 
-# Lock: a live owner blocks a second run; a dead owner's lock is taken over.
+# Lock: a live holder blocks a second run; once it is gone the next run goes.
 new_machine
-mkdir -p "${STATE}"
+kit bash "${DL}/install.sh" --auto-update on >/dev/null
 printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
-sleep 300 &
-SLEEPER=$!
-mkdir -p "${STATE}/update.lock"
-printf '%s\n' "${SLEEPER}" > "${STATE}/update.lock/pid"
+hold_lock
 out=$(kit bash "${DL}/install.sh" --auto-update run) || fail "locked run exited non-zero"
 tail -n 1 "${ULOG}" | grep -q "skipped: another update is running (pid ${SLEEPER})" || fail "lock: $(tail -n 1 "${ULOG}")"
 [ "$(cat "${STATE}/installed-release")" = "${CUR_TAG}" ] || fail "lock: updated anyway"
-kill "${SLEEPER}" 2>/dev/null || true
-wait "${SLEEPER}" 2>/dev/null || true
-dead=${SLEEPER}
-SLEEPER=""
-printf '%s\n' "${dead}" > "${STATE}/update.lock/pid"
-out=$(kit bash "${DL}/install.sh" --auto-update run) || fail "stale-lock run failed: ${out}"
-[ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "stale lock: not updated"
-[ ! -e "${STATE}/update.lock" ] || fail "lock not released"
-ok "lock: a running update blocks overlap; a stale PID's lock is taken over and released"
+drop_lock
+out=$(kit bash "${DL}/install.sh" --auto-update run) || fail "run after the holder exited failed: ${out}"
+[ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "lock: not updated after the holder exited"
+ok "lock: a running update blocks overlap; the lock goes with its holder"
 
 # --- post-update hook -----------------------------------------------------------
 new_machine

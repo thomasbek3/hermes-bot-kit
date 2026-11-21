@@ -391,7 +391,7 @@ au_hook_run() {
     echo "post-update hook not run: it changed while it was being checked${problem:+ (it ${problem})}"
     return 0
   fi
-  ( export KIT_REF="${tag}" HERMES_HOME="${HERMES_ROOT}" KIT_POST_UPDATE_HOOK="${AU_HOOK}"; exec "${hdir}/hook" </dev/null ) >> "${AU_OUT}" 2>&1 || rc=$?
+  ( export KIT_REF="${tag}" HERMES_HOME="${HERMES_ROOT}" KIT_POST_UPDATE_HOOK="${AU_HOOK}"; exec "${hdir}/hook" </dev/null 9>&- ) >> "${AU_OUT}" 2>&1 || rc=$?
   rm -rf "${hdir}"
   echo "post-update hook exited ${rc}"
 }
@@ -458,67 +458,49 @@ au_last_line() {
   return 0
 }
 
-# Single instance: a lock folder holding the owner's PID. A lock whose PID is
-# gone (or with no PID after a minute) is stale and taken over. Taking it
-# over is serialised: only the contender holding <lock>.recover may do it,
-# and only while the lock still holds the very PID it found dead (so a fresh
-# lock another contender just took is never removed). The stale folder is
-# renamed away first, then removed, then the lock is taken again.
+# Single instance: an exclusive flock(2) on <home>/hermes-bot-kit/update.flock,
+# held on file descriptor 9 for the whole run. The kernel drops it when the
+# run exits, however it exits, so there is no stale lock to detect, take over
+# or race on. flock(1) takes it on Linux; elsewhere (macOS has no flock(1))
+# perl locks the same open file (flock locks belong to the open file, which
+# this shell keeps, so the lock outlives the perl process). Children never
+# inherit descriptor 9. update.flock.pid only names the holder for the log.
 au_lock() {
-  local pid now_pid age rec stale
-  mkdir -p "${KIT_STATE_DIR}"
-  if mkdir "${AU_LOCK}" 2>/dev/null; then
-    printf '%s\n' "$$" > "${AU_LOCK}/pid"
-    return 0
-  fi
+  local rc
+  AU_LOCK_FILE="${KIT_STATE_DIR}/update.flock"
   AU_LOCK_PID="unknown"
-  pid=$(head -n 1 "${AU_LOCK}/pid" 2>/dev/null || true)
-  case "${pid}" in ''|*[!0-9]*) pid="" ;; esac
-  if [ -n "${pid}" ]; then
-    if kill -0 "${pid}" 2>/dev/null || ps -p "${pid}" >/dev/null 2>&1; then
-      AU_LOCK_PID="${pid}"
+  mkdir -p "${KIT_STATE_DIR}"
+  if [ -L "${AU_LOCK_FILE}" ] || ! : >> "${AU_LOCK_FILE}" 2>/dev/null; then
+    AU_LOCK_ERR="cannot open ${AU_LOCK_FILE}"
+    return 2
+  fi
+  exec 9>>"${AU_LOCK_FILE}"
+  if command -v flock >/dev/null 2>&1; then
+    rc=0
+    flock -n 9 || rc=$?
+  elif command -v perl >/dev/null 2>&1; then
+    rc=0
+    perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or exit 2; flock($fh, LOCK_EX | LOCK_NB) or exit 1; exit 0' || rc=$?
+  else
+    exec 9>&-
+    AU_LOCK_ERR="neither flock nor perl is installed, so a run can't be made single-instance"
+    return 2
+  fi
+  if [ "${rc}" -ne 0 ]; then
+    exec 9>&-
+    if [ "${rc}" = 1 ]; then
+      AU_LOCK_PID=$(head -n 1 "${AU_LOCK_FILE}.pid" 2>/dev/null || true)
+      case "${AU_LOCK_PID}" in ''|*[!0-9]*) AU_LOCK_PID="unknown" ;; esac
       return 1
     fi
-  else
-    age=$(( $(date +%s) - $(au_mtime "${AU_LOCK}" || date +%s) ))
-    [ "${age}" -ge 60 ] || return 1
+    AU_LOCK_ERR="could not lock ${AU_LOCK_FILE}"
+    return 2
   fi
-  rec="${AU_LOCK}.recover"
-  if ! mkdir "${rec}" 2>/dev/null; then
-    # Someone else is recovering it, unless the recovery folder was left by
-    # a crash (older than ten minutes): then it is cleared and this run tries
-    # once more (if another run got there first, mkdir fails and it waits).
-    age=$(( $(date +%s) - $(au_mtime "${rec}" || date +%s) ))
-    [ "${age}" -ge 600 ] || return 1
-    rmdir "${rec}" 2>/dev/null || return 1
-    mkdir "${rec}" 2>/dev/null || return 1
-  fi
-  now_pid=$(head -n 1 "${AU_LOCK}/pid" 2>/dev/null || true)
-  case "${now_pid}" in ''|*[!0-9]*) now_pid="" ;; esac
-  if [ ! -d "${AU_LOCK}" ] || [ -L "${AU_LOCK}" ] || [ ! -O "${AU_LOCK}" ] || [ "${now_pid}" != "${pid}" ]; then
-    rmdir "${rec}" 2>/dev/null || true
-    AU_LOCK_PID="${now_pid:-unknown}"
-    return 1
-  fi
-  stale="${AU_LOCK}.stale.$$.$(date +%s)"
-  if ! mv "${AU_LOCK}" "${stale}" 2>/dev/null; then
-    rmdir "${rec}" 2>/dev/null || true
-    return 1
-  fi
-  rm -f "${stale}/pid"
-  rmdir "${stale}" 2>/dev/null || true
-  if ! mkdir "${AU_LOCK}" 2>/dev/null; then
-    rmdir "${rec}" 2>/dev/null || true
-    return 1
-  fi
-  printf '%s\n' "$$" > "${AU_LOCK}/pid"
-  rmdir "${rec}" 2>/dev/null || true
+  printf '%s\n' "$$" > "${AU_LOCK_FILE}.pid"
   return 0
 }
 au_unlock() {
-  [ "$(head -n 1 "${AU_LOCK}/pid" 2>/dev/null)" = "$$" ] || return 0
-  rm -f "${AU_LOCK}/pid"
-  rmdir "${AU_LOCK}" 2>/dev/null || true
+  exec 9>&- 2>/dev/null || true
 }
 
 AU_CURL=(curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 --retry-delay 2 --max-filesize 1048576)
@@ -554,7 +536,7 @@ au_plain_path() {
 # a symlink, never installs into a profile that lacks it, never edits
 # config.yaml. Prints one summary phrase for the log line.
 au_texting_style() {
-  local tag="$1" dir="$2" t="$2/texting-style" base home dest f n=0 links=0 stamp
+  local tag="$1" dir="$2" t="$2/texting-style" base home dest f n=0 links=0 stamp bad nbad=0 failed=""
   base="https://raw.githubusercontent.com/${KIT_REPO}/${tag}"
   mkdir -p "${t}"
   for f in plugin.yaml __init__.py; do
@@ -582,23 +564,56 @@ au_texting_style() {
       continue
     fi
     [ -d "${dest}" ] && [ -f "${dest}/plugin.yaml" ] && [ -f "${dest}/__init__.py" ] || continue
+    # Each step is checked (this runs with errexit off): a file is replaced
+    # only after its backup was made, and a failure is reported per profile.
+    bad=""
     for f in plugin.yaml __init__.py; do
       cmp -s "${t}/${f}" "${dest}/${f}" && continue
-      cp "${dest}/${f}" "${dest}/${f}.bak.${stamp}"
-      cp "${t}/${f}" "${dest}/.${f}.new.$$"
-      mv -f "${dest}/.${f}.new.$$" "${dest}/${f}"
+      if ! cp "${dest}/${f}" "${dest}/${f}.bak.${stamp}" 2>/dev/null; then
+        bad="${bad:+${bad}, }${f} (backup failed)"
+        continue
+      fi
+      if ! cp "${t}/${f}" "${dest}/.${f}.new.$$" 2>/dev/null; then
+        rm -f "${dest}/.${f}.new.$$" 2>/dev/null
+        bad="${bad:+${bad}, }${f} (copy failed)"
+        continue
+      fi
+      if ! mv -f "${dest}/.${f}.new.$$" "${dest}/${f}" 2>/dev/null; then
+        rm -f "${dest}/.${f}.new.$$" 2>/dev/null
+        bad="${bad:+${bad}, }${f} (replace failed)"
+        continue
+      fi
     done
-    n=$((n + 1))
+    if [ -n "${bad}" ]; then
+      nbad=$((nbad + 1))
+      failed="${failed:+${failed}; }${dest}: ${bad}"
+    else
+      n=$((n + 1))
+    fi
   done
+  if [ "${nbad}" -gt 0 ]; then
+    echo "texting-style FAILED: could not refresh ${nbad} profile(s) (${failed}); refreshed in ${n} profile(s), ${links} with a symlink in the path left alone"
+    return 1
+  fi
   echo "texting-style refreshed in ${n} profile(s), ${links} with a symlink in the path left alone (new code loads at the next agent/gateway restart)"
 }
 
 au_run() {
-  local tag installed tmp rc msg base ts_msg extra=""
+  local tag installed tmp rc msg base ts_msg ts_rc extra=""
+  # Only with the settings `on` saved: a run never guesses the knobs.
+  if [ ! -f "${AU_ENV}" ]; then
+    au_log "skipped: auto-update is off (no ${AU_ENV}); turn it on with --auto-update on"
+    return 0
+  fi
   au_load || { au_log "FAILED: bad settings in ${AU_ENV}"; return 1; }
-  if ! au_lock; then
+  rc=0
+  au_lock || rc=$?
+  if [ "${rc}" = 1 ]; then
     au_log "skipped: another update is running (pid ${AU_LOCK_PID:-unknown})"
     return 0
+  elif [ "${rc}" != 0 ]; then
+    au_log "FAILED: ${AU_LOCK_ERR:-could not take the update lock}; nothing done"
+    return 1
   fi
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064 # expand now: these paths are fixed for the run
@@ -636,7 +651,7 @@ au_run() {
   (
     unset KIT_SKIP_VERIFY KIT_SOURCE_DIR KIT_CARDS_SKILL KIT_CARDS_PROFILES KIT_REMOVE_RETIRED
     export HERMES_HOME="${HERMES_ROOT}" KIT_REF="${tag}" KIT_SKIP_GROKBOT="${AU_SKIP_GROKBOT}" KIT_SKIP_COMPUTER="${AU_SKIP_COMPUTER}"
-    exec "${BASH:-bash}" "${tmp}/install.sh" </dev/null
+    exec "${BASH:-bash}" "${tmp}/install.sh" </dev/null 9>&-
   ) > "${AU_OUT}" 2>&1 || rc=$?
   if [ "${rc}" -ne 0 ]; then
     au_log "FAILED: installing ${tag} exited ${rc} (still on ${installed:-nothing}; its output: ${AU_OUT})"
@@ -654,7 +669,16 @@ au_run() {
     mv -f "${KIT_STATE_DIR}/.update.sh.new.$$" "${AU_SCRIPT}"
   fi
   if [ "${AU_TEXTING}" = 1 ]; then
-    ts_msg=$(au_texting_style "${tag}" "${tmp}") || ts_msg="texting-style refresh stopped part-way (see the .bak.<timestamp> files in each plugins/texting-style/)"
+    # Not fatal to the update, but recorded as a failure in the log line
+    # ("texting-style FAILED: ..."), which status and the doctor show.
+    ts_rc=0
+    ts_msg=$(au_texting_style "${tag}" "${tmp}") || ts_rc=$?
+    if [ "${ts_rc}" -ne 0 ]; then
+      case "${ts_msg}" in
+        "texting-style FAILED: "*) ;;
+        *) ts_msg="texting-style FAILED: the refresh stopped part-way (${ts_msg:-no output}); see the .bak.<timestamp> files in each plugins/texting-style/" ;;
+      esac
+    fi
     extra="${extra}; ${ts_msg}"
   fi
   if [ -n "${AU_HOOK}" ]; then
@@ -801,13 +825,31 @@ au_on() {
   case "${os}" in mac) AU_BASH=/bin/bash ;; esac
   au_safe_path "${AU_BASH}" && case "${AU_BASH}" in *' '*) false ;; esac || AU_BASH=/bin/bash
 
+  # Settings and the updater are saved (each atomically: temp file + rename)
+  # BEFORE the job is installed or loaded, so a run that fires while it is
+  # being enabled already sees this command's knobs.
+  case "${os}" in
+    mac) sched=launchd ;;
+    linux)
+      AU_SYSTEMCTL="${KIT_SYSTEMCTL:-systemctl}"
+      if au_systemctl_ok; then sched=systemd; else sched=cron; fi
+      ;;
+  esac
   mkdir -p "${KIT_STATE_DIR}" "${HERMES_ROOT}/logs"
   chmod 0700 "${KIT_STATE_DIR}"
   au_write "${AU_SCRIPT}" 0700 < "${self}"
+  {
+    echo "# hermes-bot-kit auto-update settings (install.sh --auto-update on). No secrets."
+    echo "HERMES_HOME=${HERMES_ROOT}"
+    echo "KIT_SKIP_GROKBOT=${g}"
+    echo "KIT_SKIP_COMPUTER=${c}"
+    echo "KIT_TEXTING_STYLE=${ts}"
+    echo "KIT_POST_UPDATE_HOOK=${hook}"
+    echo "SCHEDULER=${sched}"
+  } | au_write "${AU_ENV}" 0600
 
-  case "${os}" in
-    mac)
-      sched=launchd
+  case "${sched}" in
+    launchd)
       au_plist | au_write "${AU_PLIST}" 0644
       uid=$(id -u)
       AU_LAUNCHCTL="${KIT_LAUNCHCTL:-launchctl}"
@@ -820,10 +862,7 @@ au_on() {
         echo "                    launchctl bootstrap gui/${uid} '${AU_PLIST}'"
       fi
       ;;
-    linux)
-      AU_SYSTEMCTL="${KIT_SYSTEMCTL:-systemctl}"
-      if au_systemctl_ok; then
-        sched=systemd
+    systemd)
         au_service | au_write "${AU_UNIT_DIR}/${AU_UNIT}.service" 0644
         au_timer | au_write "${AU_UNIT_DIR}/${AU_UNIT}.timer" 0644
         if ${AU_SYSTEMCTL} --user daemon-reload >/dev/null 2>&1 &&
@@ -833,24 +872,14 @@ au_on() {
           echo "Auto-update      -> units written, but the timer could not be started. Run:"
           echo "                    systemctl --user daemon-reload && systemctl --user enable --now ${AU_UNIT}.timer"
         fi
-      else
-        sched=cron
+      ;;
+    cron)
         echo "Auto-update      -> no systemd user session here. Add this line with 'crontab -e' to run it daily at 04:20:"
         echo
         au_cron_line
         echo
-      fi
       ;;
   esac
-  {
-    echo "# hermes-bot-kit auto-update settings (install.sh --auto-update on). No secrets."
-    echo "HERMES_HOME=${HERMES_ROOT}"
-    echo "KIT_SKIP_GROKBOT=${g}"
-    echo "KIT_SKIP_COMPUTER=${c}"
-    echo "KIT_TEXTING_STYLE=${ts}"
-    echo "KIT_POST_UPDATE_HOOK=${hook}"
-    echo "SCHEDULER=${sched}"
-  } | au_write "${AU_ENV}" 0600
   echo "                    settings: ${AU_ENV}"
   echo "                    updater:  ${AU_SCRIPT}"
   echo "                    log:      ${AU_LOG}"
@@ -860,7 +889,7 @@ au_on() {
 }
 
 au_off() {
-  local uid sched left=""
+  local uid sched left="" sc="${KIT_SYSTEMCTL:-systemctl}"
   sched=$(au_get SCHEDULER)
   uid=$(id -u)
   if [ -f "${AU_PLIST}" ] && ! grep -qF "<string>${AU_SCRIPT}</string>" "${AU_PLIST}"; then
@@ -890,13 +919,34 @@ au_off() {
   if [ -f "${AU_UNIT_DIR}/${AU_UNIT}.service" ] && ! grep -qF "\"${AU_SCRIPT}\"" "${AU_UNIT_DIR}/${AU_UNIT}.service"; then
     echo "Auto-update      -- the systemd user timer belongs to another Hermes home's auto-update; left alone"
   elif [ -f "${AU_UNIT_DIR}/${AU_UNIT}.timer" ] || [ -f "${AU_UNIT_DIR}/${AU_UNIT}.service" ]; then
-    ${KIT_SYSTEMCTL:-systemctl} --user disable --now "${AU_UNIT}.timer" >/dev/null 2>&1 || true
-    rm -f "${AU_UNIT_DIR}/${AU_UNIT}.timer" "${AU_UNIT_DIR}/${AU_UNIT}.service"
-    ${KIT_SYSTEMCTL:-systemctl} --user daemon-reload >/dev/null 2>&1 || true
-    if [ -e "${AU_UNIT_DIR}/${AU_UNIT}.timer" ] || [ -e "${AU_UNIT_DIR}/${AU_UNIT}.service" ]; then
+    # Stop and disable, check it really is inactive and disabled, and only
+    # then remove the units and reload. Any failure keeps the units and the
+    # settings and names the command to run.
+    if ! ${sc} --user disable --now "${AU_UNIT}.timer" >/dev/null 2>&1; then
       left="${left} systemd"
+      echo "install.sh: could not stop the timer. Run: systemctl --user disable --now ${AU_UNIT}.timer" >&2
+    elif ${sc} --user is-active --quiet "${AU_UNIT}.timer" >/dev/null 2>&1 ||
+      ${sc} --user is-enabled --quiet "${AU_UNIT}.timer" >/dev/null 2>&1; then
+      left="${left} systemd"
+      echo "install.sh: the timer is still active or enabled. Run: systemctl --user disable --now ${AU_UNIT}.timer" >&2
+    elif ! rm -f "${AU_UNIT_DIR}/${AU_UNIT}.timer" "${AU_UNIT_DIR}/${AU_UNIT}.service" ||
+      [ -e "${AU_UNIT_DIR}/${AU_UNIT}.timer" ] || [ -e "${AU_UNIT_DIR}/${AU_UNIT}.service" ]; then
+      left="${left} systemd"
+      echo "install.sh: could not remove the unit files in ${AU_UNIT_DIR}" >&2
+    elif ! ${sc} --user daemon-reload >/dev/null 2>&1; then
+      left="${left} systemd-reload"
+      echo "install.sh: the timer is stopped and its files removed, but systemd was not reloaded. Run: systemctl --user daemon-reload" >&2
     else
       echo "Auto-update      -- systemd user timer stopped and removed"
+    fi
+  elif [ "${sched}" = systemd ]; then
+    # A retry: the units are gone; make sure systemd forgot the timer too.
+    if ! ${sc} --user daemon-reload >/dev/null 2>&1; then
+      left="${left} systemd-reload"
+      echo "install.sh: systemd was not reloaded. Run: systemctl --user daemon-reload" >&2
+    elif ${sc} --user is-active --quiet "${AU_UNIT}.timer" >/dev/null 2>&1; then
+      left="${left} systemd"
+      echo "install.sh: the timer is still active. Run: systemctl --user stop ${AU_UNIT}.timer" >&2
     fi
   fi
   # Never report off while a job for this home remains.
