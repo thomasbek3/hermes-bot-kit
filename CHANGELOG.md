@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Daily auto-update: `install.sh --auto-update on|off|status|run`.**
+  Hermes's plugin auto-update never touches `desktop-plugins/` (and treats
+  monorepo sub-folder installs as provenance drift), so the kit updates
+  itself. `on` stores the knobs that apply (`HERMES_HOME`, `KIT_SKIP_GROKBOT`,
+  `KIT_SKIP_COMPUTER`, `KIT_TEXTING_STYLE`, `KIT_POST_UPDATE_HOOK`; no secrets)
+  in `<home>/hermes-bot-kit/auto-update.env` (0600), copies the updater to
+  `<home>/hermes-bot-kit/update.sh` and installs a daily 04:20 job: a
+  LaunchAgent bootstrapped into `gui/<uid>` on macOS (`RunAtLoad` false; over
+  ssh it prints the command), a systemd user timer (`Persistent=true`) on
+  Linux or a crontab line without one. Windows/WSL: not supported yet. `run`
+  installs the newest release when it is newer than
+  `<home>/hermes-bot-kit/installed-release` (now written by every install),
+  with `KIT_REF=<tag>`, after checking that tag's `install.sh` against its
+  `MANIFEST.sha256` (which now lists `install.sh`). Single-instance lock,
+  network failure = log and exit 0, one log line per run in
+  `<home>/logs/hermes-bot-kit-update.log` (rotated at 1 MB). It never restarts
+  Hermes. Optional: refresh texting-style copies (never symlinks or new
+  profiles) and run your own owner-only post-update hook. The doctor reports
+  the auto-update state. Tests: `tests/test-auto-update.sh` (fake launchctl,
+  systemctl and curl).
 - **Qualified on Hermes v0.23.3 (2026-11-21).** Stable v0.23.3 (`caafe538`,
   released 2026-11-20) passes every source contract (SDK, host, context,
   gateway, REST, bridge, DOM, agent hooks); no breaking change was found in

@@ -96,6 +96,7 @@ run_ci_tests() {
   bash computer-viewer/tests/test-remove-orgo-computer.sh
   bash scripts/make-manifest.sh --check
   bash tests/test-install.sh
+  bash tests/test-auto-update.sh
   bash tests/test-doctor.sh
   bash tests/test-release-pins.sh
 }

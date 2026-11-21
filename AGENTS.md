@@ -142,6 +142,15 @@ Offer these; install only what the person wants.
   setup at the Mac's own screen, which an agent cannot do over SSH. Never run
   `cua-driver permissions grant` remotely.
 
+- **Daily auto-update** (installs each new release by itself; macOS and
+  Linux): the install command from step 2 with `--auto-update on` after
+  `bash "$f"`. Check it with `--auto-update status`; `--auto-update off`
+  removes the job. It never restarts Hermes; after an update the person reloads
+  desktop plugins (step 4). Over ssh on a Mac the job may not load right away:
+  the command prints the exact `launchctl bootstrap gui/<uid> ...` line for the
+  person to run in Terminal (it also loads at their next login). README: Keep
+  it updated.
+
 ## Uninstall
 
 <!-- runbook:uninstall -->
