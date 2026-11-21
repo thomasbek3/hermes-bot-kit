@@ -212,6 +212,40 @@ Connect only you can talk to the bot; the runbook shows how to add teammates
 (their member IDs in the bot's `SLACK_ALLOWED_USERS`). Team-wide access by
 default is coming in the next release.
 
+## Keep it updated
+
+Hermes's own plugin auto-update doesn't reach the kit, so the kit has its own.
+One command turns on a daily check (macOS and Linux):
+
+```bash
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21/install.sh -o "$f"; test -s "$f"; bash "$f" --auto-update on )
+```
+
+Every day at 04:20 it asks GitHub for the newest release. When it is newer
+than the one installed, it runs that release's installer with the same
+settings (and the same digest checks and backups as a manual install). It never
+restarts Hermes: after an update, **⌘K → Reload desktop plugins**.
+
+- From a clone: `bash install.sh --auto-update on`. Also `off`, `status`
+  (installed and newest release, last and next run, where the backups are)
+  and `run` (check now).
+- It remembers `HERMES_HOME`, `KIT_SKIP_GROKBOT` and `KIT_SKIP_COMPUTER` from
+  the `on` command. Settings, a copy of the updater and the installed release
+  live in `~/.hermes/hermes-bot-kit/`; the log is
+  `~/.hermes/logs/hermes-bot-kit-update.log`.
+- macOS: a LaunchAgent in `~/Library/LaunchAgents/`. Linux: a systemd user
+  timer, or a crontab line to add when there is no systemd user session.
+  Windows and WSL: not supported yet.
+- `KIT_TEXTING_STYLE=1` in front of `bash "$f"`: also refresh texting-style
+  in the profiles that already have it as a copied folder (never one with a
+  symlink anywhere in its path, never a new profile, never `config.yaml`). New code loads when the
+  agent restarts.
+- `KIT_POST_UPDATE_HOOK=/abs/path/to/script`: your own script, run after each
+  update with `KIT_REF` and `HERMES_HOME` set, for example to rebuild a private
+  build of a plugin. It must be a file you own that nobody else can write, in
+  folders nobody else can write to; a private copy of it is what runs. The
+  kit ships no hook.
+
 ## New: Grokbot Override
 
 <p align="center">

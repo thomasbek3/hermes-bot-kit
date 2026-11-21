@@ -25,11 +25,19 @@
 #   KIT_CARDS_SKILL=1      also install the agent-cards skill (off by default)
 #   KIT_CARDS_SKILL=remove remove the agent-cards skill this kit installed, then stop
 #   KIT_CARDS_PROFILES     comma-separated profiles for the skill (default: all)
+#
+# Daily auto-update (macOS and Linux):  bash install.sh --auto-update on|off|status|run
+#   `on` remembers HERMES_HOME, KIT_SKIP_GROKBOT, KIT_SKIP_COMPUTER,
+#   KIT_TEXTING_STYLE=1 (also refresh texting-style copies) and
+#   KIT_POST_UPDATE_HOOK=/abs/path (your own script, run after each update).
 set -euo pipefail
 
 # The tag this script was released with (scripts/release.sh rewrites it).
 KIT_FALLBACK_REF="v2026.11.21"
 KIT_REPO="thomasbek3/hermes-bot-kit"
+# This installer has --auto-update: the updater only ever replaces its own
+# copy (update.sh) with an install.sh that carries this exact line.
+KIT_AUTO_UPDATE_API=1
 KIT_RELEASES_API="${KIT_RELEASES_API:-https://api.github.com/repos/${KIT_REPO}/releases/latest}"
 KIT_REF_FROM_USER="${KIT_REF:-}"
 KIT_REF="${KIT_REF:-${KIT_FALLBACK_REF}}"
@@ -50,6 +58,8 @@ Install the Hermes Bot Kit desktop plugins.
 or from a clone:  bash install.sh
 
 Not working?  bash install.sh --doctor   (read-only checks; changes nothing)
+Keep it updated:  bash install.sh --auto-update on   (daily, newest release;
+                  also off, status, run; macOS and Linux)
 
 Installs the newest GitHub release (falls back to v2026.11.21 when the
 GitHub API cannot be reached) and checks every file against that release's
@@ -166,6 +176,809 @@ latest_release_tag() {
   is_release_tag "${tag}" || return 1
   printf '%s\n' "${tag}"
 }
+
+# --- Auto-update: install.sh --auto-update on|off|status|run -------------------
+# Hermes's own plugin auto-update never touches desktop-plugins/, so the kit
+# keeps itself current: `on` stores the knobs that apply (no secrets) in
+# <home>/hermes-bot-kit/auto-update.env, copies this script to
+# <home>/hermes-bot-kit/update.sh and installs a per-user daily job (macOS
+# LaunchAgent, Linux systemd user timer, else a crontab line to add) that runs
+# `update.sh --auto-update run` at 04:20 local time. `run` installs the newest
+# release when it is newer than <home>/hermes-bot-kit/installed-release, with
+# KIT_REF=<tag> and the same per-file manifest checks as a manual install. It
+# never restarts Hermes, the gateway or Desktop. One line per run goes to
+# <home>/logs/hermes-bot-kit-update.log.
+#
+# Test overrides (never needed in normal use): KIT_LAUNCHCTL, KIT_SYSTEMCTL
+# (commands to use instead of launchctl / systemctl), KIT_UPDATE_OS (mac,
+# linux, wsl or windows instead of asking uname), KIT_UPDATE_NOW (the time,
+# in epoch seconds, for log lines and the next-run time).
+AU_LABEL="io.github.thomasbek3.hermes-bot-kit.update"
+AU_UNIT="hermes-bot-kit-update"
+AU_HOUR=4
+AU_MIN=20
+AU_LOG_MAX=1048576
+
+au_paths() {
+  KIT_STATE_DIR="${HERMES_ROOT}/hermes-bot-kit"
+  AU_ENV="${KIT_STATE_DIR}/auto-update.env"
+  AU_SCRIPT="${KIT_STATE_DIR}/update.sh"
+  AU_LOCK="${KIT_STATE_DIR}/update.lock"
+  INSTALLED_RELEASE="${KIT_STATE_DIR}/installed-release"
+  AU_LOG="${HERMES_ROOT}/logs/hermes-bot-kit-update.log"
+  AU_OUT="${HERMES_ROOT}/logs/hermes-bot-kit-update.last-run.log"
+  AU_PLIST="${HOME}/Library/LaunchAgents/${AU_LABEL}.plist"
+  AU_UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+}
+au_paths
+
+# The one place HERMES_HOME is normalised for on, off, status and run: no
+# trailing slash, and the physical path (symlinks, . and .. resolved) when
+# the folder exists, so every subcommand, whichever spelling of the home it
+# is given, names the same files and the same job.
+au_norm_home() {
+  local h="${HERMES_ROOT}"
+  while [ "${#h}" -gt 1 ] && [ "${h%/}" != "${h}" ]; do h="${h%/}"; done
+  if [ -d "${h}" ]; then
+    h=$(CDPATH= cd -P -- "${h}" && pwd -P)
+  fi
+  HERMES_ROOT="${h}"
+  PLUGIN_ROOT="${h}/desktop-plugins"
+  au_paths
+}
+
+# Written on every successful install, manual or automatic: the release tag,
+# or "local" for a copy from a checkout. The updater compares against it.
+write_installed_release() {
+  local tmp
+  mkdir -p "${KIT_STATE_DIR}" || return 1
+  tmp=$(mktemp "${KIT_STATE_DIR}/.installed-release.XXXXXX") || return 1
+  printf '%s\n' "$1" > "${tmp}" && chmod 0644 "${tmp}" && mv -f "${tmp}" "${INSTALLED_RELEASE}"
+}
+
+au_installed() {
+  # The last installed release: installed-release, else (an install from
+  # before the updater existed) the desktop-plugins install record.
+  local r=""
+  [ -f "${INSTALLED_RELEASE}" ] && r=$(head -n 1 "${INSTALLED_RELEASE}")
+  if [ -z "${r}" ] && [ -f "${PLUGIN_ROOT}/.hermes-bot-kit-install" ]; then
+    r=$(sed -n 's/^release=//p' "${PLUGIN_ROOT}/.hermes-bot-kit-install" | head -n 1)
+  fi
+  printf '%s\n' "${r}"
+}
+
+au_now() {
+  case "${KIT_UPDATE_NOW:-}" in
+    '') date +%s ;;
+    *[!0-9]*) echo "install.sh: KIT_UPDATE_NOW must be epoch seconds" >&2; date +%s ;;
+    *) printf '%s\n' "${KIT_UPDATE_NOW}" ;;
+  esac
+}
+au_fmt() {
+  # au_fmt <epoch seconds> <date format>, local time (BSD date, then GNU date).
+  date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2"
+}
+
+au_os() {
+  if [ -n "${KIT_UPDATE_OS:-}" ]; then
+    printf '%s\n' "${KIT_UPDATE_OS}"
+    return 0
+  fi
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) echo mac ;;
+    Linux)
+      if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then echo wsl; else echo linux; fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*) echo windows ;;
+    *) echo other ;;
+  esac
+}
+
+au_flag() {
+  # au_flag <name> <value>: prints 0 or 1, fails on anything else.
+  case "$2" in
+    ''|0) echo 0 ;;
+    1) echo 1 ;;
+    *) echo "install.sh: $1 must be 0 or 1 (got '$2')" >&2; return 1 ;;
+  esac
+}
+
+# A path that goes into a plist, a systemd unit or a crontab line unquoted
+# by anything smarter: absolute, no control characters, no quotes, $, %, \,
+# backquote or XML specials.
+au_safe_path() {
+  case "$1" in /*) ;; *) return 1 ;; esac
+  case "$1" in *[[:cntrl:]]*|*[\"\\\$%\'\`\<\>\&]*) return 1 ;; esac
+  return 0
+}
+
+au_mode() {
+  stat -c %a -- "$1" 2>/dev/null || stat -f %Lp -- "$1" 2>/dev/null
+}
+au_mtime() {
+  stat -c %Y -- "$1" 2>/dev/null || stat -f %m -- "$1" 2>/dev/null
+}
+# Owner uid and mode of what a path points at (symlinks followed).
+au_uid_l() {
+  stat -L -c %u -- "$1" 2>/dev/null || stat -L -f %u -- "$1" 2>/dev/null
+}
+au_mode_l() {
+  stat -L -c %a -- "$1" 2>/dev/null || stat -L -f %Lp -- "$1" 2>/dev/null
+}
+
+# au_dir_problem <dir>: prints why someone else could change what is in the
+# folder, or nothing: it must be owned by you or root and not writable by
+# group or others, unless it is sticky (like /tmp: others can't rename or
+# delete what you own in it, and the next folder down is checked as well).
+au_dir_problem() {
+  local d="$1" uid mode me
+  me=$(id -u)
+  uid=$(au_uid_l "${d}")
+  mode=$(au_mode_l "${d}")
+  case "${uid}:${mode}" in
+    *[!0-9:]*|:*|*:) echo "has a folder above it whose owner or permissions could not be read (${d})"; return 0 ;;
+  esac
+  if [ "${uid}" != "${me}" ] && [ "${uid}" != 0 ]; then
+    echo "has a folder above it owned by someone else (${d})"
+    return 0
+  fi
+  if [ $((8#${mode} & 022)) -ne 0 ] && [ $((8#${mode} & 01000)) -eq 0 ]; then
+    echo "has a folder above it that group or others can write to (${d}, mode ${mode})"
+    return 0
+  fi
+  return 0
+}
+
+# au_hook_problem <path>: prints why the post-update hook can't be used, or
+# nothing when it can (an absolute path to an existing regular file you own,
+# executable, not a symlink, not writable by group or others).
+au_hook_problem() {
+  local p="$1" mode
+  case "${p}" in /*) ;; *) echo "is not an absolute path"; return 0 ;; esac
+  case "${p}" in *[[:cntrl:]]*) echo "has a control character in it"; return 0 ;; esac
+  if [ -L "${p}" ]; then echo "is a symlink (point at the file itself)"; return 0; fi
+  if [ ! -f "${p}" ]; then echo "is not an existing file"; return 0; fi
+  if [ ! -O "${p}" ]; then echo "is not owned by you"; return 0; fi
+  mode=$(au_mode "${p}")
+  case "${mode}" in
+    ''|*[!0-7]*) echo "has permissions that could not be read"; return 0 ;;
+  esac
+  if [ $((8#${mode} & 022)) -ne 0 ]; then echo "is writable by group or others (mode ${mode}; chmod go-w it)"; return 0; fi
+  if [ ! -x "${p}" ]; then echo "is not executable (chmod u+x it)"; return 0; fi
+  # Every folder above it, up to /, on the path as written AND on the path
+  # it resolves to (a symlinked folder leads elsewhere: the folders above its
+  # target count too): nobody else may be able to swap the file or a folder
+  # on the way to it between this check and the run.
+  local d problem real
+  real=$(CDPATH= cd -P -- "$(dirname -- "${p}")" 2>/dev/null && pwd -P) || {
+    echo "is in a folder that could not be resolved"
+    return 0
+  }
+  for d in "$(dirname -- "${p}")" "${real}"; do
+    while :; do
+      problem=$(au_dir_problem "${d}")
+      if [ -n "${problem}" ]; then echo "${problem}"; return 0; fi
+      [ "${d}" = / ] && break
+      d=$(dirname -- "${d}")
+    done
+  done
+  return 0
+}
+
+# au_hook_run <tag>: run the post-update hook. It is checked, copied into a
+# private 0700 folder under <home>/hermes-bot-kit, checked again and compared
+# with the copy, and the copy is what runs: the file that runs is the one
+# that was checked, whatever happens to the path afterwards. Prints the
+# phrase for the log line.
+au_hook_run() {
+  local tag="$1" problem hdir rc=0
+  problem=$(au_hook_problem "${AU_HOOK}")
+  if [ -n "${problem}" ]; then
+    echo "post-update hook not run: it ${problem}"
+    return 0
+  fi
+  hdir=$(mktemp -d "${KIT_STATE_DIR}/.hook.XXXXXX") || { echo "post-update hook not run: no private folder for it"; return 0; }
+  chmod 0700 "${hdir}"
+  if ! cp -- "${AU_HOOK}" "${hdir}/hook" 2>/dev/null; then
+    rm -rf "${hdir}"
+    echo "post-update hook not run: it could not be copied"
+    return 0
+  fi
+  chmod 0700 "${hdir}/hook"
+  problem=$(au_hook_problem "${AU_HOOK}")
+  if [ -n "${problem}" ] || ! cmp -s "${AU_HOOK}" "${hdir}/hook"; then
+    rm -rf "${hdir}"
+    echo "post-update hook not run: it changed while it was being checked${problem:+ (it ${problem})}"
+    return 0
+  fi
+  ( export KIT_REF="${tag}" HERMES_HOME="${HERMES_ROOT}" KIT_POST_UPDATE_HOOK="${AU_HOOK}"; exec "${hdir}/hook" </dev/null ) >> "${AU_OUT}" 2>&1 || rc=$?
+  rm -rf "${hdir}"
+  echo "post-update hook exited ${rc}"
+}
+
+au_get() {
+  # au_get <KEY>: the value from auto-update.env (no shell evaluation).
+  [ -f "${AU_ENV}" ] || return 0
+  sed -n "s/^$1=//p" "${AU_ENV}" | head -n 1
+}
+
+# The knobs a run uses: the ones `on` remembered, or (a manual run with
+# auto-update off) the ones in the environment.
+au_load() {
+  if [ -f "${AU_ENV}" ]; then
+    AU_ON=1
+    AU_SKIP_GROKBOT=$(au_flag KIT_SKIP_GROKBOT "$(au_get KIT_SKIP_GROKBOT)") || return 1
+    AU_SKIP_COMPUTER=$(au_flag KIT_SKIP_COMPUTER "$(au_get KIT_SKIP_COMPUTER)") || return 1
+    AU_TEXTING=$(au_flag KIT_TEXTING_STYLE "$(au_get KIT_TEXTING_STYLE)") || return 1
+    AU_HOOK=$(au_get KIT_POST_UPDATE_HOOK)
+    AU_SCHED=$(au_get SCHEDULER)
+  else
+    AU_ON=0
+    AU_SKIP_GROKBOT=$(au_flag KIT_SKIP_GROKBOT "${KIT_SKIP_GROKBOT:-}") || return 1
+    AU_SKIP_COMPUTER=$(au_flag KIT_SKIP_COMPUTER "${KIT_SKIP_COMPUTER:-}") || return 1
+    AU_TEXTING=$(au_flag KIT_TEXTING_STYLE "${KIT_TEXTING_STYLE:-}") || return 1
+    AU_HOOK="${KIT_POST_UPDATE_HOOK:-}"
+    AU_SCHED=""
+  fi
+}
+
+au_next_run() {
+  local now secs day
+  now=$(au_now)
+  secs=$((10#$(au_fmt "${now}" %H) * 3600 + 10#$(au_fmt "${now}" %M) * 60 + 10#$(au_fmt "${now}" %S)))
+  day="${now}"
+  [ "${secs}" -lt $((AU_HOUR * 3600 + AU_MIN * 60)) ] || day=$((now + 86400))
+  printf '%s %02d:%02d local time\n' "$(au_fmt "${day}" %Y-%m-%d)" "${AU_HOUR}" "${AU_MIN}"
+}
+
+au_log() {
+  # au_log <message>: one line, with the time, to the update log (rotated at
+  # 1 MB, one old file kept as .1) and to stdout.
+  local line size
+  mkdir -p "$(dirname -- "${AU_LOG}")"
+  if [ -f "${AU_LOG}" ]; then
+    size=$(wc -c < "${AU_LOG}" | tr -d '[:space:]')
+    if [ "${size:-0}" -ge "${AU_LOG_MAX}" ]; then
+      mv -f "${AU_LOG}" "${AU_LOG}.1"
+    fi
+  fi
+  line="$(au_fmt "$(au_now)" '%Y-%m-%d %H:%M:%S') $*"
+  printf '%s\n' "${line}" >> "${AU_LOG}"
+  printf '%s\n' "${line}"
+}
+
+au_last_line() {
+  local f
+  for f in "${AU_LOG}" "${AU_LOG}.1"; do
+    if [ -s "${f}" ]; then
+      tail -n 1 "${f}"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# Single instance: a lock folder holding the owner's PID. A lock whose PID is
+# gone (or with no PID after a minute) is stale and taken over. Taking it
+# over is serialised: only the contender holding <lock>.recover may do it,
+# and only while the lock still holds the very PID it found dead (so a fresh
+# lock another contender just took is never removed). The stale folder is
+# renamed away first, then removed, then the lock is taken again.
+au_lock() {
+  local pid now_pid age rec stale
+  mkdir -p "${KIT_STATE_DIR}"
+  if mkdir "${AU_LOCK}" 2>/dev/null; then
+    printf '%s\n' "$$" > "${AU_LOCK}/pid"
+    return 0
+  fi
+  AU_LOCK_PID="unknown"
+  pid=$(head -n 1 "${AU_LOCK}/pid" 2>/dev/null || true)
+  case "${pid}" in ''|*[!0-9]*) pid="" ;; esac
+  if [ -n "${pid}" ]; then
+    if kill -0 "${pid}" 2>/dev/null || ps -p "${pid}" >/dev/null 2>&1; then
+      AU_LOCK_PID="${pid}"
+      return 1
+    fi
+  else
+    age=$(( $(date +%s) - $(au_mtime "${AU_LOCK}" || date +%s) ))
+    [ "${age}" -ge 60 ] || return 1
+  fi
+  rec="${AU_LOCK}.recover"
+  if ! mkdir "${rec}" 2>/dev/null; then
+    # Someone else is recovering it, unless the recovery folder was left by
+    # a crash (older than ten minutes): then it is cleared and this run tries
+    # once more (if another run got there first, mkdir fails and it waits).
+    age=$(( $(date +%s) - $(au_mtime "${rec}" || date +%s) ))
+    [ "${age}" -ge 600 ] || return 1
+    rmdir "${rec}" 2>/dev/null || return 1
+    mkdir "${rec}" 2>/dev/null || return 1
+  fi
+  now_pid=$(head -n 1 "${AU_LOCK}/pid" 2>/dev/null || true)
+  case "${now_pid}" in ''|*[!0-9]*) now_pid="" ;; esac
+  if [ ! -d "${AU_LOCK}" ] || [ -L "${AU_LOCK}" ] || [ ! -O "${AU_LOCK}" ] || [ "${now_pid}" != "${pid}" ]; then
+    rmdir "${rec}" 2>/dev/null || true
+    AU_LOCK_PID="${now_pid:-unknown}"
+    return 1
+  fi
+  stale="${AU_LOCK}.stale.$$.$(date +%s)"
+  if ! mv "${AU_LOCK}" "${stale}" 2>/dev/null; then
+    rmdir "${rec}" 2>/dev/null || true
+    return 1
+  fi
+  rm -f "${stale}/pid"
+  rmdir "${stale}" 2>/dev/null || true
+  if ! mkdir "${AU_LOCK}" 2>/dev/null; then
+    rmdir "${rec}" 2>/dev/null || true
+    return 1
+  fi
+  printf '%s\n' "$$" > "${AU_LOCK}/pid"
+  rmdir "${rec}" 2>/dev/null || true
+  return 0
+}
+au_unlock() {
+  [ "$(head -n 1 "${AU_LOCK}/pid" 2>/dev/null)" = "$$" ] || return 0
+  rm -f "${AU_LOCK}/pid"
+  rmdir "${AU_LOCK}" 2>/dev/null || true
+}
+
+AU_CURL=(curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 --retry-delay 2 --max-filesize 1048576)
+
+au_verify() {
+  # au_verify <repo path> <file> <manifest>: the file matches the manifest.
+  local want
+  want=$(awk -v p="$1" '$2 == p { print $1; exit }' "$3")
+  [ -n "${want}" ] && [ "$(sha256_of "$2")" = "${want}" ]
+}
+
+# au_plain_path <path under HERMES_ROOT>: no part of it below HERMES_ROOT is a
+# symlink, and its folder resolves inside HERMES_ROOT.
+au_plain_path() {
+  local rel="${1#"${HERMES_ROOT}"/}" cur="${HERMES_ROOT}" part root_p dir_p
+  [ "${rel}" != "$1" ] || return 1
+  while [ -n "${rel}" ]; do
+    part="${rel%%/*}"
+    if [ "${part}" = "${rel}" ]; then rel=""; else rel="${rel#*/}"; fi
+    case "${part}" in ''|.|..) return 1 ;; esac
+    cur="${cur}/${part}"
+    [ -L "${cur}" ] && return 1
+  done
+  [ -d "$(dirname -- "$1")" ] || return 0
+  root_p=$(CDPATH= cd -P -- "${HERMES_ROOT}" && pwd -P) || return 1
+  dir_p=$(CDPATH= cd -P -- "$(dirname -- "$1")" && pwd -P) || return 1
+  case "${dir_p}/" in "${root_p}"/*) return 0 ;; esac
+  return 1
+}
+
+# After an update, only when KIT_TEXTING_STYLE=1 was set at `on`: refresh
+# texting-style where it is already installed as a plain copy. Never replaces
+# a symlink, never installs into a profile that lacks it, never edits
+# config.yaml. Prints one summary phrase for the log line.
+au_texting_style() {
+  local tag="$1" dir="$2" t="$2/texting-style" base home dest f n=0 links=0 stamp
+  base="https://raw.githubusercontent.com/${KIT_REPO}/${tag}"
+  mkdir -p "${t}"
+  for f in plugin.yaml __init__.py; do
+    if ! "${AU_CURL[@]}" "${base}/texting-style/${f}" -o "${t}/${f}" 2>/dev/null; then
+      echo "texting-style not refreshed (download failed)"
+      return 0
+    fi
+    if ! au_verify "texting-style/${f}" "${t}/${f}" "${dir}/MANIFEST.sha256"; then
+      echo "texting-style not refreshed (texting-style/${f} does not match the manifest)"
+      return 0
+    fi
+  done
+  if ! grep -q "texting-style.sms-register" "${t}/__init__.py"; then
+    echo "texting-style not refreshed (download does not look like texting-style)"
+    return 0
+  fi
+  stamp=$(date +%Y%m%d%H%M%S)
+  for home in "${HERMES_ROOT}" "${HERMES_ROOT}"/profiles/*; do
+    [ -d "${home}" ] || continue
+    dest="${home}/plugins/texting-style"
+    # A symlink anywhere from the Hermes home down (the profile, plugins/,
+    # the plugin folder or a file) means it is not a plain copy: left alone.
+    if ! au_plain_path "${dest}/plugin.yaml" || ! au_plain_path "${dest}/__init__.py"; then
+      links=$((links + 1))
+      continue
+    fi
+    [ -d "${dest}" ] && [ -f "${dest}/plugin.yaml" ] && [ -f "${dest}/__init__.py" ] || continue
+    for f in plugin.yaml __init__.py; do
+      cmp -s "${t}/${f}" "${dest}/${f}" && continue
+      cp "${dest}/${f}" "${dest}/${f}.bak.${stamp}"
+      cp "${t}/${f}" "${dest}/.${f}.new.$$"
+      mv -f "${dest}/.${f}.new.$$" "${dest}/${f}"
+    done
+    n=$((n + 1))
+  done
+  echo "texting-style refreshed in ${n} profile(s), ${links} with a symlink in the path left alone (new code loads at the next agent/gateway restart)"
+}
+
+au_run() {
+  local tag installed tmp rc msg base ts_msg extra=""
+  au_load || { au_log "FAILED: bad settings in ${AU_ENV}"; return 1; }
+  if ! au_lock; then
+    au_log "skipped: another update is running (pid ${AU_LOCK_PID:-unknown})"
+    return 0
+  fi
+  tmp=$(mktemp -d)
+  # shellcheck disable=SC2064 # expand now: these paths are fixed for the run
+  trap "rm -rf '${tmp}'; au_unlock" EXIT
+  if ! tag=$(latest_release_tag); then
+    au_log "skipped: GitHub API not reachable or rate-limited; will try again next run"
+    return 0
+  fi
+  installed=$(au_installed)
+  if is_release_tag "${installed}" && ! tag_older_than "${installed}" "${tag}"; then
+    au_log "up to date (${installed})"
+    return 0
+  fi
+  base="https://raw.githubusercontent.com/${KIT_REPO}/${tag}"
+  if ! "${AU_CURL[@]}" "${base}/MANIFEST.sha256" -o "${tmp}/MANIFEST.sha256" 2>/dev/null ||
+    ! "${AU_CURL[@]}" "${base}/install.sh" -o "${tmp}/install.sh" 2>/dev/null; then
+    au_log "skipped: could not download ${tag}; will try again next run"
+    return 0
+  fi
+  if awk '$2 == "install.sh" { found=1 } END { exit found ? 0 : 1 }' "${tmp}/MANIFEST.sha256"; then
+    if ! au_verify install.sh "${tmp}/install.sh" "${tmp}/MANIFEST.sha256"; then
+      au_log "FAILED: ${tag} install.sh does not match its MANIFEST.sha256; nothing installed"
+      return 1
+    fi
+  fi
+  # Not listed: install.sh checks every file it installs against the manifest
+  # itself. Still, it must be the installer released as that tag.
+  if ! grep -qxF "KIT_FALLBACK_REF=\"${tag}\"" "${tmp}/install.sh" || ! bash -n "${tmp}/install.sh" 2>/dev/null; then
+    au_log "FAILED: the downloaded ${tag} install.sh does not look like that release's installer; nothing installed"
+    return 1
+  fi
+  rc=0
+  # The first run that updates may come before any log line was written.
+  mkdir -p "$(dirname -- "${AU_OUT}")"
+  (
+    unset KIT_SKIP_VERIFY KIT_SOURCE_DIR KIT_CARDS_SKILL KIT_CARDS_PROFILES KIT_REMOVE_RETIRED
+    export HERMES_HOME="${HERMES_ROOT}" KIT_REF="${tag}" KIT_SKIP_GROKBOT="${AU_SKIP_GROKBOT}" KIT_SKIP_COMPUTER="${AU_SKIP_COMPUTER}"
+    exec "${BASH:-bash}" "${tmp}/install.sh" </dev/null
+  ) > "${AU_OUT}" 2>&1 || rc=$?
+  if [ "${rc}" -ne 0 ]; then
+    au_log "FAILED: installing ${tag} exited ${rc} (still on ${installed:-nothing}; its output: ${AU_OUT})"
+    return 1
+  fi
+  write_installed_release "${tag}" || true
+  # The job runs the newest release's own updater from now on, but only when
+  # that installer has --auto-update: an older one (no KIT_AUTO_UPDATE_API=1
+  # line) ran above only as an installer, and the current updater stays.
+  if [ "${AU_ON}" = 1 ] && ! grep -qx 'KIT_AUTO_UPDATE_API=1' "${tmp}/install.sh"; then
+    extra="${extra}; kept the current updater (the ${tag} installer has no auto-update)"
+  elif [ "${AU_ON}" = 1 ]; then
+    cp "${tmp}/install.sh" "${KIT_STATE_DIR}/.update.sh.new.$$"
+    chmod 0700 "${KIT_STATE_DIR}/.update.sh.new.$$"
+    mv -f "${KIT_STATE_DIR}/.update.sh.new.$$" "${AU_SCRIPT}"
+  fi
+  if [ "${AU_TEXTING}" = 1 ]; then
+    ts_msg=$(au_texting_style "${tag}" "${tmp}") || ts_msg="texting-style refresh stopped part-way (see the .bak.<timestamp> files in each plugins/texting-style/)"
+    extra="${extra}; ${ts_msg}"
+  fi
+  if [ -n "${AU_HOOK}" ]; then
+    extra="${extra}; $(au_hook_run "${tag}")"
+  fi
+  msg="updated ${installed:-nothing} -> ${tag}${extra}. Reload desktop plugins (Cmd+K) to pick up ${tag}"
+  au_log "${msg}"
+  return 0
+}
+
+au_plist() {
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${AU_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${AU_SCRIPT}</string>
+    <string>--auto-update</string>
+    <string>run</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HERMES_HOME</key>
+    <string>${HERMES_ROOT}</string>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>${AU_HOUR}</integer>
+    <key>Minute</key>
+    <integer>${AU_MIN}</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>/dev/null</string>
+</dict>
+</plist>
+EOF
+}
+
+au_service() {
+  cat <<EOF
+[Unit]
+Description=Hermes Bot Kit daily update (install.sh --auto-update)
+
+[Service]
+Type=oneshot
+Environment="HERMES_HOME=${HERMES_ROOT}"
+ExecStart=${AU_BASH} "${AU_SCRIPT}" --auto-update run
+Nice=10
+StandardOutput=null
+StandardError=null
+EOF
+}
+
+au_timer() {
+  cat <<EOF
+[Unit]
+Description=Hermes Bot Kit daily update (install.sh --auto-update)
+
+[Timer]
+OnCalendar=*-*-* $(printf '%02d:%02d' "${AU_HOUR}" "${AU_MIN}")
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
+au_cron_line() {
+  printf '%s %s * * * HERMES_HOME='"'"'%s'"'"' %s '"'"'%s'"'"' --auto-update run >/dev/null 2>&1\n' \
+    "${AU_MIN}" "${AU_HOUR}" "${HERMES_ROOT}" "${AU_BASH}" "${AU_SCRIPT}"
+}
+
+au_write() {
+  # au_write <dest> <mode>: stdin to dest, atomically (temp file beside it).
+  local tmp
+  mkdir -p "$(dirname -- "$1")"
+  tmp=$(mktemp "$1.XXXXXX")
+  cat > "${tmp}"
+  chmod "$2" "${tmp}"
+  mv -f "${tmp}" "$1"
+}
+
+au_systemctl_ok() {
+  command -v "${AU_SYSTEMCTL%% *}" >/dev/null 2>&1 && ${AU_SYSTEMCTL} --user show-environment >/dev/null 2>&1
+}
+
+au_on() {
+  local os self g c ts hook problem uid sched
+  os=$(au_os)
+  case "${os}" in
+    mac|linux) ;;
+    wsl|windows)
+      echo "install.sh: --auto-update is not supported on Windows or WSL yet." >&2
+      echo "  Hermes Desktop for Windows reads its plugins from %LOCALAPPDATA%\\hermes\\desktop-plugins; update them by" >&2
+      echo "  copying a newer release in by hand (README: Troubleshooting, Hermes Desktop on Windows). Nothing was changed." >&2
+      return 1
+      ;;
+    *)
+      echo "install.sh: --auto-update supports macOS and Linux only. Nothing was changed." >&2
+      return 1
+      ;;
+  esac
+  if [ ! -d "${HERMES_ROOT}" ]; then
+    echo "install.sh: no Hermes home at ${HERMES_ROOT}; install Hermes (and the kit) first. Nothing was changed." >&2
+    return 1
+  fi
+  if ! au_safe_path "${HERMES_ROOT}" || ! au_safe_path "${HOME}"; then
+    echo "install.sh: --auto-update needs a Hermes home and HOME path without quotes, \$, %, \\, \` or < > &. Nothing was changed." >&2
+    return 1
+  fi
+  g=$(au_flag KIT_SKIP_GROKBOT "${KIT_SKIP_GROKBOT:-}") || return 2
+  c=$(au_flag KIT_SKIP_COMPUTER "${KIT_SKIP_COMPUTER:-}") || return 2
+  ts=$(au_flag KIT_TEXTING_STYLE "${KIT_TEXTING_STYLE:-}") || return 2
+  hook="${KIT_POST_UPDATE_HOOK:-}"
+  if [ -n "${hook}" ]; then
+    problem=$(au_hook_problem "${hook}")
+    if [ -n "${problem}" ]; then
+      echo "install.sh: KIT_POST_UPDATE_HOOK ${hook} ${problem}. Nothing was changed." >&2
+      return 2
+    fi
+  fi
+  self="${BASH_SOURCE[0]:-}"
+  if [ -z "${self}" ] || [ ! -f "${self}" ] || ! grep -q '^KIT_FALLBACK_REF="' "${self}" || ! grep -qx 'KIT_AUTO_UPDATE_API=1' "${self}"; then
+    echo "install.sh: run --auto-update on from a downloaded install.sh file (the one-liner in the README), not a pipe. Nothing was changed." >&2
+    return 1
+  fi
+  AU_BASH=$(command -v bash 2>/dev/null || echo /bin/bash)
+  case "${os}" in mac) AU_BASH=/bin/bash ;; esac
+  au_safe_path "${AU_BASH}" && case "${AU_BASH}" in *' '*) false ;; esac || AU_BASH=/bin/bash
+
+  mkdir -p "${KIT_STATE_DIR}" "${HERMES_ROOT}/logs"
+  chmod 0700 "${KIT_STATE_DIR}"
+  au_write "${AU_SCRIPT}" 0700 < "${self}"
+
+  case "${os}" in
+    mac)
+      sched=launchd
+      au_plist | au_write "${AU_PLIST}" 0644
+      uid=$(id -u)
+      AU_LAUNCHCTL="${KIT_LAUNCHCTL:-launchctl}"
+      ${AU_LAUNCHCTL} bootout "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1 || true
+      if ${AU_LAUNCHCTL} bootstrap "gui/${uid}" "${AU_PLIST}" >/dev/null 2>&1; then
+        echo "Auto-update      -> on: daily at 04:20 (LaunchAgent ${AU_PLIST})"
+      else
+        echo "Auto-update      -> on, but the job could not be loaded now (normal over ssh). It loads by itself at your"
+        echo "                    next login, or run this in Terminal on this Mac:"
+        echo "                    launchctl bootstrap gui/${uid} '${AU_PLIST}'"
+      fi
+      ;;
+    linux)
+      AU_SYSTEMCTL="${KIT_SYSTEMCTL:-systemctl}"
+      if au_systemctl_ok; then
+        sched=systemd
+        au_service | au_write "${AU_UNIT_DIR}/${AU_UNIT}.service" 0644
+        au_timer | au_write "${AU_UNIT_DIR}/${AU_UNIT}.timer" 0644
+        if ${AU_SYSTEMCTL} --user daemon-reload >/dev/null 2>&1 &&
+          ${AU_SYSTEMCTL} --user enable --now "${AU_UNIT}.timer" >/dev/null 2>&1; then
+          echo "Auto-update      -> on: daily at 04:20 (systemd user timer ${AU_UNIT}.timer)"
+        else
+          echo "Auto-update      -> units written, but the timer could not be started. Run:"
+          echo "                    systemctl --user daemon-reload && systemctl --user enable --now ${AU_UNIT}.timer"
+        fi
+      else
+        sched=cron
+        echo "Auto-update      -> no systemd user session here. Add this line with 'crontab -e' to run it daily at 04:20:"
+        echo
+        au_cron_line
+        echo
+      fi
+      ;;
+  esac
+  {
+    echo "# hermes-bot-kit auto-update settings (install.sh --auto-update on). No secrets."
+    echo "HERMES_HOME=${HERMES_ROOT}"
+    echo "KIT_SKIP_GROKBOT=${g}"
+    echo "KIT_SKIP_COMPUTER=${c}"
+    echo "KIT_TEXTING_STYLE=${ts}"
+    echo "KIT_POST_UPDATE_HOOK=${hook}"
+    echo "SCHEDULER=${sched}"
+  } | au_write "${AU_ENV}" 0600
+  echo "                    settings: ${AU_ENV}"
+  echo "                    updater:  ${AU_SCRIPT}"
+  echo "                    log:      ${AU_LOG}"
+  echo "                    next run: $(au_next_run)"
+  echo "It never restarts Hermes: after an update, reload desktop plugins (Cmd+K -> 'Reload desktop plugins')."
+  echo "Check it: bash install.sh --auto-update status. Turn it off: bash install.sh --auto-update off."
+}
+
+au_off() {
+  local uid sched left=""
+  sched=$(au_get SCHEDULER)
+  uid=$(id -u)
+  if [ -f "${AU_PLIST}" ] && ! grep -qF "<string>${AU_SCRIPT}</string>" "${AU_PLIST}"; then
+    echo "Auto-update      -- the LaunchAgent belongs to another Hermes home's auto-update; left alone (turn it off with that HERMES_HOME)"
+  elif [ -f "${AU_PLIST}" ]; then
+    ${KIT_LAUNCHCTL:-launchctl} bootout "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1 || true
+    rm -f "${AU_PLIST}"
+    if ${KIT_LAUNCHCTL:-launchctl} print "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1; then
+      left="${left} launchd"
+      echo "install.sh: the LaunchAgent file is removed but the job is still loaded. Run this in Terminal on this Mac:" >&2
+      echo "  launchctl bootout gui/${uid}/${AU_LABEL}" >&2
+    else
+      echo "Auto-update      -- LaunchAgent unloaded and removed"
+    fi
+  elif [ "${sched}" = launchd ] && ${KIT_LAUNCHCTL:-launchctl} print "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1; then
+    # A retry after an unload that failed: the file is gone, the job is still
+    # loaded, and no other home's LaunchAgent file claims it.
+    ${KIT_LAUNCHCTL:-launchctl} bootout "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1 || true
+    if ${KIT_LAUNCHCTL:-launchctl} print "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1; then
+      left="${left} launchd"
+      echo "install.sh: the job is still loaded. Run this in Terminal on this Mac:" >&2
+      echo "  launchctl bootout gui/${uid}/${AU_LABEL}" >&2
+    else
+      echo "Auto-update      -- LaunchAgent unloaded"
+    fi
+  fi
+  if [ -f "${AU_UNIT_DIR}/${AU_UNIT}.service" ] && ! grep -qF "\"${AU_SCRIPT}\"" "${AU_UNIT_DIR}/${AU_UNIT}.service"; then
+    echo "Auto-update      -- the systemd user timer belongs to another Hermes home's auto-update; left alone"
+  elif [ -f "${AU_UNIT_DIR}/${AU_UNIT}.timer" ] || [ -f "${AU_UNIT_DIR}/${AU_UNIT}.service" ]; then
+    ${KIT_SYSTEMCTL:-systemctl} --user disable --now "${AU_UNIT}.timer" >/dev/null 2>&1 || true
+    rm -f "${AU_UNIT_DIR}/${AU_UNIT}.timer" "${AU_UNIT_DIR}/${AU_UNIT}.service"
+    ${KIT_SYSTEMCTL:-systemctl} --user daemon-reload >/dev/null 2>&1 || true
+    if [ -e "${AU_UNIT_DIR}/${AU_UNIT}.timer" ] || [ -e "${AU_UNIT_DIR}/${AU_UNIT}.service" ]; then
+      left="${left} systemd"
+    else
+      echo "Auto-update      -- systemd user timer stopped and removed"
+    fi
+  fi
+  # Never report off while a job for this home remains.
+  if [ -f "${AU_PLIST}" ] && grep -qF "<string>${AU_SCRIPT}</string>" "${AU_PLIST}"; then
+    left="${left} launchd-file"
+  fi
+  if [ -n "${left}" ]; then
+    echo "install.sh: auto-update is NOT off: a daily job for ${HERMES_ROOT} is still scheduled (${left# }). Settings kept; fix the above and run --auto-update off again." >&2
+    return 1
+  fi
+  if [ "${sched}" = cron ]; then
+    echo "Auto-update      -- remove the hermes-bot-kit line from 'crontab -e' yourself (it now finds nothing to run)"
+  fi
+  rm -f "${AU_ENV}" "${AU_SCRIPT}"
+  echo "Auto-update      -- off. Installed plugins, backups, installed-release and the log are kept."
+}
+
+au_status() {
+  local installed newest last uid loaded="" n
+  au_load || return 1
+  installed=$(au_installed)
+  if [ "${AU_ON}" = 1 ]; then
+    case "${AU_SCHED}" in
+      launchd)
+        uid=$(id -u)
+        if [ ! -f "${AU_PLIST}" ]; then
+          loaded=" - but the LaunchAgent is missing: run --auto-update on again"
+        elif ! grep -qF "<string>${AU_SCRIPT}</string>" "${AU_PLIST}"; then
+          loaded=" - but the LaunchAgent now runs another Hermes home's updater"
+        elif ${KIT_LAUNCHCTL:-launchctl} print "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1; then
+          loaded=" (LaunchAgent loaded)"
+        else
+          loaded=" (LaunchAgent not loaded yet: it loads at your next login, or: launchctl bootstrap gui/${uid} '${AU_PLIST}')"
+        fi
+        ;;
+      systemd)
+        if ${KIT_SYSTEMCTL:-systemctl} --user is-enabled "${AU_UNIT}.timer" >/dev/null 2>&1; then
+          loaded=" (systemd user timer enabled)"
+        else
+          loaded=" (systemd user timer not enabled: systemctl --user enable --now ${AU_UNIT}.timer)"
+        fi
+        ;;
+      cron) loaded=" (crontab line you added by hand)" ;;
+    esac
+    echo "Auto-update      : on, daily at 04:20 local time via ${AU_SCHED:-unknown}${loaded}"
+    echo "Next run         : $(au_next_run) (a Mac asleep then runs it when it wakes)"
+  else
+    echo "Auto-update      : off (turn it on: bash install.sh --auto-update on)"
+  fi
+  echo "Installed release: ${installed:-unknown}"
+  if newest=$(latest_release_tag); then
+    echo "Newest release   : ${newest}"
+  else
+    echo "Newest release   : unknown (GitHub API not reachable or rate-limited)"
+  fi
+  last=$(au_last_line)
+  echo "Last run         : ${last:-never}"
+  case "${last}" in
+    *" updated "*) echo "                   Reload desktop plugins (Cmd+K) to pick up ${installed} if you haven't yet." ;;
+  esac
+  if [ "${AU_ON}" = 1 ]; then
+    echo "Remembered knobs : KIT_SKIP_GROKBOT=${AU_SKIP_GROKBOT} KIT_SKIP_COMPUTER=${AU_SKIP_COMPUTER} KIT_TEXTING_STYLE=${AU_TEXTING}${AU_HOOK:+ KIT_POST_UPDATE_HOOK=${AU_HOOK}}"
+  fi
+  n=0
+  [ -d "${PLUGIN_ROOT}" ] && n=$( { find "${PLUGIN_ROOT}" -name '*.bak.[0-9]*' -type f 2>/dev/null || true; } | wc -l | tr -d '[:space:]')
+  echo "Backups          : ${n:-0} file(s), each replaced file is kept beside it as <file>.bak.<timestamp> in ${PLUGIN_ROOT}/"
+  echo "Log              : ${AU_LOG} (output of the last update: ${AU_OUT})"
+}
+
+if [ "${1:-}" = "--auto-update" ]; then
+  au_norm_home
+  case "${2:-}" in
+    on) au_on; exit $? ;;
+    off) au_off; exit $? ;;
+    status) au_status; exit $? ;;
+    run) au_run; exit $? ;;
+    *)
+      echo "Usage: install.sh --auto-update on|off|status|run" >&2
+      exit 2
+      ;;
+  esac
+fi
 
 case "${KIT_CARDS_SKILL:-0}" in
   0|1|remove) ;;
@@ -729,6 +1542,10 @@ else
   INSTALL_OK=0
   install_all
   INSTALL_OK=1
+  # For the auto-updater (and its status): which release is installed now.
+  if [ -n "${SOURCE_DIR}" ]; then installed_as="local"; else installed_as="${KIT_REF}"; fi
+  write_installed_release "${installed_as}" ||
+    echo "install.sh: could not write ${INSTALLED_RELEASE} (the auto-updater reads it)" >&2
 
   if [ "${KIT_SKIP_COMPUTER:-0}" != "1" ]; then
     echo "Computer viewer  -> ${PLUGIN_ROOT}/computer-viewer/plugin.js (+ helper scripts)"

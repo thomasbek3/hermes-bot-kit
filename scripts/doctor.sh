@@ -686,6 +686,39 @@ if [ -n "${orgo}" ]; then
 fi
 [ -z "${retired}" ] && [ -z "${orgo}" ] && ok retired "No retired kit plugins"
 
+# --- Auto-update (install.sh --auto-update) ----------------------------------------------
+# Reads only the scheduler name from the settings file (it holds no secrets)
+# and the last line of the update log; changes nothing.
+AU_DIR="${H}/hermes-bot-kit"
+AU_LOG="${H}/logs/hermes-bot-kit-update.log"
+AU_LAST=""
+[ -s "${AU_LOG}" ] && AU_LAST=$(tail -n 1 "${AU_LOG}")
+if [ "${WIN_TARGET}" = 1 ] || [ "${OS_KIND}" = wsl ]; then
+  info auto-update "Auto-update: not available for Hermes Desktop on Windows yet; update by copying a newer release in"
+elif [ ! -f "${AU_DIR}/auto-update.env" ]; then
+  info auto-update "Auto-update is off. To install new releases daily: bash install.sh --auto-update on (from the downloaded install.sh; README: Keep it updated)"
+else
+  au_sched=$(sed -n 's/^SCHEDULER=//p' "${AU_DIR}/auto-update.env" | head -n 1)
+  au_job=1
+  case "${au_sched}" in
+    launchd) [ -f "${HOME}/Library/LaunchAgents/io.github.thomasbek3.hermes-bot-kit.update.plist" ] || au_job=0 ;;
+    systemd) [ -f "${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user/hermes-bot-kit-update.timer" ] || au_job=0 ;;
+  esac
+  if [ ! -f "${AU_DIR}/update.sh" ] || [ "${au_job}" = 0 ]; then
+    fix auto-update "Auto-update is on but its daily job or updater copy is missing, so nothing runs" \
+      "bash install.sh --auto-update on   (from the downloaded install.sh; it rewrites both)"
+  else
+    case "${AU_LAST}" in
+      *" FAILED: "*)
+        fix auto-update "Auto-update is on (${au_sched:-unknown}), but the last run failed: ${AU_LAST}" \
+          "read ${AU_LOG} and ${H}/logs/hermes-bot-kit-update.last-run.log, then try: bash install.sh --auto-update run"
+        ;;
+      '') ok auto-update "Auto-update is on (${au_sched:-unknown}, daily at 04:20); no run yet" ;;
+      *) ok auto-update "Auto-update is on (${au_sched:-unknown}, daily at 04:20); last run: ${AU_LAST}" ;;
+    esac
+  fi
+fi
+
 # --- Settings this script can't read -----------------------------------------------------
 info switches "On/off switches: Hermes keeps them in the app's own storage, which a script can't read. Check Capabilities -> Plugins (in the sidebar): Grokbot Override and Computer should be on"
 info override-switch "Grokbot Override has its own switch: if the Bots tab looks stock, press Cmd+K (Ctrl+K on Linux/Windows) -> 'Grokbot Override: toggle'"

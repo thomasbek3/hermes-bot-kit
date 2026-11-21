@@ -93,6 +93,11 @@ jobs:
       - name: Installer tests
         run: bash tests/test-install.sh
 
+      # Fake launchctl, systemctl and curl, throwaway HOME and Hermes homes:
+      # no real LaunchAgent, systemd unit or network.
+      - name: Auto-update tests
+        run: bash tests/test-auto-update.sh
+
       # Throwaway Hermes homes and a fake app; never the runner's own. The fix
       # lines are parsed under bash and zsh, so Linux needs zsh.
       - name: Doctor tests
