@@ -23,8 +23,11 @@
   hook (owner-only file in owner-only folders; a private copy is what runs).
   The updater copy is only replaced by an installer that has auto-update
   (`KIT_AUTO_UPDATE_API=1`); an older release is installed but not used as
-  the updater. Stale-lock recovery is serialised; `off` normalises
-  `HERMES_HOME` like `on` and fails while a job for the home remains. The doctor reports
+  the updater. Stale-lock recovery is serialised (a recovery left by a crash
+  is cleared after ten minutes); `HERMES_HOME` is resolved to its physical
+  path for every subcommand, so a symlinked home is one home; `off` fails
+  while a job for the home remains and a retry unloads it. The hook's
+  folders are checked on its path as written and as resolved. The doctor reports
   the auto-update state. Tests: `tests/test-auto-update.sh` (fake launchctl,
   systemctl and curl).
 - **Qualified on Hermes v0.23.3 (2026-11-21).** Stable v0.23.3 (`caafe538`,

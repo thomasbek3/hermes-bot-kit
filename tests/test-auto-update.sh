@@ -9,6 +9,9 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 INSTALLER="${ROOT}/install.sh"
 
 WORK=$(mktemp -d)
+# The physical path: the updater resolves the Hermes home to it (macOS's
+# temp folder sits behind the /var -> /private/var symlink).
+WORK=$(CDPATH= cd -P -- "${WORK}" && pwd -P)
 export TMPDIR="${WORK}"
 SLEEPER=""
 cleanup() {
@@ -224,7 +227,103 @@ reg_legacy_driver() {
   ok "regression: a release without auto-update installs but never replaces the updater"
 }
 
-REGRESSIONS="reg_hook_toctou reg_lock_race reg_texting_ancestor_link reg_off_normalise reg_legacy_driver"
+# Round 2. 6. A hook reached through a symlinked folder: the folders above the
+# symlink's TARGET are checked too (on and run).
+reg_hook_symlinked_ancestor() {
+  new_machine
+  local pub="${M}/pub" safe="${M}/safe" hook
+  mkdir -p "${pub}/real" "${safe}"
+  chmod 0700 "${pub}/real" "${safe}"
+  printf '#!/bin/sh\ntouch "%s/hook.ran"\n' "${M}" > "${pub}/real/hook.sh"
+  chmod 0700 "${pub}/real/hook.sh"
+  ln -s "${pub}/real" "${safe}/link"
+  hook="${safe}/link/hook.sh"
+  chmod 0777 "${pub}"
+  if out=$(kit KIT_POST_UPDATE_HOOK="${hook}" bash "${DL}/install.sh" --auto-update on 2>&1); then
+    fail "hook symlinked ancestor: accepted a hook whose real folder sits in a folder others can write to"
+  fi
+  printf '%s\n' "${out}" | grep -q "group or others can write to (${pub}," || fail "hook symlinked ancestor: wrong reason: ${out}"
+  [ ! -e "${STATE}/auto-update.env" ] || fail "hook symlinked ancestor: on went ahead"
+  chmod 0700 "${pub}"
+  mkdir -p "${STATE}"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  kit KIT_POST_UPDATE_HOOK="${hook}" bash "${DL}/install.sh" --auto-update on >/dev/null || fail "hook symlinked ancestor: a safe symlinked path was rejected"
+  chmod 0777 "${pub}"
+  job >/dev/null || fail "hook symlinked ancestor: run failed"
+  chmod 0700 "${pub}"
+  [ ! -e "${M}/hook.ran" ] || fail "hook symlinked ancestor: the hook ran from a swappable folder"
+  tail -n 1 "${ULOG}" | grep -q 'post-update hook not run: it has a folder above it that group or others can write to' || fail "hook symlinked ancestor log: $(tail -n 1 "${ULOG}")"
+  ok "regression: a hook behind a symlinked folder is checked on its resolved path too (on and run)"
+}
+
+# 7. A .recover folder left by a crashed recovery is cleared and the stale
+# lock is recovered in the same run.
+reg_lock_crashed_recover() {
+  new_machine
+  mkdir -p "${STATE}/update.lock" "${STATE}/update.lock.recover"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  sleep 0.1 &
+  local dead=$!
+  wait "${dead}" 2>/dev/null || true
+  printf '%s\n' "${dead}" > "${STATE}/update.lock/pid"
+  touch -t 202001010000 "${STATE}/update.lock.recover"
+  kit bash "${DL}/install.sh" --auto-update run >/dev/null || fail "crashed recover: run failed"
+  [ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "crashed recover: not updated: $(tail -n 1 "${ULOG}")"
+  [ ! -e "${STATE}/update.lock.recover" ] || fail "crashed recover: .recover left behind"
+  [ ! -e "${STATE}/update.lock" ] || fail "crashed recover: lock left behind"
+  # A fresh .recover (someone is recovering right now) still means wait.
+  mkdir -p "${STATE}/update.lock" "${STATE}/update.lock.recover"
+  printf '%s\n' "${dead}" > "${STATE}/update.lock/pid"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  kit bash "${DL}/install.sh" --auto-update run >/dev/null || fail "fresh recover: run failed"
+  [ "$(cat "${STATE}/installed-release")" = "${CUR_TAG}" ] || fail "fresh recover: ran during someone else's recovery"
+  [ -d "${STATE}/update.lock.recover" ] || fail "fresh recover: removed someone else's recovery"
+  ok "regression: a crashed .recover is cleared and recovered in the same run; a fresh one is waited for"
+}
+
+# 8. off retried after a failed unload: unloads the still-loaded job, then
+# succeeds; with the job already gone it succeeds too.
+reg_off_retry() {
+  new_machine
+  kit bash "${DL}/install.sh" --auto-update on >/dev/null
+  if kit FAKE_BOOTOUT=fail bash "${DL}/install.sh" --auto-update off >/dev/null 2>&1; then fail "off retry: first off should fail"; fi
+  [ -e "${LOGS}/launchctl.loaded" ] || fail "off retry: test setup, job not loaded"
+  out=$(kit bash "${DL}/install.sh" --auto-update off 2>&1) || fail "off retry: second off failed: ${out}"
+  [ ! -e "${LOGS}/launchctl.loaded" ] || fail "off retry: reported off while the job is still loaded"
+  [ ! -e "${STATE}/auto-update.env" ] || fail "off retry: settings kept after success"
+  [ "$(grep -c "^bootout gui/${UIDN}/" "${LOGS}/launchctl")" -ge 2 ] || fail "off retry: no second bootout"
+  new_machine
+  kit bash "${DL}/install.sh" --auto-update on >/dev/null
+  if kit FAKE_BOOTOUT=fail bash "${DL}/install.sh" --auto-update off >/dev/null 2>&1; then fail "off retry: first off should fail"; fi
+  rm -f "${LOGS}/launchctl.loaded"
+  kit bash "${DL}/install.sh" --auto-update off >/dev/null 2>&1 || fail "off retry: off after the job went away failed"
+  [ ! -e "${STATE}/auto-update.env" ] || fail "off retry: settings kept"
+  ok "regression: off retried after a failed unload unloads the job, and succeeds once it is gone"
+}
+
+# 9. A symlinked HERMES_HOME and its target are the same home for on, off,
+# status and run.
+reg_symlinked_home() {
+  new_machine
+  local hl="${M}/hermes-link"
+  ln -s "${HH}" "${hl}"
+  kit HERMES_HOME="${hl}" bash "${DL}/install.sh" --auto-update on >/dev/null || fail "symlinked home: on failed"
+  grep -qF "<string>${STATE}/update.sh</string>" "${PLIST}" || fail "symlinked home: plist does not name the resolved home"
+  out=$(kit bash "${DL}/install.sh" --auto-update status)
+  printf '%s\n' "${out}" | grep -q '^Auto-update      : on, daily at 04:20 local time via launchd (LaunchAgent loaded)' || fail "symlinked home: status through the target: ${out}"
+  mkdir -p "${STATE}"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  kit HERMES_HOME="${hl}" bash "${STATE}/update.sh" --auto-update run >/dev/null || fail "symlinked home: run failed"
+  [ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "symlinked home: run did not update"
+  kit bash "${DL}/install.sh" --auto-update off >/dev/null || fail "symlinked home: off through the target failed"
+  [ ! -e "${PLIST}" ] || fail "symlinked home: off through the target left the job"
+  kit bash "${DL}/install.sh" --auto-update on >/dev/null
+  kit HERMES_HOME="${hl}/" bash "${DL}/install.sh" --auto-update off >/dev/null || fail "symlinked home: off through the link failed"
+  [ ! -e "${PLIST}" ] && [ ! -e "${STATE}/auto-update.env" ] || fail "symlinked home: off through the link left state"
+  ok "regression: a symlinked HERMES_HOME and its target are one home for on/off/status/run"
+}
+
+REGRESSIONS="reg_hook_toctou reg_lock_race reg_texting_ancestor_link reg_off_normalise reg_legacy_driver reg_hook_symlinked_ancestor reg_lock_crashed_recover reg_off_retry reg_symlinked_home"
 if [ -n "${AU_TEST_ONLY:-}" ]; then
   "${AU_TEST_ONLY}"
   echo "test-auto-update.sh: ${AU_TEST_ONLY} passed"

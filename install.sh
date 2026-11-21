@@ -213,13 +213,14 @@ au_paths() {
 au_paths
 
 # The one place HERMES_HOME is normalised for on, off, status and run: no
-# trailing slash, and . / .. resolved when the folder exists, so every
-# subcommand names the same files and the same job.
+# trailing slash, and the physical path (symlinks, . and .. resolved) when
+# the folder exists, so every subcommand, whichever spelling of the home it
+# is given, names the same files and the same job.
 au_norm_home() {
   local h="${HERMES_ROOT}"
   while [ "${#h}" -gt 1 ] && [ "${h%/}" != "${h}" ]; do h="${h%/}"; done
   if [ -d "${h}" ]; then
-    h=$(CDPATH= cd -- "${h}" && pwd)
+    h=$(CDPATH= cd -P -- "${h}" && pwd -P)
   fi
   HERMES_ROOT="${h}"
   PLUGIN_ROOT="${h}/desktop-plugins"
@@ -344,15 +345,22 @@ au_hook_problem() {
   esac
   if [ $((8#${mode} & 022)) -ne 0 ]; then echo "is writable by group or others (mode ${mode}; chmod go-w it)"; return 0; fi
   if [ ! -x "${p}" ]; then echo "is not executable (chmod u+x it)"; return 0; fi
-  # Every folder above it, up to /: nobody else may be able to swap the file
-  # or a folder on the way to it between this check and the run.
-  local d problem
-  d=$(dirname -- "${p}")
-  while :; do
-    problem=$(au_dir_problem "${d}")
-    if [ -n "${problem}" ]; then echo "${problem}"; return 0; fi
-    [ "${d}" = / ] && break
-    d=$(dirname -- "${d}")
+  # Every folder above it, up to /, on the path as written AND on the path
+  # it resolves to (a symlinked folder leads elsewhere: the folders above its
+  # target count too): nobody else may be able to swap the file or a folder
+  # on the way to it between this check and the run.
+  local d problem real
+  real=$(CDPATH= cd -P -- "$(dirname -- "${p}")" 2>/dev/null && pwd -P) || {
+    echo "is in a folder that could not be resolved"
+    return 0
+  }
+  for d in "$(dirname -- "${p}")" "${real}"; do
+    while :; do
+      problem=$(au_dir_problem "${d}")
+      if [ -n "${problem}" ]; then echo "${problem}"; return 0; fi
+      [ "${d}" = / ] && break
+      d=$(dirname -- "${d}")
+    done
   done
   return 0
 }
@@ -477,11 +485,13 @@ au_lock() {
   fi
   rec="${AU_LOCK}.recover"
   if ! mkdir "${rec}" 2>/dev/null; then
-    # Someone else is recovering it. A recovery folder left by a crash (older
-    # than ten minutes) is cleared for the next run.
+    # Someone else is recovering it, unless the recovery folder was left by
+    # a crash (older than ten minutes): then it is cleared and this run tries
+    # once more (if another run got there first, mkdir fails and it waits).
     age=$(( $(date +%s) - $(au_mtime "${rec}" || date +%s) ))
-    [ "${age}" -lt 600 ] || rmdir "${rec}" 2>/dev/null || true
-    return 1
+    [ "${age}" -ge 600 ] || return 1
+    rmdir "${rec}" 2>/dev/null || return 1
+    mkdir "${rec}" 2>/dev/null || return 1
   fi
   now_pid=$(head -n 1 "${AU_LOCK}/pid" 2>/dev/null || true)
   case "${now_pid}" in ''|*[!0-9]*) now_pid="" ;; esac
@@ -621,6 +631,8 @@ au_run() {
     return 1
   fi
   rc=0
+  # The first run that updates may come before any log line was written.
+  mkdir -p "$(dirname -- "${AU_OUT}")"
   (
     unset KIT_SKIP_VERIFY KIT_SOURCE_DIR KIT_CARDS_SKILL KIT_CARDS_PROFILES KIT_REMOVE_RETIRED
     export HERMES_HOME="${HERMES_ROOT}" KIT_REF="${tag}" KIT_SKIP_GROKBOT="${AU_SKIP_GROKBOT}" KIT_SKIP_COMPUTER="${AU_SKIP_COMPUTER}"
@@ -862,6 +874,17 @@ au_off() {
       echo "  launchctl bootout gui/${uid}/${AU_LABEL}" >&2
     else
       echo "Auto-update      -- LaunchAgent unloaded and removed"
+    fi
+  elif [ "${sched}" = launchd ] && ${KIT_LAUNCHCTL:-launchctl} print "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1; then
+    # A retry after an unload that failed: the file is gone, the job is still
+    # loaded, and no other home's LaunchAgent file claims it.
+    ${KIT_LAUNCHCTL:-launchctl} bootout "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1 || true
+    if ${KIT_LAUNCHCTL:-launchctl} print "gui/${uid}/${AU_LABEL}" >/dev/null 2>&1; then
+      left="${left} launchd"
+      echo "install.sh: the job is still loaded. Run this in Terminal on this Mac:" >&2
+      echo "  launchctl bootout gui/${uid}/${AU_LABEL}" >&2
+    else
+      echo "Auto-update      -- LaunchAgent unloaded"
     fi
   fi
   if [ -f "${AU_UNIT_DIR}/${AU_UNIT}.service" ] && ! grep -qF "\"${AU_SCRIPT}\"" "${AU_UNIT_DIR}/${AU_UNIT}.service"; then
