@@ -31,7 +31,7 @@ body:
     attributes:
       label: Hermes Desktop version
       description: Settings → About in Hermes Desktop.
-      placeholder: "0.23.2"
+      placeholder: "0.23.3"
     validations:
       required: true
   - type: input

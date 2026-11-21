@@ -74,7 +74,7 @@ viewed through the pane's noVNC connection.</em></p>
 
 ## Compatibility
 
-- **Requires Hermes Desktop ≥ 0.23.0** (verified on stable v0.23.0 and v0.23.2;
+- **Requires Hermes Desktop ≥ 0.23.0** (verified on stable v0.23.0, v0.23.2 and v0.23.3;
   [docs/COMPATIBILITY.md](../docs/COMPATIBILITY.md)). The 2026-08 stock releases
   reworked the pane shell: `placement: 'right'` now means the collapsible ⌘J
   sidebar (hidden by default), and `host.paneVisibility` became read-only.

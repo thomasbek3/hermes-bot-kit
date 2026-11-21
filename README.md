@@ -6,7 +6,7 @@
 
 A chat-app Bot Mode screen + a live window into your bots' computers.
 
-[![Hermes Desktop](https://img.shields.io/badge/Hermes_Desktop-%E2%89%A5%200.23.0%20%C2%B7%20verified%200.23.2-8b5cf6?style=flat-square)](docs/COMPATIBILITY.md)
+[![Hermes Desktop](https://img.shields.io/badge/Hermes_Desktop-%E2%89%A5%200.23.0%20%C2%B7%20verified%200.23.3-8b5cf6?style=flat-square)](docs/COMPATIBILITY.md)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-444?style=flat-square)](#install)
 [![GitHub stars](https://img.shields.io/github/stars/thomasbek3/hermes-bot-kit?style=flat-square&color=e3b341)](https://github.com/thomasbek3/hermes-bot-kit/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/thomasbek3/hermes-bot-kit?style=flat-square)](https://github.com/thomasbek3/hermes-bot-kit/commits/master)
@@ -258,9 +258,11 @@ built on, not live-qualified on every Hermes version (see the
 
 ## Requirements
 
-- **Hermes Desktop ≥ 0.23.0.** Source contracts checked on 2026-11-19 against
-  stable **v0.23.2** (`ae2a81cc`, 2026-11-16), **v0.23.0** (`2bd378ed`) and
-  upstream main; v0.23.1 was not checked on its own. Older releases are not
+- **Hermes Desktop ≥ 0.23.0.** Source contracts checked on 2026-11-21 against
+  stable **v0.23.3** (`caafe538`, released 2026-11-20), **v0.23.0**
+  (`2bd378ed`) and upstream main (v0.23.2, `ae2a81cc`, on 2026-11-19); v0.23.1
+  was not checked on its own. On v0.23.3, remote-cua needs cua-driver 0.52.0 on
+  the remote Mac (Hermes's new pin). Older releases are not
   supported: v0.22.7 has no group-chat Continue, and v0.21.x lacks several
   APIs the plugins use. See
   [compatibility and verification limits](docs/COMPATIBILITY.md).

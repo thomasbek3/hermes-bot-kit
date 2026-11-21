@@ -24,8 +24,8 @@ It is written to be run unattended on **macOS and Linux**.
 ( set -e; for c in bash curl grep awk sed mktemp; do command -v "$c" >/dev/null || { echo "missing: $c" >&2; exit 1; }; done; command -v shasum >/dev/null || command -v sha256sum >/dev/null || { echo "missing: shasum or sha256sum" >&2; exit 1; }; test -d "${HERMES_HOME:-$HOME/.hermes}" || { echo "No Hermes home at ${HERMES_HOME:-$HOME/.hermes}: install and open Hermes Desktop first (https://github.com/NousResearch/hermes-agent)" >&2; exit 1; }; echo "prerequisites OK" )
 ```
 
-- **Hermes Desktop 0.23.0 or newer is required** (verified on stable v0.23.0
-  and v0.23.2; see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)). Ask the
+- **Hermes Desktop 0.23.0 or newer is required** (verified on stable v0.23.0,
+  v0.23.2 and v0.23.3; see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)). Ask the
   person to check *About* in Hermes Desktop if you can't; the doctor
   (`bash install.sh --doctor`) prints it too.
 - `node` is optional. When it is present the installer also syntax-checks the

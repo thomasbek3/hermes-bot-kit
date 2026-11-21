@@ -1,4 +1,4 @@
-// Hermes Desktop v0.23.2 has no Cmd/Ctrl+Shift+P palette (it is Cmd/Ctrl+K or
+// Hermes Desktop v0.23.2 and v0.23.3 have no Cmd/Ctrl+Shift+P palette (it is Cmd/Ctrl+K or
 // +P, command "Reload desktop plugins"), and the plugin on/off switches live
 // in Capabilities -> Plugins (Settings -> Plugins only holds plugin settings
 // pages, e.g. "Settings -> Plugins -> Email drafts"). Tracked text must not send

@@ -1,7 +1,10 @@
 # remote-cua: what it relies on in Hermes
 
 Supported: **Hermes `>=0.23.0,<0.24.0`** (`compat.SUPPORTED_HERMES`, mirrored in `plugin.yaml`
-`requires_hermes`). Built and tested against Hermes 0.23.1, cua-driver pin 0.21.0.
+`requires_hermes`). Built and tested against Hermes 0.23.1, cua-driver pin 0.21.0. The contract tests
+(`tests/test_backend_contract.py`, the whole suite) also pass against the real Hermes 0.23.0 and 0.23.3
+code (2026-11-21). Hermes 0.23.3 pins cua-driver **0.52.0**, so a gateway on 0.23.3 needs 0.52.0 on the
+remote Mac; that pairing has not been run live yet. Every name below is unchanged in 0.23.3.
 
 ## Private imports (version-gated)
 

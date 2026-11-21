@@ -22,8 +22,8 @@ Per Hermes run, on the remote Mac, the gateway:
 
 1. Finds the driver in one SSH session: `remote_cua.driver` if set, else
    `~/.hermes/tools/cua-driver-<pin>-darwin-*/cua-driver` matching **the gateway's** pinned version
-   (`pm/lock.json`, 0.21.0 today), else `cua-driver` on the remote PATH. It reads the driver's
-   `manifest` (version + Hermes's 0.20 contract) and `codesign -dv` of the `CuaDriver.app` that
+   (`pm/lock.json`: 0.21.0 on Hermes 0.23.0 to 0.23.2, 0.52.0 on 0.23.3), else `cua-driver` on
+   the remote PATH. It reads the driver's `manifest` (version + Hermes's 0.20 contract) and `codesign -dv` of the `CuaDriver.app` that
    carries it (`com.trycua.driver`, one of Hermes's two accepted signing teams). A different version
    is refused with a plain message.
 2. Starts a **private daemon** through that exact app, never by name (`open -a CuaDriver` lets macOS
@@ -57,7 +57,9 @@ On the Mac, logged in as the user the bot will drive:
    `hermes computer-use install` (puts `cua-driver-<pin>-darwin-*` with its `CuaDriver.app` under
    `~/.hermes/tools/`). Otherwise copy the same cua-driver release (with `CuaDriver.app` next to the
    binary) and set `remote_cua.driver` to the binary's absolute path. The version must match the
-   gateway's Hermes pin.
+   gateway's Hermes pin. `hermes computer-use install` installs the Mac's own Hermes pin, so keep the
+   Mac's Hermes on the gateway's release. Updating the gateway's Hermes can move the pin (0.23.3 moved
+   it from 0.21.0 to 0.52.0): redo this step on the Mac afterwards.
 3. **Grant permissions once, at the Mac's screen** (not over SSH): run `<path>/cua-driver permissions
    grant` and approve **Accessibility** and **Screen Recording** for **CuaDriver**
    (`com.trycua.driver`); on macOS Tahoe also approve its direct-capture prompt. The grant follows

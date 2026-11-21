@@ -15,7 +15,7 @@
 # Exit 0 when nothing needs fixing, 1 when any check says FIX, 2 when nothing
 # says FIX but the home could not be verified (WSL without a view of Windows).
 #
-# Facts it relies on (Hermes v0.23.2, apps/desktop/):
+# Facts it relies on (Hermes v0.23.2, unchanged in v0.23.3, apps/desktop/):
 #   - Desktop loads <HERMES_HOME>/desktop-plugins/<folder>/plugin.js, one level
 #     deep, for the whole app, not per profile (electron/fs-ipc.ts:141-150,
 #     src/contrib/runtime-loader.ts:590-595, 960-975).
@@ -54,7 +54,7 @@ set -uo pipefail
 
 # The oldest Hermes Desktop this release supports.
 # The oldest Hermes Desktop the plugins were verified on (docs/COMPATIBILITY.md:
-# stable v0.23.0 and v0.23.2 pass the source contracts; v0.22.7 lacks
+# stable v0.23.0, v0.23.2 and v0.23.3 pass the source contracts; v0.22.7 lacks
 # groups.continue and v0.21.x several more APIs).
 MIN_DESKTOP="0.23.0"
 KIT_REPO="thomasbek3/hermes-bot-kit"

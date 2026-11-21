@@ -1,5 +1,25 @@
 # Changelog (kit)
 
+## Unreleased
+
+- **Qualified on Hermes v0.23.3 (2026-11-21).** Stable v0.23.3 (`caafe538`,
+  released 2026-11-20) passes every source contract (SDK, host, context,
+  gateway, REST, bridge, DOM, agent hooks); from v0.23.0 it only adds optional
+  fields, one SDK export and one gateway method, so no code change was needed
+  and the minimum stays **0.23.0**. The remote-cua, slack-connect, slack-check,
+  email-drafts and texting-style tests also ran against the real v0.23.0 and
+  v0.23.3 code (same results on both), and `hermes plugins validate` from each
+  release passes the four agent plugins. CI's source-contract job now checks
+  v0.23.3, v0.23.0 and main (was v0.23.2 and main). See
+  [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#what-changed-in-v0233-for-the-kit).
+- **remote-cua on v0.23.3: update the Mac's cua-driver.** Hermes v0.23.3 moved
+  its cua-driver pin from 0.21.0 to 0.52.0, and remote-cua requires the remote
+  Mac's driver to match the gateway's pin, so after updating the gateway the
+  Mac needs cua-driver 0.52.0 (README step 2). Until then the check says which
+  version it found and which it wants. Not yet run live with 0.52.0.
+- **Known gap:** stock Bot Mode's new "teammate waits" banner above the
+  composer (v0.23.3) does not show in Grokbot Override's chat.
+
 ## 2026-11-19 — release v2026.11.19: one-sentence agent install, security audit
 
 First GitHub Release since v2026.09.12. For new users, in short: tell your AI

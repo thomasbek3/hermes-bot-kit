@@ -1,17 +1,38 @@
 # Hermes compatibility
 
-**Supported: Hermes Desktop v0.23.0 and newer.** Checked 2026-11-19 against:
+**Supported: Hermes Desktop v0.23.0 and newer.** Checked 2026-11-21 against:
 
 | Hermes | Commit | Result |
 |---|---|---|
-| stable **v0.23.2** (2026-11-16) | `ae2a81ccc00e9b7c06301523e5bb09608397149c` | every surface present, same params and fields as main |
-| stable **v0.23.0** (2026-11-05) | `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` | every surface present; v0.23.2 only added optional fields |
-| main / canary (2026-11-18) | `93790765c57a16d289fd69ea9861abb3144e3f8f` | every surface present (the kit was built and live-tested here) |
+| stable **v0.23.3** (released 2026-11-20) | `caafe5389ae585ef77387a962aee05b1bcf17029` | every surface present; only optional fields and one new method added; agent-plugin tests pass on its real code |
+| stable **v0.23.2** (2026-11-16) | `ae2a81ccc00e9b7c06301523e5bb09608397149c` | every surface present (checked 2026-11-19) |
+| stable **v0.23.0** (2026-11-05) | `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` | every surface present; agent-plugin tests pass on its real code (the minimum) |
+| main / canary (2026-11-21) | `25a1302eacb563c59eb3b7454c1a53f8c89f274c` | every surface present |
 | v0.22.7 | `b200f5bc60e31588ba2cb60e288029c4a54ba5fa` | not supported: no `groups.continue` (a group chat's Continue button fails) |
 | v0.21.7 | `71d34bad1045610252eda02ee79549436896e784` | not supported: 9 surfaces missing (`ctx.files`, `session.rewind`, ...) |
 
 v0.22.0 to v0.22.6 and v0.23.1 were not checked.
-[v0.23.2 release](https://github.com/NousResearch/hermes-agent/releases/tag/v0.23.2).
+[v0.23.3 release](https://github.com/NousResearch/hermes-agent/releases/tag/v0.23.3).
+
+## What changed in v0.23.3 for the kit
+
+- **remote-cua: the cua-driver pin moved from 0.21.0 to 0.52.0** (`pm/lock.json`).
+  remote-cua follows the gateway's pin, so after the gateway's Hermes is on
+  v0.23.3 the remote Mac needs cua-driver 0.52.0 (with its `CuaDriver.app`)
+  too; until then the Computer pane's check and every `computer_use` call say
+  "cua-driver on <host> is 0.21.0, but this gateway's Hermes pins 0.52.0".
+  Every private name remote-cua imports, and the daemon and MCP launch flags,
+  are unchanged. Not run live against a 0.52.0 driver yet.
+- **Stock Bot Mode gained a "teammate waits" banner** above a Bot Chat's
+  composer (`plugins/hermes-bots/teammate-waits.tsx`, new `bot_delivery.list`
+  method). Grokbot Override draws its own composer, so the banner does not show
+  there; stock Bot Mode (⌘K → Grokbot Override: toggle) has it.
+- Everything else the kit uses is unchanged or only gained optional fields: the
+  plugin SDK barrel (one new export, `useComposerSession`), the runtime loader,
+  the plugin manifest parser, `plugin_validate_desktop.py`, the desktop-plugins
+  folder rules the installer and doctor rely on, the gateway contracts, and the
+  bundled Slack adapter's internals slack-http extends (Socket Mode and vault
+  code handling moved into mixins; the names are still on `SlackAdapter`).
 
 ## What was checked
 
@@ -23,20 +44,32 @@ texting-style use, read from the kit's sources (`grokbot-override/src`,
   8 `host.state` members, 12 plugin-context members (`ctx.*`), and the SDK
   icons the Computer plugin draws without a fallback. The SDK barrel, the plugin
   context and the runtime loader's import pipeline are the same in v0.23.0,
-  v0.23.2 and main, apart from log wording.
+  v0.23.2, v0.23.3 and main, apart from log wording and new exports.
 - **Gateway**: 91 RPC method, server-request and event names. The
-  `tui_gateway/contracts` declarations differ between v0.23.2 and main only in
-  comments. From v0.23.0 to v0.23.2 they only gain optional fields, none of which
-  the kit sends.
+  `tui_gateway/contracts` declarations only gain optional fields and new
+  methods from v0.23.0 through v0.23.3 and main; nothing the kit sends or reads
+  was removed or renamed.
 - **REST** (19 dashboard routes), the `window.hermesDesktop` bridge (8 members),
   and the Hermes DOM anchors the override hides or restyles (17 `data-*`
   attributes, the `statusbar` slot, `.aui-md`).
-- **Agent plugins**: the registration hooks texting-style uses.
+- **Agent plugins**: the registration hooks texting-style uses, and every
+  Hermes module and name the agent plugins import (remote-cua, email-drafts,
+  slack-http, slack-connect, slack-check), present in v0.23.0, v0.23.2,
+  v0.23.3 and main. On 2026-11-21 their test suites also ran against the real
+  v0.23.0 and v0.23.3 code (a throwaway venv with Hermes's declared
+  dependencies, `HERMES_AGENT_DIR` pointing at the checkout): remote-cua 105
+  passed (1 live test skipped), slack-connect 114, slack-check 26, email-drafts
+  70, texting-style 7, the same on both. `hermes plugins validate` from each
+  release passes email-drafts, remote-cua, slack-http and texting-style with the
+  same output on both (two warnings about private core access: remote-cua
+  gates its private imports on the Hermes version, slack-http checks every
+  adapter name it needs before HTTP mode starts and otherwise stops with
+  "slack-http plugin incompatible with this Hermes version").
 
 Grokbot Override already feature-detects the SDK names it reads (a namespace
 import, so a missing name is `undefined`, never a module link error). The
 Computer plugin's named imports are all present from v0.23.0 on. No fallback was
-needed for v0.23.2.
+needed for v0.23.2 or v0.23.3.
 
 ## Repeat the checks
 
@@ -51,24 +84,32 @@ python3 -m unittest discover -s texting-style/tests
 
 `check-hermes-compat.py` reads the checkout as text, never imports or runs it,
 and prints how many names each area checked. CI runs it against stable
-`v0.23.2` and upstream `main` on pushes, PRs and a weekly schedule. It checks
+`v0.23.3`, the minimum `v0.23.0` and upstream `main` on pushes, PRs and a weekly schedule. It checks
 that names are present, not TypeScript signatures, behaviour, CSS layout or model
 responses. A pass is an early warning, not proof of runtime compatibility.
 
 The Grokbot Override tests load the built `plugin.js` through a copy of Hermes's
 runtime loader (`test/hermes-loader.mjs`, ported from v0.23.0, unchanged
-through v0.23.2) with a stub SDK. Loading it into the real v0.23.2 SDK needs a
+through v0.23.3) with a stub SDK. Loading it into the real v0.23.3 SDK needs a
 full Desktop build and was not done.
+
+The agent-plugin tests against a real Hermes checkout:
+
+```sh
+HERMES_AGENT_DIR=/path/to/hermes-agent /path/to/hermes-venv/bin/python -m pytest -p no:cacheprovider -q remote-cua/tests slack-connect/tests slack-check/tests
+```
 
 ## Not verified
 
-- **Live rendering on a v0.23.2 Desktop.** No stable Desktop app was run; the
+- **Live rendering on a v0.23.3 Desktop.** No stable Desktop app was run; the
   results above come from source. Still needed, in a test Desktop: install from
   the checkout, run **Reload desktop plugins** from the command palette
   (⌘K, or Ctrl+K on Windows and Linux), then check the Bot Chat,
   approvals, roster sections, a test computer, texting-style and a bot's
   `computer_use` calls with a configured model. Include two connections with
   identically named profiles for a multi-gateway fleet.
+- **remote-cua with cua-driver 0.52.0** (v0.23.3's pin) on a real Mac. The
+  contract tests use a fake driver.
 - Windows PowerShell parsing is covered by Windows CI, not by this check.
 
 This kit does not select, pin, download or upgrade a model. Choose a
