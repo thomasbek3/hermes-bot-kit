@@ -51,6 +51,7 @@ case "$1" in
   print) [ -f "${FAKE_LAUNCHCTL_LOG}.loaded" ] || exit 113 ;;
 esac
 [ "$1" = bootstrap ] && touch "${FAKE_LAUNCHCTL_LOG}.loaded"
+[ "$1" = bootout ] && [ "${FAKE_BOOTOUT:-ok}" != ok ] && exit 5
 [ "$1" = bootout ] && rm -f "${FAKE_LAUNCHCTL_LOG}.loaded"
 exit 0
 EOF
@@ -81,12 +82,154 @@ new_machine() {
 
 # kit [VAR=value ...] <command...>: run with only the fakes and this machine.
 kit() {
-  env -i PATH="${FAKE}:/usr/bin:/bin" HOME="${H}" HERMES_HOME="${HH}" TMPDIR="${TMPDIR}" \
+  env -i PATH="${XPATH:+${XPATH}:}${FAKE}:/usr/bin:/bin" HOME="${H}" HERMES_HOME="${HH}" TMPDIR="${TMPDIR}" \
     KIT_LAUNCHCTL="${FAKE}/launchctl" KIT_SYSTEMCTL="${FAKE}/systemctl" KIT_UPDATE_OS="${OS:-mac}" \
     FAKE_LAUNCHCTL_LOG="${LOGS}/launchctl" FAKE_SYSTEMCTL_LOG="${LOGS}/systemctl" \
     FAKE_API="${API:-ok}" FAKE_ROOT="${FROOT:-${REL}}" FAKE_LOG="${LOGS}/curl" "$@"
 }
 job() { kit "$@" bash "${STATE}/update.sh" --auto-update run; }
+
+# --- Regression tests (review of fad9c31) ---------------------------------------
+# AU_TEST_ONLY=<name> runs just that one after the shared setup.
+
+# 1. The hook that runs is the file that was checked: every folder above it
+# must be yours (or root's) and not writable by others, and a private copy
+# runs, not the path.
+reg_hook_toctou() {
+  new_machine
+  local shared="${M}/shared" hook
+  mkdir -p "${shared}"
+  hook="${shared}/hook.sh"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$0" > "%s/hook.argv0"\n' "${M}" > "${hook}"
+  chmod 0700 "${hook}"
+  chmod 0777 "${shared}"
+  if kit KIT_POST_UPDATE_HOOK="${hook}" bash "${DL}/install.sh" --auto-update on >/dev/null 2>&1; then
+    fail "hook toctou: a hook in a folder others can write to was accepted"
+  fi
+  chmod 0700 "${shared}"
+  mkdir -p "${STATE}"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  kit KIT_POST_UPDATE_HOOK="${hook}" bash "${DL}/install.sh" --auto-update on >/dev/null || fail "hook toctou: a safe hook was rejected"
+  job >/dev/null || fail "hook toctou: run failed"
+  [ -s "${M}/hook.argv0" ] || fail "hook toctou: the hook did not run: $(tail -n 1 "${ULOG}")"
+  case "$(cat "${M}/hook.argv0")" in
+    "${STATE}/.hook."*/hook) ;;
+    *) fail "hook toctou: the path ran, not a private copy: $(cat "${M}/hook.argv0")" ;;
+  esac
+  if ls -d "${STATE}"/.hook.* >/dev/null 2>&1; then fail "hook toctou: the private copy was left behind"; fi
+  # Made swappable after on: not run.
+  rm -f "${M}/hook.argv0"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  chmod 0777 "${shared}"
+  job >/dev/null || fail "hook toctou: run with a swappable hook failed"
+  chmod 0700 "${shared}"
+  [ ! -e "${M}/hook.argv0" ] || fail "hook toctou: a hook in a folder others can write to ran"
+  tail -n 1 "${ULOG}" | grep -q 'post-update hook not run: it has a folder above it that group or others can write to' || fail "hook toctou log: $(tail -n 1 "${ULOG}")"
+  ok "regression: hook folders above it checked (on and run); a private 0700 copy runs, then is removed"
+}
+
+# 2. Stale-lock recovery never removes a fresh lock: a fake ps reports the
+# old PID dead and, at that moment, plays the other contender (which already
+# recovered the stale lock and holds a fresh one with a live PID).
+reg_lock_race() {
+  new_machine
+  mkdir -p "${STATE}/update.lock"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  sleep 300 &
+  SLEEPER=$!
+  sleep 0.1 &
+  local dead=$!
+  wait "${dead}" 2>/dev/null || true
+  printf '%s\n' "${dead}" > "${STATE}/update.lock/pid"
+  local psdir="${M}/psbin"
+  mkdir -p "${psdir}"
+  cat > "${psdir}/ps" <<EOF
+#!/usr/bin/env bash
+if [ ! -e "${M}/ps-swapped" ]; then
+  touch "${M}/ps-swapped"
+  rm -rf "${STATE}/update.lock"
+  mkdir "${STATE}/update.lock"
+  printf '%s\n' "${SLEEPER}" > "${STATE}/update.lock/pid"
+  exit 1
+fi
+exec /bin/ps "\$@"
+EOF
+  chmod +x "${psdir}/ps"
+  out=$(XPATH="${psdir}" kit bash "${DL}/install.sh" --auto-update run) || fail "lock race: run exited non-zero"
+  [ -e "${M}/ps-swapped" ] || fail "lock race: the fake ps was never asked (test is not exercising recovery)"
+  [ "$(cat "${STATE}/update.lock/pid" 2>/dev/null)" = "${SLEEPER}" ] || fail "lock race: the other contender's fresh lock was removed"
+  [ "$(cat "${STATE}/installed-release")" = "${CUR_TAG}" ] || fail "lock race: updated while another contender held the lock"
+  tail -n 1 "${ULOG}" | grep -q "skipped: another update is running (pid ${SLEEPER})" || fail "lock race log: $(tail -n 1 "${ULOG}")"
+  kill "${SLEEPER}" 2>/dev/null || true
+  wait "${SLEEPER}" 2>/dev/null || true
+  SLEEPER=""
+  ok "regression: stale-lock recovery is serialised and never removes a fresh lock"
+}
+
+# 3. texting-style: a symlink anywhere above the plugin (plugins/ -> elsewhere)
+# means it is left alone.
+reg_texting_ancestor_link() {
+  new_machine
+  local outside="${M}/outside/plugins"
+  mkdir -p "${outside}/texting-style" "${HH}/profiles/evil" "${HH}/plugins/texting-style"
+  printf 'old\n' > "${outside}/texting-style/plugin.yaml"
+  printf '# old texting-style.sms-register\n' > "${outside}/texting-style/__init__.py"
+  ln -s "${outside}" "${HH}/profiles/evil/plugins"
+  cp "${outside}/texting-style/"* "${HH}/plugins/texting-style/"
+  mkdir -p "${STATE}"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  kit KIT_TEXTING_STYLE=1 bash "${DL}/install.sh" --auto-update on >/dev/null
+  job >/dev/null || fail "texting ancestor: run failed"
+  [ "$(cat "${outside}/texting-style/plugin.yaml")" = old ] || fail "texting ancestor: wrote through a symlinked plugins/ folder"
+  if ls "${outside}/texting-style/"*.bak.* >/dev/null 2>&1; then fail "texting ancestor: backups written outside the Hermes home"; fi
+  cmp -s "${HH}/plugins/texting-style/plugin.yaml" "${REL}/texting-style/plugin.yaml" || fail "texting ancestor: the plain copy was not refreshed"
+  tail -n 1 "${ULOG}" | grep -q 'texting-style refreshed in 1 profile(s), 1 with a symlink in the path left alone' || fail "texting ancestor log: $(tail -n 1 "${ULOG}")"
+  ok "regression: texting-style skips a plugin behind a symlinked folder"
+}
+
+# 4. off normalises HERMES_HOME like on, and never says off while the job stays.
+reg_off_normalise() {
+  new_machine
+  kit bash "${DL}/install.sh" --auto-update on >/dev/null
+  out=$(kit HERMES_HOME="${HH}/" bash "${DL}/install.sh" --auto-update off) || fail "off with a trailing slash failed: ${out}"
+  [ ! -e "${PLIST}" ] || fail "off with a trailing slash left this home's LaunchAgent"
+  grep -qx "bootout gui/${UIDN}/io.github.thomasbek3.hermes-bot-kit.update" "${LOGS}/launchctl" || fail "off with a trailing slash: no bootout"
+  [ ! -e "${STATE}/auto-update.env" ] || fail "off with a trailing slash: settings kept"
+  kit HERMES_HOME="${HH}/" bash "${DL}/install.sh" --auto-update on >/dev/null
+  grep -qF "<string>${STATE}/update.sh</string>" "${PLIST}" || fail "on with a trailing slash: plist path not normalised"
+  if out=$(kit FAKE_BOOTOUT=fail bash "${DL}/install.sh" --auto-update off 2>&1); then
+    fail "off reported success while the job is still loaded"
+  fi
+  printf '%s\n' "${out}" | grep -q 'auto-update is NOT off' || fail "off: no NOT off message: ${out}"
+  [ -f "${STATE}/auto-update.env" ] || fail "off deleted the settings while the job stayed loaded"
+  ok "regression: on/off/status/run share one HERMES_HOME normalisation; off fails while a job remains"
+}
+
+# 5. A newest release without --auto-update runs only as an installer: the
+# updater copy stays.
+reg_legacy_driver() {
+  new_machine
+  local legacy="${WORK}/legacy"
+  rm -rf "${legacy}"
+  cp -R "${REL}" "${legacy}"
+  sed '/^KIT_AUTO_UPDATE_API=1$/d' "${REL}/install.sh" > "${legacy}/install.sh"
+  ( cd "${legacy}" && bash scripts/make-manifest.sh >/dev/null )
+  mkdir -p "${STATE}"
+  printf '%s\n' "${CUR_TAG}" > "${STATE}/installed-release"
+  kit bash "${DL}/install.sh" --auto-update on >/dev/null
+  FROOT="${legacy}" job >/dev/null || fail "legacy: run failed"
+  [ "$(cat "${STATE}/installed-release")" = "${NEW_TAG}" ] || fail "legacy: the legacy release was not installed"
+  cmp -s "${STATE}/update.sh" "${DL}/install.sh" || fail "legacy: update.sh was replaced by an installer without auto-update"
+  tail -n 1 "${ULOG}" | grep -q "kept the current updater (the ${NEW_TAG} installer has no auto-update)" || fail "legacy log: $(tail -n 1 "${ULOG}")"
+  ok "regression: a release without auto-update installs but never replaces the updater"
+}
+
+REGRESSIONS="reg_hook_toctou reg_lock_race reg_texting_ancestor_link reg_off_normalise reg_legacy_driver"
+if [ -n "${AU_TEST_ONLY:-}" ]; then
+  "${AU_TEST_ONLY}"
+  echo "test-auto-update.sh: ${AU_TEST_ONLY} passed"
+  exit 0
+fi
 
 # --- on / status / off on macOS ------------------------------------------------
 new_machine
@@ -347,7 +490,7 @@ for d in "${HH}" "${HH}/profiles/linked" "${HH}/profiles/none" "${HH}/profiles/c
   [ "$(cat "${d}/config.yaml")" = "plugins:
   enabled: [x]" ] || fail "config.yaml edited in ${d}"
 done
-tail -n 1 "${ULOG}" | grep -q 'texting-style refreshed in 2 profile(s), 1 symlinked left alone (new code loads at the next agent/gateway restart)' || fail "texting-style log: $(tail -n 1 "${ULOG}")"
+tail -n 1 "${ULOG}" | grep -q 'texting-style refreshed in 2 profile(s), 1 with a symlink in the path left alone (new code loads at the next agent/gateway restart)' || fail "texting-style log: $(tail -n 1 "${ULOG}")"
 ok "texting-style (KIT_TEXTING_STYLE=1 only): plain copies refreshed with backups; symlinks, new profiles and config.yaml untouched"
 
 # --- log rotation ------------------------------------------------------------------
@@ -363,5 +506,7 @@ grep -q '^second' "${ULOG}.1" || fail "second rotation did not replace .1"
 if grep -q '^old line' "${ULOG}.1"; then fail "more than one old log kept"; fi
 [ ! -e "${ULOG}.2" ] || fail "a .2 log was kept"
 ok "log: one line per run, rotated at 1 MB, one old file kept"
+
+for r in ${REGRESSIONS}; do "${r}"; done
 
 echo "test-auto-update.sh: all passed"

@@ -237,12 +237,13 @@ restarts Hermes: after an update, **⌘K → Reload desktop plugins**.
   timer, or a crontab line to add when there is no systemd user session.
   Windows and WSL: not supported yet.
 - `KIT_TEXTING_STYLE=1` in front of `bash "$f"`: also refresh texting-style
-  in the profiles that already have it as a copied folder (never a symlinked
-  one, never a new profile, never `config.yaml`). New code loads when the
+  in the profiles that already have it as a copied folder (never one with a
+  symlink anywhere in its path, never a new profile, never `config.yaml`). New code loads when the
   agent restarts.
 - `KIT_POST_UPDATE_HOOK=/abs/path/to/script`: your own script, run after each
   update with `KIT_REF` and `HERMES_HOME` set, for example to rebuild a private
-  build of a plugin. It must be a file you own that nobody else can write. The
+  build of a plugin. It must be a file you own that nobody else can write, in
+  folders nobody else can write to; a private copy of it is what runs. The
   kit ships no hook.
 
 ## New: Grokbot Override
