@@ -19,7 +19,7 @@
 # public `hermes plugins enable remote-cua`, run with HERMES_HOME set to each profile's home.
 set -euo pipefail
 
-KIT_REF="${KIT_REF:-v2026.11.19}"
+KIT_REF="${KIT_REF:-v2026.11.21}"
 RAW_ROOT="https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/${KIT_REF}"
 PLUGIN="remote-cua"
 FILES=(plugin.yaml __init__.py settings.py lease.py compat.py remote.py status.py backend.py provider.py cli.py

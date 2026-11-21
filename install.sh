@@ -4,7 +4,7 @@
 # Safe for agents to run unattended:
 # idempotent, no prompts, no sudo, backs up any existing copy before overwriting.
 #
-#   ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.19/install.sh -o "$f"; test -s "$f"; bash "$f" )
+#   ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21/install.sh -o "$f"; test -s "$f"; bash "$f" )
 #
 # or from a clone:  bash install.sh
 #
@@ -15,7 +15,7 @@
 # Env knobs:
 #   HERMES_HOME            Hermes home dir (default ~/.hermes)
 #   KIT_REF                release tag to install (default: newest release,
-#                          falling back to v2026.11.19)
+#                          falling back to v2026.11.21)
 #   KIT_SOURCE_DIR         local checkout to copy from (auto-detected from a clone)
 #   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
 #   KIT_SKIP_COMPUTER=1    skip the Computer viewer
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 # The tag this script was released with (scripts/release.sh rewrites it).
-KIT_FALLBACK_REF="v2026.11.19"
+KIT_FALLBACK_REF="v2026.11.21"
 KIT_REPO="thomasbek3/hermes-bot-kit"
 KIT_RELEASES_API="${KIT_RELEASES_API:-https://api.github.com/repos/${KIT_REPO}/releases/latest}"
 KIT_REF_FROM_USER="${KIT_REF:-}"
@@ -45,13 +45,13 @@ usage() {
   cat <<'EOF'
 Install the Hermes Bot Kit desktop plugins.
 
-  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.19/install.sh -o "$f"; test -s "$f"; bash "$f" )
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21/install.sh -o "$f"; test -s "$f"; bash "$f" )
 
 or from a clone:  bash install.sh
 
 Not working?  bash install.sh --doctor   (read-only checks; changes nothing)
 
-Installs the newest GitHub release (falls back to v2026.11.19 when the
+Installs the newest GitHub release (falls back to v2026.11.21 when the
 GitHub API cannot be reached) and checks every file against that release's
 MANIFEST.sha256 before copying anything.
 
