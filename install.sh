@@ -4,7 +4,7 @@
 # Safe for agents to run unattended:
 # idempotent, no prompts, no sudo, backs up any existing copy before overwriting.
 #
-#   ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21/install.sh -o "$f"; test -s "$f"; bash "$f" )
+#   ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21.1/install.sh -o "$f"; test -s "$f"; bash "$f" )
 #
 # or from a clone:  bash install.sh
 #
@@ -15,7 +15,7 @@
 # Env knobs:
 #   HERMES_HOME            Hermes home dir (default ~/.hermes)
 #   KIT_REF                release tag to install (default: newest release,
-#                          falling back to v2026.11.21)
+#                          falling back to v2026.11.21.1)
 #   KIT_SOURCE_DIR         local checkout to copy from (auto-detected from a clone)
 #   KIT_SKIP_VERIFY=1      skip digest checks (developer use only)
 #   KIT_SKIP_COMPUTER=1    skip the Computer viewer
@@ -33,7 +33,7 @@
 set -euo pipefail
 
 # The tag this script was released with (scripts/release.sh rewrites it).
-KIT_FALLBACK_REF="v2026.11.21"
+KIT_FALLBACK_REF="v2026.11.21.1"
 KIT_REPO="thomasbek3/hermes-bot-kit"
 # This installer has --auto-update: the updater only ever replaces its own
 # copy (update.sh) with an install.sh that carries this exact line.
@@ -53,7 +53,7 @@ usage() {
   cat <<'EOF'
 Install the Hermes Bot Kit desktop plugins.
 
-  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21/install.sh -o "$f"; test -s "$f"; bash "$f" )
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21.1/install.sh -o "$f"; test -s "$f"; bash "$f" )
 
 or from a clone:  bash install.sh
 
@@ -61,7 +61,7 @@ Not working?  bash install.sh --doctor   (read-only checks; changes nothing)
 Keep it updated:  bash install.sh --auto-update on   (daily, newest release;
                   also off, status, run; macOS and Linux)
 
-Installs the newest GitHub release (falls back to v2026.11.21 when the
+Installs the newest GitHub release (falls back to v2026.11.21.1 when the
 GitHub API cannot be reached) and checks every file against that release's
 MANIFEST.sha256 before copying anything.
 
