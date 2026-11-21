@@ -4,8 +4,9 @@
 
 - **Qualified on Hermes v0.23.3 (2026-11-21).** Stable v0.23.3 (`caafe538`,
   released 2026-11-20) passes every source contract (SDK, host, context,
-  gateway, REST, bridge, DOM, agent hooks); from v0.23.0 it only adds optional
-  fields, one SDK export and one gateway method, so no code change was needed
+  gateway, REST, bridge, DOM, agent hooks); no breaking change was found in
+  the contracts the kit uses (upstream added optional fields, one SDK export and
+  new gateway methods), so no code change was needed
   and the minimum stays **0.23.0**. The remote-cua, slack-connect, slack-check,
   email-drafts and texting-style tests also ran against the real v0.23.0 and
   v0.23.3 code (same results on both), and `hermes plugins validate` from each

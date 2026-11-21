@@ -4,7 +4,7 @@
 
 | Hermes | Commit | Result |
 |---|---|---|
-| stable **v0.23.3** (released 2026-11-20) | `caafe5389ae585ef77387a962aee05b1bcf17029` | every surface present; only optional fields and one new method added; agent-plugin tests pass on its real code |
+| stable **v0.23.3** (released 2026-11-20) | `caafe5389ae585ef77387a962aee05b1bcf17029` | every surface present; no breaking change in the contracts the kit uses (only optional fields and new methods added); agent-plugin tests pass on its real code |
 | stable **v0.23.2** (2026-11-16) | `ae2a81ccc00e9b7c06301523e5bb09608397149c` | every surface present (checked 2026-11-19) |
 | stable **v0.23.0** (2026-11-05) | `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` | every surface present; agent-plugin tests pass on its real code (the minimum) |
 | main / canary (2026-11-21) | `25a1302eacb563c59eb3b7454c1a53f8c89f274c` | every surface present |
@@ -19,8 +19,10 @@ v0.22.0 to v0.22.6 and v0.23.1 were not checked.
 - **remote-cua: the cua-driver pin moved from 0.21.0 to 0.52.0** (`pm/lock.json`).
   remote-cua follows the gateway's pin, so after the gateway's Hermes is on
   v0.23.3 the remote Mac needs cua-driver 0.52.0 (with its `CuaDriver.app`)
-  too; until then the Computer pane's check and every `computer_use` call say
-  "cua-driver on <host> is 0.21.0, but this gateway's Hermes pins 0.52.0".
+  too. Until then the Computer pane's check and every `computer_use` call
+  refuse: with the old driver on PATH they say "cua-driver on <host> is 0.21.0,
+  but this gateway's Hermes pins 0.52.0"; if the old driver is only in its
+  versioned tools folder and not on PATH, they report that 0.52.0 was not found.
   Every private name remote-cua imports, and the daemon and MCP launch flags,
   are unchanged. Not run live against a 0.52.0 driver yet.
 - **Stock Bot Mode gained a "teammate waits" banner** above a Bot Chat's
@@ -61,7 +63,7 @@ texting-style use, read from the kit's sources (`grokbot-override/src`,
   passed (1 live test skipped), slack-connect 114, slack-check 26, email-drafts
   70, texting-style 7, the same on both. `hermes plugins validate` from each
   release passes email-drafts, remote-cua, slack-http and texting-style with the
-  same output on both (two warnings about private core access: remote-cua
+  same output on both (three warnings about private core access, one for remote-cua and two for slack-http: remote-cua
   gates its private imports on the Hermes version, slack-http checks every
   adapter name it needs before HTTP mode starts and otherwise stops with
   "slack-http plugin incompatible with this Hermes version").
