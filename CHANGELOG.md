@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Grokbot Override: opening a bot clears its unread dot (#35).** Clicking an
+  unread row opened the chat but the blue dot and the "More unreads" pill
+  stayed. The override only called `ackStoredSessionId`, which retires
+  Hermes's persisted unread marker; the dot paints from core's transient
+  unread list, which stock clears only when a chat is selected in core's own
+  chat pane, a path the override's chat never takes. Opening a bot now also
+  calls `forgetSessionUnread` for its Bot Chat ids under the bot's profile,
+  and the bot whose chat is on screen is read again on new activity instead
+  of left to be lit. Test: `grokbot-override/test/unread-ack-35.test.mjs`.
 - **Daily auto-update: `install.sh --auto-update on|off|status|run`.**
   Hermes's plugin auto-update never touches `desktop-plugins/` (and treats
   monorepo sub-folder installs as provenance drift), so the kit updates

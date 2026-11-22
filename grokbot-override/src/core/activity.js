@@ -10,7 +10,7 @@
 // SessionStatusDot reads), and, when the user turned activity toasts on in
 // Bot Mode, toasts once per distinct preview. The first refresh only seeds the
 // watermarks, so history is never replayed. Hidden bots are marked but never
-// toast. The bot on screen is refreshed instead of marked.
+// toast. The bot on screen is refreshed and read instead of marked.
 
 import { rowKey } from './roster.js'
 import { isSilenceReply } from './silence.js'
@@ -29,7 +29,7 @@ export function botCanonicalSessionId(bot) {
 /**
  * deps: { selectedKey(): string, isHidden(bot): boolean, label(bot): string,
  *         markUnread(sessionId, profile), toastsEnabled(): boolean,
- *         notify({kind,title,message}), refreshOpen(bot) }
+ *         notify({kind,title,message}), refreshOpen(bot), readOpen(bot) }
  */
 export function createActivityTracker(deps) {
   const watermarks = new Map()
@@ -50,6 +50,9 @@ export function createActivityTracker(deps) {
         continue
       }
       if (deps.selectedKey() === key) {
+        // On screen: nothing is unread. Read it again, so a dot core lit
+        // for it meanwhile (its own list refresh) clears too (#35).
+        deps.readOpen?.(bot)
         deps.refreshOpen?.(bot)
         continue
       }
