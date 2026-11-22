@@ -467,7 +467,9 @@ const activity = createActivityTracker({
   notify: (n: any) => host?.notify?.(n),
   // Activity on the open chat: a background re-read (coalesced, on its
   // connection's lane, never while hidden), not a direct read.
-  refreshOpen: () => requestOpenRefresh()
+  refreshOpen: () => requestOpenRefresh(),
+  // The bot on screen: read, never marked (#35).
+  readOpen: (bot: any) => ackBot(bot)
 })
 let activityPaused = false
 
@@ -484,12 +486,27 @@ function trackActivity() {
   activity.track(app.roster.get().rows)
 }
 
-/** Opening a bot reads its activity (roster-actions.ts:286 ackStoredSessionId). */
+/** Opening a bot reads its activity. Core's unread store has two layers
+ *  (store/session-unread.ts): the persisted per-profile marker, which
+ *  `ackStoredSessionId` retires (roster-actions.ts:286, as stock), and the
+ *  transient $unreadFinishedSessionIds the SessionStatusDot paints, which
+ *  stock leaves to core's selection path (store/session.ts
+ *  setSelectedStoredSessionId -> markSessionRead) once the Bot Chat lands in
+ *  core's chat pane. The override's chat is its own, so that path never runs
+ *  and the ack alone leaves the dot lit (#35): `forgetSessionUnread` drops the
+ *  transient dot (and marker) for the Bot Chat's ids, under the bot's profile
+ *  as the mark was filed. */
 function ackBot(bot: any) {
   const id = botCanonicalSessionId(bot)
   if (!id) return
   try {
     ;(sdk as any).ackStoredSessionId?.(id, bot.name)
+  } catch {
+    /* older desktop */
+  }
+  const ids = [...new Set([id, bot?.canonical_session?.id].filter(Boolean).map(String))]
+  try {
+    ;(sdk as any).forgetSessionUnread?.(ids, bot.name)
   } catch {
     /* older desktop */
   }

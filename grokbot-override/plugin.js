@@ -46344,6 +46344,7 @@ function createActivityTracker(deps) {
         continue;
       }
       if (deps.selectedKey() === key) {
+        deps.readOpen?.(bot);
         deps.refreshOpen?.(bot);
         continue;
       }
@@ -51722,7 +51723,9 @@ var activity = createActivityTracker({
   notify: (n) => host2?.notify?.(n),
   // Activity on the open chat: a background re-read (coalesced, on its
   // connection's lane, never while hidden), not a direct read.
-  refreshOpen: () => requestOpenRefresh()
+  refreshOpen: () => requestOpenRefresh(),
+  // The bot on screen: read, never marked (#35).
+  readOpen: (bot) => ackBot(bot)
 });
 var activityPaused = false;
 function trackActivity() {
@@ -51743,6 +51746,12 @@ function ackBot(bot) {
   try {
     ;
     sdk.ackStoredSessionId?.(id, bot.name);
+  } catch {
+  }
+  const ids = [...new Set([id, bot?.canonical_session?.id].filter(Boolean).map(String))];
+  try {
+    ;
+    sdk.forgetSessionUnread?.(ids, bot.name);
   } catch {
   }
 }
