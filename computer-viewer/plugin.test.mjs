@@ -233,7 +233,7 @@ function loadPlugin({ fetchImpl, importHook, hermesDesktop, timers } = {}) {
       .replace(/import \{ jsx, jsxs \} from 'react\/jsx-runtime'\n/, '')
       .replace('export default {', 'globalThis.__plugin = {')
       .concat(
-        '\nglobalThis.__t = { isInsecurePublicWs, validateWsUrl, loadSettingsFrom, credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner, onFocusedOwnerChange }\n'
+        '\nglobalThis.__t = { isInsecurePublicWs, validateWsUrl, loadSettingsFrom, credentialTargetAllowed, iframePolicy, classifyAddress, sessionOrigin, authFetch, loadRFB, rfbStatusDetail, engine, hiperfReadUe, probeUrlsFromHostPort, hiperfBuildUrl, hiperfHandshakeFrames, fingerprintDecision, fetchSession, attachEngine, connect, normalizeEndpoint, liveEndpoint, handleToolStart, control, $control, $ui, $settings, controlView, normalizeLease, normalizeStatus, statusWords, takeOver, handBack, handBackOnClose, syncControlTarget, controlLocked, effectiveViewOnly, showPane, hidePane, userDisconnect, refreshLease, createRemoteCuaClient, remoteCuaRestRequest, refreshStatus, ControlBar, ControlStatusLine, ComputerPane, OverlayBar, syncSurfacePointer, ensureIframeEl, resolveControlOwner, onFocusedOwnerChange, bindingKey, readBindingScope, resolveBindingEndpointId, boundEndpointId, bindingSelectionValue, updateBindingSelection, resolveEndpoint }\n'
       )
 
   vm.runInNewContext(source, vm.createContext(context), { filename: pluginPath.pathname })
@@ -2322,4 +2322,155 @@ test('a configured endpoint with a bad address opens no RFB', async () => {
     assert.equal(instances.length, 0, wsUrl)
     assert.equal(t.engine.state.get().phase, 'error', wsUrl)
   }
+})
+
+// ---------------------------------------------------------------------------
+// #26: per-bot endpoints are scoped to the focused connection + profile, so two
+// Desktop connections that both have a `default` profile don't share a binding.
+// Ported from JamRov's PR #26 onto the current plugin.
+// ---------------------------------------------------------------------------
+
+test('#26 legacy profile-only No computer selection displays as none for a qualified owner', () => {
+  const { t } = loadPlugin()
+  const scope = { connectionId: 'local', profile: 'default' }
+  const settings = { globalEndpointId: 'global', perBotEndpoint: { default: false } }
+  assert.equal(t.bindingSelectionValue(settings, scope), '__none__')
+  assert.equal(t.resolveBindingEndpointId(settings, scope), null)
+})
+
+test('#26 connection-qualified No computer selection fails closed without legacy or global fallback', () => {
+  const { t } = loadPlugin()
+  const scope = { connectionId: 'local', profile: 'default' }
+  const settings = { globalEndpointId: 'global', perBotEndpoint: { default: 'legacy', 'local::default': false } }
+  assert.equal(t.resolveBindingEndpointId(settings, scope), null)
+  assert.equal(t.bindingSelectionValue(settings, scope), '__none__')
+  const next = t.updateBindingSelection({ globalEndpointId: 'global', perBotEndpoint: { default: 'legacy' } }, scope, '__none__')
+  assert.equal(next.perBotEndpoint['local::default'], false)
+  assert.equal(t.resolveBindingEndpointId(next, scope), null)
+})
+
+test('#26 connection-qualified Global selection overrides a legacy profile mapping', () => {
+  const { t } = loadPlugin()
+  const scope = { connectionId: 'gateway-a', profile: 'default' }
+  const settings = { globalEndpointId: 'global', perBotEndpoint: { default: 'legacy' } }
+
+  assert.equal(t.bindingSelectionValue(settings, scope), 'legacy')
+  const next = t.updateBindingSelection(settings, scope, '__global__')
+  assert.equal(next.perBotEndpoint.default, 'legacy')
+  assert.equal(next.perBotEndpoint['gateway-a::default'], null)
+  assert.equal(t.bindingSelectionValue(next, scope), '__global__')
+  assert.equal(t.resolveBindingEndpointId(next, scope), 'global')
+  assert.equal(t.boundEndpointId(next, scope), null, 'global is not an own binding')
+
+  const legacyNext = t.updateBindingSelection(settings, { connectionId: null, profile: 'default' }, '__global__')
+  assert.equal(Object.prototype.hasOwnProperty.call(legacyNext.perBotEndpoint, 'default'), false)
+})
+
+test('#26 connection-qualified binding keys isolate same-profile connections', () => {
+  const { t } = loadPlugin()
+  const settings = {
+    globalEndpointId: 'global',
+    perBotEndpoint: { 'gateway-a::default': 'computer-a', 'gateway-b::default': 'computer-b', default: 'legacy' }
+  }
+  assert.equal(t.bindingKey({ connectionId: 'gateway-a', profile: 'default' }), 'gateway-a::default')
+  assert.equal(t.resolveBindingEndpointId(settings, { connectionId: 'gateway-a', profile: 'default' }), 'computer-a')
+  assert.equal(t.resolveBindingEndpointId(settings, { connectionId: 'gateway-b', profile: 'default' }), 'computer-b')
+  assert.equal(t.resolveBindingEndpointId(settings, { connectionId: 'gateway-c', profile: 'default' }), 'legacy')
+})
+
+test('#26 legacy profile binding remains available and qualified binding wins', () => {
+  const { t } = loadPlugin()
+  const settings = { globalEndpointId: 'global', perBotEndpoint: { personal: 'legacy' } }
+  const scope = { connectionId: 'local', profile: 'personal' }
+  assert.equal(t.resolveBindingEndpointId(settings, scope), 'legacy')
+  assert.equal(
+    t.resolveBindingEndpointId({ ...settings, perBotEndpoint: { personal: 'legacy', 'local::personal': 'qualified' } }, scope),
+    'qualified'
+  )
+})
+
+test('#26 unavailable focused owner uses only the global default', () => {
+  const { t } = loadPlugin()
+  const settings = { globalEndpointId: 'global', perBotEndpoint: { default: 'legacy' } }
+  assert.equal(t.resolveBindingEndpointId(settings, null), 'global')
+  assert.equal(t.boundEndpointId(settings, null), null)
+})
+
+test('#26 malformed present qualified binding uses global instead of a legacy profile endpoint', () => {
+  const { t } = loadPlugin()
+  const settings = { globalEndpointId: 'global', perBotEndpoint: { default: 'legacy', 'local::default': '' } }
+  assert.equal(t.resolveBindingEndpointId(settings, { connectionId: 'local', profile: 'default' }), 'global')
+})
+
+test('#26 focused owner is authoritative; a local owner keys as local; older SDKs keep the profile scope', () => {
+  const { t, context } = loadPlugin()
+  const state = context.__host.state
+  state.focusedSessionProfile = atom('default')
+  state.profile = atom('default')
+  assert.deepEqual({ ...t.readBindingScope() }, { connectionId: null, profile: 'default' }, 'older SDK: profile-only')
+
+  state.focusedSessionOwner = atom({ connectionId: 'gateway-a', profile: 'default' })
+  assert.deepEqual({ ...t.readBindingScope() }, { connectionId: 'gateway-a', profile: 'default' })
+
+  state.focusedSessionOwner.set({ connectionId: null, profile: 'default' })
+  assert.deepEqual({ ...t.readBindingScope() }, { connectionId: 'local', profile: 'default' })
+
+  state.focusedSessionOwner.set(null)
+  assert.equal(t.readBindingScope(), null)
+})
+
+function ownerEngineSetup(perBotEndpoint, owner) {
+  const loaded = loadPlugin()
+  const { t, context } = loaded
+  const focusedSessionOwner = atom(owner)
+  context.__host.state.focusedSessionOwner = focusedSessionOwner
+  context.__host.state.profile = atom(owner ? owner.profile : 'default')
+  const ctx = makeCtx()
+  const first = t.normalizeEndpoint({ id: 'first', name: 'First', mode: 'websocket', wsUrl: 'ws://127.0.0.1:6080/websockify' })
+  const second = t.normalizeEndpoint({ id: 'second', name: 'Second', mode: 'websocket', wsUrl: 'ws://127.0.0.1:6081/websockify' })
+  ctx.storage.set('endpoints', [first, second])
+  ctx.storage.set('globalEndpointId', 'first')
+  ctx.storage.set('perBotEndpoint', perBotEndpoint)
+  t.attachEngine(ctx)
+  return { t, ctx, first, second, focusedSessionOwner }
+}
+
+test('#26 switching focus between two connections with the same profile name switches the computer', () => {
+  const { t, focusedSessionOwner } = ownerEngineSetup(
+    { 'one::default': 'first', 'two::default': 'second' },
+    { connectionId: 'one', profile: 'default' }
+  )
+  assert.equal(t.resolveEndpoint().id, 'first')
+  focusedSessionOwner.set({ connectionId: 'two', profile: 'default' })
+  assert.equal(t.resolveEndpoint().id, 'second')
+  assert.equal(t.engine.endpoint.id, 'second')
+})
+
+test('#26 switching to an owner assigned No computer disconnects the current viewer', () => {
+  const { t, first, focusedSessionOwner } = ownerEngineSetup(
+    { 'gateway-a::default': 'first', 'gateway-b::default': false },
+    { connectionId: 'gateway-a', profile: 'default' }
+  )
+  let disconnects = 0
+  t.engine.endpoint = first
+  t.engine.currentEndpointId = first.id
+  t.engine.rfb = { disconnect: () => { disconnects += 1 }, removeEventListener() {} }
+  t.engine.state.set({ phase: 'connected' })
+
+  focusedSessionOwner.set({ connectionId: 'gateway-b', profile: 'default' })
+
+  assert.equal(disconnects, 1)
+  assert.equal(t.engine.endpoint, null)
+  assert.equal(t.engine.rfb, null)
+  assert.equal(t.engine.state.get().phase, 'unconfigured')
+})
+
+test('#26 a computer bound on one connection does not wake the pane for the same bot name on another', () => {
+  const owner = atom({ connectionId: 'conn-a', profile: 'ava' })
+  const { t } = boundSetup({ bind: false, state: { focusedSessionOwner: owner } })
+  t.$settings.set({ ...t.$settings.get(), perBotEndpoint: { 'conn-a::ava': 'ep-mac' } })
+  owner.set({ connectionId: 'conn-b', profile: 'ava' })
+  assert.equal(t.handleToolStart(toolStart('computer_use', { connectionId: 'conn-b' }), 1_000_000), false)
+  owner.set({ connectionId: 'conn-a', profile: 'ava' })
+  assert.equal(t.handleToolStart(toolStart('computer_use', { connectionId: 'conn-a' }), 1_000_000), true)
 })

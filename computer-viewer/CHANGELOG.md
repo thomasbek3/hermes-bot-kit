@@ -5,6 +5,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Per-bot endpoints are bound to the focused chat's connection and profile
+  (`perBotEndpoint["<connectionId>::<profile>"]`), so two Desktop connections
+  with a `default` profile no longer share one computer (#26, ported from
+  JamRov's PR). Profile-only bindings still work as a fallback. Settings adds
+  **No computer assigned** (`false`, fails closed); choosing **Use global
+  default** on a qualified owner stores `null`. An unknown focused owner uses
+  only the global default. Auto-wake and Take over follow the same scope.
+
 ### Security
 
 - Bearer tokens go only to the configured API origin, over https unless the
