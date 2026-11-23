@@ -576,7 +576,7 @@ test('classifyAddress treats a bare hostname as a host, and a bare key as nothin
   assert.equal(host.connectEnabled, true)
 
   // No cloud-provider key discovery any more: a key on its own is not an address.
-  const key = t.classifyAddress('sk_live_abc123456789')
+  const key = t.classifyAddress('sk_test_FAKE_PLACEHOLDER')
   assert.notEqual(key.kind, 'api-key')
   assert.equal(key.connectEnabled, key.kind === 'probe')
 })
