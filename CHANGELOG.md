@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Computer Viewer: per-bot computers are scoped to the connection, not just
+  the profile name (#26).** Two Desktop connections that both had a `default`
+  profile shared one endpoint override. Bindings are now stored under the
+  focused chat's `connectionId::profile` owner (`local::<profile>` for the
+  local gateway); older profile-only bindings still apply as a fallback, `null`
+  is an explicit **Use global default** and `false` is the new **No computer
+  assigned** (disconnects). With no known owner only the global default
+  applies. Auto-wake and remote-cua Take over use the same scope. Ported from
+  JamRov's PR #26 with its regression tests. Tests in
+  `computer-viewer/plugin.test.mjs` (`#26 …`).
+- **Computer Viewer test fixture (#27):** the classifier test no longer uses a
+  live-Stripe-shaped `sk_live_…` string; it uses `sk_test_FAKE_PLACEHOLDER`.
 - **Grokbot Override: opening a bot clears its unread dot (#35).** Clicking an
   unread row opened the chat but the blue dot and the "More unreads" pill
   stayed. The override only called `ackStoredSessionId`, which retires

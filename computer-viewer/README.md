@@ -874,9 +874,29 @@ Iframe expanded controls are Reload, Open in browser, and Collapse.
 
 ### Per-bot endpoints
 
-Effective endpoint = `perBotEndpoint[focusedProfile] ?? globalEndpointId`.
-Switching the focused chat to a profile that resolves to a **different**
-endpoint disconnects and reconnects. The same endpoint is left alone.
+A binding belongs to the focused chat's Desktop owner, stored as
+`perBotEndpoint["<connectionId>::<profile>"]` (a chat on the local gateway is
+`local::<profile>`). Two connections that both have a `default` profile, say
+`gateway-a::default` and `gateway-b::default`, therefore get separate
+computers. Settings shows the scope as **Endpoint for gateway-a / default**.
+
+A connection-qualified binding has three states: an endpoint id, `null`
+(**Use global default**, chosen explicitly) and `false` (**No computer
+assigned**: nothing connects and an open viewer disconnects).
+
+Effective endpoint = the connection-qualified binding, else the older
+profile-only `perBotEndpoint[profile]` (still read, so existing bindings keep
+working until you replace them; `false` there also means no computer), else
+`globalEndpointId`. When Hermes cannot tell which owner the focused chat
+belongs to (`focusedSessionOwner` is null), only the global default applies,
+never a profile-only binding. Builds without `focusedSessionOwner` keep the old
+behaviour: the focused profile is the scope and new bindings use the
+profile-only key.
+
+Auto-wake and Take over count only a computer bound to that owner itself
+(not the global default). Switching the focused chat to an owner that resolves
+to a **different** endpoint disconnects and reconnects. The same endpoint is
+left alone.
 
 `autoConnect` (default on) connects when the pane becomes visible and
 disconnects when it is hidden or the plugin is disabled. An explicit
