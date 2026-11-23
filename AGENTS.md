@@ -38,13 +38,13 @@ It is written to be run unattended on **macOS and Linux**.
 
 <!-- runbook:install -->
 ```bash
-( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21.2/install.sh -o "$f"; test -s "$f"; bash "$f" )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" )
 ```
 
 The script is downloaded to a file first and run only if the download
 succeeded, so a failed or empty download stops here with a non-zero exit. The
 first output line names the release it installs, for example
-`Release -> v2026.11.21.2 (newest GitHub release)`.
+`Release -> v2026.11.22 (newest GitHub release)`.
 
 Variants (same command, with a variable in front of `bash "$f"`, for example
 `KIT_SKIP_COMPUTER=1 bash "$f"`):
@@ -53,7 +53,7 @@ Variants (same command, with a variable in front of `bash "$f"`, for example
 |---|---|
 | Grokbot Override only | `KIT_SKIP_COMPUTER=1` |
 | Computer viewer only | `KIT_SKIP_GROKBOT=1` |
-| A specific release | `KIT_REF=v2026.11.21.2` |
+| A specific release | `KIT_REF=v2026.11.22` |
 | Another Hermes home (a second install) | `HERMES_HOME=/path/to/.hermes` |
 | Move retired kit plugins (Bubble Mode, Task Dock, Bot Sections) out of the way | `KIT_REMOVE_RETIRED=1` |
 
@@ -113,7 +113,7 @@ Offer these; install only what the person wants.
   chat; question cards work without it):
 
   ```bash
-  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21.2/install.sh -o "$f"; test -s "$f"; KIT_CARDS_SKILL=1 bash "$f" )
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; KIT_CARDS_SKILL=1 bash "$f" )
   ```
 
   It goes to `<profile home>/skills/agent-cards/SKILL.md` for the root home and
@@ -125,7 +125,7 @@ Offer these; install only what the person wants.
 - **texting-style** (bots reply in a short texting register, only in Bot Chat):
 
   ```bash
-  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.21.2/texting-style/install.sh -o "$f"; test -s "$f"; bash "$f" )
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/texting-style/install.sh -o "$f"; test -s "$f"; bash "$f" )
   ```
 
   To limit it to some profiles, pass them to the script:
