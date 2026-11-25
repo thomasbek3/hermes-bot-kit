@@ -42164,6 +42164,11 @@ function looksUnsupported(error) {
   if (isMethodNotServed(error)) return true;
   return /unknown method|method not found|method-not-found|no handler for|unexpected session\.active_list/i.test(rpcErrorParts(error).message);
 }
+function isUnknownConfigKey(error) {
+  const { code, message } = rpcErrorParts(error);
+  if (code !== void 0 && code !== 4002) return false;
+  return /unknown config key/i.test(message);
+}
 function isSessionGoneError(error) {
   if (!error) return false;
   const { code, reason, message } = rpcErrorParts(error);
@@ -47567,6 +47572,89 @@ function routineDetailIssue(job) {
   return first ? first.trim() : null;
 }
 
+// src/core/approvalMode.js
+var APPROVAL_KEY = "approvals.mode";
+var APPROVAL_MODES = ["manual", "smart", "off"];
+var APPROVAL_TITLE = "Approval mode";
+var APPROVAL_LABELS = { manual: "Manual", smart: "Smart", off: "Off" };
+var APPROVAL_DESCRIPTIONS = {
+  manual: "Ask before actions that require approval",
+  smart: "Automatically assess actions and ask when needed",
+  off: "Run without approval prompts"
+};
+function normalizeApprovalMode(value) {
+  const mode = String(value ?? "").trim().toLowerCase();
+  return APPROVAL_MODES.includes(mode) ? mode : "manual";
+}
+function approvalParams(profile, extra = {}) {
+  const name = String(profile ?? "").trim();
+  const params = { key: APPROVAL_KEY, ...extra };
+  return name ? { ...params, profile: name } : params;
+}
+function approvalUnsupported(error) {
+  if (!error) return false;
+  return isUnknownConfigKey(error) || looksUnsupported(error);
+}
+function createApprovalModes({ onChange = () => void 0 } = {}) {
+  const states = /* @__PURE__ */ new Map();
+  const revisions = /* @__PURE__ */ new Map();
+  const confirmed = /* @__PURE__ */ new Map();
+  const bump = (key) => {
+    const next = (revisions.get(key) || 0) + 1;
+    revisions.set(key, next);
+    return next;
+  };
+  const put = (key, patch) => {
+    states.set(key, { status: "loading", mode: null, error: null, ...states.get(key), ...patch });
+    onChange(key);
+  };
+  return {
+    get(key) {
+      return states.get(key) || null;
+    },
+    async read(key, request2, profile) {
+      const revision = bump(key);
+      if (!states.has(key)) put(key, { status: "loading" });
+      try {
+        const result = await request2("config.get", approvalParams(profile));
+        if (revisions.get(key) !== revision) return states.get(key);
+        if (result && typeof result === "object" && result.error) throw result.error;
+        const mode = normalizeApprovalMode(result?.value);
+        confirmed.set(key, mode);
+        put(key, { status: "ready", mode, error: null });
+      } catch (error) {
+        if (revisions.get(key) !== revision) return states.get(key);
+        if (approvalUnsupported(error)) put(key, { status: "unsupported", mode: null, error: null });
+        else put(key, { status: confirmed.has(key) ? "ready" : "error", mode: confirmed.get(key) ?? null, error: String(error?.message || error) });
+      }
+      return states.get(key);
+    },
+    async write(key, request2, profile, mode) {
+      const next = normalizeApprovalMode(mode);
+      const revision = bump(key);
+      put(key, { status: "ready", mode: next, error: null });
+      try {
+        const result = await request2("config.set", approvalParams(profile, { value: next }));
+        if (result && typeof result === "object" && result.error) throw result.error;
+        const authoritative = normalizeApprovalMode(result?.value ?? next);
+        if (revisions.get(key) === revision) {
+          confirmed.set(key, authoritative);
+          put(key, { status: "ready", mode: authoritative });
+        }
+        return authoritative;
+      } catch (error) {
+        if (revisions.get(key) === revision) put(key, { status: "ready", mode: confirmed.get(key) ?? null });
+        throw error;
+      }
+    },
+    clear() {
+      states.clear();
+      revisions.clear();
+      confirmed.clear();
+    }
+  };
+}
+
 // src/core/modelSheet.js
 var EFFORT_KEY = "agent.reasoning_effort";
 var SPEED_KEY = "agent.service_tier";
@@ -48454,6 +48542,9 @@ var roster2 = {
   models: createStore({}),
   /** The model sheet's Effort and Speed: roster key -> the profile's values. */
   modelSettings: createStore({}),
+  /** The panel's Approval mode: roster key -> { status, mode, error }
+   *  (core/approvalMode.js; 'unsupported' hides the control). */
+  approvals: createStore({}),
   /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
    *  the first unread bot message (null: none; absent: not decided), and the
    *  per-bot seen watermark (ms; plugin storage `seenAt`). */
@@ -48810,6 +48901,20 @@ async function loadBotModelSettings(bot, { force = false, foreground = false } =
     setBotModelSettings(bot, { ...settingsFromConfig(res), error: null });
   } catch (error) {
     roster2.modelSettings.set((all) => ({ ...all, [key]: { effort: "", speed: "", ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }));
+  }
+}
+var approvalModes = createApprovalModes({
+  onChange: (key) => roster2.approvals.set((all) => ({ ...all, [key]: approvalModes.get(key) }))
+});
+var approvalRequest = (bot) => (method, params) => request(bot, method, params, method === "config.set" ? FOREGROUND : {});
+function loadBotApprovalMode(bot) {
+  return approvalModes.read(rowKey(bot), approvalRequest(bot), bot.name);
+}
+async function setBotApprovalMode(bot, mode) {
+  try {
+    await approvalModes.write(rowKey(bot), approvalRequest(bot), bot.name, mode);
+  } catch (error) {
+    notifyError(error, `Could not set ${displayName(bot, metaFor(bot))}’s approval mode to ${APPROVAL_LABELS[mode] || mode}`);
   }
 }
 async function saveBotModelSheet(bot, before, next) {
@@ -50691,6 +50796,10 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
 .gbo-model-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-text-secondary); }
 .gbo-model-name { min-width: 0; font-size: 13px; line-height: 18px; letter-spacing: 0.195px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-model-value > svg { width: 12px; height: 12px; flex: none; opacity: 0.66; }
+.gbo-approvals-row { height: 36px; padding: 6px 4px 6px 8px; gap: 12px; }
+.gbo-approvals-row > .panel-row__title { flex: none; }
+.gbo-approvals-row > .gbo-select { width: auto; min-width: 0; max-width: 60%; height: 26px; padding-top: 2px; padding-bottom: 2px; font-size: 13px; }
+.gbo-approvals-hint { padding: 0 8px 8px; font-size: 12px; line-height: 16px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-meter-bar { background: var(--color-bg-tertiary); }
 .gbo-meter-bar > span { background: var(--gbo-action, var(--color-primary)); }
 .gbo-drawer { background: var(--color-bg-chrome); }
@@ -61895,6 +62004,45 @@ function ModelCard({ bot }) {
     ] })
   ] }) }) });
 }
+var APPROVAL_OPTIONS = APPROVAL_MODES.map((m) => [m, APPROVAL_LABELS[m]]);
+function ApprovalCard({ bot }) {
+  const key = rowKey(bot);
+  const state = useStore(roster2.approvals)[key];
+  React23.useEffect(() => {
+    void loadBotApprovalMode(bot);
+    const win = typeof window === "undefined" ? null : window;
+    const doc = typeof document === "undefined" ? null : document;
+    const again = () => {
+      if (doc?.visibilityState === "hidden") return;
+      void loadBotApprovalMode(bot);
+    };
+    win?.addEventListener?.("focus", again);
+    doc?.addEventListener?.("visibilitychange", again);
+    return () => {
+      win?.removeEventListener?.("focus", again);
+      doc?.removeEventListener?.("visibilitychange", again);
+    };
+  }, [key]);
+  if (!state || state.status === "unsupported") return null;
+  const mode = state.mode || "";
+  const hint = state.status === "error" && !mode ? `Could not read it (${state.error})` : mode ? APPROVAL_DESCRIPTIONS[mode] : "Loading…";
+  return /* @__PURE__ */ jsx25("section", { className: "gbo-panel-section gbo-approvals-section", children: /* @__PURE__ */ jsxs23("div", { className: "panel-card gbo-panel-box", children: [
+    /* @__PURE__ */ jsxs23("div", { className: "panel-row panel-row--setting gbo-approvals-row", children: [
+      /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: APPROVAL_TITLE }),
+      /* @__PURE__ */ jsx25(
+        Select,
+        {
+          label: APPROVAL_TITLE,
+          value: mode,
+          disabled: !mode,
+          options: mode ? APPROVAL_OPTIONS : [["", "…"], ...APPROVAL_OPTIONS],
+          onChange: (value) => void setBotApprovalMode(bot, value)
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsx25("div", { className: "gbo-approvals-hint", children: hint })
+  ] }) });
+}
 function ComputerThumb({ card }) {
   if (card.thumb === "shot")
     return /* @__PURE__ */ jsx25("span", { className: "computer-thumb has-shot gbo-computer-thumb", "data-thumb": "shot", children: /* @__PURE__ */ jsx25("img", { src: card.src, alt: "", draggable: false }) });
@@ -62031,6 +62179,7 @@ function ProfilePanel({ bot, onClose }) {
         ] }) }) : null
       ] }),
       /* @__PURE__ */ jsx25(ModelCard, { bot }),
+      /* @__PURE__ */ jsx25(ApprovalCard, { bot }),
       /* @__PURE__ */ jsxs23("section", { className: "gbo-panel-section", children: [
         /* @__PURE__ */ jsx25("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx25("span", { children: "Profile" }) }),
         /* @__PURE__ */ jsxs23("div", { className: "panel-card gbo-panel-box", children: [
@@ -62490,7 +62639,7 @@ function Thinking({ text: text3 }) {
     /* @__PURE__ */ jsx28("div", { className: "gbo-think-body", children: text3 })
   ] });
 }
-function ApprovalCard({ item, onAnswer }) {
+function ApprovalCard2({ item, onAnswer }) {
   const pending = item.status === "pending";
   const answering = item.status === "answering";
   const stateText = item.status === "answered" ? `${CHOICE_LABELS[item.answer] || item.answer}` : item.status === "resolved" ? "Answered in another window" : item.status === "expired" ? "No longer waiting, nothing was approved" : item.status === "cancelled" ? "No longer waiting" : answering ? "Sending…" : "";
@@ -62672,7 +62821,7 @@ function Item({
     case "tools":
       return /* @__PURE__ */ jsx28(ToolGroup, { item, bot });
     case "approval":
-      return /* @__PURE__ */ jsx28(ApprovalCard, { item, onAnswer });
+      return /* @__PURE__ */ jsx28(ApprovalCard2, { item, onAnswer });
     case "email-draft":
       return /* @__PURE__ */ jsx28(EmailDraftCard, { item, bot, controller: controller2 });
     case "clarify":

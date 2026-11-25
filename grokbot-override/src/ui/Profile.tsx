@@ -1,6 +1,6 @@
 // Right panel: big avatar and name, scheduled jobs (create / edit / run /
 // remove / detail, on/off switches), the bot's computer, its model (one row
-// that opens the model picker) and its profile. Slack (SlackSetup.tsx), under the
+// that opens the model picker), its approval mode and its profile. Slack (SlackSetup.tsx), under the
 // jobs: a Suggested "Add to Slack" card while the profile has no Slack, or a
 // "Slack · <status>" card once it has; never both. Markup uses the reference
 // layout's details-panel class names (details__top, details__identity,
@@ -19,7 +19,9 @@ import { IconChevronDown, IconClock, IconPlus, IconScreen, IconX } from './icons
 import { IconEdit, IconPlay, IconRefresh, IconSettings, IconTrash, IconUsers } from './iconsRoster'
 import { botFor, openNewGroupForm } from './Rooms'
 import { openDialog, roster2 } from './rosterStores'
-import { loadBotModel, loadBotModelSettings, runJob } from './rosterActions'
+import { APPROVAL_DESCRIPTIONS, APPROVAL_LABELS, APPROVAL_MODES, APPROVAL_TITLE } from '../core/approvalMode.js'
+import { Select } from './kit'
+import { loadBotApprovalMode, loadBotModel, loadBotModelSettings, runJob, setBotApprovalMode } from './rosterActions'
 import { openBotScreen, useScreenThumb } from './Screen'
 import { SlackStatusCard, SuggestedSlack } from './SlackSetup'
 import { useStore } from './store'
@@ -61,6 +63,52 @@ function ModelCard({ bot }: { bot: any }) {
             <IconChevronDown />
           </span>
         </button>
+      </div>
+    </section>
+  )
+}
+
+const APPROVAL_OPTIONS = APPROVAL_MODES.map(m => [m, (APPROVAL_LABELS as any)[m]] as [string, string])
+
+/** The bot's approval mode (Manual / Smart / Off), the control stock keeps in
+ *  the status bar the override hides. Read from the bot's own profile when the
+ *  panel opens and when the window regains focus; written to that profile
+ *  only. Hidden when the bot's gateway has no approvals.mode. */
+export function ApprovalCard({ bot }: { bot: any }) {
+  const key = rowKey(bot)
+  const state = useStore(roster2.approvals)[key]
+  React.useEffect(() => {
+    void loadBotApprovalMode(bot)
+    const win: any = typeof window === 'undefined' ? null : window
+    const doc: any = typeof document === 'undefined' ? null : document
+    const again = () => {
+      if (doc?.visibilityState === 'hidden') return
+      void loadBotApprovalMode(bot)
+    }
+    win?.addEventListener?.('focus', again)
+    doc?.addEventListener?.('visibilitychange', again)
+    return () => {
+      win?.removeEventListener?.('focus', again)
+      doc?.removeEventListener?.('visibilitychange', again)
+    }
+  }, [key])
+  if (!state || state.status === 'unsupported') return null
+  const mode = state.mode || ''
+  const hint = state.status === 'error' && !mode ? `Could not read it (${state.error})` : mode ? (APPROVAL_DESCRIPTIONS as any)[mode] : 'Loading…'
+  return (
+    <section className="gbo-panel-section gbo-approvals-section">
+      <div className="panel-card gbo-panel-box">
+        <div className="panel-row panel-row--setting gbo-approvals-row">
+          <span className="panel-row__title">{APPROVAL_TITLE}</span>
+          <Select
+            label={APPROVAL_TITLE}
+            value={mode}
+            disabled={!mode}
+            options={mode ? APPROVAL_OPTIONS : [['', '…'], ...APPROVAL_OPTIONS]}
+            onChange={value => void setBotApprovalMode(bot, value)}
+          />
+        </div>
+        <div className="gbo-approvals-hint">{hint}</div>
       </div>
     </section>
   )
@@ -255,6 +303,7 @@ export function ProfilePanel({ bot, onClose }: { bot: any; onClose?: () => void 
       </section>
 
       <ModelCard bot={bot} />
+      <ApprovalCard bot={bot} />
 
       <section className="gbo-panel-section">
         <div className="section-label gbo-panel-label">

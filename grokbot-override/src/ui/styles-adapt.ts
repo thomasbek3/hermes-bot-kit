@@ -778,6 +778,10 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
 .gbo-model-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-text-secondary); }
 .gbo-model-name { min-width: 0; font-size: 13px; line-height: 18px; letter-spacing: 0.195px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-model-value > svg { width: 12px; height: 12px; flex: none; opacity: 0.66; }
+.gbo-approvals-row { height: 36px; padding: 6px 4px 6px 8px; gap: 12px; }
+.gbo-approvals-row > .panel-row__title { flex: none; }
+.gbo-approvals-row > .gbo-select { width: auto; min-width: 0; max-width: 60%; height: 26px; padding-top: 2px; padding-bottom: 2px; font-size: 13px; }
+.gbo-approvals-hint { padding: 0 8px 8px; font-size: 12px; line-height: 16px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-meter-bar { background: var(--color-bg-tertiary); }
 .gbo-meter-bar > span { background: var(--gbo-action, var(--color-primary)); }
 .gbo-drawer { background: var(--color-bg-chrome); }

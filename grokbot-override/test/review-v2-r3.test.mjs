@@ -380,7 +380,8 @@ const CLASSIFIERS = [
   'looksUnsupported',
   'isSessionGoneError',
   'roomPostFailure',
-  'isHostPreSendFailure'
+  'isHostPreSendFailure',
+  'isUnknownConfigKey'
 ]
 
 // [file, classifier, calls, what the verdict may authorize]
@@ -400,7 +401,9 @@ const CALL_SITES = [
   ['core/rooms.js', 'roomPostFailure', 1, 'give the words back only on admitted:false; else same-event-id retry'],
   ['core/botMeta.js', 'looksUnsupported', 1, 'read-only verdict: keep the save local (no server write)'],
   ['ui/app.ts', 'looksUnsupported', 1, 'read-only: room list shows none'],
-  ['ui/Screen.tsx', 'looksUnsupported', 1, 'read-only: screen tab shows unavailable']
+  ['ui/Screen.tsx', 'looksUnsupported', 1, 'read-only: screen tab shows unavailable'],
+  ['core/approvalMode.js', 'isUnknownConfigKey', 1, 'read-only: the approval-mode row hides'],
+  ['core/approvalMode.js', 'looksUnsupported', 1, 'read-only: the approval-mode row hides']
 ]
 
 function sources(dir, out = []) {

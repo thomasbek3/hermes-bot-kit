@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Grokbot Override: a bot's approval mode in its profile panel.** Stock
+  Hermes keeps Manual / Smart / Off in the bottom status bar, which the
+  override hides. The panel now has an **Approval mode** row under **Model**
+  with stock's labels and the chosen mode's one-line description. It reads
+  `config.get {key: 'approvals.mode', profile}` when the panel opens and when
+  the window regains focus, and writes `config.set {key: 'approvals.mode',
+  value, profile}` (stock's RPC: no session, no scope) for that bot's profile
+  only, on the bot's own route (a remote bot's own connection). A refused
+  write goes back with the usual error toast; the row hides on a gateway
+  without the key or the RPC. PARITY.md P8; test
+  `grokbot-override/test/approval-mode.test.mjs`.
+
 - **The doctor checks your own Hermes.** `install.sh --doctor` (and the end of
   every install) runs `scripts/check-hermes-compat.py`, CI-only until now,
   against the local Hermes Agent source (`<home>/hermes-agent`, or
