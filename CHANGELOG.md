@@ -2,6 +2,86 @@
 
 ## Unreleased
 
+- **Grokbot Override: the work fold says how long the turn took.** A finished
+  turn's last "N tools" fold now reads "Worked for 3m 12s · 12 tools" ("41s"
+  under a minute, "1h 4m" past an hour): from the user's message to the
+  reply's completion, from timestamps the items already carry (the stored
+  rows' for history; live turns are stamped when `message.complete` arrives,
+  so a running turn shows no time). Without a timestamp, or with the turn's
+  user message on an earlier page, the fold keeps its old line. Hermes's own
+  turns for finished background work (process / delegation notices) start
+  their own turn; the end is the turn's latest reply (none without its
+  time, never before the last tools ran). The live completion stamp uses the
+  same turn boundaries, and a turn with no reply row of its own (a silent
+  one) stamps nothing. One line,
+  never wrapped on a phone. `src/core/workTime.js`; test
+  `grokbot-override/test/work-time.test.mjs`.
+
+- **Grokbot Override: a bot's approval mode in its profile panel.** Stock
+  Hermes keeps Manual / Smart / Off in the bottom status bar, which the
+  override hides. The panel now has an **Approval mode** row under **Model**
+  with stock's labels and the chosen mode's one-line description. It reads
+  `config.get {key: 'approvals.mode', profile}` when the panel opens and when
+  the window regains focus, and writes `config.set {key: 'approvals.mode',
+  value, profile}` (stock's RPC: no session, no scope) for that bot's profile
+  only, on the bot's own route (a remote bot's own connection). A refused
+  write goes back with the usual error toast; the row hides on a gateway
+  without the key or the RPC. PARITY.md P8; test
+  `grokbot-override/test/approval-mode.test.mjs`.
+
+- **The doctor checks your own Hermes.** `install.sh --doctor` (and the end of
+  every install) runs `scripts/check-hermes-compat.py`, CI-only until now,
+  against the local Hermes Agent source (`<home>/hermes-agent`, or
+  `KIT_HERMES_SOURCE`): one `OK` line with the Hermes version and commit
+  (read from its `.git` files), a `WARN` listing each missing surface and the
+  kit part it affects ("the kit may misbehave on this Hermes; check
+  COMPATIBILITY.md / update the kit"), or one `skipped (why)` line without a
+  source, a python3 3.8+ (macOS `/usr/bin/python3` 3.9 works; the Command Line
+  Tools stub is never run) or a whole tree. Read-only, never fetches Hermes,
+  never a FIX, never fatal. The checker now also runs from
+  `scripts/hermes-surfaces.json` (what the kit uses, written ahead with
+  `--write-surfaces`; CI checks it is current), which `install.sh --doctor`
+  downloads with the doctor and checks against the release manifest. Its CI
+  output is unchanged. Tests: a fake Hermes tree (`tests/fake-hermes-source.py`)
+  in `tests/test-doctor.sh` (2c) and `tests/test-install.sh`.
+
+- **`install.sh --uninstall` (fixes: an uninstall was undone by the next
+  auto-update).** The old runbook moved the two desktop plugins out but left
+  the daily job and `<home>/hermes-bot-kit/installed-release`, so the next
+  release put them back. `--uninstall` (also through the curl one-liner) first
+  turns auto-update off through the `--auto-update off` code path and stops
+  with a non-zero exit, changing nothing, if that fails. Then it moves
+  `computer-viewer` and `grokbot-override` to
+  `<home>/desktop-plugins-removed-<ts>-<name>` and the records
+  (`desktop-plugins/.hermes-bot-kit-install`, the installed `MANIFEST.sha256`,
+  the `hermes-bot-kit/` folder with `installed-release`) to
+  `<home>/hermes-bot-kit-removed-<ts>/`; nothing is deleted or restarted. A
+  second run says nothing is installed and exits 0, and the doctor then reports
+  "not installed" (INFO, exit 0) instead of a FIX per plugin. Uninstall and
+  the daily run share one lock beside `hermes-bot-kit/` (now
+  `<home>/.hermes-bot-kit-update.flock`, no longer inside the folder uninstall
+  moves): uninstall never runs under an update, and an update that read its
+  settings before an uninstall re-checks them under the lock and installs
+  nothing. An older updater still installed as `update.sh` (v2026.11.22 and
+  before) locks `<home>/hermes-bot-kit/update.flock`; uninstall and new
+  runs take that lock too while it exists (uninstall holds it until the
+  folder is moved), so an older updater that is running makes uninstall stop
+  with nothing changed. One tiny window remains: an older updater that had
+  already read its settings but not yet taken its lock (two consecutive
+  steps of a run that had already started) when the uninstall finished does
+  not re-check and can still install. That is acceptable: uninstall turns
+  auto-update off first, so no new run of the old updater can start, and the
+  first update replaces the old updater with one that re-checks. The
+  UNINSTALLED marker is written before the last record moves, and a rerun
+  finishes an uninstall that stopped part-way. Also fixed: `au_unlock` ran
+  `exec 9>&- 2>/dev/null`, which sent every later error message of that
+  shell to /dev/null. Agent plugins and
+  `config.yaml` are never touched: it lists where each kit agent plugin was
+  found with its README's removal steps. AGENTS.md's uninstall block uses it;
+  the manual fallback block now turns auto-update off first. Tests in
+  `tests/test-auto-update.sh` (`uninstall: …`), `tests/test-doctor.sh` (2b) and
+  `tests/test-agents-runbook.sh`.
+
 - **Computer Viewer: per-bot computers are scoped to the connection, not just
   the profile name (#26).** Two Desktop connections that both had a `default`
   profile shared one endpoint override. Bindings are now stored under the

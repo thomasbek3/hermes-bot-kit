@@ -67,7 +67,7 @@ A chat-app Bot Mode screen + a live window into your bots' computers.
 ## Troubleshooting
 
 **Run the doctor first.** It only reads, changes nothing, and prints one
-line per check (`OK`, `FIX` or `INFO`), each `FIX` with the exact command
+line per check (`OK`, `FIX`, `WARN` or `INFO`), each `FIX` with the exact command
 that fixes it:
 
 ```bash
@@ -78,7 +78,17 @@ From a clone: `bash install.sh --doctor` (or `bash scripts/doctor.sh`). It
 ends with a summary between two `--- doctor summary ---` lines; paste that
 into a [not-working issue](https://github.com/thomasbek3/hermes-bot-kit/issues/new/choose).
 It holds no paths, names or tokens: only versions, plugin names, a home
-category and OK/FIX/INFO per check.
+category and OK/FIX/WARN/INFO per check.
+
+The doctor also checks **your own Hermes**: when the Hermes Agent source is at
+`~/.hermes/hermes-agent` (or `KIT_HERMES_SOURCE=/path` in front of `bash`), it
+reads it as text (never runs or fetches anything) and checks that every Hermes
+surface the kit uses is there. `OK` names the Hermes version and commit; a
+`WARN` lists each missing name and the kit part it affects (the kit may
+misbehave on that Hermes: see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md),
+or update the kit); without the source or a python3 (3.8 or newer) it says
+`skipped` and why. It is never a FIX. The installer prints the same check as
+its last `Hermes check` line.
 
 | What you see | Why, and the fix |
 |---|---|
@@ -91,6 +101,7 @@ category and OK/FIX/INFO per check.
 | `plugin.js exceeds this shell's 512 KiB read limit` | Hermes Desktop is too old for the override's file size. Update Hermes Desktop. |
 | `install.sh: sha256 mismatch for …` | A download was not the released file (proxy, cut-off download). Nothing was installed. Run it again. |
 | Bubble Mode, Task Dock or Bot Sections still installed | Retired in 2026-11. Run the installer with `KIT_REMOVE_RETIRED=1` in front of `bash` (it moves them aside; nothing is deleted). |
+| `WARN  Hermes … lacks N surface(s) the kit uses` | Your Hermes lacks names the kit calls (the line under it says which, and which plugin). Usually a Hermes much older or newer than the kit's tested range: update the kit, or check [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for supported versions. |
 | Hermes Desktop older than 0.23.0 | Not supported (see [Requirements](#requirements)): update Hermes Desktop. The doctor prints your version. |
 | Hermes Desktop on Windows | The installer is a bash script for macOS and Linux. Desktop on Windows reads `HERMES_HOME`, else a `HERMES_HOME` set in the registry (`setx`), else `%LOCALAPPDATA%\hermes` (an older `%USERPROFILE%\.hermes` only when that doesn't exist). From the release's source zip, copy the `grokbot-override` and `computer-viewer` folders and `MANIFEST.sha256` into its `desktop-plugins\` (folder names exactly as shown, `plugin.js` one level down), then reload. To verify, run the [Windows check](#windows-check-powershell) below the table. |
 | Hermes Desktop for Windows with the installer run in WSL | Different homes: WSL's `~/.hermes` is not Desktop's `%LOCALAPPDATA%\hermes`. Copy the folders and `MANIFEST.sha256` into that one's `desktop-plugins` as above. The doctor run in WSL checks your Windows home when it can see it (through `cmd.exe` and `reg.exe`); when it can't, it marks the home unverified and exits 2. |
@@ -245,6 +256,32 @@ restarts Hermes: after an update, **⌘K → Reload desktop plugins**.
   build of a plugin. It must be a file you own that nobody else can write, in
   folders nobody else can write to; a private copy of it is what runs. The
   kit ships no hook.
+
+## Uninstall
+
+One command takes the desktop plugins out again (macOS and Linux):
+
+```bash
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" --uninstall )
+```
+
+From a clone: `bash install.sh --uninstall`. It turns the daily auto-update
+off first (otherwise the next run would put the plugins back) and stops,
+changing nothing, if that fails. Then it moves `grokbot-override` and
+`computer-viewer` out of `desktop-plugins/` to
+`desktop-plugins-removed-<timestamp>-<name>`, and the kit's records
+(`installed-release`, the install record, the installed manifest) to
+`hermes-bot-kit-removed-<timestamp>/`, both in the Hermes home. Nothing is
+deleted and nothing is restarted: **⌘K → Reload desktop plugins**, or restart
+Hermes Desktop. Running it again says nothing is installed.
+
+Agent plugins (texting-style, email-drafts, remote-cua, the Slack plugins) are
+per profile and may be enabled in `config.yaml`, so `--uninstall` leaves them
+and every `config.yaml` alone. It lists where it found each one, with the
+removal steps from that plugin's README (for example
+[texting-style](texting-style/README.md), [remote-cua](remote-cua/README.md#uninstall),
+[slack-connect](slack-connect/README.md#uninstall)). The agent-cards skill:
+`KIT_CARDS_SKILL=remove` (see [Install](#install)).
 
 ## New: Grokbot Override
 

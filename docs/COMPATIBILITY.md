@@ -84,6 +84,26 @@ npm ci --prefix grokbot-override && npm test --prefix grokbot-override
 python3 -m unittest discover -s texting-style/tests
 ```
 
+## Check your own Hermes
+
+`bash install.sh --doctor` runs the same check against the Hermes Agent source
+on your machine (`<home>/hermes-agent`, or `KIT_HERMES_SOURCE=/path`), and the
+installer runs it as its last step. Either way it is read-only and never fatal:
+
+- `OK    Hermes source v0.23.3 (commit caafe5389): every surface the kit uses is there`
+- `WARN  Hermes … lacks N surface(s) the kit uses; the kit may misbehave on this Hermes; check docs/COMPATIBILITY.md / update the kit`,
+  then one `- <area>: <name> (affects: <kit part>)` line per missing name
+- `INFO  Hermes source check: skipped (<why>)`: no source there, no python3
+  3.8 or newer (macOS's `/usr/bin/python3` 3.9 works once the Command Line
+  Tools are installed; it is never run as the installer stub), or a partial
+  source tree.
+
+What the kit uses comes from `scripts/hermes-surfaces.json` (written by
+`python3 scripts/check-hermes-compat.py --write-surfaces scripts/hermes-surfaces.json <hermes v0.23.3 checkout>`;
+CI fails when it no longer matches the kit's sources), so the doctor fetched
+on its own, without the kit's sources, can run it. The version comes from the
+checkout's `.git` files (git itself is not run).
+
 `check-hermes-compat.py` reads the checkout as text, never imports or runs it,
 and prints how many names each area checked. CI runs it against stable
 `v0.23.3`, the minimum `v0.23.0` and upstream `main` on pushes, PRs and a weekly schedule. It checks

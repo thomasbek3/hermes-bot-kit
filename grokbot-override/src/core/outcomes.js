@@ -310,6 +310,15 @@ export function looksUnsupported(error) {
   return /unknown method|method not found|method-not-found|no handler for|unexpected session\.active_list/i.test(rpcErrorParts(error).message)
 }
 
+/** `config.get` on a key this gateway does not have (an older Hermes):
+ *  tui_gateway/methods_config.py answers 4002 "unknown config key: <key>".
+ *  Read-only availability (the approval-mode row hides); never decides a write. */
+export function isUnknownConfigKey(error) {
+  const { code, message } = rpcErrorParts(error)
+  if (code !== undefined && code !== 4002) return false
+  return /unknown config key/i.test(message)
+}
+
 /** The runtime session is gone: legacy 4001 "session not found" (4007 = never
  *  existed), or a canonical refusal whose reason is `not_found`. A canonical
  *  4001 with any other reason is a refusal, not a reaped runtime. Prose counts

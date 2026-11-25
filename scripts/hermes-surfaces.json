@@ -1,0 +1,765 @@
+{
+ "format": 1,
+ "surfaces": {
+  "sdk": {
+   "BOT_CHAT_SESSION_HYDRATION_TIMEOUT_MS": [
+    "Grokbot Override"
+   ],
+   "Badge": [
+    "Computer viewer"
+   ],
+   "Button": [
+    "Computer viewer"
+   ],
+   "ConfirmDialog": [
+    "Computer viewer"
+   ],
+   "CopyButton": [
+    "Computer viewer"
+   ],
+   "Dialog": [
+    "Computer viewer"
+   ],
+   "DialogContent": [
+    "Computer viewer"
+   ],
+   "DialogDescription": [
+    "Computer viewer"
+   ],
+   "DialogFooter": [
+    "Computer viewer"
+   ],
+   "DialogHeader": [
+    "Computer viewer"
+   ],
+   "DialogTitle": [
+    "Computer viewer"
+   ],
+   "DropdownMenu": [
+    "Computer viewer"
+   ],
+   "DropdownMenuContent": [
+    "Computer viewer"
+   ],
+   "DropdownMenuItem": [
+    "Computer viewer"
+   ],
+   "DropdownMenuSeparator": [
+    "Computer viewer"
+   ],
+   "DropdownMenuTrigger": [
+    "Computer viewer"
+   ],
+   "EmptyState": [
+    "Computer viewer"
+   ],
+   "ErrorState": [
+    "Computer viewer"
+   ],
+   "Input": [
+    "Computer viewer"
+   ],
+   "KEYBINDS_AREA": [
+    "Computer viewer"
+   ],
+   "Loader": [
+    "Computer viewer"
+   ],
+   "MessageTextContent": [
+    "Grokbot Override"
+   ],
+   "PALETTE_AREA": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "PANES_AREA": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "STATUSBAR_AREAS": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "SegmentedControl": [
+    "Computer viewer"
+   ],
+   "Select": [
+    "Computer viewer"
+   ],
+   "SelectContent": [
+    "Computer viewer"
+   ],
+   "SelectItem": [
+    "Computer viewer"
+   ],
+   "SelectTrigger": [
+    "Computer viewer"
+   ],
+   "SelectValue": [
+    "Computer viewer"
+   ],
+   "Separator": [
+    "Computer viewer"
+   ],
+   "SessionStatusDot": [
+    "Grokbot Override"
+   ],
+   "StatusDot": [
+    "Computer viewer"
+   ],
+   "Switch": [
+    "Computer viewer"
+   ],
+   "Tip": [
+    "Computer viewer"
+   ],
+   "ToolsetConfigPanel": [
+    "Grokbot Override"
+   ],
+   "ackStoredSessionId": [
+    "Grokbot Override"
+   ],
+   "atom": [
+    "Computer viewer"
+   ],
+   "blobatarSvg": [
+    "Grokbot Override"
+   ],
+   "cn": [
+    "Computer viewer"
+   ],
+   "createPortal": [
+    "Computer viewer"
+   ],
+   "forgetSessionUnread": [
+    "Grokbot Override"
+   ],
+   "host": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "icons": [
+    "Computer viewer"
+   ],
+   "markSessionUnreadFinished": [
+    "Grokbot Override"
+   ],
+   "profileColor": [
+    "Grokbot Override"
+   ],
+   "queryClient": [
+    "Grokbot Override"
+   ],
+   "resolveSiblingWsUrl": [
+    "Grokbot Override"
+   ],
+   "useValue": [
+    "Computer viewer"
+   ]
+  },
+  "host": {
+   "activeConnectionId": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "agents": [
+    "Grokbot Override"
+   ],
+   "completeMcpOAuth": [
+    "Grokbot Override"
+   ],
+   "connections": [
+    "Grokbot Override"
+   ],
+   "deleteProfile": [
+    "Grokbot Override"
+   ],
+   "dropLeftoverProfilePrefs": [
+    "Grokbot Override"
+   ],
+   "focusOpenWorkspaceSession": [
+    "Grokbot Override"
+   ],
+   "newChat": [
+    "Grokbot Override"
+   ],
+   "notify": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "notifyError": [
+    "Grokbot Override"
+   ],
+   "onEvent": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "openSession": [
+    "Grokbot Override"
+   ],
+   "openWorkspace": [
+    "Grokbot Override"
+   ],
+   "paneVisibility": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "profileRoutes": [
+    "Computer viewer"
+   ],
+   "request": [
+    "Grokbot Override"
+   ],
+   "requestProfile": [
+    "Grokbot Override"
+   ],
+   "retainProfile": [
+    "Grokbot Override"
+   ],
+   "retainProfileSocket": [
+    "Grokbot Override"
+   ],
+   "revealPane": [
+    "Grokbot Override"
+   ],
+   "state": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "undismissPane": [
+    "Grokbot Override"
+   ],
+   "warmAgent": [
+    "Grokbot Override"
+   ]
+  },
+  "host.state": {
+   "activeSessionId": [
+    "Grokbot Override"
+   ],
+   "connectionId": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "cwd": [
+    "Grokbot Override"
+   ],
+   "focusedSessionOwner": [
+    "Computer viewer"
+   ],
+   "focusedSessionProfile": [
+    "Computer viewer"
+   ],
+   "focusedStoredSessionId": [
+    "Grokbot Override"
+   ],
+   "profile": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "viewport": [
+    "Computer viewer"
+   ]
+  },
+  "ctx": {
+   "files": [
+    "Grokbot Override"
+   ],
+   "listActions": [
+    "Grokbot Override"
+   ],
+   "onDispose": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "onEvent": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "os": [
+    "Grokbot Override"
+   ],
+   "register": [
+    "Grokbot Override"
+   ],
+   "registerMany": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "rest": [
+    "Computer viewer"
+   ],
+   "runAction": [
+    "Grokbot Override"
+   ],
+   "setInterval": [
+    "Computer viewer"
+   ],
+   "setTimeout": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "storage": [
+    "Computer viewer",
+    "Grokbot Override"
+   ]
+  },
+  "icons": {
+   "Check": [
+    "Computer viewer"
+   ],
+   "Clipboard": [
+    "Computer viewer"
+   ],
+   "ExternalLink": [
+    "Computer viewer"
+   ],
+   "FileImage": [
+    "Computer viewer"
+   ],
+   "Keyboard": [
+    "Computer viewer"
+   ],
+   "Plus": [
+    "Computer viewer"
+   ],
+   "RefreshCw": [
+    "Computer viewer"
+   ],
+   "Settings": [
+    "Computer viewer"
+   ],
+   "Trash2": [
+    "Computer viewer"
+   ],
+   "X": [
+    "Computer viewer"
+   ]
+  },
+  "gateway": {
+   "approval.cancelled": [
+    "Grokbot Override"
+   ],
+   "approval.pending": [
+    "Grokbot Override"
+   ],
+   "approval.request": [
+    "Grokbot Override"
+   ],
+   "approval.respond": [
+    "Grokbot Override"
+   ],
+   "approval.settled": [
+    "Grokbot Override"
+   ],
+   "clarify.lock": [
+    "Grokbot Override"
+   ],
+   "clarify.request": [
+    "Grokbot Override"
+   ],
+   "clarify.settled": [
+    "Grokbot Override"
+   ],
+   "cli.exec": [
+    "Grokbot Override"
+   ],
+   "command.dispatch": [
+    "Grokbot Override"
+   ],
+   "complete.slash": [
+    "Grokbot Override"
+   ],
+   "config.get": [
+    "Grokbot Override"
+   ],
+   "config.set": [
+    "Grokbot Override"
+   ],
+   "connection.request": [
+    "Grokbot Override"
+   ],
+   "connection.respond": [
+    "Grokbot Override"
+   ],
+   "connection.update": [
+    "Grokbot Override"
+   ],
+   "cron.manage": [
+    "Grokbot Override"
+   ],
+   "display.install": [
+    "Grokbot Override"
+   ],
+   "display.install.done": [
+    "Grokbot Override"
+   ],
+   "display.install.log": [
+    "Grokbot Override"
+   ],
+   "display.lease": [
+    "Grokbot Override"
+   ],
+   "display.lease.acquire": [
+    "Grokbot Override"
+   ],
+   "display.lease.release": [
+    "Grokbot Override"
+   ],
+   "display.observe": [
+    "Grokbot Override"
+   ],
+   "display.start": [
+    "Grokbot Override"
+   ],
+   "display.status": [
+    "Grokbot Override"
+   ],
+   "file.attach": [
+    "Grokbot Override"
+   ],
+   "gateway.ready": [
+    "Grokbot Override"
+   ],
+   "groups.approve": [
+    "Grokbot Override"
+   ],
+   "groups.capabilities": [
+    "Grokbot Override"
+   ],
+   "groups.continue": [
+    "Grokbot Override"
+   ],
+   "groups.create": [
+    "Grokbot Override"
+   ],
+   "groups.disband": [
+    "Grokbot Override"
+   ],
+   "groups.discard": [
+    "Grokbot Override"
+   ],
+   "groups.list": [
+    "Grokbot Override"
+   ],
+   "groups.log": [
+    "Grokbot Override"
+   ],
+   "groups.rename": [
+    "Grokbot Override"
+   ],
+   "groups.retry": [
+    "Grokbot Override"
+   ],
+   "groups.send": [
+    "Grokbot Override"
+   ],
+   "groups.state": [
+    "Grokbot Override"
+   ],
+   "groups.stop": [
+    "Grokbot Override"
+   ],
+   "image.attach_bytes": [
+    "Grokbot Override"
+   ],
+   "image.detach": [
+    "Grokbot Override"
+   ],
+   "image.generate": [
+    "Grokbot Override"
+   ],
+   "mcp.catalog": [
+    "Grokbot Override"
+   ],
+   "mcp.servers.add": [
+    "Grokbot Override"
+   ],
+   "mcp.servers.set_api_key": [
+    "Grokbot Override"
+   ],
+   "mcp.servers.test": [
+    "Grokbot Override"
+   ],
+   "message.complete": [
+    "Grokbot Override"
+   ],
+   "message.delta": [
+    "Grokbot Override"
+   ],
+   "message.interim": [
+    "Grokbot Override"
+   ],
+   "message.react": [
+    "Grokbot Override"
+   ],
+   "message.reaction": [
+    "Grokbot Override"
+   ],
+   "message.start": [
+    "Grokbot Override"
+   ],
+   "model.options": [
+    "Grokbot Override"
+   ],
+   "profiles.configure": [
+    "Grokbot Override"
+   ],
+   "profiles.create": [
+    "Grokbot Override"
+   ],
+   "profiles.describe": [
+    "Grokbot Override"
+   ],
+   "profiles.get_asset": [
+    "Grokbot Override"
+   ],
+   "profiles.list": [
+    "Grokbot Override"
+   ],
+   "profiles.set_asset": [
+    "Grokbot Override"
+   ],
+   "prompt.submit": [
+    "Grokbot Override"
+   ],
+   "reasoning.available": [
+    "Grokbot Override"
+   ],
+   "reasoning.delta": [
+    "Grokbot Override"
+   ],
+   "request.answer": [
+    "Grokbot Override"
+   ],
+   "request.cancel": [
+    "Grokbot Override"
+   ],
+   "session.active_list": [
+    "Grokbot Override"
+   ],
+   "session.compress": [
+    "Grokbot Override"
+   ],
+   "session.create": [
+    "Grokbot Override"
+   ],
+   "session.info": [
+    "Grokbot Override"
+   ],
+   "session.interrupt": [
+    "Grokbot Override"
+   ],
+   "session.list": [
+    "Grokbot Override"
+   ],
+   "session.reclaimed": [
+    "Grokbot Override"
+   ],
+   "session.replay_gap": [
+    "Grokbot Override"
+   ],
+   "session.resume": [
+    "Grokbot Override"
+   ],
+   "session.rewind": [
+    "Grokbot Override"
+   ],
+   "session.status": [
+    "Grokbot Override"
+   ],
+   "session.steer": [
+    "Grokbot Override"
+   ],
+   "session.title": [
+    "Grokbot Override"
+   ],
+   "session.usage": [
+    "Grokbot Override"
+   ],
+   "setup.runtime_check": [
+    "Grokbot Override"
+   ],
+   "skills.manage": [
+    "Grokbot Override"
+   ],
+   "slash.exec": [
+    "Grokbot Override"
+   ],
+   "status.update": [
+    "Grokbot Override"
+   ],
+   "thinking.delta": [
+    "Grokbot Override"
+   ],
+   "tool.complete": [
+    "Grokbot Override"
+   ],
+   "tool.generating": [
+    "Grokbot Override"
+   ],
+   "tool.start": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "vault.code": [
+    "Grokbot Override"
+   ],
+   "vault.save_login": [
+    "Grokbot Override"
+   ],
+   "vault.unlock_prompt": [
+    "Grokbot Override"
+   ]
+  },
+  "rest": {
+   "/api/audio/transcribe": [
+    "Grokbot Override"
+   ],
+   "/api/cron/jobs/": [
+    "Grokbot Override"
+   ],
+   "/api/cron/jobs/{}": [
+    "Grokbot Override"
+   ],
+   "/api/cron/jobs/{}/trigger": [
+    "Grokbot Override"
+   ],
+   "/api/cron/jobs/{}{}": [
+    "Grokbot Override"
+   ],
+   "/api/display/ws": [
+    "Grokbot Override"
+   ],
+   "/api/fs/read-data-url": [
+    "Grokbot Override"
+   ],
+   "/api/fs/read-text": [
+    "Grokbot Override"
+   ],
+   "/api/gateway/restart": [
+    "Grokbot Override"
+   ],
+   "/api/messaging/platforms": [
+    "Grokbot Override"
+   ],
+   "/api/messaging/platforms/slack": [
+    "Grokbot Override"
+   ],
+   "/api/messaging/platforms/slack/test": [
+    "Grokbot Override"
+   ],
+   "/api/messaging/platforms/{}": [
+    "Grokbot Override"
+   ],
+   "/api/messaging/platforms/{}/test": [
+    "Grokbot Override"
+   ],
+   "/api/pairing": [
+    "Grokbot Override"
+   ],
+   "/api/pairing/approve": [
+    "Grokbot Override"
+   ],
+   "/api/profiles": [
+    "Grokbot Override"
+   ],
+   "/api/sessions/{}/messages": [
+    "Grokbot Override"
+   ],
+   "/api/status": [
+    "Grokbot Override"
+   ]
+  },
+  "bridge": {
+   "api": [
+    "Computer viewer",
+    "Grokbot Override"
+   ],
+   "desktopPluginsRoot": [
+    "Computer viewer"
+   ],
+   "getMachineProfile": [
+    "Grokbot Override"
+   ],
+   "openExternal": [
+    "Grokbot Override"
+   ],
+   "readFileDataUrl": [
+    "Grokbot Override"
+   ],
+   "readFileText": [
+    "Computer viewer"
+   ],
+   "readPluginSource": [
+    "Computer viewer"
+   ],
+   "requestMicrophoneAccess": [
+    "Grokbot Override"
+   ]
+  },
+  "dom": {
+   "data-active": [
+    "Grokbot Override"
+   ],
+   "data-disabled": [
+    "Grokbot Override"
+   ],
+   "data-hermes-send": [
+    "Grokbot Override"
+   ],
+   "data-highlighted": [
+    "Grokbot Override"
+   ],
+   "data-panel-header": [
+    "Grokbot Override"
+   ],
+   "data-panel-page-header": [
+    "Grokbot Override"
+   ],
+   "data-sash-overlap": [
+    "Grokbot Override"
+   ],
+   "data-slot": [
+    "Grokbot Override"
+   ],
+   "data-theme": [
+    "Grokbot Override"
+   ],
+   "data-titlebar": [
+    "Computer viewer"
+   ],
+   "data-titlebar-cluster": [
+    "Grokbot Override"
+   ],
+   "data-tree-group": [
+    "Grokbot Override"
+   ],
+   "data-tree-tab": [
+    "Grokbot Override"
+   ],
+   "data-vertical": [
+    "Grokbot Override"
+   ],
+   "data-window-drag-handle": [
+    "Grokbot Override"
+   ],
+   "data-window-top": [
+    "Grokbot Override"
+   ],
+   "data-zone-tabstrip": [
+    "Grokbot Override"
+   ]
+  },
+  "dom.slot": {
+   "statusbar": [
+    "Grokbot Override"
+   ]
+  },
+  "dom.class": {
+   "aui-md": [
+    "Grokbot Override"
+   ]
+  }
+ }
+}

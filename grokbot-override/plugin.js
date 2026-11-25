@@ -680,15 +680,15 @@ function SSF_normalize_xl_unsafe(v) {
 function SSF_parse_date_code(v, opts, b2) {
   if (v > 2958465 || v < 0) return null;
   v = SSF_normalize_xl_unsafe(v);
-  var date = v | 0, time = Math.floor(86400 * (v - date)), dow = 0;
+  var date = v | 0, time2 = Math.floor(86400 * (v - date)), dow = 0;
   var dout = [];
-  var out = { D: date, T: time, u: 86400 * (v - date) - time, y: 0, m: 0, d: 0, H: 0, M: 0, S: 0, q: 0 };
+  var out = { D: date, T: time2, u: 86400 * (v - date) - time2, y: 0, m: 0, d: 0, H: 0, M: 0, S: 0, q: 0 };
   if (Math.abs(out.u) < 1e-6) out.u = 0;
   if (opts && opts.date1904) date += 1462;
   if (out.u > 0.9999) {
     out.u = 0;
-    if (++time == 86400) {
-      out.T = time = 0;
+    if (++time2 == 86400) {
+      out.T = time2 = 0;
       ++date;
       ++out.D;
     }
@@ -711,11 +711,11 @@ function SSF_parse_date_code(v, opts, b2) {
   out.y = dout[0];
   out.m = dout[1];
   out.d = dout[2];
-  out.S = time % 60;
-  time = Math.floor(time / 60);
-  out.M = time % 60;
-  time = Math.floor(time / 60);
-  out.H = time;
+  out.S = time2 % 60;
+  time2 = Math.floor(time2 / 60);
+  out.M = time2 % 60;
+  time2 = Math.floor(time2 / 60);
+  out.H = time2;
   out.q = dow;
   return out;
 }
@@ -1925,13 +1925,13 @@ function numdate(v) {
   return out;
 }
 function parse_isodur(s) {
-  var sec = 0, mt = 0, time = false;
+  var sec = 0, mt = 0, time2 = false;
   var m = s.match(/P([0-9\.]+Y)?([0-9\.]+M)?([0-9\.]+D)?T([0-9\.]+H)?([0-9\.]+M)?([0-9\.]+S)?/);
   if (!m) throw new Error("|" + s + "| is not an ISO8601 Duration");
   for (var i = 1; i != m.length; ++i) {
     if (!m[i]) continue;
     mt = 1;
-    if (i > 3) time = true;
+    if (i > 3) time2 = true;
     switch (m[i].slice(m[i].length - 1)) {
       case "Y":
         throw new Error("Unsupported ISO Duration Field: " + m[i].slice(m[i].length - 1));
@@ -1942,7 +1942,7 @@ function parse_isodur(s) {
         mt *= 60;
       /* falls through */
       case "M":
-        if (!time) throw new Error("Unsupported ISO Duration Field: M");
+        if (!time2) throw new Error("Unsupported ISO Duration Field: M");
         else mt *= 60;
       /* falls through */
       case "S":
@@ -42164,6 +42164,11 @@ function looksUnsupported(error) {
   if (isMethodNotServed(error)) return true;
   return /unknown method|method not found|method-not-found|no handler for|unexpected session\.active_list/i.test(rpcErrorParts(error).message);
 }
+function isUnknownConfigKey(error) {
+  const { code, message } = rpcErrorParts(error);
+  if (code !== void 0 && code !== 4002) return false;
+  return /unknown config key/i.test(message);
+}
 function isSessionGoneError(error) {
   if (!error) return false;
   const { code, reason, message } = rpcErrorParts(error);
@@ -43713,6 +43718,70 @@ function valueResult(kind, input) {
   return { value: str(typeof input === "string" ? input : input?.value) };
 }
 
+// src/core/workTime.js
+var END_KINDS = /* @__PURE__ */ new Set(["assistant", "error", "turn-error"]);
+var startsTurn = (item) => item?.kind === "user" || item?.kind === "notice" && BACKGROUND_NOTICE_KINDS.has(item.system);
+function formatWorked(ms) {
+  const secs = Math.max(1, Math.round(Number(ms) / 1e3));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+var time = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+function withWorkTimes(items, { busy = false } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const patches = /* @__PURE__ */ new Map();
+  let start2 = -1;
+  const close = (from, to, last) => {
+    if (from < 0) return;
+    const began = time(list[from].at);
+    if (began === null) return;
+    let tools = -1;
+    let end = null;
+    for (let i = from + 1; i < to; i += 1) {
+      const item = list[i];
+      if (item?.kind === "tools") {
+        tools = i;
+        if (time(item.completedAt) !== null) end = time(item.completedAt);
+      } else if (END_KINDS.has(item?.kind)) {
+        end = time(item.completedAt) ?? time(item.at);
+      }
+    }
+    if (tools < 0 || end === null || last && busy || end < began) return;
+    const toolsAt = time(list[tools].at);
+    if (toolsAt !== null && end < toolsAt) return;
+    patches.set(tools, end - began);
+  };
+  for (let i = 0; i < list.length; i += 1) {
+    if (!startsTurn(list[i])) continue;
+    close(start2, i, false);
+    start2 = i;
+  }
+  close(start2, list.length, true);
+  if (!patches.size && !list.some((item) => item?.kind === "tools" && "workedMs" in item)) return items;
+  let changed = false;
+  const out = list.map((item, i) => {
+    if (patches.has(i)) {
+      if (item.workedMs === patches.get(i)) return item;
+      changed = true;
+      return { ...item, workedMs: patches.get(i) };
+    }
+    if (item?.kind === "tools" && "workedMs" in item) {
+      changed = true;
+      const { workedMs: _drop, ...rest } = item;
+      return rest;
+    }
+    return item;
+  });
+  return changed ? out : items;
+}
+function foldLabel({ done, workedMs, toolSecs = 0 }) {
+  const count = done === 1 ? "1 tool" : `${done} tools`;
+  if (typeof workedMs === "number" && Number.isFinite(workedMs) && workedMs >= 0) return `Worked for ${formatWorked(workedMs)} · ${count}`;
+  return toolSecs >= 1 ? `${count} · ${Math.round(toolSecs)}s` : count;
+}
+
 // src/core/reducer.js
 function emptyLive() {
   return { turnId: "", cursor: void 0, bubbleId: null, toolsId: null, reasoning: "", streamed: false, sealed: "" };
@@ -43788,6 +43857,16 @@ function dropSilentBubble(state) {
   if (!bubble || !isSilenceReply(bubble.text)) return state;
   const items = bubble.reasoning ? replaceItem(state.items, bubble.id, { text: "", streaming: false }) : state.items.filter((item) => item.id !== bubble.id);
   return { ...state, items, live: { ...state.live, bubbleId: null } };
+}
+function stampCompleted(state, now) {
+  for (let i = state.items.length - 1; i >= 0; i -= 1) {
+    const item = state.items[i];
+    if (startsTurn(item)) break;
+    if (END_KINDS.has(item.kind)) {
+      return { ...state, items: state.items.map((it, j) => j === i ? { ...it, completedAt: now } : it) };
+    }
+  }
+  return state;
 }
 function finishTurn(state) {
   const closed = closeBubble(state);
@@ -43939,7 +44018,7 @@ function applyEvent(state, event, now = Date.now()) {
         const message = String(payload.error || payload.failure_reason || "The reply failed.");
         next = { ...next, items: [...next.items, { kind: "error", id: liveId("e"), text: message, at: now }] };
       }
-      return finishTurn(next);
+      return finishTurn(stampCompleted(next, now));
     }
     case "error": {
       const message = String(payload.message || payload.error || "").trim();
@@ -47567,6 +47646,89 @@ function routineDetailIssue(job) {
   return first ? first.trim() : null;
 }
 
+// src/core/approvalMode.js
+var APPROVAL_KEY = "approvals.mode";
+var APPROVAL_MODES = ["manual", "smart", "off"];
+var APPROVAL_TITLE = "Approval mode";
+var APPROVAL_LABELS = { manual: "Manual", smart: "Smart", off: "Off" };
+var APPROVAL_DESCRIPTIONS = {
+  manual: "Ask before actions that require approval",
+  smart: "Automatically assess actions and ask when needed",
+  off: "Run without approval prompts"
+};
+function normalizeApprovalMode(value) {
+  const mode = String(value ?? "").trim().toLowerCase();
+  return APPROVAL_MODES.includes(mode) ? mode : "manual";
+}
+function approvalParams(profile, extra = {}) {
+  const name = String(profile ?? "").trim();
+  const params = { key: APPROVAL_KEY, ...extra };
+  return name ? { ...params, profile: name } : params;
+}
+function approvalUnsupported(error) {
+  if (!error) return false;
+  return isUnknownConfigKey(error) || looksUnsupported(error);
+}
+function createApprovalModes({ onChange = () => void 0 } = {}) {
+  const states = /* @__PURE__ */ new Map();
+  const revisions = /* @__PURE__ */ new Map();
+  const confirmed = /* @__PURE__ */ new Map();
+  const bump = (key) => {
+    const next = (revisions.get(key) || 0) + 1;
+    revisions.set(key, next);
+    return next;
+  };
+  const put = (key, patch) => {
+    states.set(key, { status: "loading", mode: null, error: null, ...states.get(key), ...patch });
+    onChange(key);
+  };
+  return {
+    get(key) {
+      return states.get(key) || null;
+    },
+    async read(key, request2, profile) {
+      const revision = bump(key);
+      if (!states.has(key)) put(key, { status: "loading" });
+      try {
+        const result = await request2("config.get", approvalParams(profile));
+        if (revisions.get(key) !== revision) return states.get(key);
+        if (result && typeof result === "object" && result.error) throw result.error;
+        const mode = normalizeApprovalMode(result?.value);
+        confirmed.set(key, mode);
+        put(key, { status: "ready", mode, error: null });
+      } catch (error) {
+        if (revisions.get(key) !== revision) return states.get(key);
+        if (approvalUnsupported(error)) put(key, { status: "unsupported", mode: null, error: null });
+        else put(key, { status: confirmed.has(key) ? "ready" : "error", mode: confirmed.get(key) ?? null, error: String(error?.message || error) });
+      }
+      return states.get(key);
+    },
+    async write(key, request2, profile, mode) {
+      const next = normalizeApprovalMode(mode);
+      const revision = bump(key);
+      put(key, { status: "ready", mode: next, error: null });
+      try {
+        const result = await request2("config.set", approvalParams(profile, { value: next }));
+        if (result && typeof result === "object" && result.error) throw result.error;
+        const authoritative = normalizeApprovalMode(result?.value ?? next);
+        if (revisions.get(key) === revision) {
+          confirmed.set(key, authoritative);
+          put(key, { status: "ready", mode: authoritative });
+        }
+        return authoritative;
+      } catch (error) {
+        if (revisions.get(key) === revision) put(key, { status: "ready", mode: confirmed.get(key) ?? null });
+        throw error;
+      }
+    },
+    clear() {
+      states.clear();
+      revisions.clear();
+      confirmed.clear();
+    }
+  };
+}
+
 // src/core/modelSheet.js
 var EFFORT_KEY = "agent.reasoning_effort";
 var SPEED_KEY = "agent.service_tier";
@@ -48454,6 +48616,9 @@ var roster2 = {
   models: createStore({}),
   /** The model sheet's Effort and Speed: roster key -> the profile's values. */
   modelSettings: createStore({}),
+  /** The panel's Approval mode: roster key -> { status, mode, error }
+   *  (core/approvalMode.js; 'unsupported' hides the control). */
+  approvals: createStore({}),
   /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
    *  the first unread bot message (null: none; absent: not decided), and the
    *  per-bot seen watermark (ms; plugin storage `seenAt`). */
@@ -48810,6 +48975,20 @@ async function loadBotModelSettings(bot, { force = false, foreground = false } =
     setBotModelSettings(bot, { ...settingsFromConfig(res), error: null });
   } catch (error) {
     roster2.modelSettings.set((all) => ({ ...all, [key]: { effort: "", speed: "", ...all[key], loading: false, loaded: false, error: String(error?.message || error) } }));
+  }
+}
+var approvalModes = createApprovalModes({
+  onChange: (key) => roster2.approvals.set((all) => ({ ...all, [key]: approvalModes.get(key) }))
+});
+var approvalRequest = (bot) => (method, params) => request(bot, method, params, method === "config.set" ? FOREGROUND : {});
+function loadBotApprovalMode(bot) {
+  return approvalModes.read(rowKey(bot), approvalRequest(bot), bot.name);
+}
+async function setBotApprovalMode(bot, mode) {
+  try {
+    await approvalModes.write(rowKey(bot), approvalRequest(bot), bot.name, mode);
+  } catch (error) {
+    notifyError(error, `Could not set ${displayName(bot, metaFor(bot))}’s approval mode to ${APPROVAL_LABELS[mode] || mode}`);
   }
 }
 async function saveBotModelSheet(bot, before, next) {
@@ -50391,6 +50570,7 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
   list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; margin-left: 4px; border-radius: var(--radius-full);
   font-size: 12px; line-height: 16px; letter-spacing: 0.12px; font-weight: 400; color: var(--color-text-tertiary); cursor: pointer; user-select: none;
 }
+.gbo-tools > summary { max-width: calc(100% - 4px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-think > summary:hover, .gbo-tools > summary:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
 .gbo-think > summary svg, .gbo-tools > summary svg { order: 1; width: 10px; height: 10px; opacity: 0.66; transform: rotate(90deg); transition: transform 160ms var(--ease-out); }
 .gbo-think[open] > summary svg, .gbo-tools[open] > summary svg { transform: rotate(-90deg); }
@@ -50691,6 +50871,10 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
 .gbo-model-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-text-secondary); }
 .gbo-model-name { min-width: 0; font-size: 13px; line-height: 18px; letter-spacing: 0.195px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-model-value > svg { width: 12px; height: 12px; flex: none; opacity: 0.66; }
+.gbo-approvals-row { height: 36px; padding: 6px 4px 6px 8px; gap: 12px; }
+.gbo-approvals-row > .panel-row__title { flex: none; }
+.gbo-approvals-row > .gbo-select { width: auto; min-width: 0; max-width: 60%; height: 26px; padding-top: 2px; padding-bottom: 2px; font-size: 13px; }
+.gbo-approvals-hint { padding: 0 8px 8px; font-size: 12px; line-height: 16px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-meter-bar { background: var(--color-bg-tertiary); }
 .gbo-meter-bar > span { background: var(--gbo-action, var(--color-primary)); }
 .gbo-drawer { background: var(--color-bg-chrome); }
@@ -57990,7 +58174,7 @@ function sameNode(a2, b2) {
     return x === y || (typeof x !== "object" || x === null) && (typeof y !== "object" || y === null) && Object.is(x, y) || key === "children" && sameNode(x, y);
   });
 }
-function BotProseView({ bot, text: text3, pos, time, streaming = false }) {
+function BotProseView({ bot, text: text3, pos, time: time2, streaming = false }) {
   const { text: clean, media } = React12.useMemo(() => extractMedia(text3), [text3]);
   const files = media.filter((item) => item.kind === "file");
   const bubble = Boolean(clean) || media.length > files.length;
@@ -57999,7 +58183,7 @@ function BotProseView({ bot, text: text3, pos, time, streaming = false }) {
   return /* @__PURE__ */ jsxs13(Fragment8, { children: [
     bubble ? /* @__PURE__ */ jsxs13("div", { className: "bubble-wrap is-left", children: [
       /* @__PURE__ */ jsx14("div", { className: `bubble is-agent${pos}${streaming ? " is-streaming" : ""}`, children: /* @__PURE__ */ jsx14("div", { className: "md", ref: prose, onClickCapture: onSourceClickCapture, onAuxClickCapture: onSourceClickCapture, children: /* @__PURE__ */ jsx14(BotText, { bot, text: text3 }) }) }),
-      time
+      time2
     ] }) : null,
     /* @__PURE__ */ jsx14(FileCards, { bot, files })
   ] });
@@ -61895,6 +62079,45 @@ function ModelCard({ bot }) {
     ] })
   ] }) }) });
 }
+var APPROVAL_OPTIONS = APPROVAL_MODES.map((m) => [m, APPROVAL_LABELS[m]]);
+function ApprovalCard({ bot }) {
+  const key = rowKey(bot);
+  const state = useStore(roster2.approvals)[key];
+  React23.useEffect(() => {
+    void loadBotApprovalMode(bot);
+    const win = typeof window === "undefined" ? null : window;
+    const doc = typeof document === "undefined" ? null : document;
+    const again = () => {
+      if (doc?.visibilityState === "hidden") return;
+      void loadBotApprovalMode(bot);
+    };
+    win?.addEventListener?.("focus", again);
+    doc?.addEventListener?.("visibilitychange", again);
+    return () => {
+      win?.removeEventListener?.("focus", again);
+      doc?.removeEventListener?.("visibilitychange", again);
+    };
+  }, [key]);
+  if (!state || state.status === "unsupported") return null;
+  const mode = state.mode || "";
+  const hint = state.status === "error" && !mode ? `Could not read it (${state.error})` : mode ? APPROVAL_DESCRIPTIONS[mode] : "Loading…";
+  return /* @__PURE__ */ jsx25("section", { className: "gbo-panel-section gbo-approvals-section", children: /* @__PURE__ */ jsxs23("div", { className: "panel-card gbo-panel-box", children: [
+    /* @__PURE__ */ jsxs23("div", { className: "panel-row panel-row--setting gbo-approvals-row", children: [
+      /* @__PURE__ */ jsx25("span", { className: "panel-row__title", children: APPROVAL_TITLE }),
+      /* @__PURE__ */ jsx25(
+        Select,
+        {
+          label: APPROVAL_TITLE,
+          value: mode,
+          disabled: !mode,
+          options: mode ? APPROVAL_OPTIONS : [["", "…"], ...APPROVAL_OPTIONS],
+          onChange: (value) => void setBotApprovalMode(bot, value)
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsx25("div", { className: "gbo-approvals-hint", children: hint })
+  ] }) });
+}
 function ComputerThumb({ card }) {
   if (card.thumb === "shot")
     return /* @__PURE__ */ jsx25("span", { className: "computer-thumb has-shot gbo-computer-thumb", "data-thumb": "shot", children: /* @__PURE__ */ jsx25("img", { src: card.src, alt: "", draggable: false }) });
@@ -62031,6 +62254,7 @@ function ProfilePanel({ bot, onClose }) {
         ] }) }) : null
       ] }),
       /* @__PURE__ */ jsx25(ModelCard, { bot }),
+      /* @__PURE__ */ jsx25(ApprovalCard, { bot }),
       /* @__PURE__ */ jsxs23("section", { className: "gbo-panel-section", children: [
         /* @__PURE__ */ jsx25("div", { className: "section-label gbo-panel-label", children: /* @__PURE__ */ jsx25("span", { children: "Profile" }) }),
         /* @__PURE__ */ jsxs23("div", { className: "panel-card gbo-panel-box", children: [
@@ -62467,8 +62691,7 @@ function ToolGroup({ item, bot }) {
     done > 0 ? /* @__PURE__ */ jsxs25("details", { className: "gbo-tools", children: [
       /* @__PURE__ */ jsxs25("summary", { children: [
         /* @__PURE__ */ jsx27(IconChevron, {}),
-        done === 1 ? "1 tool" : `${done} tools`,
-        secs >= 1 ? ` · ${Math.round(secs)}s` : ""
+        foldLabel({ done, workedMs: item.workedMs, toolSecs: secs })
       ] }),
       /* @__PURE__ */ jsx27("ul", { children: item.tools.filter((tool) => tool.status !== "running").map((tool) => /* @__PURE__ */ jsx27(ToolRow, { tool, bot }, tool.id)) })
     ] }) : null,
@@ -62490,7 +62713,7 @@ function Thinking({ text: text3 }) {
     /* @__PURE__ */ jsx28("div", { className: "gbo-think-body", children: text3 })
   ] });
 }
-function ApprovalCard({ item, onAnswer }) {
+function ApprovalCard2({ item, onAnswer }) {
   const pending = item.status === "pending";
   const answering = item.status === "answering";
   const stateText = item.status === "answered" ? `${CHOICE_LABELS[item.answer] || item.answer}` : item.status === "resolved" ? "Answered in another window" : item.status === "expired" ? "No longer waiting, nothing was approved" : item.status === "cancelled" ? "No longer waiting" : answering ? "Sending…" : "";
@@ -62584,7 +62807,7 @@ function AssistantBody({ item, bot, pos }) {
   const text3 = safe ? safe.text : item.text;
   const { segments: found, scope } = useDirectiveSegments(text3);
   const segments = React26.useMemo(() => found && scope ? found : [{ kind: "prose", text: text3 }], [found, scope, text3]);
-  const time = React26.useMemo(() => item.at ? /* @__PURE__ */ jsx28("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
+  const time2 = React26.useMemo(() => item.at ? /* @__PURE__ */ jsx28("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
   const poll = Boolean(scope?.recent.has(item.id));
   const body = React26.useMemo(() => {
     const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
@@ -62597,13 +62820,13 @@ function AssistantBody({ item, bot, pos }) {
           bot,
           text: segment.text,
           pos,
-          time: index === lastProse ? time : null,
+          time: index === lastProse ? time2 : null,
           streaming: streaming && index === lastProse
         },
         `p${prose++}`
       ) : /* @__PURE__ */ jsx28(DirectiveBlock, { segment, poll, scope }, `d${directives++}`)
     );
-  }, [segments, bot, pos, time, streaming, poll, scope]);
+  }, [segments, bot, pos, time2, streaming, poll, scope]);
   const placeholder = React26.useMemo(() => safe?.pending && scope ? /* @__PURE__ */ jsx28(DirectivePlaceholder, { pending: safe.pending }) : null, [safe, scope]);
   return /* @__PURE__ */ jsxs26(Fragment15, { children: [
     body,
@@ -62672,7 +62895,7 @@ function Item({
     case "tools":
       return /* @__PURE__ */ jsx28(ToolGroup, { item, bot });
     case "approval":
-      return /* @__PURE__ */ jsx28(ApprovalCard, { item, onAnswer });
+      return /* @__PURE__ */ jsx28(ApprovalCard2, { item, onAnswer });
     case "email-draft":
       return /* @__PURE__ */ jsx28(EmailDraftCard, { item, bot, controller: controller2 });
     case "clarify":
@@ -62752,7 +62975,7 @@ function Transcript({ state, bot, meta, onPrefill }) {
   };
   const decorated = React26.useMemo(
     () => groupMessages(
-      withNewMarker(withDividers(withTurnCards(visibleItems(withEmailDrafts(items), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
+      withNewMarker(withDividers(withTurnCards(visibleItems(withWorkTimes(withEmailDrafts(items), { busy: Boolean(state.chat.busy) }), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
     ),
     [items, showWork, newLine.id, state.chat.busy, state.turnRetry]
   );

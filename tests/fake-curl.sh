@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fake curl for the offline installer tests: answers the GitHub API per
 # FAKE_API (ok, garbage, old, anything else = down) and serves raw files from
-# FAKE_ROOT, logging the ref of each raw file to FAKE_LOG.
+# FAKE_ROOT, logging the ref of each raw file to FAKE_LOG. FAKE_API_WAIT holds
+# the API answer back (an updater paused mid-run).
 out="" url=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -13,6 +14,12 @@ while [ $# -gt 0 ]; do
 done
 case "${url}" in
   *api.github.com*|*releases/latest*)
+    # FAKE_API_WAIT=<file>: say so (<file>.waiting), then hang until <file> exists.
+    if [ -n "${FAKE_API_WAIT:-}" ]; then
+      : > "${FAKE_API_WAIT}.waiting"
+      n=0
+      while [ ! -e "${FAKE_API_WAIT}" ] && [ "${n}" -lt 600 ]; do sleep 0.05; n=$((n + 1)); done
+    fi
     case "${FAKE_API:-down}" in
       ok) printf '{\n  "url": "x",\n  "tag_name": "v2099.01.02",\n  "name": "x"\n}\n' ;;
       garbage) printf '{"tag_name": "main; rm -rf /"}\n' ;;

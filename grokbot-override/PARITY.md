@@ -173,18 +173,19 @@ link first (see Known limits). Clicks go through `ctx.os.openExternal`. `src/cor
 | P5 | Kit Computer viewer pane | kit `computer-viewer` | Implemented | Status and an **Open** button (`host.revealPane('computer-viewer:pane')`) when the plugin is loaded. |
 | P6 | Profile config: skills, toolsets, MCP, SOUL, model | `profile-config.tsx`, `soul.ts`, `skills-hub.tsx`, `mcp-setup.tsx` | Implemented | **Skills, tools and model** (panel, row menu, palette) and inside **Edit profile**: `profiles.describe` + `mcp.catalog` on the bot's route (foreground), skill / toolset / MCP checklists, SOUL (the messaging section kept or appended unless the backend injects it), and only dirty sections written with `profiles.configure` (all-or-none toolsets clear the pin; an emptied model is unset with `cli.exec config unset model`). Skills hub search (shared hub) and install on the bot's route. A catalog MCP server that needs keys or a sign-in gets **Set up** (`mcp.servers.add` preset, `mcp.servers.set_api_key` per key, `mcp.servers.test`) or **Sign in** (`host.completeMcpOAuth`), on the bot's own route. Key values are read from the visible fields once on submit and the fields are cleared before the first request; values not yet sent are held only by the panel, which wipes them when it closes or a new attempt starts. Closing the panel stops the setup: no further key write and no server test starts after it (a request already sent cannot be recalled). Nothing is kept after a failure, a retry starts from empty fields, and shown errors are scrubbed of the submitted values. A sign-in still running when the panel closes is cancelled (stock's `oauthEpoch`). Tests `test/review-v2-r1-mcp.test.mjs`, `test/review-v2-r2-mcp.test.mjs` (loader). The SDK's `ToolsetConfigPanel` is embedded per toolset when the desktop exports it. Stock's newer builds embed the whole core Capabilities view instead of checklists; the override keeps the checklists (stock's own older-build UI). |
 | P7 | Bot description / title | `profiles.list` | Implemented | Read-only. |
+| P8 | Approval mode (Manual / Smart / Off) | statusbar `app/shell/approval-mode-menu.tsx`, `store/approval-mode.ts`; gateway `tui_gateway/methods_config.py:274,288`, `methods_config_set.py:426,589` | Implemented | Stock shows it in the bottom status bar, which the override hides; the panel's **Approval mode** row (under **Model**) is the same control for the bot on screen: stock's labels and the selected mode's one-line description, read with `config.get {key:'approvals.mode', profile}` when the panel opens and when the window regains focus, written with `config.set {key:'approvals.mode', value, profile}` (no session, no scope, as stock; the gateway writes that profile's `config.yaml`). Both ride the bot's own route (`requestForBot`: a remote bot's own connection, `profile` rewritten to its backend name), never another profile or the launch profile; the write dials foreground. A refused write goes back to the last read value with the usual error toast; an older answer never overwrites a newer one (stock's revisions). Hidden when the bot's gateway has no `approvals.mode` key or no `config.get` (an unknown config key, a method not served). Test `test/approval-mode.test.mjs`. |
 
 ## Counts
 
 | Status | Count |
 |---|---|
-| Implemented | 51 |
+| Implemented | 52 |
 | Partial | 5 |
 | Fallback | 0 |
 | Later | 0 |
 | Blocked | 0 |
 
-(R1-R18, C1-C31, P1-P7 = 56 rows, each counted once by its status, after merging the chat-side parity
+(R1-R18, C1-C31, P1-P8 = 57 rows, each counted once by its status, after merging the chat-side parity
 (`feature/override-parity-chat`: C3, C6, C7, C11, C13, C15, C19, C20, C22, C23, C26, C28, C29, R14, R16, R17)
 and the roster-side parity (`feature/override-parity-roster`: R6, R9, R11, R12, R13, R15, P3, P4, P6, C21,
 C25) into `feature/grokbot-override-v2` and wiring them together. The five **Partial** rows (R11, R12, R13,

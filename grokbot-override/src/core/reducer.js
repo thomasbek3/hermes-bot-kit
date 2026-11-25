@@ -18,6 +18,7 @@ import { approvalFromPayload, upsertApproval, cancelApprovals, settleApprovals }
 import { applyConnectionUpdate, inputRequestFrom, keepCardProgress } from './prompts.js'
 import { completeDetail, startDetail } from './tools.js'
 import { isSilenceReply } from './silence.js'
+import { END_KINDS, startsTurn } from './workTime.js'
 
 export function emptyLive() {
   return { turnId: '', cursor: undefined, bubbleId: null, toolsId: null, reasoning: '', streamed: false, sealed: '' }
@@ -115,6 +116,21 @@ function dropSilentBubble(state) {
     ? replaceItem(state.items, bubble.id, { text: '', streaming: false })
     : state.items.filter(item => item.id !== bubble.id)
   return { ...state, items, live: { ...state.live, bubbleId: null } }
+}
+
+/** When the turn finished (core/workTime.js "Worked for …"): on this turn's
+ *  latest reply (or error) row, looking back only as far as the turn's start
+ *  (workTime.js startsTurn: a user message or a background-work notice). A
+ *  turn with no reply row of its own (a silent one) stamps nothing. */
+function stampCompleted(state, now) {
+  for (let i = state.items.length - 1; i >= 0; i -= 1) {
+    const item = state.items[i]
+    if (startsTurn(item)) break
+    if (END_KINDS.has(item.kind)) {
+      return { ...state, items: state.items.map((it, j) => (j === i ? { ...it, completedAt: now } : it)) }
+    }
+  }
+  return state
 }
 
 export function finishTurn(state) {
@@ -293,7 +309,7 @@ export function applyEvent(state, event, now = Date.now()) {
         const message = String(payload.error || payload.failure_reason || 'The reply failed.')
         next = { ...next, items: [...next.items, { kind: 'error', id: liveId('e'), text: message, at: now }] }
       }
-      return finishTurn(next)
+      return finishTurn(stampCompleted(next, now))
     }
 
     case 'error': {

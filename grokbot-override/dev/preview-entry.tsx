@@ -273,7 +273,7 @@ export { CARDS_DEMO_FILES, CARDS_DEMO_ITEMS, CARD_ITEMS, CARD_MULTI_WAITING, CAR
 export * as appApi from '../src/ui/app'
 export * as fakeSdk from '@hermes/plugin-sdk'
 export { Composer, ComposerNote } from '../src/ui/Composer'
-export { ProfilePanel } from '../src/ui/Profile'
+export { ApprovalCard, ProfilePanel } from '../src/ui/Profile'
 export { AssistantBody, STICK_PX, STREAM_RENDER_MS, UserMeta, useStreamText } from '../src/ui/Chat'
 export { DirectiveBlock, DirectiveContext } from '../src/ui/Directives'
 export { markdownRenders } from '@hermes/plugin-sdk'

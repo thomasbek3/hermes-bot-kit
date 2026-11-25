@@ -99,13 +99,13 @@ kit() {
 job() { kit "$@" bash "${STATE}/update.sh" --auto-update run; }
 # hold_lock: a background process holds the updater's flock until killed.
 hold_lock() {
-  mkdir -p "${STATE}"
   rm -f "${M}/held"
+  # The lock sits beside the state folder (uninstall moves that folder).
   perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; open(my $r, ">", $ARGV[1]) or die; close $r; sleep 300' \
-    "${STATE}/update.flock" "${M}/held" &
+    "${HH}/.hermes-bot-kit-update.flock" "${M}/held" &
   SLEEPER=$!
   until [ -e "${M}/held" ]; do sleep 0.05; done
-  printf '%s\n' "${SLEEPER}" > "${STATE}/update.flock.pid"
+  printf '%s\n' "${SLEEPER}" > "${HH}/.hermes-bot-kit-update.flock.pid"
 }
 drop_lock() {
   kill -9 "${SLEEPER}" 2>/dev/null || true
@@ -679,6 +679,165 @@ grep -q '^second' "${ULOG}.1" || fail "second rotation did not replace .1"
 if grep -q '^old line' "${ULOG}.1"; then fail "more than one old log kept"; fi
 [ ! -e "${ULOG}.2" ] || fail "a .2 log was kept"
 ok "log: one line per run, rotated at 1 MB, one old file kept"
+
+# --- install.sh --uninstall ------------------------------------------------------
+# tree_sum <dir>: every path and file checksum under it (what must not change).
+tree_sum() { (cd "$1" && find . -print | LC_ALL=C sort && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 cksum); }
+uninstall_machine() {
+  # A machine with the kit installed at the current release, auto-update on,
+  # and agent plugins plus config.yaml in two profiles.
+  new_machine
+  mkdir -p "${HH}/plugins/texting-style" "${HH}/profiles/a/plugins/remote-cua" "${HH}/profiles/a/plugins/platforms/slack"
+  printf 'name: texting-style\n' > "${HH}/plugins/texting-style/plugin.yaml"
+  printf 'x = 1\n' > "${HH}/profiles/a/plugins/remote-cua/__init__.py"
+  printf '# adapter\n' > "${HH}/profiles/a/plugins/platforms/slack/http_adapter.py"
+  printf 'plugins:\n  enabled: [texting-style]\n' > "${HH}/config.yaml"
+  printf 'plugins:\n  enabled: [remote-cua]\ncomputer_use:\n  backend: remote-cua\n' > "${HH}/profiles/a/config.yaml"
+  API=down kit bash "${DL}/install.sh" >/dev/null || fail "uninstall setup: install failed"
+  [ "$(cat "${STATE}/installed-release")" = "${CUR_TAG}" ] || fail "uninstall setup: not on ${CUR_TAG}"
+  kit bash "${DL}/install.sh" --auto-update on >/dev/null || fail "uninstall setup: on failed"
+  [ -f "${PLIST}" ] && [ -e "${LOGS}/launchctl.loaded" ] || fail "uninstall setup: no job"
+  tree_sum "${HH}/plugins" > "${M}/agent.before"
+  tree_sum "${HH}/profiles" > "${M}/profiles.before"
+  cksum "${HH}/config.yaml" "${HH}/profiles/a/config.yaml" > "${M}/config.before"
+}
+
+# 1. auto-update on: the job goes first, the plugins and records move out,
+# agent plugins and config.yaml stay byte for byte, and the next run (a newer
+# release is out) installs nothing.
+uninstall_machine
+out=$(kit bash "${DL}/install.sh" --uninstall) || fail "uninstall failed: ${out}"
+[ ! -e "${PLIST}" ] && [ ! -e "${LOGS}/launchctl.loaded" ] || fail "uninstall left the daily job"
+grep -qx "bootout gui/${UIDN}/io.github.thomasbek3.hermes-bot-kit.update" "${LOGS}/launchctl" || fail "uninstall: no bootout"
+[ ! -e "${HH}/desktop-plugins/computer-viewer" ] && [ ! -e "${HH}/desktop-plugins/grokbot-override" ] || fail "uninstall left a desktop plugin"
+ls -d "${HH}"/desktop-plugins-removed-*-computer-viewer "${HH}"/desktop-plugins-removed-*-grokbot-override >/dev/null 2>&1 || fail "uninstall did not keep the moved plugins"
+[ ! -e "${HH}/desktop-plugins/.hermes-bot-kit-install" ] || fail "uninstall left the install record"
+[ ! -e "${STATE}" ] || fail "uninstall left ${STATE} (installed-release, update.sh, auto-update.env)"
+removed=$(ls -d "${HH}"/hermes-bot-kit-removed-*)
+[ -f "${removed}/installed-release" ] && [ -f "${removed}/UNINSTALLED" ] || fail "uninstall: records not kept in ${removed}"
+[ ! -e "${removed}/update.sh" ] && [ ! -e "${removed}/auto-update.env" ] || fail "uninstall: the updater or its settings survived"
+printf '%s\n' "${out}" | grep -qx 'Reload desktop plugins (Cmd+K) or restart Hermes Desktop' || fail "uninstall: no reload line: ${out}"
+printf '%s\n' "${out}" | grep -q '^  texting-style (plugins/texting-style in ' || fail "uninstall: texting-style not listed: ${out}"
+printf '%s\n' "${out}" | grep -q '^  remote-cua (plugins/remote-cua in .*/profiles/a)' || fail "uninstall: remote-cua not listed: ${out}"
+printf '%s\n' "${out}" | grep -q '^  slack-http (the Slack platform shadow) (plugins/platforms/slack in ' || fail "uninstall: slack-http not listed: ${out}"
+printf '%s\n' "${out}" | grep -q 'remote-cua/README.md#uninstall' || fail "uninstall: no removal pointer: ${out}"
+tree_sum "${HH}/plugins" | cmp -s - "${M}/agent.before" || fail "uninstall touched an agent plugin"
+tree_sum "${HH}/profiles" | cmp -s - "${M}/profiles.before" || fail "uninstall touched a profile"
+cksum "${HH}/config.yaml" "${HH}/profiles/a/config.yaml" | cmp -s - "${M}/config.before" || fail "uninstall touched a config.yaml"
+: > "${LOGS}/curl"
+kit bash "${DL}/install.sh" --auto-update run >/dev/null || fail "run after uninstall failed"
+[ ! -e "${HH}/desktop-plugins/grokbot-override" ] && [ ! -e "${HH}/desktop-plugins/computer-viewer" ] || fail "a run after uninstall installed the plugins again"
+[ ! -e "${STATE}/installed-release" ] || fail "a run after uninstall wrote installed-release"
+grep -q "${NEW_TAG}" "${LOGS}/curl" && fail "a run after uninstall downloaded ${NEW_TAG}"
+tail -n 1 "${ULOG}" | grep -q 'skipped: auto-update is off' || fail "run after uninstall: $(tail -n 1 "${ULOG}")"
+ok "uninstall: job removed first, plugins and records moved out, agent plugins/config.yaml untouched; the next run installs nothing"
+
+# 2. Running it again is a no-op that says so.
+tree_sum "${HH}" > "${M}/all.before"
+out=$(kit bash "${DL}/install.sh" --uninstall) || fail "second uninstall exited non-zero: ${out}"
+printf '%s\n' "${out}" | grep -q '^Uninstall        -- nothing is installed in ' || fail "second uninstall: ${out}"
+tree_sum "${HH}" | cmp -s - "${M}/all.before" || fail "second uninstall changed something"
+ok "uninstall: a second run says nothing is installed, exits 0, changes nothing"
+
+# 3. Auto-update can't be turned off: stop, nothing moved.
+uninstall_machine
+tree_sum "${HH}/desktop-plugins" > "${M}/dp.before"
+if out=$(kit FAKE_BOOTOUT=fail bash "${DL}/install.sh" --uninstall 2>&1); then
+  fail "uninstall succeeded although auto-update could not be turned off"
+fi
+printf '%s\n' "${out}" | grep -q 'auto-update could not be turned off (see above), so nothing else was changed' || fail "uninstall (off fails): ${out}"
+tree_sum "${HH}/desktop-plugins" | cmp -s - "${M}/dp.before" || fail "uninstall moved plugins although auto-update stayed on"
+[ -f "${STATE}/installed-release" ] && [ -f "${STATE}/auto-update.env" ] || fail "uninstall removed records although auto-update stayed on"
+if ls -d "${HH}"/desktop-plugins-removed-* "${HH}"/hermes-bot-kit-removed-* >/dev/null 2>&1; then fail "uninstall (off fails) moved something"; fi
+out=$(kit bash "${DL}/install.sh" --uninstall) || fail "uninstall retry failed: ${out}"
+[ ! -e "${HH}/desktop-plugins/grokbot-override" ] && [ ! -e "${PLIST}" ] || fail "uninstall retry left state"
+ok "uninstall: when auto-update can't be turned off it stops (exit 1) and moves nothing; a retry finishes"
+
+# 4. Linux (systemd): the timer goes too.
+new_machine
+API=down OS=linux kit bash "${DL}/install.sh" >/dev/null
+OS=linux kit bash "${DL}/install.sh" --auto-update on >/dev/null
+[ -f "${UNITS}/hermes-bot-kit-update.timer" ] || fail "linux uninstall setup: no timer"
+OS=linux kit bash "${DL}/install.sh" --uninstall >/dev/null || fail "linux uninstall failed"
+[ ! -e "${UNITS}/hermes-bot-kit-update.timer" ] && [ ! -e "${LOGS}/systemctl.enabled" ] || fail "linux uninstall left the timer"
+[ ! -e "${HH}/desktop-plugins/grokbot-override" ] && [ ! -e "${STATE}" ] || fail "linux uninstall left state"
+ok "uninstall (systemd): timer disabled and removed, then plugins and records moved out"
+
+# 5. (review P1) An update that read its settings before an uninstall, then
+# resumes, installs nothing: run and uninstall share a lock outside the folder
+# uninstall moves, and run re-checks auto-update after taking it.
+uninstall_machine
+mkdir -p "${M}/gate"
+job KIT_TEST_RUN_GATE="${M}/gate/go" > "${M}/job.out" 2>&1 &
+jobpid=$!
+for _ in $(seq 1 200); do [ -e "${M}/gate/go.waiting" ] && break; sleep 0.05; done
+[ -e "${M}/gate/go.waiting" ] || fail "uninstall race: the update never reached its gate"
+kit bash "${DL}/install.sh" --uninstall >/dev/null || fail "uninstall race: uninstall failed while an update was paused"
+touch "${M}/gate/go"
+wait "${jobpid}" || fail "uninstall race: the paused update exited non-zero: $(cat "${M}/job.out")"
+[ ! -e "${HH}/desktop-plugins/grokbot-override" ] && [ ! -e "${HH}/desktop-plugins/computer-viewer" ] || fail "uninstall race: the paused update reinstalled the plugins"
+[ ! -e "${STATE}" ] || fail "uninstall race: the paused update recreated ${STATE}"
+tail -n 1 "${ULOG}" | grep -q 'skipped: auto-update was turned off' || fail "uninstall race log: $(tail -n 1 "${ULOG}")"
+# While an update holds the lock, uninstall changes nothing (exit 1).
+uninstall_machine
+hold_lock
+tree_sum "${HH}" > "${M}/all.before"
+if kit bash "${DL}/install.sh" --uninstall >/dev/null 2>&1; then drop_lock; fail "uninstall ran while an update held the lock"; fi
+drop_lock
+tree_sum "${HH}" | grep -v 'hermes-bot-kit-update.flock' > "${M}/all.after" || true
+grep -v 'hermes-bot-kit-update.flock' "${M}/all.before" | cmp -s - "${M}/all.after" || fail "uninstall changed something while an update held the lock"
+[ -f "${PLIST}" ] && [ -f "${STATE}/auto-update.env" ] || fail "uninstall turned auto-update off while an update held the lock"
+ok "uninstall vs a running update: one lock outside the moved folder; a resumed update re-checks and installs nothing"
+
+# 6. (review P2) A record move that fails part-way is finished by a rerun,
+# which writes the UNINSTALLED marker.
+uninstall_machine
+mkdir -p "${M}/failmv"
+cat > "${M}/failmv/mv" <<'EOF'
+#!/bin/sh
+for a in "$@"; do case "$a" in *desktop-plugins/MANIFEST.sha256) [ -n "${FAKE_MV_FAIL:-}" ] && exit 1 ;; esac; done
+exec /bin/mv "$@"
+EOF
+chmod +x "${M}/failmv/mv"
+if XPATH="${M}/failmv" kit FAKE_MV_FAIL=1 bash "${DL}/install.sh" --uninstall >/dev/null 2>&1; then fail "partial uninstall: a failed record move exited 0"; fi
+[ -f "${HH}/desktop-plugins/MANIFEST.sha256" ] || fail "partial uninstall: test setup, the manifest moved"
+out=$(kit bash "${DL}/install.sh" --uninstall) || fail "partial uninstall: the rerun failed: ${out}"
+printf '%s\n' "${out}" | grep -q 'nothing is installed' && fail "partial uninstall: the rerun said nothing is installed: ${out}"
+[ ! -e "${HH}/desktop-plugins/MANIFEST.sha256" ] || fail "partial uninstall: the rerun left the manifest"
+ls "${HH}"/hermes-bot-kit-removed-*/UNINSTALLED >/dev/null 2>&1 || fail "partial uninstall: no UNINSTALLED marker after the rerun"
+ok "uninstall: a record move that failed part-way is finished by a rerun, which writes the marker"
+
+# 7. (review round 2, P1) An OLDER updater (the released v2026.11.22 install.sh,
+# kept as a fixture so shallow CI checkouts work, run as update.sh) holds the legacy lock
+# <state>/update.flock while it waits on the GitHub API. Uninstall must see it:
+# exit 1, nothing changed. Once it is done, uninstall goes ahead. A new-style
+# run waits for the legacy lock too.
+OLD_UPDATER="${WORK}/old-update.sh"
+cp "${ROOT}/tests/fixtures/legacy-install-v2026.11.22.sh" "${OLD_UPDATER}" || fail "legacy lock: fixture tests/fixtures/legacy-install-v2026.11.22.sh missing"
+uninstall_machine
+cp "${OLD_UPDATER}" "${STATE}/update.sh"
+chmod 0700 "${STATE}/update.sh"
+mkdir -p "${M}/apigate"
+job FAKE_API_WAIT="${M}/apigate/go" > "${M}/oldjob.out" 2>&1 &
+oldpid=$!
+for _ in $(seq 1 200); do [ -e "${M}/apigate/go.waiting" ] && break; sleep 0.05; done
+[ -e "${M}/apigate/go.waiting" ] || { kill "${oldpid}" 2>/dev/null; fail "legacy lock: the old updater never reached the API"; }
+[ -f "${STATE}/update.flock" ] || { touch "${M}/apigate/go"; fail "legacy lock: test setup, the old updater has no legacy lock file"; }
+tree_sum "${HH}" | grep -v 'hermes-bot-kit-update.flock' > "${M}/all.before"
+if out=$(kit bash "${DL}/install.sh" --uninstall 2>&1); then
+  touch "${M}/apigate/go"; wait "${oldpid}" || true
+  fail "legacy lock: uninstall ran while an older updater held its lock: ${out}"
+fi
+printf '%s\n' "${out}" | grep -q 'an update is running right now' || { touch "${M}/apigate/go"; fail "legacy lock: wrong message: ${out}"; }
+tree_sum "${HH}" | grep -v 'hermes-bot-kit-update.flock' | cmp -s - "${M}/all.before" || { touch "${M}/apigate/go"; fail "legacy lock: uninstall changed something"; }
+# A new-style run while the old one holds the legacy lock: skipped.
+kit bash "${DL}/install.sh" --auto-update run >/dev/null || { touch "${M}/apigate/go"; fail "legacy lock: a new run failed"; }
+tail -n 1 "${ULOG}" | grep -q 'skipped: another update is running' || { touch "${M}/apigate/go"; fail "legacy lock: a new run did not wait for the old one: $(tail -n 1 "${ULOG}")"; }
+touch "${M}/apigate/go"
+wait "${oldpid}" || fail "legacy lock: the old updater failed: $(cat "${M}/oldjob.out")"
+out=$(kit bash "${DL}/install.sh" --uninstall) || fail "legacy lock: uninstall after the old updater finished failed: ${out}"
+[ ! -e "${HH}/desktop-plugins/grokbot-override" ] && [ ! -e "${STATE}" ] || fail "legacy lock: uninstall left state"
+ok "uninstall vs an older updater: its legacy lock is honoured (exit 1, nothing changed); new runs wait for it too"
 
 for r in ${REGRESSIONS}; do "${r}"; done
 

@@ -5,6 +5,7 @@
 import { attentionFromEvent, clearAttention, noteAttention } from '../core/attention.js'
 import { botMetaKey, effectiveMeta, overlayEntry, pruneOverlay, readServerBotMeta, saveBotMetaPatch } from '../core/botMeta.js'
 import { cronAddParams, cronEditUpdates, cronJobRestPath, cronRemoveParams, CRON_TRIGGER_REQUEST_TIMEOUT_MS, isStoredJobFor } from '../core/cronOps.js'
+import { APPROVAL_LABELS, createApprovalModes } from '../core/approvalMode.js'
 import { settingsFromConfig, sheetSavePlan, stepSucceeded } from '../core/modelSheet.js'
 import { applyAdvancedConfig, emptyAdvancedState, loadAdvanced } from '../core/profileConfig.js'
 import {
@@ -492,6 +493,39 @@ export async function loadBotModelSettings(bot: any, { force = false, foreground
 /** Seed a bot's Effort and Speed (the preview and tests). */
 export function primeBotModelSettings(bot: any, value: { effort: string; speed: string }) {
   setBotModelSettings(bot, { ...value, error: null })
+}
+
+// ── the panel's Approval mode (core/approvalMode.js) ─────────────────────
+
+const approvalModes = createApprovalModes({
+  onChange: key => roster2.approvals.set(all => ({ ...all, [key]: approvalModes.get(key) as any }))
+})
+
+/** The bot's own route, as `request(method, params)`: config.get / config.set
+ *  scoped to the bot's profile (the requester rewrites `profile` to the
+ *  route's backend name), never the active gateway's own profile. */
+const approvalRequest = (bot: any) => (method: string, params: Record<string, unknown>) =>
+  request(bot, method, params, method === 'config.set' ? FOREGROUND : {})
+
+/** Read the bot's approvals.mode (on open, and when the window regains focus). */
+export function loadBotApprovalMode(bot: any) {
+  return approvalModes.read(rowKey(bot), approvalRequest(bot), bot.name)
+}
+
+/** Write the bot's approvals.mode; a failure goes back to the last read
+ *  value and shows the usual error toast. */
+export async function setBotApprovalMode(bot: any, mode: string) {
+  try {
+    await approvalModes.write(rowKey(bot), approvalRequest(bot), bot.name, mode)
+  } catch (error: any) {
+    notifyError(error, `Could not set ${displayName(bot, metaFor(bot))}’s approval mode to ${(APPROVAL_LABELS as any)[mode] || mode}`)
+  }
+}
+
+/** Forget every read (tests). */
+export function resetApprovalModes() {
+  approvalModes.clear()
+  roster2.approvals.set({})
 }
 
 export interface ModelSheetValue {

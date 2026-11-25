@@ -25,11 +25,17 @@
 #   KIT_CARDS_SKILL=1      also install the agent-cards skill (off by default)
 #   KIT_CARDS_SKILL=remove remove the agent-cards skill this kit installed, then stop
 #   KIT_CARDS_PROFILES     comma-separated profiles for the skill (default: all)
+#   KIT_HERMES_SOURCE      Hermes Agent source the end-of-install check reads
+#                          (default <home>/hermes-agent; read as text only)
+#   KIT_PYTHON             python3 for that check ("none" skips it)
 #
 # Daily auto-update (macOS and Linux):  bash install.sh --auto-update on|off|status|run
 #   `on` remembers HERMES_HOME, KIT_SKIP_GROKBOT, KIT_SKIP_COMPUTER,
 #   KIT_TEXTING_STYLE=1 (also refresh texting-style copies) and
 #   KIT_POST_UPDATE_HOOK=/abs/path (your own script, run after each update).
+#
+# Uninstall:  bash install.sh --uninstall   (auto-update off first, then the
+#   desktop plugins and the kit's records moved aside; nothing is deleted)
 set -euo pipefail
 
 # The tag this script was released with (scripts/release.sh rewrites it).
@@ -60,6 +66,8 @@ or from a clone:  bash install.sh
 Not working?  bash install.sh --doctor   (read-only checks; changes nothing)
 Keep it updated:  bash install.sh --auto-update on   (daily, newest release;
                   also off, status, run; macOS and Linux)
+Uninstall:        bash install.sh --uninstall   (auto-update off, then the desktop
+                  plugins and records moved aside; agent plugins are listed, not touched)
 
 Installs the newest GitHub release (falls back to v2026.11.22 when the
 GitHub API cannot be reached) and checks every file against that release's
@@ -147,6 +155,20 @@ if [ "${1:-}" = "--doctor" ]; then
     echo "install.sh: sha256 mismatch for scripts/doctor.sh (${doc_ref}); not running it" >&2
     exit 1
   fi
+  # The Hermes source check beside it (releases from v2026.11.23 on): each file
+  # only when the manifest lists it and it matches; otherwise the doctor says
+  # that check was skipped.
+  for doc_f in check-hermes-compat.py hermes-surfaces.json; do
+    doc_want=$(awk -v p="scripts/${doc_f}" '$2 == p { print $1; exit }' "${doc_tmp}/MANIFEST.sha256")
+    [ -n "${doc_want}" ] || continue
+    if curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 2 --max-filesize 1048576 \
+      "${doc_base}/scripts/${doc_f}" -o "${doc_tmp}/${doc_f}" 2>/dev/null &&
+      [ "$(sha256_of "${doc_tmp}/${doc_f}")" = "${doc_want}" ]; then
+      :
+    else
+      rm -f "${doc_tmp}/${doc_f}"
+    fi
+  done
   doc_rc=0
   bash "${doc_tmp}/doctor.sh" "$@" || doc_rc=$?
   exit "${doc_rc}"
@@ -391,7 +413,7 @@ au_hook_run() {
     echo "post-update hook not run: it changed while it was being checked${problem:+ (it ${problem})}"
     return 0
   fi
-  ( export KIT_REF="${tag}" HERMES_HOME="${HERMES_ROOT}" KIT_POST_UPDATE_HOOK="${AU_HOOK}"; exec "${hdir}/hook" </dev/null 9>&- ) >> "${AU_OUT}" 2>&1 || rc=$?
+  ( export KIT_REF="${tag}" HERMES_HOME="${HERMES_ROOT}" KIT_POST_UPDATE_HOOK="${AU_HOOK}"; exec "${hdir}/hook" </dev/null 8>&- 9>&- ) >> "${AU_OUT}" 2>&1 || rc=$?
   rm -rf "${hdir}"
   echo "post-update hook exited ${rc}"
 }
@@ -458,18 +480,19 @@ au_last_line() {
   return 0
 }
 
-# Single instance: an exclusive flock(2) on <home>/hermes-bot-kit/update.flock,
-# held on file descriptor 9 for the whole run. The kernel drops it when the
+# Single instance: an exclusive flock(2) on <home>/.hermes-bot-kit-update.flock,
+# held on file descriptor 9 for the whole run. It sits beside, not inside,
+# <home>/hermes-bot-kit/: --uninstall moves that folder and takes the same
+# lock, so a run and an uninstall never overlap. The kernel drops it when the
 # run exits, however it exits, so there is no stale lock to detect, take over
 # or race on. flock(1) takes it on Linux; elsewhere (macOS has no flock(1))
 # perl locks the same open file (flock locks belong to the open file, which
 # this shell keeps, so the lock outlives the perl process). Children never
-# inherit descriptor 9. update.flock.pid only names the holder for the log.
+# inherit descriptor 9. The .pid file beside it only names the holder for the log.
 au_lock() {
   local rc
-  AU_LOCK_FILE="${KIT_STATE_DIR}/update.flock"
+  AU_LOCK_FILE="${HERMES_ROOT}/.hermes-bot-kit-update.flock"
   AU_LOCK_PID="unknown"
-  mkdir -p "${KIT_STATE_DIR}"
   if [ -L "${AU_LOCK_FILE}" ] || ! : >> "${AU_LOCK_FILE}" 2>/dev/null; then
     AU_LOCK_ERR="cannot open ${AU_LOCK_FILE}"
     return 2
@@ -500,7 +523,45 @@ au_lock() {
   return 0
 }
 au_unlock() {
-  exec 9>&- 2>/dev/null || true
+  # Plain `exec 9>&-`: an `exec` with a `2>/dev/null` on it would send all
+  # later stderr of this shell to /dev/null. Closing a descriptor never fails.
+  exec 8>&- 9>&-
+}
+
+# The legacy lock: updaters from before the lock moved (v2026.11.22 and
+# earlier) take an exclusive flock(2) on <home>/hermes-bot-kit/update.flock
+# (flock(1), else perl), the same mechanism as au_lock. While that file
+# exists, uninstall and new-style runs take it too (non-blocking, on file
+# descriptor 8, released by au_unlock), so an older updater still installed as
+# update.sh and this script never overlap. 0 = held or no legacy file,
+# 1 = an older updater holds it (AU_LOCK_PID names it), 2 = could not lock.
+au_legacy_lock() {
+  local f="${KIT_STATE_DIR}/update.flock" rc
+  [ -e "${f}" ] || [ -L "${f}" ] || return 0
+  if [ -L "${f}" ] || ! : >> "${f}" 2>/dev/null; then
+    AU_LOCK_ERR="cannot open ${f}"
+    return 2
+  fi
+  exec 8>>"${f}"
+  rc=0
+  if command -v flock >/dev/null 2>&1; then
+    flock -n 8 || rc=$?
+  elif command -v perl >/dev/null 2>&1; then
+    perl -MFcntl=:flock -e 'open(my $fh, ">&=", 8) or exit 2; flock($fh, LOCK_EX | LOCK_NB) or exit 1; exit 0' || rc=$?
+  else
+    rc=2
+  fi
+  if [ "${rc}" -ne 0 ]; then
+    exec 8>&-
+    if [ "${rc}" = 1 ]; then
+      AU_LOCK_PID=$(head -n 1 "${f}.pid" 2>/dev/null || true)
+      case "${AU_LOCK_PID}" in ''|*[!0-9]*) AU_LOCK_PID="unknown" ;; esac
+      return 1
+    fi
+    AU_LOCK_ERR="could not lock ${f}"
+    return 2
+  fi
+  return 0
 }
 
 AU_CURL=(curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 --retry-delay 2 --max-filesize 1048576)
@@ -606,6 +667,13 @@ au_run() {
     return 0
   fi
   au_load || { au_log "FAILED: bad settings in ${AU_ENV}"; return 1; }
+  # Test seam (KIT_TEST_RUN_GATE=<file>): wait here, settings read and lock
+  # not yet taken, until <file> exists; the uninstall race test uses it.
+  if [ -n "${KIT_TEST_RUN_GATE:-}" ]; then
+    : > "${KIT_TEST_RUN_GATE}.waiting"
+    local waited=0
+    while [ ! -e "${KIT_TEST_RUN_GATE}" ] && [ "${waited}" -lt 600 ]; do sleep 0.05; waited=$((waited + 1)); done
+  fi
   rc=0
   au_lock || rc=$?
   if [ "${rc}" = 1 ]; then
@@ -615,6 +683,26 @@ au_run() {
     au_log "FAILED: ${AU_LOCK_ERR:-could not take the update lock}; nothing done"
     return 1
   fi
+  # Under the lock: auto-update may have been turned off (or the kit
+  # uninstalled) since the settings were read. Read them again.
+  if [ ! -f "${AU_ENV}" ]; then
+    au_unlock
+    au_log "skipped: auto-update was turned off (or the kit uninstalled) while this run started; nothing installed"
+    return 0
+  fi
+  # An older updater still installed as update.sh may hold the legacy lock.
+  rc=0
+  au_legacy_lock || rc=$?
+  if [ "${rc}" = 1 ]; then
+    au_unlock
+    au_log "skipped: another update is running (an older updater, pid ${AU_LOCK_PID:-unknown})"
+    return 0
+  elif [ "${rc}" != 0 ]; then
+    au_unlock
+    au_log "FAILED: ${AU_LOCK_ERR:-could not take the legacy update lock}; nothing done"
+    return 1
+  fi
+  au_load || { au_unlock; au_log "FAILED: bad settings in ${AU_ENV}"; return 1; }
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064 # expand now: these paths are fixed for the run
   trap "rm -rf '${tmp}'; au_unlock" EXIT
@@ -651,7 +739,7 @@ au_run() {
   (
     unset KIT_SKIP_VERIFY KIT_SOURCE_DIR KIT_CARDS_SKILL KIT_CARDS_PROFILES KIT_REMOVE_RETIRED
     export HERMES_HOME="${HERMES_ROOT}" KIT_REF="${tag}" KIT_SKIP_GROKBOT="${AU_SKIP_GROKBOT}" KIT_SKIP_COMPUTER="${AU_SKIP_COMPUTER}"
-    exec "${BASH:-bash}" "${tmp}/install.sh" </dev/null 9>&-
+    exec "${BASH:-bash}" "${tmp}/install.sh" </dev/null 8>&- 9>&-
   ) > "${AU_OUT}" 2>&1 || rc=$?
   if [ "${rc}" -ne 0 ]; then
     au_log "FAILED: installing ${tag} exited ${rc} (still on ${installed:-nothing}; its output: ${AU_OUT})"
@@ -1028,6 +1116,194 @@ if [ "${1:-}" = "--auto-update" ]; then
       exit 2
       ;;
   esac
+fi
+
+# --- Uninstall: install.sh --uninstall -------------------------------------------
+# Order matters: the daily job is turned off FIRST (the --auto-update off code
+# path), because a job left behind reinstalls the plugins at its next run. If
+# that fails nothing else is changed. Then the kit's desktop plugin folders
+# move out of desktop-plugins/ to <home>/desktop-plugins-removed-<ts>-<name>,
+# and the kit's records (desktop-plugins/.hermes-bot-kit-install and
+# MANIFEST.sha256, and the <home>/hermes-bot-kit/ folder with installed-release)
+# move to <home>/hermes-bot-kit-removed-<ts>/. Nothing is deleted. Agent
+# plugins (per profile, maybe enabled in config.yaml) and config.yaml are never
+# touched: they are listed with how to remove each. Never restarts anything.
+KIT_DESKTOP_PLUGINS="computer-viewer grokbot-override"
+KIT_DOCS="https://github.com/${KIT_REPO}/blob/${KIT_FALLBACK_REF}"
+
+# Something of this home's auto-update is still there (settings, the updater
+# copy, or a job file that runs this home's updater).
+un_au_present() {
+  [ -f "${AU_ENV}" ] && return 0
+  [ -f "${AU_SCRIPT}" ] && return 0
+  if [ -f "${AU_PLIST}" ] && grep -qF "<string>${AU_SCRIPT}</string>" "${AU_PLIST}"; then return 0; fi
+  if [ -f "${AU_UNIT_DIR}/${AU_UNIT}.service" ] && grep -qF "\"${AU_SCRIPT}\"" "${AU_UNIT_DIR}/${AU_UNIT}.service"; then return 0; fi
+  return 1
+}
+
+# The kit's agent plugins found in this Hermes home and its profiles, each with
+# the removal steps its README documents. Only reads.
+un_agent_report() {
+  local dir name how home where any=0
+  while IFS='|' read -r dir name how; do
+    [ -n "${dir}" ] || continue
+    where=""
+    for home in "${HERMES_ROOT}" "${HERMES_ROOT}"/profiles/*; do
+      [ -d "${home}" ] || continue
+      case "${dir}" in
+        platforms/slack) [ -f "${home}/plugins/platforms/slack/http_adapter.py" ] || continue ;;
+        *) [ -e "${home}/plugins/${dir}" ] || [ -L "${home}/plugins/${dir}" ] || continue ;;
+      esac
+      where="${where:+${where}, }${home}"
+    done
+    [ -n "${where}" ] || continue
+    if [ "${any}" = 0 ]; then
+      echo
+      echo "Agent plugins from the kit are still installed. They live per profile and may be enabled in"
+      echo "config.yaml, so --uninstall leaves them (and every config.yaml) alone. To remove one:"
+      any=1
+    fi
+    echo "  ${name} (plugins/${dir} in ${where})"
+    echo "    ${how}"
+  done <<EOF
+texting-style|texting-style|move plugins/texting-style out of that Hermes home and take texting-style out of plugins.enabled in its config.yaml (${KIT_DOCS}/texting-style/README.md)
+email-drafts|email-drafts|move plugins/email-drafts out of that Hermes home and take email-drafts out of plugins.enabled in its config.yaml (${KIT_DOCS}/email-drafts/README.md)
+remote-cua|remote-cua|move plugins/remote-cua out, take remote-cua out of plugins.enabled and remove the computer_use.backend / remote_cua lines in its config.yaml (${KIT_DOCS}/remote-cua/README.md#uninstall)
+slack-check|slack-check|move plugins/slack-check out and take slack-check out of plugins.enabled in its config.yaml (${KIT_DOCS}/slack-check/README.md)
+slack-connect|slack-connect|from a clone: bash slack-connect/install.sh --uninstall --dry-run, then without --dry-run (${KIT_DOCS}/slack-connect/README.md#uninstall)
+platforms/slack|slack-http (the Slack platform shadow)|move plugins/platforms/slack out of that Hermes home (${KIT_DOCS}/slack-http/README.md)
+EOF
+  for home in "${HERMES_ROOT}" "${HERMES_ROOT}"/profiles/*; do
+    [ -f "${home}/skills/agent-cards/SKILL.md" ] && grep -qF "${CARDS_MARKER}" "${home}/skills/agent-cards/SKILL.md" || continue
+    echo
+    echo "The kit's agent-cards skill is still installed: run the installer again with KIT_CARDS_SKILL=remove in front of bash."
+    break
+  done
+  return 0
+}
+
+kit_uninstall() {
+  local p installed=0 rc
+  au_norm_home
+  if [ ! -d "${HERMES_ROOT}" ]; then
+    echo "Uninstall        -- nothing is installed: there is no Hermes home at ${HERMES_ROOT}. Nothing changed."
+    return 0
+  fi
+  un_au_present && installed=1
+  for p in ${KIT_DESKTOP_PLUGINS}; do
+    if [ -e "${PLUGIN_ROOT}/${p}" ] || [ -L "${PLUGIN_ROOT}/${p}" ]; then installed=1; fi
+  done
+  # Any kit record left (also what an earlier --uninstall that stopped
+  # part-way did not move yet): this run finishes the job.
+  [ -f "${PLUGIN_ROOT}/.hermes-bot-kit-install" ] && installed=1
+  [ -f "${PLUGIN_ROOT}/MANIFEST.sha256" ] && installed=1
+  [ -d "${KIT_STATE_DIR}" ] && installed=1
+  if [ "${installed}" = 0 ]; then
+    echo "Uninstall        -- nothing is installed in ${HERMES_ROOT} (no kit desktop plugins, install records or auto-update). Nothing changed."
+    un_agent_report
+    return 0
+  fi
+  # 1. The update lock (beside hermes-bot-kit/, the same one a run takes),
+  # held to the end: never while an update runs, and an update that started
+  # before this re-checks auto-update under the lock and installs nothing.
+  rc=0
+  au_lock || rc=$?
+  if [ "${rc}" = 1 ]; then
+    echo "install.sh: --uninstall stopped: an update is running right now (pid ${AU_LOCK_PID:-unknown}). Nothing was changed. Run --uninstall again in a minute." >&2
+    return 1
+  elif [ "${rc}" != 0 ]; then
+    echo "install.sh: --uninstall stopped: ${AU_LOCK_ERR:-could not take the update lock}. Nothing was changed." >&2
+    return 1
+  fi
+  # An older updater (v2026.11.22 and before) locks inside hermes-bot-kit/:
+  # held too, until that folder has been moved.
+  rc=0
+  au_legacy_lock || rc=$?
+  if [ "${rc}" = 1 ]; then
+    au_unlock
+    echo "install.sh: --uninstall stopped: an update is running right now (an older updater, pid ${AU_LOCK_PID:-unknown}). Nothing was changed. Run --uninstall again in a minute." >&2
+    return 1
+  elif [ "${rc}" != 0 ]; then
+    au_unlock
+    echo "install.sh: --uninstall stopped: ${AU_LOCK_ERR:-could not take the legacy update lock}. Nothing was changed." >&2
+    return 1
+  fi
+  rc=0
+  un_locked || rc=$?
+  au_unlock
+  return "${rc}"
+}
+
+un_locked() {
+  local ts p dest n moved="" removed
+  # 2. The daily job first: left behind, it would install the plugins again.
+  if un_au_present; then
+    if ! au_off; then
+      echo "install.sh: --uninstall stopped: auto-update could not be turned off (see above), so nothing else was changed. Fix that, then run --uninstall again." >&2
+      return 1
+    fi
+  fi
+
+  # 3. The desktop plugins, moved out (nothing deleted).
+  ts=$(date +%Y%m%d%H%M%S)
+  for p in ${KIT_DESKTOP_PLUGINS}; do
+    [ -e "${PLUGIN_ROOT}/${p}" ] || [ -L "${PLUGIN_ROOT}/${p}" ] || continue
+    dest="${HERMES_ROOT}/desktop-plugins-removed-${ts}-${p}"
+    n=1
+    while [ -e "${dest}" ] || [ -L "${dest}" ]; do
+      n=$((n + 1))
+      dest="${HERMES_ROOT}/desktop-plugins-removed-${ts}-${p}.${n}"
+    done
+    if ! mv -- "${PLUGIN_ROOT}/${p}" "${dest}" 2>/dev/null; then
+      echo "install.sh: --uninstall stopped: could not move ${PLUGIN_ROOT}/${p} out (permissions?)${moved:+; already moved:${moved}}. Auto-update is off. Fix that, then run --uninstall again." >&2
+      return 1
+    fi
+    moved="${moved} ${p}"
+    echo "Uninstall        -- moved ${p} to ${dest}"
+  done
+
+  # 4. The kit's records, moved to one hermes-bot-kit-removed-<ts> folder.
+  # Its UNINSTALLED marker is written before the last moves, so a stop
+  # part-way still reads as an uninstall; a rerun moves what is left.
+  removed="${HERMES_ROOT}/hermes-bot-kit-removed-${ts}"
+  n=1
+  while [ -e "${removed}" ] || [ -L "${removed}" ]; do
+    n=$((n + 1))
+    removed="${HERMES_ROOT}/hermes-bot-kit-removed-${ts}.${n}"
+  done
+  if [ -d "${KIT_STATE_DIR}" ]; then
+    if ! mv -- "${KIT_STATE_DIR}" "${removed}" 2>/dev/null; then
+      echo "install.sh: --uninstall stopped: could not move ${KIT_STATE_DIR} out. Auto-update is off${moved:+ and the plugins are moved out}. Fix that, then run --uninstall again." >&2
+      return 1
+    fi
+  elif ! mkdir -p "${removed}" 2>/dev/null; then
+    echo "install.sh: --uninstall stopped: could not create ${removed}. Fix that, then run --uninstall again." >&2
+    return 1
+  fi
+  rm -f "${removed}/update.flock" "${removed}/update.flock.pid"
+  printf 'removed=%s\nplugins=%s\n' "${ts}" "${moved# }" > "${removed}/UNINSTALLED"
+  for p in .hermes-bot-kit-install MANIFEST.sha256; do
+    [ -f "${PLUGIN_ROOT}/${p}" ] || continue
+    if ! mv -- "${PLUGIN_ROOT}/${p}" "${removed}/${p#.}" 2>/dev/null; then
+      echo "install.sh: --uninstall stopped part-way: could not move ${PLUGIN_ROOT}/${p} out. Fix that, then run --uninstall again to finish." >&2
+      return 1
+    fi
+  done
+  echo "Uninstall        -- install records (installed-release, the install record, the manifest) moved to ${removed}"
+  un_agent_report
+  echo
+  echo "Done: the kit's desktop plugins are uninstalled and auto-update is off (nothing was deleted; nothing was restarted)."
+  echo "Reload desktop plugins (Cmd+K) or restart Hermes Desktop"
+  return 0
+}
+
+if [ "${1:-}" = "--uninstall" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "Usage: install.sh --uninstall" >&2
+    exit 2
+  fi
+  kit_uninstall
+  exit $?
 fi
 
 case "${KIT_CARDS_SKILL:-0}" in
@@ -1608,8 +1884,86 @@ else
   fi
 fi
 
+# The person's own Hermes source against what the kit uses
+# (scripts/check-hermes-compat.py with scripts/hermes-surfaces.json, the same
+# check as the doctor's). One line; never fatal, never fetches Hermes.
+hermes_source_report() {
+  local src="${KIT_HERMES_SOURCE:-${HERMES_ROOT}/hermes-agent}" dir="" f out rc=0 line version="" counts="" incomplete="" n=0 items=""
+  [ -d "${src}/apps/desktop" ] || [ -d "${src}/tui_gateway" ] || {
+    echo "Hermes check     -- skipped (no Hermes Agent source at ${src})"
+    return 0
+  }
+  if [ -n "${SOURCE_DIR}" ]; then
+    dir="${SOURCE_DIR}/scripts"
+  elif [ -s "${MANIFEST}" ]; then
+    dir="${TMP_DIR}/hermes-check"
+    mkdir -p "${dir}"
+    for f in check-hermes-compat.py hermes-surfaces.json; do
+      if ! manifest_has "scripts/${f}"; then
+        echo "Hermes check     -- skipped (release ${KIT_REF} has no Hermes source check)"
+        return 0
+      fi
+      if ! "${CURL_MANIFEST[@]}" "${RAW_BASE}/scripts/${f}" -o "${dir}/${f}" 2>/dev/null ||
+        { [ "${KIT_SKIP_VERIFY:-0}" != 1 ] && [ "$(file_sha256 "${dir}/${f}")" != "$(manifest_hash "scripts/${f}")" ]; }; then
+        echo "Hermes check     -- skipped (could not download scripts/${f} for ${KIT_REF}, or it does not match the manifest)"
+        return 0
+      fi
+    done
+  else
+    echo "Hermes check     -- skipped (nothing was installed)"
+    return 0
+  fi
+  [ -f "${dir}/check-hermes-compat.py" ] && [ -f "${dir}/hermes-surfaces.json" ] || {
+    echo "Hermes check     -- skipped (no scripts/check-hermes-compat.py and scripts/hermes-surfaces.json in ${SOURCE_DIR})"
+    return 0
+  }
+  case "${KIT_PYTHON:-}" in
+    none) echo "Hermes check     -- skipped (no python3; KIT_PYTHON=none)"; return 0 ;;
+    '') find_python
+      [ -n "${PYTHON}" ] || { echo "Hermes check     -- skipped (no working python3 here)"; return 0; } ;;
+    *) PYTHON="${KIT_PYTHON}" ;;
+  esac
+  rc=0
+  PYTHONDONTWRITEBYTECODE=1 limited "${PYTHON}" -I -B -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 3)' </dev/null >/dev/null 2>&1 || rc=$?
+  if [ "${rc}" != 0 ]; then
+    echo "Hermes check     -- skipped (${PYTHON} does not run or is older than Python 3.8)"
+    return 0
+  fi
+  rc=0
+  out=$(KIT_PYTHON_TIMEOUT=60 PYTHONDONTWRITEBYTECODE=1 limited "${PYTHON}" -I -B "${dir}/check-hermes-compat.py" --doctor --surfaces "${dir}/hermes-surfaces.json" "${src}" </dev/null 2>&1) || rc=$?
+  if [ "${rc}" != 0 ]; then
+    echo "Hermes check     -- skipped (the check stopped, exit ${rc})"
+    return 0
+  fi
+  while IFS= read -r line; do
+    case "${line}" in
+      'VERSION '*) version="${line#VERSION }" ;;
+      'OK '*) counts="${line#OK }" ;;
+      'INCOMPLETE '*) incomplete="${line#INCOMPLETE }" ;;
+      'MISSING '*)
+        line="${line#MISSING }"
+        n=$((n + 1))
+        items="${items}                    - ${line%%$'\t'*} (affects: ${line#*$'\t'})"$'\n'
+        ;;
+    esac
+  done <<< "${out}"
+  if [ -n "${incomplete}" ]; then
+    echo "Hermes check     -- skipped (the Hermes source at ${src} has no ${incomplete})"
+  elif [ "${n}" -gt 0 ]; then
+    echo "Hermes check     -- WARN: Hermes ${version:-version unknown} at ${src} lacks ${n} surface(s) the kit uses:"
+    printf '%s' "${items}"
+    echo "                    The kit may misbehave on this Hermes; check docs/COMPATIBILITY.md / update the kit."
+  elif [ -n "${counts}" ]; then
+    echo "Hermes check     -> OK: Hermes source ${version:-version unknown} has every surface the kit uses"
+  else
+    echo "Hermes check     -- skipped (no answer from the check)"
+  fi
+  return 0
+}
+
 retired_report
 retired_agent_report
+hermes_source_report || true
 
 echo
 echo "Finish: in Hermes Desktop press Cmd+K (Ctrl+K on Linux) -> 'Reload desktop plugins', or quit and reopen the app."

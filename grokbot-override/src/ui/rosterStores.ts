@@ -59,6 +59,9 @@ export const roster2 = {
   models: createStore<Record<string, BotModel>>({}),
   /** The model sheet's Effort and Speed: roster key -> the profile's values. */
   modelSettings: createStore<Record<string, BotModelSettings>>({}),
+  /** The panel's Approval mode: roster key -> { status, mode, error }
+   *  (core/approvalMode.js; 'unsupported' hides the control). */
+  approvals: createStore<Record<string, { status: string; mode: string | null; error: string | null }>>({}),
   /** The open chats' NEW line (core/newMarker.js): roster key -> the id of
    *  the first unread bot message (null: none; absent: not decided), and the
    *  per-bot seen watermark (ms; plugin storage `seenAt`). */

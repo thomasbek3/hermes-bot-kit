@@ -155,22 +155,48 @@ Offer these; install only what the person wants.
 
 <!-- runbook:uninstall -->
 ```bash
-( set -e; D="${HERMES_HOME:-$HOME/.hermes}/desktop-plugins"; for p in computer-viewer grokbot-override; do if [ -e "$D/$p" ]; then mv "$D/$p" "$D/../desktop-plugins-removed-$(date +%Y%m%d%H%M%S)-$p"; fi; done; rm -f "$D/.hermes-bot-kit-install"; echo "moved out of $D" )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" --uninstall )
 ```
 
-This moves the two plugin folders out of `desktop-plugins/` (nothing is
-deleted), then the person reloads plugins. Remove the agent-cards skill with
-`KIT_CARDS_SKILL=remove` (step 5). Plugin settings live in Hermes plugin storage
-under `hermes.plugin.computer-viewer.*` and `hermes.plugin.grokbot-override.*`.
+`--uninstall` first turns the daily auto-update off (a job left behind would
+install the plugins again at its next run); if that fails it stops, exits
+non-zero and changes nothing else. Then it moves the `computer-viewer` and
+`grokbot-override` folders out of `desktop-plugins/` to
+`desktop-plugins-removed-<timestamp>-<name>` next to it, and the kit's records
+(`desktop-plugins/.hermes-bot-kit-install`, the installed `MANIFEST.sha256` and
+the `hermes-bot-kit/` folder with `installed-release`) to
+`hermes-bot-kit-removed-<timestamp>/`. Nothing is deleted and nothing is
+restarted; the person then reloads plugins (step 4). If an update is running
+at that moment (including an older updater from v2026.11.22 or before), it
+stops with "an update is running right now", changes nothing, and can simply
+be run again a minute later. (One tiny window remains with such an older
+updater: one that had already read its settings, but not yet taken its lock,
+when the uninstall finished can still install once. Auto-update is turned off
+first, so no new run starts; run `--uninstall` again if the plugins
+reappear.) Running it again says
+nothing is installed and exits 0, and `--doctor` afterwards reports the kit as
+not installed. Agent plugins (texting-style, email-drafts, remote-cua, the
+slack-* plugins) live per profile and may be enabled in `config.yaml`, so it
+leaves them and every `config.yaml` alone: it lists where it found each one
+and how to remove it. Remove the agent-cards skill with `KIT_CARDS_SKILL=remove`
+(step 5). Plugin settings live in Hermes plugin storage under
+`hermes.plugin.computer-viewer.*` and `hermes.plugin.grokbot-override.*`.
+
+Without the download (fallback, same steps by hand, auto-update off first):
+
+<!-- runbook:uninstall-manual -->
+```bash
+( set -e; H="${HERMES_HOME:-$HOME/.hermes}"; S="$H/hermes-bot-kit"; D="$H/desktop-plugins"; T=$(date +%Y%m%d%H%M%S); if [ -f "$S/update.sh" ]; then bash "$S/update.sh" --auto-update off; fi; for p in computer-viewer grokbot-override; do if [ -e "$D/$p" ]; then mv "$D/$p" "$H/desktop-plugins-removed-$T-$p"; fi; done; rm -f "$D/.hermes-bot-kit-install"; if [ -d "$S" ]; then mv "$S" "$H/hermes-bot-kit-removed-$T"; fi; mkdir -p "$H/hermes-bot-kit-removed-$T"; echo "removed=$T" > "$H/hermes-bot-kit-removed-$T/UNINSTALLED"; echo "moved out of $D" )
+```
 
 ## Troubleshooting
 
 **If it isn't working, run the doctor first:** the install command from step 2
 with `--doctor` after `bash "$f"`, or `bash install.sh --doctor` from a clone.
-It only reads, prints `OK` / `FIX` / `INFO` per check with the exact fix for
+It only reads, prints `OK` / `FIX` / `WARN` / `INFO` per check with the exact fix for
 each `FIX`, exits 1 when anything needs fixing (2 when it can't see the
 Hermes home Desktop uses, e.g. from WSL), and ends with a
-`--- doctor summary ---` block (no paths, names or tokens: versions, plugin names, a home category and OK/FIX/INFO per check) to hand back to
+`--- doctor summary ---` block (no paths, names or tokens: versions, plugin names, a home category and OK/FIX/WARN/INFO per check) to hand back to
 the person or paste into an issue.
 
 | Symptom | Cause and fix |
