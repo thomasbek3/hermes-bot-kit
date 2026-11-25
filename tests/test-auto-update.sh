@@ -807,13 +807,13 @@ printf '%s\n' "${out}" | grep -q 'nothing is installed' && fail "partial uninsta
 ls "${HH}"/hermes-bot-kit-removed-*/UNINSTALLED >/dev/null 2>&1 || fail "partial uninstall: no UNINSTALLED marker after the rerun"
 ok "uninstall: a record move that failed part-way is finished by a rerun, which writes the marker"
 
-# 7. (review round 2, P1) An OLDER updater (this branch before the lock moved:
-# 9cbd3c7's install.sh as update.sh) holds the legacy lock
+# 7. (review round 2, P1) An OLDER updater (the released v2026.11.22 install.sh,
+# kept as a fixture so shallow CI checkouts work, run as update.sh) holds the legacy lock
 # <state>/update.flock while it waits on the GitHub API. Uninstall must see it:
 # exit 1, nothing changed. Once it is done, uninstall goes ahead. A new-style
 # run waits for the legacy lock too.
 OLD_UPDATER="${WORK}/old-update.sh"
-git -C "${ROOT}" show 9cbd3c7:install.sh > "${OLD_UPDATER}" 2>/dev/null || fail "legacy lock: cannot read 9cbd3c7:install.sh"
+cp "${ROOT}/tests/fixtures/legacy-install-v2026.11.22.sh" "${OLD_UPDATER}" || fail "legacy lock: fixture tests/fixtures/legacy-install-v2026.11.22.sh missing"
 uninstall_machine
 cp "${OLD_UPDATER}" "${STATE}/update.sh"
 chmod 0700 "${STATE}/update.sh"
