@@ -807,6 +807,38 @@ printf '%s\n' "${out}" | grep -q 'nothing is installed' && fail "partial uninsta
 ls "${HH}"/hermes-bot-kit-removed-*/UNINSTALLED >/dev/null 2>&1 || fail "partial uninstall: no UNINSTALLED marker after the rerun"
 ok "uninstall: a record move that failed part-way is finished by a rerun, which writes the marker"
 
+# 7. (review round 2, P1) An OLDER updater (this branch before the lock moved:
+# 9cbd3c7's install.sh as update.sh) holds the legacy lock
+# <state>/update.flock while it waits on the GitHub API. Uninstall must see it:
+# exit 1, nothing changed. Once it is done, uninstall goes ahead. A new-style
+# run waits for the legacy lock too.
+OLD_UPDATER="${WORK}/old-update.sh"
+git -C "${ROOT}" show 9cbd3c7:install.sh > "${OLD_UPDATER}" 2>/dev/null || fail "legacy lock: cannot read 9cbd3c7:install.sh"
+uninstall_machine
+cp "${OLD_UPDATER}" "${STATE}/update.sh"
+chmod 0700 "${STATE}/update.sh"
+mkdir -p "${M}/apigate"
+job FAKE_API_WAIT="${M}/apigate/go" > "${M}/oldjob.out" 2>&1 &
+oldpid=$!
+for _ in $(seq 1 200); do [ -e "${M}/apigate/go.waiting" ] && break; sleep 0.05; done
+[ -e "${M}/apigate/go.waiting" ] || { kill "${oldpid}" 2>/dev/null; fail "legacy lock: the old updater never reached the API"; }
+[ -f "${STATE}/update.flock" ] || { touch "${M}/apigate/go"; fail "legacy lock: test setup, the old updater has no legacy lock file"; }
+tree_sum "${HH}" | grep -v 'hermes-bot-kit-update.flock' > "${M}/all.before"
+if out=$(kit bash "${DL}/install.sh" --uninstall 2>&1); then
+  touch "${M}/apigate/go"; wait "${oldpid}" || true
+  fail "legacy lock: uninstall ran while an older updater held its lock: ${out}"
+fi
+printf '%s\n' "${out}" | grep -q 'an update is running right now' || { touch "${M}/apigate/go"; fail "legacy lock: wrong message: ${out}"; }
+tree_sum "${HH}" | grep -v 'hermes-bot-kit-update.flock' | cmp -s - "${M}/all.before" || { touch "${M}/apigate/go"; fail "legacy lock: uninstall changed something"; }
+# A new-style run while the old one holds the legacy lock: skipped.
+kit bash "${DL}/install.sh" --auto-update run >/dev/null || { touch "${M}/apigate/go"; fail "legacy lock: a new run failed"; }
+tail -n 1 "${ULOG}" | grep -q 'skipped: another update is running' || { touch "${M}/apigate/go"; fail "legacy lock: a new run did not wait for the old one: $(tail -n 1 "${ULOG}")"; }
+touch "${M}/apigate/go"
+wait "${oldpid}" || fail "legacy lock: the old updater failed: $(cat "${M}/oldjob.out")"
+out=$(kit bash "${DL}/install.sh" --uninstall) || fail "legacy lock: uninstall after the old updater finished failed: ${out}"
+[ ! -e "${HH}/desktop-plugins/grokbot-override" ] && [ ! -e "${STATE}" ] || fail "legacy lock: uninstall left state"
+ok "uninstall vs an older updater: its legacy lock is honoured (exit 1, nothing changed); new runs wait for it too"
+
 for r in ${REGRESSIONS}; do "${r}"; done
 
 echo "test-auto-update.sh: all passed"

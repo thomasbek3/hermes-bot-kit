@@ -166,7 +166,14 @@ non-zero and changes nothing else. Then it moves the `computer-viewer` and
 (`desktop-plugins/.hermes-bot-kit-install`, the installed `MANIFEST.sha256` and
 the `hermes-bot-kit/` folder with `installed-release`) to
 `hermes-bot-kit-removed-<timestamp>/`. Nothing is deleted and nothing is
-restarted; the person then reloads plugins (step 4). Running it again says
+restarted; the person then reloads plugins (step 4). If an update is running
+at that moment (including an older updater from v2026.11.22 or before), it
+stops with "an update is running right now", changes nothing, and can simply
+be run again a minute later. (One tiny window remains with such an older
+updater: one that had already read its settings, but not yet taken its lock,
+when the uninstall finished can still install once. Auto-update is turned off
+first, so no new run starts; run `--uninstall` again if the plugins
+reappear.) Running it again says
 nothing is installed and exits 0, and `--doctor` afterwards reports the kit as
 not installed. Agent plugins (texting-style, email-drafts, remote-cua, the
 slack-* plugins) live per profile and may be enabled in `config.yaml`, so it

@@ -413,7 +413,7 @@ au_hook_run() {
     echo "post-update hook not run: it changed while it was being checked${problem:+ (it ${problem})}"
     return 0
   fi
-  ( export KIT_REF="${tag}" HERMES_HOME="${HERMES_ROOT}" KIT_POST_UPDATE_HOOK="${AU_HOOK}"; exec "${hdir}/hook" </dev/null 9>&- ) >> "${AU_OUT}" 2>&1 || rc=$?
+  ( export KIT_REF="${tag}" HERMES_HOME="${HERMES_ROOT}" KIT_POST_UPDATE_HOOK="${AU_HOOK}"; exec "${hdir}/hook" </dev/null 8>&- 9>&- ) >> "${AU_OUT}" 2>&1 || rc=$?
   rm -rf "${hdir}"
   echo "post-update hook exited ${rc}"
 }
@@ -523,7 +523,45 @@ au_lock() {
   return 0
 }
 au_unlock() {
-  exec 9>&- 2>/dev/null || true
+  # Plain `exec 9>&-`: an `exec` with a `2>/dev/null` on it would send all
+  # later stderr of this shell to /dev/null. Closing a descriptor never fails.
+  exec 8>&- 9>&-
+}
+
+# The legacy lock: updaters from before the lock moved (v2026.11.22 and
+# earlier) take an exclusive flock(2) on <home>/hermes-bot-kit/update.flock
+# (flock(1), else perl), the same mechanism as au_lock. While that file
+# exists, uninstall and new-style runs take it too (non-blocking, on file
+# descriptor 8, released by au_unlock), so an older updater still installed as
+# update.sh and this script never overlap. 0 = held or no legacy file,
+# 1 = an older updater holds it (AU_LOCK_PID names it), 2 = could not lock.
+au_legacy_lock() {
+  local f="${KIT_STATE_DIR}/update.flock" rc
+  [ -e "${f}" ] || [ -L "${f}" ] || return 0
+  if [ -L "${f}" ] || ! : >> "${f}" 2>/dev/null; then
+    AU_LOCK_ERR="cannot open ${f}"
+    return 2
+  fi
+  exec 8>>"${f}"
+  rc=0
+  if command -v flock >/dev/null 2>&1; then
+    flock -n 8 || rc=$?
+  elif command -v perl >/dev/null 2>&1; then
+    perl -MFcntl=:flock -e 'open(my $fh, ">&=", 8) or exit 2; flock($fh, LOCK_EX | LOCK_NB) or exit 1; exit 0' || rc=$?
+  else
+    rc=2
+  fi
+  if [ "${rc}" -ne 0 ]; then
+    exec 8>&-
+    if [ "${rc}" = 1 ]; then
+      AU_LOCK_PID=$(head -n 1 "${f}.pid" 2>/dev/null || true)
+      case "${AU_LOCK_PID}" in ''|*[!0-9]*) AU_LOCK_PID="unknown" ;; esac
+      return 1
+    fi
+    AU_LOCK_ERR="could not lock ${f}"
+    return 2
+  fi
+  return 0
 }
 
 AU_CURL=(curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 --retry-delay 2 --max-filesize 1048576)
@@ -652,6 +690,18 @@ au_run() {
     au_log "skipped: auto-update was turned off (or the kit uninstalled) while this run started; nothing installed"
     return 0
   fi
+  # An older updater still installed as update.sh may hold the legacy lock.
+  rc=0
+  au_legacy_lock || rc=$?
+  if [ "${rc}" = 1 ]; then
+    au_unlock
+    au_log "skipped: another update is running (an older updater, pid ${AU_LOCK_PID:-unknown})"
+    return 0
+  elif [ "${rc}" != 0 ]; then
+    au_unlock
+    au_log "FAILED: ${AU_LOCK_ERR:-could not take the legacy update lock}; nothing done"
+    return 1
+  fi
   au_load || { au_unlock; au_log "FAILED: bad settings in ${AU_ENV}"; return 1; }
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064 # expand now: these paths are fixed for the run
@@ -689,7 +739,7 @@ au_run() {
   (
     unset KIT_SKIP_VERIFY KIT_SOURCE_DIR KIT_CARDS_SKILL KIT_CARDS_PROFILES KIT_REMOVE_RETIRED
     export HERMES_HOME="${HERMES_ROOT}" KIT_REF="${tag}" KIT_SKIP_GROKBOT="${AU_SKIP_GROKBOT}" KIT_SKIP_COMPUTER="${AU_SKIP_COMPUTER}"
-    exec "${BASH:-bash}" "${tmp}/install.sh" </dev/null 9>&-
+    exec "${BASH:-bash}" "${tmp}/install.sh" </dev/null 8>&- 9>&-
   ) > "${AU_OUT}" 2>&1 || rc=$?
   if [ "${rc}" -ne 0 ]; then
     au_log "FAILED: installing ${tag} exited ${rc} (still on ${installed:-nothing}; its output: ${AU_OUT})"
@@ -1163,6 +1213,19 @@ kit_uninstall() {
     return 1
   elif [ "${rc}" != 0 ]; then
     echo "install.sh: --uninstall stopped: ${AU_LOCK_ERR:-could not take the update lock}. Nothing was changed." >&2
+    return 1
+  fi
+  # An older updater (v2026.11.22 and before) locks inside hermes-bot-kit/:
+  # held too, until that folder has been moved.
+  rc=0
+  au_legacy_lock || rc=$?
+  if [ "${rc}" = 1 ]; then
+    au_unlock
+    echo "install.sh: --uninstall stopped: an update is running right now (an older updater, pid ${AU_LOCK_PID:-unknown}). Nothing was changed. Run --uninstall again in a minute." >&2
+    return 1
+  elif [ "${rc}" != 0 ]; then
+    au_unlock
+    echo "install.sh: --uninstall stopped: ${AU_LOCK_ERR:-could not take the legacy update lock}. Nothing was changed." >&2
     return 1
   fi
   rc=0
