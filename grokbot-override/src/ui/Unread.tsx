@@ -1,28 +1,29 @@
-// The row's unread dot (PARITY R16), Grok Bot's look: a small blue dot at
-// the right edge of an unread row. The state is Hermes's own: the row draws
-// Hermes's SessionStatusDot, keyed by the bot's Bot Chat id exactly as Bot
-// Mode's row draws it (hermes-bots/bot-row.tsx:270-273), and the CSS shows
-// only its "finished, unread" state (painted blue) and its "needs input"
-// state. So the override and stock show the same state from core's unread
-// store, and there is no second record of read / unread. Missing on an older
-// desktop: nothing drawn.
+// The row's unread dot (Spec 106), Grok Bot's look: a small blue dot at
+// the right edge of an unread row (and on the avatar of a pinned tile).
 //
-// Hermes's running cue (the same dot in its working / stalled / background
-// states) is its own element, RunningDot, on the avatar: independent of the
-// unread dot, which never draws those states.
+// Driven exclusively by the plugin's own unread store (core/unreadStore.js,
+// roster2.unread) for EVERY bot row, local and remote. Hermes's native unread
+// dot is hidden/ignored in bot rows so bare-id native markers can never stick
+// or collide across machines, and the "More unreads" pill (UnreadPill.tsx)
+// counts only plugin dots.
+//
+// Hermes's running cue (SessionStatusDot in its working / stalled / background
+// states) stays on the avatar via RunningDot, independent of the unread dot.
 
 import * as React from 'react'
 
 import { botCanonicalSessionId } from '../core/activity.js'
+import { app, botIsUnread } from './app'
+import { roster2 } from './rosterStores'
 import { sdk } from './sdk'
+import { useStore } from './store'
 
-/** Hermes's dot in its unread state (session-status-dot.tsx: the `unread`
- *  variant, `bg-(--ui-success)` with role="status"). */
-export const UNREAD_STATE_SELECTOR = '[role="status"][class*="ui-success"]'
+/** Plugin's own unread dot inner element. */
+export const UNREAD_STATE_SELECTOR = '[role="status"][data-gbo-unread="true"]'
 /** An unread dot the override draws (rows and pinned tiles). */
 export const UNREAD_DOT_SELECTOR = `.gbo-unread-dot ${UNREAD_STATE_SELECTOR}`
 
-/** Hermes's status dot for the bot's Bot Chat, in a wrapper `className`. */
+/** Hermes's status dot for the bot's Bot Chat (used ONLY for the running cue). */
 function StatusDot({ bot, className }: { bot: any; className: string }) {
   const Dot = (sdk as any).SessionStatusDot
   const id = botCanonicalSessionId(bot)
@@ -30,9 +31,17 @@ function StatusDot({ bot, className }: { bot: any; className: string }) {
   return <span className={className}>{React.createElement(Dot, { storedSessionId: id })}</span>
 }
 
-/** The unread dot: drawn by the CSS only in the unread and needs-input states. */
+/** The plugin's own unread dot: blue, at the row's right edge (or on a pinned
+ *  avatar). Renders only when the plugin's own store marks this bot unread. */
 export function UnreadDot({ bot }: { bot: any }) {
-  return <StatusDot bot={bot} className="gbo-unread-dot" />
+  const unread = useStore(roster2.unread)
+  const roster = useStore(app.roster)
+  if (!botIsUnread(bot, unread, roster.sources)) return null
+  return (
+    <span className="gbo-unread-dot">
+      <span role="status" data-gbo-unread="true" className="gbo-unread-dot-inner" aria-label="Unread" />
+    </span>
+  )
 }
 
 /** Hermes's running cue on the avatar: drawn by the CSS only in the working,

@@ -279,9 +279,13 @@ export function createChatController(bot, deps, options = {}) {
     turnRetry: null,
     // A remembered transcript that is still being checked (T9).
     checking: Boolean(seed),
+    // Fresh, non-cached history presented by this controller (Spec 106):
+    // null until a fresh network read returns non-empty messages.
+    freshHistory: null,
     chat: initialChatState(seed ? seedItems(seed) : [])
   }
   const listeners = new Set()
+  let freshHistorySeq = 0
   let attachFlight = null
   let pollCancel = null
   let idleCancel = null
@@ -510,9 +514,57 @@ export function createChatController(bot, deps, options = {}) {
     return leaseFlight
   }
 
-  async function readPage(offset) {
+  function newestRowAt(rows) {
+    let max = 0
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const n = typeof row?.timestamp === 'string' ? Number(row.timestamp) : row?.timestamp
+      if (!Number.isFinite(n) || n <= 0) continue
+      const ms = n < 1e12 ? Math.round(n * 1000) : Math.round(n)
+      if (ms > max) max = ms
+    }
+    return max
+  }
+
+  function makeFreshHistory(rows, { sessionId = '', total = null, canonical = null } = {}) {
+    const list = Array.isArray(rows) ? rows : []
+    const tip = String(sessionId || state.storedId || '').trim()
+    let count = null
+    if (Number.isFinite(total) && total > 0) {
+      count = Math.max(Math.floor(total), list.length)
+    } else if (list.length >= HISTORY_PAGE) {
+      const can = canonical || state.canonical
+      const canCount = Number.isFinite(can?.live_message_count)
+        ? can.live_message_count
+        : Number.isFinite(can?.message_count)
+          ? can.message_count
+          : 0
+      count = Math.max(list.length, canCount)
+    } else {
+      count = list.length
+    }
+    return {
+      seq: ++freshHistorySeq,
+      sessionId: tip,
+      count,
+      lastAt: newestRowAt(list),
+      nonEmpty: list.length > 0
+    }
+  }
+
+  async function readPageMeta(offset) {
     const page = await deps.readHistory(bot, state.storedId, { limit: HISTORY_PAGE, offset })
-    return Array.isArray(page?.messages) ? page.messages : []
+    const rows = Array.isArray(page?.messages) ? page.messages : []
+    const sessionId = typeof page?.session_id === 'string' && page.session_id.trim() ? page.session_id.trim() : ''
+    const total = Number.isFinite(page?.pagination?.total)
+      ? page.pagination.total
+      : Number.isFinite(page?.total)
+        ? page.total
+        : null
+    return { rows, sessionId, total }
+  }
+
+  async function readPage(offset) {
+    return (await readPageMeta(offset)).rows
   }
 
   /** Items a history rebuild keeps: anything live while a turn runs; when
@@ -591,7 +643,9 @@ export function createChatController(bot, deps, options = {}) {
     if (mine !== generation || disposed) return state
     if (!canonical) {
       if (options.createIfMissing) return create()
-      set({ phase: 'no-chat', canonical: null })
+      // A fresh answer that the bot has no Bot Chat yet (Spec 106: opening it
+      // still reads the bot).
+      set({ phase: 'no-chat', canonical: null, freshHistory: makeFreshHistory([], { sessionId: '' }) })
       return state
     }
     // A seed for another stored session (the chat was replaced) is dropped:
@@ -634,18 +688,22 @@ export function createChatController(bot, deps, options = {}) {
 
     let loaded = false
     try {
-      const rows = await readPage(0)
+      const page = await readPageMeta(0)
       if (mine !== generation || disposed) return state
+      const rows = page.rows
+      const resolvedId = page.sessionId || storedId
+      const freshHistory = makeFreshHistory(rows, { sessionId: resolvedId, total: page.total, canonical })
       if (quiet) {
         // The same Bot Chat as the seed: the fresh tail merges into the
         // remembered rows, earlier pages and all (review tighter-b r1 #4).
-        mergeTail(rows, keepLocal)
+        mergeTail(rows, keepLocal, freshHistory ? { freshHistory } : {})
       } else {
         set({
           phase: 'ready',
           rows,
           loadedCount: rows.length,
           hasMore: rows.length >= HISTORY_PAGE,
+          ...(freshHistory ? { freshHistory } : {}),
           chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
         })
       }
@@ -845,7 +903,13 @@ export function createChatController(bot, deps, options = {}) {
       const live = initial ? (bubbleId ? { ...emptyLive(), bubbleId } : emptyLive()) : { ...chat.live, bubbleId }
       return { ...chat, items, busy: running, live, waiting }
     })
-    if (withHistory) set({ phase: 'ready', hasMore: false })
+    if (withHistory) {
+      const freshHistory = makeFreshHistory(snapshot?.messages, {
+        sessionId: state.storedId,
+        total: Number.isFinite(snapshot?.message_count) ? snapshot.message_count : null
+      })
+      set({ phase: 'ready', hasMore: false, ...(freshHistory ? { freshHistory } : {}) })
+    }
   }
 
   // ── reconciliation ───────────────────────────────────────────────────────
@@ -1017,11 +1081,12 @@ export function createChatController(bot, deps, options = {}) {
     }
   }
 
-  function mergeTail(tail, keep) {
+  function mergeTail(tail, keep, extra = {}) {
     set(s => {
       const rows = mergeTailRows(s.rows, tail)
       const joined = rows.length > tail.length
       return {
+        ...extra,
         rows,
         loadedCount: rows.length,
         hasMore: joined ? s.hasMore : tail.length >= HISTORY_PAGE,
@@ -1045,10 +1110,13 @@ export function createChatController(bot, deps, options = {}) {
   async function refreshTail(live) {
     if (!state.storedId || state.chat.busy || state.phase !== 'ready' || state.loadingMore) return true
     try {
-      const tail = await readPage(0)
+      const page = await readPageMeta(0)
       if (disposed || state.chat.busy || state.loadingMore) return true
       if (typeof live === 'function' && !live()) return true
-      mergeTail(tail, keepLocal)
+      const tail = page.rows
+      const resolvedId = page.sessionId || state.storedId
+      const freshHistory = makeFreshHistory(tail, { sessionId: resolvedId, total: page.total })
+      mergeTail(tail, keepLocal, freshHistory ? { freshHistory } : {})
       resolveUnknownFrom(tail)
       return true
     } catch {
@@ -1300,12 +1368,16 @@ export function createChatController(bot, deps, options = {}) {
       if (!canonical || disposed) return
       const tip = openedSessionId(canonical)
       if (tip && tip !== state.storedId) set({ canonical, storedId: tip })
-      const tail = await readPage(0)
+      const page = await readPageMeta(0)
       if (disposed) return
+      const tail = page.rows
+      const resolvedId = page.sessionId || state.storedId
+      const freshHistory = makeFreshHistory(tail, { sessionId: resolvedId, total: page.total, canonical })
       set(s => ({
         rows: tail,
         loadedCount: tail.length,
         hasMore: tail.length >= HISTORY_PAGE,
+        ...(freshHistory ? { freshHistory } : {}),
         chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(tail), keepingSends(s.chat.items, tail, keepLocal)) }
       }))
     } catch {

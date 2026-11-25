@@ -72,12 +72,12 @@ test('R16 reseed forgets watermarks: activity seen while stock Bot Mode was fron
   assert.equal(botCanonicalSessionId({ canonical_session: { id: 'r' } }), 'r')
 })
 
-test('loader-faithful R16: the row draws Hermes\'s SessionStatusDot for the Bot Chat id; a roster refresh with new activity marks it unread', { skip: !READY && 'dev dependencies not installed' }, async t => {
-  const marks = []
+test('loader-faithful R16: the row draws the running cue for the Bot Chat id and paints the plugin unread dot on new activity', { skip: !READY && 'dev dependencies not installed' }, async t => {
+  const nativeMarks = []
   let remote = { ...REMOTE }
   const { panes, mount, errors, React } = await bootPlugin(t, {
     tweak: sdk => {
-      sdk.markSessionUnreadFinished = (id, profile) => marks.push([id, profile])
+      sdk.markSessionUnreadFinished = (id, profile) => nativeMarks.push([id, profile])
       sdk.ackStoredSessionId = () => undefined
       sdk.SessionStatusDot = ({ storedSessionId }) => globalThis.__dot(storedSessionId)
       sdk.queryClient = {
@@ -89,9 +89,10 @@ test('loader-faithful R16: the row draws Hermes\'s SessionStatusDot for the Bot 
   })
   globalThis.__dot = id => React.createElement('i', { 'data-dot': id })
   const rosterEl = mount(panes.find(p => p.id === 'roster').render)
-  await waitFor(() => rosterEl.querySelector('[data-dot="k-tip"]'), 'the dot keyed by the lineage tip')
+  await waitFor(() => rosterEl.querySelector('[data-dot="k-tip"]'), 'the running cue keyed by the lineage tip')
   remote = { ...REMOTE, canonical_session: { ...REMOTE.canonical_session, last_active: REMOTE.canonical_session.last_active + 60, preview: 'Message from cron: done' } }
-  await waitFor(() => marks.length > 0, 'the next roster refresh', 6000)
-  assert.deepEqual(marks[0], ['k-tip', 'scholar'])
+  const scholarRow = () => [...rosterEl.querySelectorAll('button.gbo-row')].find(b => b.textContent.includes('Scholar'))
+  await waitFor(() => scholarRow()?.querySelector('.gbo-unread-dot [role="status"][data-gbo-unread="true"]'), 'the plugin unread dot after the next roster refresh', 6000)
+  assert.deepEqual(nativeMarks, [], 'native unread store is untouched')
   assert.deepEqual(errors, [])
 })

@@ -44382,9 +44382,13 @@ function createChatController(bot, deps, options = {}) {
     turnRetry: null,
     // A remembered transcript that is still being checked (T9).
     checking: Boolean(seed),
+    // Fresh, non-cached history presented by this controller (Spec 106):
+    // null until a fresh network read returns non-empty messages.
+    freshHistory: null,
     chat: initialChatState(seed ? seedItems(seed) : [])
   };
   const listeners = /* @__PURE__ */ new Set();
+  let freshHistorySeq = 0;
   let attachFlight = null;
   let pollCancel = null;
   let idleCancel = null;
@@ -44567,9 +44571,46 @@ function createChatController(bot, deps, options = {}) {
     })();
     return leaseFlight;
   }
-  async function readPage(offset) {
+  function newestRowAt(rows) {
+    let max = 0;
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const n = typeof row?.timestamp === "string" ? Number(row.timestamp) : row?.timestamp;
+      if (!Number.isFinite(n) || n <= 0) continue;
+      const ms = n < 1e12 ? Math.round(n * 1e3) : Math.round(n);
+      if (ms > max) max = ms;
+    }
+    return max;
+  }
+  function makeFreshHistory(rows, { sessionId = "", total = null, canonical: canonical2 = null } = {}) {
+    const list = Array.isArray(rows) ? rows : [];
+    const tip = String(sessionId || state.storedId || "").trim();
+    let count = null;
+    if (Number.isFinite(total) && total > 0) {
+      count = Math.max(Math.floor(total), list.length);
+    } else if (list.length >= HISTORY_PAGE) {
+      const can = canonical2 || state.canonical;
+      const canCount = Number.isFinite(can?.live_message_count) ? can.live_message_count : Number.isFinite(can?.message_count) ? can.message_count : 0;
+      count = Math.max(list.length, canCount);
+    } else {
+      count = list.length;
+    }
+    return {
+      seq: ++freshHistorySeq,
+      sessionId: tip,
+      count,
+      lastAt: newestRowAt(list),
+      nonEmpty: list.length > 0
+    };
+  }
+  async function readPageMeta(offset) {
     const page = await deps.readHistory(bot, state.storedId, { limit: HISTORY_PAGE, offset });
-    return Array.isArray(page?.messages) ? page.messages : [];
+    const rows = Array.isArray(page?.messages) ? page.messages : [];
+    const sessionId = typeof page?.session_id === "string" && page.session_id.trim() ? page.session_id.trim() : "";
+    const total = Number.isFinite(page?.pagination?.total) ? page.pagination.total : Number.isFinite(page?.total) ? page.total : null;
+    return { rows, sessionId, total };
+  }
+  async function readPage(offset) {
+    return (await readPageMeta(offset)).rows;
   }
   const keepLocal = (item) => item.failed || item.kind === "command" || item.kind === "clarify" || item.kind === "approval" && item.status === "pending";
   const keepLive = (item) => !isPersistedItem(item);
@@ -44630,7 +44671,7 @@ function createChatController(bot, deps, options = {}) {
     if (mine !== generation2 || disposed) return state;
     if (!canonical2) {
       if (options.createIfMissing) return create();
-      set({ phase: "no-chat", canonical: null });
+      set({ phase: "no-chat", canonical: null, freshHistory: makeFreshHistory([], { sessionId: "" }) });
       return state;
     }
     return load(canonical2, mine, { quiet: quiet && openedSessionId(canonical2) === state.storedId });
@@ -44662,16 +44703,20 @@ function createChatController(bot, deps, options = {}) {
     set(quiet ? { canonical: canonical2, storedId } : { phase: "loading", canonical: canonical2, storedId });
     let loaded = false;
     try {
-      const rows = await readPage(0);
+      const page = await readPageMeta(0);
       if (mine !== generation2 || disposed) return state;
+      const rows = page.rows;
+      const resolvedId = page.sessionId || storedId;
+      const freshHistory = makeFreshHistory(rows, { sessionId: resolvedId, total: page.total, canonical: canonical2 });
       if (quiet) {
-        mergeTail(rows, keepLocal);
+        mergeTail(rows, keepLocal, freshHistory ? { freshHistory } : {});
       } else {
         set({
           phase: "ready",
           rows,
           loadedCount: rows.length,
           hasMore: rows.length >= HISTORY_PAGE,
+          ...freshHistory ? { freshHistory } : {},
           chat: { ...initialChatState([...rowsToItems(rows), ...openSendsMissingFrom(state.chat?.items, rows)]) }
         });
       }
@@ -44835,7 +44880,13 @@ function createChatController(bot, deps, options = {}) {
       const live = initial ? bubbleId ? { ...emptyLive(), bubbleId } : emptyLive() : { ...chat.live, bubbleId };
       return { ...chat, items, busy: running, live, waiting };
     });
-    if (withHistory) set({ phase: "ready", hasMore: false });
+    if (withHistory) {
+      const freshHistory = makeFreshHistory(snapshot?.messages, {
+        sessionId: state.storedId,
+        total: Number.isFinite(snapshot?.message_count) ? snapshot.message_count : null
+      });
+      set({ phase: "ready", hasMore: false, ...freshHistory ? { freshHistory } : {} });
+    }
   }
   function reconcile({ snapshot = false } = {}) {
     if (disposed) return Promise.resolve("closed");
@@ -44982,11 +45033,12 @@ function createChatController(bot, deps, options = {}) {
       set({ loadingMore: false, attachError: String(error?.message || error) });
     }
   }
-  function mergeTail(tail, keep) {
+  function mergeTail(tail, keep, extra = {}) {
     set((s) => {
       const rows = mergeTailRows(s.rows, tail);
       const joined = rows.length > tail.length;
       return {
+        ...extra,
         rows,
         loadedCount: rows.length,
         hasMore: joined ? s.hasMore : tail.length >= HISTORY_PAGE,
@@ -45000,10 +45052,13 @@ function createChatController(bot, deps, options = {}) {
   async function refreshTail(live) {
     if (!state.storedId || state.chat.busy || state.phase !== "ready" || state.loadingMore) return true;
     try {
-      const tail = await readPage(0);
+      const page = await readPageMeta(0);
       if (disposed || state.chat.busy || state.loadingMore) return true;
       if (typeof live === "function" && !live()) return true;
-      mergeTail(tail, keepLocal);
+      const tail = page.rows;
+      const resolvedId = page.sessionId || state.storedId;
+      const freshHistory = makeFreshHistory(tail, { sessionId: resolvedId, total: page.total });
+      mergeTail(tail, keepLocal, freshHistory ? { freshHistory } : {});
       resolveUnknownFrom(tail);
       return true;
     } catch {
@@ -45197,12 +45252,16 @@ function createChatController(bot, deps, options = {}) {
       if (!canonical2 || disposed) return;
       const tip = openedSessionId(canonical2);
       if (tip && tip !== state.storedId) set({ canonical: canonical2, storedId: tip });
-      const tail = await readPage(0);
+      const page = await readPageMeta(0);
       if (disposed) return;
+      const tail = page.rows;
+      const resolvedId = page.sessionId || state.storedId;
+      const freshHistory = makeFreshHistory(tail, { sessionId: resolvedId, total: page.total, canonical: canonical2 });
       set((s) => ({
         rows: tail,
         loadedCount: tail.length,
         hasMore: tail.length >= HISTORY_PAGE,
+        ...freshHistory ? { freshHistory } : {},
         chat: { ...s.chat, items: rebuildItems(s.chat.items, rowsToItems(tail), keepingSends(s.chat.items, tail, keepLocal)) }
       }));
     } catch {
@@ -46456,6 +46515,645 @@ function createActivityTracker(deps) {
   return { track, reseed };
 }
 
+// src/core/ownership.js
+function sourceHostId(source) {
+  if (!source || typeof source !== "object") return "";
+  for (const field of ["installId", "install_id", "host", "sshHost", "ssh_host", "hostname"]) {
+    const val2 = String(source[field] || "").trim();
+    if (val2) return val2;
+  }
+  return "";
+}
+function createOwnership({ onRetire = () => void 0 } = {}) {
+  const table = /* @__PURE__ */ new Map();
+  const entryOf = (id) => {
+    const key = String(id || "").trim() || "local";
+    if (!table.has(key)) table.set(key, { installId: "", host: "", generation: 1, listed: false, gone: false });
+    return table.get(key);
+  };
+  function retire(id, entry) {
+    entry.generation += 1;
+    entry.installId = "";
+    try {
+      onRetire(id);
+    } catch {
+    }
+  }
+  function sync(sources) {
+    const list = (Array.isArray(sources) ? sources : []).filter((source) => String(source?.connectionId || "").trim());
+    if (!list.length) return;
+    const listed = /* @__PURE__ */ new Set();
+    for (const source of list) {
+      const id = String(source.connectionId).trim();
+      listed.add(id);
+      const entry = entryOf(id);
+      entry.listed = true;
+      entry.gone = false;
+      const install = String(source.installId || source.install_id || "").trim();
+      if (install && entry.installId && install !== entry.installId) retire(id, entry);
+      if (install) entry.installId = install;
+      const host3 = sourceHostId(source);
+      if (host3) entry.host = host3;
+    }
+    for (const [id, entry] of table) {
+      if (listed.has(id) || !entry.listed || entry.gone) continue;
+      entry.gone = true;
+      retire(id, entry);
+    }
+  }
+  function accept(id, installId) {
+    const install = String(installId || "").trim();
+    if (!install) return true;
+    const entry = entryOf(id);
+    if (entry.installId && entry.installId !== install) return false;
+    entry.installId = install;
+    if (!entry.host) entry.host = install;
+    return true;
+  }
+  return {
+    sync,
+    accept,
+    token: (id) => `${String(id || "").trim() || "local"}#${entryOf(id).generation}`,
+    stableHost: (id) => entryOf(id).installId || entryOf(id).host || ""
+  };
+}
+
+// src/core/remoteAvatars.js
+var AVATAR_TTL_MS = 15 * 6e4;
+var AVATAR_RETRY_MS = 2 * 6e4;
+var AVATAR_LIST_TTL_MS = 5 * 6e4;
+var AVATAR_TIMEOUT_MS = 2e4;
+var AVATAR_MAX_CHARS = 3e6;
+var DATA_IMAGE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=\s]+$/;
+function isAvatarDataUrl(value) {
+  return typeof value === "string" && value.length <= AVATAR_MAX_CHARS && DATA_IMAGE.test(value);
+}
+function isBackfilledFacePng(dataUrl) {
+  const prefix = "data:image/png;base64,";
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith(prefix)) return false;
+  try {
+    const bin = atob(dataUrl.slice(prefix.length, prefix.length + 48));
+    if (bin.length < 24) return false;
+    const word = (at) => (bin.charCodeAt(at) << 24 | bin.charCodeAt(at + 1) << 16 | bin.charCodeAt(at + 2) << 8 | bin.charCodeAt(at + 3)) >>> 0;
+    return word(16) === 160 && word(20) === 160;
+  } catch {
+    return false;
+  }
+}
+function remoteAvatarRoute(bot) {
+  if (!bot || !bot.remoteSource || bot.ghost || bot.retained || !botSourceStatus(bot).available) return null;
+  const route = resolveBotConnectionRoute(bot).route;
+  return route && route.mode === "remote" ? route : null;
+}
+function createRemoteAvatars({ request: request2, hasOwnImage = () => false, onChange = () => void 0, onProfiles = () => void 0, now = () => Date.now() } = {}) {
+  const entries = /* @__PURE__ */ new Map();
+  const inflight = /* @__PURE__ */ new Set();
+  const lists = /* @__PURE__ */ new Map();
+  const listing = /* @__PURE__ */ new Set();
+  let images = {};
+  let stopped = false;
+  let lastRows = [];
+  function publish() {
+    const next = {};
+    for (const [key, entry] of entries) if (entry.image) next[key] = entry.image;
+    const a2 = Object.keys(images);
+    const b2 = Object.keys(next);
+    if (a2.length === b2.length && b2.every((key) => images[key] === next[key])) return;
+    images = next;
+    onChange(images);
+  }
+  function forget(key) {
+    if (entries.delete(key)) publish();
+  }
+  function flagFor(bot, route) {
+    if (typeof bot.has_avatar === "boolean") return bot.has_avatar;
+    const list = lists.get(route.connectionId);
+    if (!list?.flags) return void 0;
+    return list.flags.get(route.targetProfile || route.profile) === true;
+  }
+  function listConnection(connectionId, carrier) {
+    const t = now();
+    const list = lists.get(connectionId);
+    if (listing.has(connectionId)) return;
+    if (list?.flags && t - list.at < AVATAR_LIST_TTL_MS) return;
+    if (list?.failedAt && t - list.failedAt < AVATAR_RETRY_MS) return;
+    listing.add(connectionId);
+    Promise.resolve().then(() => request2(carrier, "profiles.list", { include_sessions: false }, { timeoutMs: AVATAR_TIMEOUT_MS })).then((result) => {
+      const flags = /* @__PURE__ */ new Map();
+      for (const row of Array.isArray(result?.profiles) ? result.profiles : []) {
+        const name = String(row?.name || "").trim();
+        if (name) flags.set(name, row?.has_avatar === true);
+      }
+      lists.set(connectionId, { at: now(), failedAt: 0, flags });
+      if (stopped) return;
+      try {
+        onProfiles(connectionId, Array.isArray(result?.profiles) ? result.profiles : []);
+      } catch {
+      }
+    }).catch(() => {
+      lists.set(connectionId, { ...lists.get(connectionId) || { at: 0, flags: null }, failedAt: now() });
+    }).finally(() => {
+      listing.delete(connectionId);
+      if (!stopped) sync(lastRows);
+    });
+  }
+  function fetchAvatar(bot, key, route) {
+    inflight.add(key);
+    Promise.resolve().then(() => request2(bot, "profiles.get_asset", { name: String(bot.name || route.profile), asset: "avatar" }, { timeoutMs: AVATAR_TIMEOUT_MS })).then((result) => {
+      if (stopped) return;
+      const data = result?.found ? result.data : null;
+      const image = isAvatarDataUrl(data) && !isBackfilledFacePng(data) ? data : null;
+      entries.set(key, { image, at: now(), failedAt: 0 });
+      publish();
+    }).catch(() => {
+      if (stopped) return;
+      const prev = entries.get(key);
+      entries.set(key, { image: prev?.image || null, at: prev?.at || 0, failedAt: now() });
+      publish();
+    }).finally(() => inflight.delete(key));
+  }
+  function sync(rows) {
+    if (stopped) return;
+    lastRows = Array.isArray(rows) ? rows : [];
+    const t = now();
+    const needList = /* @__PURE__ */ new Map();
+    const seen = /* @__PURE__ */ new Set();
+    for (const bot of lastRows) {
+      const route = remoteAvatarRoute(bot);
+      if (!route) continue;
+      const key = botRouteKey(route);
+      seen.add(key);
+      if (typeof bot.has_avatar !== "boolean") {
+        if (!needList.has(route.connectionId)) needList.set(route.connectionId, []);
+        needList.get(route.connectionId).push(bot);
+      }
+      const flag = flagFor(bot, route);
+      if (flag === void 0) continue;
+      if (!flag) {
+        forget(key);
+        continue;
+      }
+      if (inflight.has(key)) continue;
+      if (hasOwnImage(bot)) {
+        forget(key);
+        continue;
+      }
+      const entry = entries.get(key);
+      if (entry?.failedAt && t - entry.failedAt < AVATAR_RETRY_MS) continue;
+      if (entry && !entry.failedAt && t - entry.at < AVATAR_TTL_MS) continue;
+      fetchAvatar(bot, key, route);
+    }
+    for (const [connectionId, bots] of needList) listConnection(connectionId, carrierFor(bots));
+    let dropped = false;
+    for (const key of [...entries.keys()]) {
+      if (!seen.has(key)) {
+        entries.delete(key);
+        dropped = true;
+      }
+    }
+    if (dropped) publish();
+  }
+  return {
+    sync,
+    /** route key → data URL (only pictures to show). */
+    images: () => images,
+    stop() {
+      stopped = true;
+      entries.clear();
+      lists.clear();
+      lastRows = [];
+      images = {};
+    }
+  };
+}
+function carrierFor(bots) {
+  const sorted2 = [...bots].sort((a2, b2) => String(a2.name).localeCompare(String(b2.name)));
+  return sorted2.find((bot) => (bot.targetProfile || bot.name) === "default") || sorted2[0];
+}
+
+// src/core/remoteActivity.js
+var FROM_LIST = Symbol("gbo.sessionsFromList");
+var REMOTE_ACTIVITY_MS = 6e4;
+var REMOTE_ACTIVITY_TIMEOUT_MS = 2e4;
+var SESSION_FIELDS = ["canonical_session", "last_session", "worker_session"];
+function remoteActivityRoute(bot) {
+  if (!bot || !bot.remoteSource || bot.ghost) return null;
+  const route = resolveBotConnectionRoute(bot).route;
+  return route && route.mode === "remote" && route.connectionId ? route : null;
+}
+function canStartRead(bot) {
+  return Boolean(remoteActivityRoute(bot)) && botSourceStatus(bot).available;
+}
+function hasOwnSessions(bot) {
+  return !bot?.[FROM_LIST] && SESSION_FIELDS.some((key) => bot?.[key] !== void 0);
+}
+function remoteActivityCarriers(rows) {
+  const byConnection = /* @__PURE__ */ new Map();
+  for (const bot of Array.isArray(rows) ? rows : []) {
+    if (!canStartRead(bot) || hasOwnSessions(bot)) continue;
+    const { connectionId } = remoteActivityRoute(bot);
+    if (!byConnection.has(connectionId)) byConnection.set(connectionId, []);
+    byConnection.get(connectionId).push(bot);
+  }
+  const carriers = /* @__PURE__ */ new Map();
+  for (const [connectionId, bots] of byConnection) carriers.set(connectionId, carrierFor(bots));
+  return carriers;
+}
+function sessionFieldsByName(result) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const row of Array.isArray(result?.profiles) ? result.profiles : []) {
+    const name = String(row?.name || "").trim();
+    if (!name) continue;
+    const fields = {};
+    for (const key of SESSION_FIELDS) fields[key] = row?.[key] ?? null;
+    byName.set(name, fields);
+  }
+  return byName;
+}
+function withRemoteSessions(rows, lists) {
+  if (!Array.isArray(rows)) return rows;
+  let changed = false;
+  const next = rows.map((bot) => {
+    if (!bot || hasOwnSessions(bot)) return bot;
+    const route = remoteActivityRoute(bot);
+    const list = route ? lists?.get?.(route.connectionId) : null;
+    const fields = list?.byName?.get?.(route.targetProfile || route.profile);
+    if (fields) {
+      if (bot[FROM_LIST] === list.identity && SESSION_FIELDS.every((key) => sameData(bot[key], fields[key]))) return bot;
+      changed = true;
+      return { ...bot, ...fields, [FROM_LIST]: list.identity };
+    }
+    if (!bot[FROM_LIST]) return bot;
+    changed = true;
+    const bare2 = { ...bot };
+    for (const key of [...SESSION_FIELDS, FROM_LIST]) delete bare2[key];
+    return bare2;
+  });
+  return changed ? next : rows;
+}
+function createRemoteActivity({
+  request: request2,
+  ownership: ownership2 = createOwnership(),
+  onChange = () => void 0,
+  onProfiles = () => void 0,
+  setTimer: setTimer2 = defaultTimer,
+  timeoutMs = REMOTE_ACTIVITY_TIMEOUT_MS
+} = {}) {
+  let lists = /* @__PURE__ */ new Map();
+  let startable = null;
+  const settled = /* @__PURE__ */ new Map();
+  let seq = 0;
+  let stopped = false;
+  function publish(next) {
+    lists = next;
+    if (!stopped) onChange();
+  }
+  function drop(connectionId) {
+    settled.delete(connectionId);
+    if (!lists.has(connectionId)) return;
+    const next = new Map(lists);
+    next.delete(connectionId);
+    publish(next);
+  }
+  async function read(connectionId, carrier, live = () => true) {
+    if (stopped) return true;
+    const mine = ++seq;
+    const owner = ownership2.token(connectionId);
+    const current = () => !stopped && ownership2.token(connectionId) === owner && (!startable || startable.has(connectionId)) && (settled.get(connectionId) || 0) <= mine;
+    let timedOut = false;
+    const cancel = setTimer2(() => {
+      timedOut = true;
+      if (current()) drop(connectionId);
+    }, timeoutMs);
+    try {
+      const result = await request2(carrier, "profiles.list", { include_sessions: true }, { timeoutMs });
+      if (!current()) return true;
+      settled.set(connectionId, mine);
+      const accepted = live() && ownership2.accept(connectionId, result?.install_id);
+      if (!accepted) {
+        drop(connectionId);
+        settled.set(connectionId, mine);
+        return !live();
+      }
+      const profiles = Array.isArray(result?.profiles) ? result.profiles : [];
+      try {
+        onProfiles(connectionId, profiles);
+      } catch {
+      }
+      const byName = sessionFieldsByName(result);
+      const prev = lists.get(connectionId);
+      const same = prev && prev.identity === owner && prev.byName.size === byName.size && [...byName].every(([name, fields]) => prev.byName.has(name) && SESSION_FIELDS.every((key) => sameData(prev.byName.get(name)[key], fields[key])));
+      if (!same) publish(new Map(lists).set(connectionId, { identity: owner, byName }));
+      return true;
+    } catch {
+      if (current()) {
+        drop(connectionId);
+        settled.set(connectionId, mine);
+      }
+      return false;
+    } finally {
+      if (!timedOut) cancel?.();
+    }
+  }
+  function sync(startableIds) {
+    startable = new Set(startableIds);
+    for (const id of [...lists.keys()]) if (!startable.has(id)) drop(id);
+  }
+  return {
+    read,
+    sync,
+    drop,
+    lists: () => lists,
+    stop() {
+      stopped = true;
+      lists = /* @__PURE__ */ new Map();
+      settled.clear();
+    },
+    start() {
+      stopped = false;
+    }
+  };
+}
+function defaultTimer(fn, ms) {
+  const id = setTimeout(fn, ms);
+  return () => clearTimeout(id);
+}
+
+// src/core/unreadStore.js
+var UNREAD_STORE_KEY = "unreadStore";
+var MAX_UNREAD_ENTRIES = 500;
+function toMillis2(value) {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e12 ? Math.round(n * 1e3) : Math.round(n);
+}
+function storedMs(value) {
+  const n = typeof value === "string" ? Number(value) : value;
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+function finiteCount(value) {
+  if (value === null || value === void 0 || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+}
+function sessionCount(session) {
+  if (!session || typeof session !== "object") return null;
+  const live = finiteCount(session.live_message_count);
+  if (live !== null) return live;
+  return finiteCount(session.message_count);
+}
+function sessionTipId(session) {
+  if (!session || typeof session !== "object") return "";
+  return String(session.resolved_id || session.id || "").trim();
+}
+function sessionReadable(session) {
+  if (!session || typeof session !== "object") return false;
+  const tip = sessionTipId(session);
+  const count = sessionCount(session);
+  const rawAt = session.last_active;
+  const hasNumericAt = rawAt !== null && rawAt !== void 0 && rawAt !== "" && Number.isFinite(Number(rawAt));
+  if (tip && (count !== null || hasNumericAt)) return true;
+  if (count !== null && count > 0) return true;
+  if (hasNumericAt && Number(rawAt) > 0) return true;
+  return false;
+}
+function unreadBotKey(bot, sources = [], ownership2 = null) {
+  if (!bot || typeof bot !== "object") return "";
+  const route = resolveBotConnectionRoute(bot).route;
+  const profile = String(route?.profile || bot.name || "").trim();
+  if (!profile) return "";
+  const isLocal = !bot.remoteSource && (!route || route.mode === "local") && (!bot.connectionKind || bot.connectionKind === "local");
+  if (isLocal) return `local::${profile}`;
+  const connectionId = String(route?.connectionId || bot.connectionId || "").trim();
+  if (!connectionId || connectionId === "local") return `local::${profile}`;
+  const source = Array.isArray(sources) ? sources.find((s) => String(s?.connectionId || "").trim() === connectionId) : null;
+  const host3 = sourceHostId(source) || ownership2?.stableHost?.(connectionId) || sourceHostId(bot);
+  return `${host3 || connectionId}::${profile}`;
+}
+function rawConnectionKey(bot) {
+  if (!bot || typeof bot !== "object") return "";
+  const route = resolveBotConnectionRoute(bot).route;
+  const profile = String(route?.profile || bot.name || "").trim();
+  const connectionId = String(route?.connectionId || bot.connectionId || "").trim();
+  if (!profile || !connectionId || connectionId === "local") return "";
+  return `${connectionId}::${profile}`;
+}
+function extractBotActivity(bot) {
+  if (!bot || typeof bot !== "object") return null;
+  const canonical2 = sessionReadable(bot.canonical_session) ? bot.canonical_session : null;
+  const last = sessionReadable(bot.last_session) ? bot.last_session : null;
+  if (!canonical2 && !last) return null;
+  let active = canonical2 || last;
+  if (canonical2 && last) {
+    const canAt = toMillis2(canonical2.last_active);
+    const lastAt = toMillis2(last.last_active);
+    active = lastAt > canAt ? last : canonical2;
+  }
+  const tipId = sessionTipId(active);
+  const count = sessionCount(active);
+  const at = toMillis2(active.last_active);
+  const preview = String(active.preview || "");
+  return {
+    tipId,
+    count,
+    at,
+    preview,
+    silent: isSilenceReply(preview),
+    isCanonical: active === canonical2
+  };
+}
+function normalizeEntry(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const seenTipId = typeof raw.seenTipId === "string" ? raw.seenTipId : "";
+  const latestTipId = typeof raw.latestTipId === "string" ? raw.latestTipId : "";
+  const seenCount = finiteCount(raw.seenCount);
+  const latestCount = finiteCount(raw.latestCount);
+  const seenAt = storedMs(raw.seenAt);
+  const latestAt = storedMs(raw.latestAt);
+  const updatedAt = storedMs(raw.updatedAt);
+  return { seenCount, seenTipId, latestCount, latestTipId, updatedAt, ...seenAt ? { seenAt } : {}, ...latestAt ? { latestAt } : {} };
+}
+function loadUnreadStore(saved) {
+  const out = {};
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return out;
+  for (const [key, raw] of Object.entries(saved)) {
+    if (typeof key !== "string" || !key.includes("::")) continue;
+    const entry = normalizeEntry(raw);
+    if (entry) out[key] = entry;
+  }
+  return pruneUnreadStore(out);
+}
+function pruneUnreadStore(store) {
+  const keys2 = Object.keys(store);
+  if (keys2.length <= MAX_UNREAD_ENTRIES) return store;
+  keys2.sort((a2, b2) => Number(store[a2]?.updatedAt || 0) - Number(store[b2]?.updatedAt || 0));
+  const next = { ...store };
+  for (const drop of keys2.slice(0, keys2.length - MAX_UNREAD_ENTRIES)) delete next[drop];
+  return next;
+}
+function isEntryUnread(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  const latestTip = String(entry.latestTipId || "");
+  const seenTip = String(entry.seenTipId || "");
+  const latestCount = finiteCount(entry.latestCount);
+  const seenCount = finiteCount(entry.seenCount);
+  const latestAt = storedMs(entry.latestAt);
+  const seenAt = storedMs(entry.seenAt);
+  if (!latestTip && latestCount === null && !latestAt) return false;
+  if (latestTip && seenTip && latestTip !== seenTip) {
+    if (latestCount !== null && latestCount > 0) return true;
+    if (latestAt > seenAt) return true;
+    return false;
+  }
+  if (latestCount !== null && seenCount !== null) {
+    return latestCount > seenCount;
+  }
+  if (latestAt > seenAt) return true;
+  if (latestTip && !seenTip && latestCount !== null && latestCount > 0) return true;
+  return false;
+}
+function isBotUnread(store, bot, sources = [], ownership2 = null) {
+  if (!store || typeof store !== "object") return false;
+  const key = unreadBotKey(bot, sources, ownership2);
+  if (key && isEntryUnread(store[key])) return true;
+  const raw = rawConnectionKey(bot);
+  if (raw && raw !== key && isEntryUnread(store[raw])) return true;
+  return false;
+}
+function sameEntry(a2, b2) {
+  if (a2 === b2) return true;
+  if (!a2 || !b2) return false;
+  return a2.seenCount === b2.seenCount && a2.seenTipId === b2.seenTipId && a2.latestCount === b2.latestCount && a2.latestTipId === b2.latestTipId && (a2.seenAt || 0) === (b2.seenAt || 0) && (a2.latestAt || 0) === (b2.latestAt || 0);
+}
+function observeBot(store, key, activity2, { now = Date.now(), migrateFrom = "" } = {}) {
+  if (!key || !activity2) return { store, changed: false };
+  let base4 = store;
+  let prev = base4[key];
+  let migrated = false;
+  if (!prev && migrateFrom && migrateFrom !== key && base4[migrateFrom]) {
+    prev = base4[migrateFrom];
+    migrated = true;
+  }
+  let entry;
+  if (!prev) {
+    entry = {
+      seenCount: activity2.count,
+      seenTipId: activity2.tipId,
+      latestCount: activity2.count,
+      latestTipId: activity2.tipId,
+      updatedAt: now,
+      ...activity2.at ? { seenAt: activity2.at, latestAt: activity2.at } : {}
+    };
+  } else {
+    const prevLatestAt = storedMs(prev.latestAt);
+    const prevSeenAt = storedMs(prev.seenAt);
+    const prevLatestCount = finiteCount(prev.latestCount);
+    const prevSeenCount = finiteCount(prev.seenCount);
+    const sameTip = !activity2.tipId || !prev.latestTipId || activity2.tipId === prev.latestTipId;
+    let nextLatestTip = prev.latestTipId;
+    let nextLatestCount = prevLatestCount;
+    let nextLatestAt = prevLatestAt;
+    let nextSeenTip = prev.seenTipId;
+    let nextSeenCount = prevSeenCount;
+    let nextSeenAt = prevSeenAt;
+    if (sameTip) {
+      const tip = activity2.tipId || prev.latestTipId;
+      const countMoved = activity2.count !== null && (prevLatestCount === null || activity2.count > prevLatestCount);
+      const atMoved = activity2.at > prevLatestAt;
+      if (prevLatestCount === null && activity2.count !== null && !atMoved && !isEntryUnread(prev)) {
+        nextLatestTip = tip;
+        nextLatestCount = activity2.count;
+        nextSeenTip = tip;
+        nextSeenCount = activity2.count;
+      } else if (countMoved || atMoved) {
+        nextLatestTip = tip;
+        if (activity2.count !== null) nextLatestCount = prevLatestCount !== null ? Math.max(prevLatestCount, activity2.count) : activity2.count;
+        nextLatestAt = Math.max(prevLatestAt, activity2.at);
+        if (activity2.silent) {
+          nextSeenTip = nextLatestTip;
+          nextSeenCount = nextLatestCount;
+          nextSeenAt = Math.max(prevSeenAt, nextLatestAt);
+        }
+      }
+    } else {
+      const notOlder = activity2.at >= prevLatestAt || prevLatestAt === 0 && (activity2.count || 0) > 0;
+      if (notOlder) {
+        nextLatestTip = activity2.tipId;
+        nextLatestCount = activity2.count;
+        nextLatestAt = Math.max(prevLatestAt, activity2.at);
+        if (activity2.silent) {
+          nextSeenTip = nextLatestTip;
+          nextSeenCount = nextLatestCount;
+          nextSeenAt = Math.max(prevSeenAt, nextLatestAt);
+        }
+      }
+    }
+    entry = {
+      seenCount: nextSeenCount,
+      seenTipId: nextSeenTip,
+      latestCount: nextLatestCount,
+      latestTipId: nextLatestTip,
+      updatedAt: now,
+      ...nextSeenAt ? { seenAt: nextSeenAt } : {},
+      ...nextLatestAt ? { latestAt: nextLatestAt } : {}
+    };
+    if (!migrated && sameEntry(prev, entry) && !(migrateFrom && base4[migrateFrom])) return { store, changed: false };
+  }
+  const next = { ...base4, [key]: entry };
+  if (migrateFrom && migrateFrom !== key) delete next[migrateFrom];
+  return { store: pruneUnreadStore(next), changed: true };
+}
+function observeRoster(store, rows, sources = [], { now = Date.now(), ownership: ownership2 = null } = {}) {
+  let cur = store;
+  let changed = false;
+  for (const bot of Array.isArray(rows) ? rows : []) {
+    const key = unreadBotKey(bot, sources, ownership2);
+    if (!key) continue;
+    const activity2 = extractBotActivity(bot);
+    if (!activity2) continue;
+    const raw = rawConnectionKey(bot);
+    const res = observeBot(cur, key, activity2, { now, migrateFrom: raw && raw !== key ? raw : "" });
+    if (res.changed) {
+      cur = res.store;
+      changed = true;
+    }
+  }
+  return { store: cur, changed };
+}
+function markBotSeen(store, bot, sources = [], presentation = null, { now = Date.now(), ownership: ownership2 = null } = {}) {
+  if (!presentation || !presentation.visible || !presentation.fresh) return { store, changed: false };
+  if (!presentation.nonEmpty && !presentation.emptyChat) return { store, changed: false };
+  const key = unreadBotKey(bot, sources, ownership2);
+  if (!key) return { store, changed: false };
+  const raw = rawConnectionKey(bot);
+  const migrateFrom = raw && raw !== key && store[raw] ? raw : "";
+  const prev = store[key] || (migrateFrom ? store[migrateFrom] : null);
+  if (!prev) return { store, changed: false };
+  const shownTip = String(presentation.sessionId || "").trim();
+  const shownCount = finiteCount(presentation.count);
+  const shownAt = storedMs(presentation.lastAt);
+  const prevLatestTip = String(prev?.latestTipId || "");
+  const prevLatestCount = finiteCount(prev?.latestCount);
+  const prevLatestAt = storedMs(prev?.latestAt);
+  const prevSeenAt = storedMs(prev?.seenAt);
+  const tip = prevLatestTip || shownTip;
+  let count = prevLatestCount;
+  if (shownCount !== null && (!prevLatestTip || prevLatestTip === shownTip)) count = count === null ? shownCount : Math.max(count, shownCount);
+  const at = Math.max(prevLatestAt, prevSeenAt, shownAt);
+  const entry = {
+    seenCount: count,
+    seenTipId: tip,
+    latestCount: count,
+    latestTipId: tip,
+    updatedAt: now,
+    ...at ? { seenAt: at, latestAt: at } : {}
+  };
+  if (!migrateFrom && sameEntry(prev, entry)) return { store, changed: false };
+  const next = { ...store, [key]: entry };
+  if (migrateFrom) delete next[migrateFrom];
+  return { store: pruneUnreadStore(next), changed: true };
+}
+
 // src/core/newMarker.js
 var SEEN_KEY = "seenAt";
 var MAX_SEEN = 200;
@@ -47165,7 +47863,7 @@ function gatewayMetaFor(bot, fresh, cache) {
   const entry = plainObject(fresh) && fresh[key] || plainObject(cache) && cache[key] || null;
   return plainObject(entry) && plainObject(entry.meta) ? entry : null;
 }
-function sameEntry(a2, b2) {
+function sameEntry2(a2, b2) {
   if (!a2 || !b2) return a2 === b2;
   const { at: _a, ...left } = a2;
   const { at: _b, ...right } = b2;
@@ -47177,7 +47875,7 @@ function mergeEntries(map, entries, { touch = false } = {}) {
   for (const [key, entry] of Object.entries(entries || {})) {
     if (!key || !plainObject(entry)) continue;
     const old = base4[key];
-    if (old && sameEntry(old, entry) && !touch) continue;
+    if (old && sameEntry2(old, entry) && !touch) continue;
     next ??= { ...base4 };
     next[key] = entry;
   }
@@ -47201,159 +47899,6 @@ function entryAfterSave(previous, written, now = Date.now()) {
     description: String(previous?.description || ""),
     at: Number(now) || 0
   };
-}
-
-// src/core/remoteAvatars.js
-var AVATAR_TTL_MS = 15 * 6e4;
-var AVATAR_RETRY_MS = 2 * 6e4;
-var AVATAR_LIST_TTL_MS = 5 * 6e4;
-var AVATAR_TIMEOUT_MS = 2e4;
-var AVATAR_MAX_CHARS = 3e6;
-var DATA_IMAGE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=\s]+$/;
-function isAvatarDataUrl(value) {
-  return typeof value === "string" && value.length <= AVATAR_MAX_CHARS && DATA_IMAGE.test(value);
-}
-function isBackfilledFacePng(dataUrl) {
-  const prefix = "data:image/png;base64,";
-  if (typeof dataUrl !== "string" || !dataUrl.startsWith(prefix)) return false;
-  try {
-    const bin = atob(dataUrl.slice(prefix.length, prefix.length + 48));
-    if (bin.length < 24) return false;
-    const word = (at) => (bin.charCodeAt(at) << 24 | bin.charCodeAt(at + 1) << 16 | bin.charCodeAt(at + 2) << 8 | bin.charCodeAt(at + 3)) >>> 0;
-    return word(16) === 160 && word(20) === 160;
-  } catch {
-    return false;
-  }
-}
-function remoteAvatarRoute(bot) {
-  if (!bot || !bot.remoteSource || bot.ghost || bot.retained || !botSourceStatus(bot).available) return null;
-  const route = resolveBotConnectionRoute(bot).route;
-  return route && route.mode === "remote" ? route : null;
-}
-function createRemoteAvatars({ request: request2, hasOwnImage = () => false, onChange = () => void 0, onProfiles = () => void 0, now = () => Date.now() } = {}) {
-  const entries = /* @__PURE__ */ new Map();
-  const inflight = /* @__PURE__ */ new Set();
-  const lists = /* @__PURE__ */ new Map();
-  const listing = /* @__PURE__ */ new Set();
-  let images = {};
-  let stopped = false;
-  let lastRows = [];
-  function publish() {
-    const next = {};
-    for (const [key, entry] of entries) if (entry.image) next[key] = entry.image;
-    const a2 = Object.keys(images);
-    const b2 = Object.keys(next);
-    if (a2.length === b2.length && b2.every((key) => images[key] === next[key])) return;
-    images = next;
-    onChange(images);
-  }
-  function forget(key) {
-    if (entries.delete(key)) publish();
-  }
-  function flagFor(bot, route) {
-    if (typeof bot.has_avatar === "boolean") return bot.has_avatar;
-    const list = lists.get(route.connectionId);
-    if (!list?.flags) return void 0;
-    return list.flags.get(route.targetProfile || route.profile) === true;
-  }
-  function listConnection(connectionId, carrier) {
-    const t = now();
-    const list = lists.get(connectionId);
-    if (listing.has(connectionId)) return;
-    if (list?.flags && t - list.at < AVATAR_LIST_TTL_MS) return;
-    if (list?.failedAt && t - list.failedAt < AVATAR_RETRY_MS) return;
-    listing.add(connectionId);
-    Promise.resolve().then(() => request2(carrier, "profiles.list", { include_sessions: false }, { timeoutMs: AVATAR_TIMEOUT_MS })).then((result) => {
-      const flags = /* @__PURE__ */ new Map();
-      for (const row of Array.isArray(result?.profiles) ? result.profiles : []) {
-        const name = String(row?.name || "").trim();
-        if (name) flags.set(name, row?.has_avatar === true);
-      }
-      lists.set(connectionId, { at: now(), failedAt: 0, flags });
-      if (stopped) return;
-      try {
-        onProfiles(connectionId, Array.isArray(result?.profiles) ? result.profiles : []);
-      } catch {
-      }
-    }).catch(() => {
-      lists.set(connectionId, { ...lists.get(connectionId) || { at: 0, flags: null }, failedAt: now() });
-    }).finally(() => {
-      listing.delete(connectionId);
-      if (!stopped) sync(lastRows);
-    });
-  }
-  function fetchAvatar(bot, key, route) {
-    inflight.add(key);
-    Promise.resolve().then(() => request2(bot, "profiles.get_asset", { name: String(bot.name || route.profile), asset: "avatar" }, { timeoutMs: AVATAR_TIMEOUT_MS })).then((result) => {
-      if (stopped) return;
-      const data = result?.found ? result.data : null;
-      const image = isAvatarDataUrl(data) && !isBackfilledFacePng(data) ? data : null;
-      entries.set(key, { image, at: now(), failedAt: 0 });
-      publish();
-    }).catch(() => {
-      if (stopped) return;
-      const prev = entries.get(key);
-      entries.set(key, { image: prev?.image || null, at: prev?.at || 0, failedAt: now() });
-      publish();
-    }).finally(() => inflight.delete(key));
-  }
-  function sync(rows) {
-    if (stopped) return;
-    lastRows = Array.isArray(rows) ? rows : [];
-    const t = now();
-    const needList = /* @__PURE__ */ new Map();
-    const seen = /* @__PURE__ */ new Set();
-    for (const bot of lastRows) {
-      const route = remoteAvatarRoute(bot);
-      if (!route) continue;
-      const key = botRouteKey(route);
-      seen.add(key);
-      if (typeof bot.has_avatar !== "boolean") {
-        if (!needList.has(route.connectionId)) needList.set(route.connectionId, []);
-        needList.get(route.connectionId).push(bot);
-      }
-      const flag = flagFor(bot, route);
-      if (flag === void 0) continue;
-      if (!flag) {
-        forget(key);
-        continue;
-      }
-      if (inflight.has(key)) continue;
-      if (hasOwnImage(bot)) {
-        forget(key);
-        continue;
-      }
-      const entry = entries.get(key);
-      if (entry?.failedAt && t - entry.failedAt < AVATAR_RETRY_MS) continue;
-      if (entry && !entry.failedAt && t - entry.at < AVATAR_TTL_MS) continue;
-      fetchAvatar(bot, key, route);
-    }
-    for (const [connectionId, bots] of needList) listConnection(connectionId, carrierFor(bots));
-    let dropped = false;
-    for (const key of [...entries.keys()]) {
-      if (!seen.has(key)) {
-        entries.delete(key);
-        dropped = true;
-      }
-    }
-    if (dropped) publish();
-  }
-  return {
-    sync,
-    /** route key → data URL (only pictures to show). */
-    images: () => images,
-    stop() {
-      stopped = true;
-      entries.clear();
-      lists.clear();
-      lastRows = [];
-      images = {};
-    }
-  };
-}
-function carrierFor(bots) {
-  const sorted2 = [...bots].sort((a2, b2) => String(a2.name).localeCompare(String(b2.name)));
-  return sorted2.find((bot) => (bot.targetProfile || bot.name) === "default") || sorted2[0];
 }
 
 // src/core/attention.js
@@ -48636,7 +49181,12 @@ var roster2 = {
   /** Bot Mode meta of bots whose row carries none (SSH sources), as their own
    *  gateway reported it (core/gatewayMeta.js): `fresh` = read this app
    *  session, `cache` = plugin storage `botMetaCache`. Route key -> entry. */
-  gatewayMeta: createStore({ fresh: {}, cache: {} })
+  gatewayMeta: createStore({ fresh: {}, cache: {} }),
+  /** Plugin's own unread store (Spec 106, core/unreadStore.js):
+   *  `<stableConnection>::<profile>` -> { seenCount, seenTipId, latestCount,
+   *  latestTipId, updatedAt, seenAt?, latestAt? }. Drives every bot row's blue
+   *  dot and "More unreads" pill. */
+  unread: createStore({})
 };
 function openDialog(state) {
   roster2.dialog.set(state);
@@ -50198,22 +50748,19 @@ var ADAPT_SRC = (
 .gbo-row-line > svg, .gbo-row-line .gbo-attn, .gbo-row-line .gbo-row-flag { width: 12px; height: 12px; flex: none; color: var(--color-text-tertiary); }
 .gbo-row-line .gbo-attn { color: var(--color-warn); }
 .gbo-row-line .gbo-attn svg, .gbo-row-line .gbo-row-flag svg { width: 100%; height: 100%; display: block; }
-/* The unread dot, Grok Bot's look: Hermes's own status dot (Unread.tsx) at
-   the row's right edge, vertically centred, as a small blue dot. Only its
-   unread state (painted blue) and its needs-input state (Hermes's amber)
-   draw (working, idle and draft are the running cue's, below). A pinned tile has no
-   right edge: the same dot sits on its avatar, ringed in the sidebar colour.
-   The hover ⋯ button covers the row's dot while it shows. */
-.gbo-unread-dot { display: none; flex: none; align-items: center; justify-content: center; width: 8px; height: 8px; margin: 0 4px 0 2px; line-height: 0; }
-.gbo-unread-dot:has([role="status"][class*="ui-success"]), .gbo-unread-dot:has([role="status"][class*="amber"]) { display: inline-flex; }
+/* The unread dot, Grok Bot's look: the plugin's own unread dot (Unread.tsx,
+   Spec 106) at the row's right edge, vertically centred, as a small blue dot.
+   A pinned tile has no right edge: the same dot sits on its avatar, ringed in
+   the sidebar colour. The hover ⋯ button covers the row's dot while it shows. */
+.gbo-unread-dot { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 8px; height: 8px; margin: 0 4px 0 2px; line-height: 0; }
 .gbo-unread-dot > span { display: inline-flex; line-height: 0; }
 .gbo-unread-dot [role="status"] { display: block; width: 8px; height: 8px; border-radius: 50%; border-width: 0; }
-.gbo-unread-dot [role="status"][class*="ui-success"] { background: var(--color-bot-blue); }
+.gbo-unread-dot [role="status"][data-gbo-unread="true"] { background: var(--color-bot-blue); }
 /* Hermes's running cue (RunningDot): the same status dot in its working,
    stalled or background state, on the avatar's top right, ringed in the
    sidebar colour; independent of the unread dot. */
 .gbo-run-dot { display: none; position: absolute; right: -1px; top: -1px; line-height: 0; }
-.gbo-run-dot:has([role="status"][class*="ui-accent"]), .gbo-run-dot:has([role="status"][class*="ui-text-tertiary"]) { display: inline-flex; }
+.gbo-run-dot:has([role="status"][class*="ui-accent"]), .gbo-run-dot:has([role="status"][class*="ui-text-tertiary"]), .gbo-run-dot:has([role="status"][class*="amber"]) { display: inline-flex; }
 .gbo-run-dot > span { display: inline-flex; line-height: 0; }
 .pinned__avatar .gbo-run-dot { right: auto; left: 4px; top: 4px; }
 .gbo-run-dot [role="status"] { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }
@@ -51762,11 +52309,14 @@ var lastLocal = null;
 var lastUnion = null;
 function paintOwn(local, union, active) {
   const sources = union ? Array.isArray(union.sources) ? union.sources : [] : app.roster.get().sources || [];
-  const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), sources), liveNames);
+  ownership.sync(sources);
+  const merged = dropDeadRows(annotateSources(mergeRoster(local, union, active), sources), liveNames);
+  const rows = withRemoteSessions(merged, remoteActivity?.lists());
   lastOwnRead = Date.now();
   app.roster.set((s) => {
     return mergeRosterState(s, { rows, sources, origin: "own", error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) });
   });
+  remoteActivity?.sync(remoteActivityCarriers(app.roster.get().rows).keys());
   trackActivity();
 }
 async function readRich(live = () => true) {
@@ -51895,28 +52445,92 @@ async function fetchOwnRoster({ foreground = false, live = () => true } = {}) {
     return false;
   }
 }
+var ownership = createOwnership({
+  onRetire: (connectionId) => remoteActivity?.drop(connectionId)
+});
+var remoteActivity = null;
+function startRemoteActivity() {
+  stopRemoteActivity();
+  remoteActivity = createRemoteActivity({
+    request: (bot, method, params, options) => {
+      if (!requestForBot) return Promise.reject(new Error("not started"));
+      return requestForBot(bot, method, params, options);
+    },
+    ownership,
+    onChange: () => {
+      const lists = remoteActivity?.lists();
+      app.roster.set((s) => {
+        const rows = withRemoteSessions(s.rows, lists);
+        return rows === s.rows ? s : mergeRosterState(s, { rows });
+      });
+      trackActivity();
+    },
+    onProfiles: (connectionId, profiles) => noteGatewayProfiles(connectionId, profiles),
+    setTimer
+  });
+}
+function stopRemoteActivity() {
+  remoteActivity?.stop();
+  remoteActivity = null;
+}
 var activity = createActivityTracker({
   selectedKey: () => controller ? controllerKey : "",
   isHidden: (bot) => Boolean(metaFor(bot)?.hidden),
   label: (bot) => String(metaFor(bot)?.title || bot.display_name || bot.title || bot.name),
-  markUnread: (sessionId, profile) => {
-    try {
-      ;
-      sdk.markSessionUnreadFinished?.(sessionId, profile);
-    } catch {
-    }
-  },
   toastsEnabled: () => readPluginStorage("hermes-bots", "activity-toasts", false) === true,
   notify: (n) => host2?.notify?.(n),
   // Activity on the open chat: a background re-read (coalesced, on its
   // connection's lane, never while hidden), not a direct read.
-  refreshOpen: () => requestOpenRefresh(),
-  // The bot on screen: read, never marked (#35).
-  readOpen: (bot) => ackBot(bot)
+  refreshOpen: () => requestOpenRefresh()
 });
 var activityPaused = false;
+function paneVisibleOrUnknown(paneId) {
+  try {
+    if (typeof host2?.paneVisibility !== "function") return true;
+    return host2.paneVisibility(paneId)?.get?.() !== false;
+  } catch {
+    return true;
+  }
+}
+function checkChatSeen(paneId, chatState) {
+  if (!app.enabled.get() || !chatState || chatState.checking) return;
+  const phase = chatState.phase;
+  if (phase !== "ready" && phase !== "no-chat") return;
+  const fresh = chatState.freshHistory;
+  if (!fresh) return;
+  const emptyChat = !fresh.nonEmpty && (phase === "no-chat" || !(Array.isArray(chatState.rows) && chatState.rows.length));
+  if (!fresh.nonEmpty && !emptyChat) return;
+  if (!isVisible() || !paneVisibleOrUnknown(paneId)) return;
+  const roster = app.roster.get();
+  const bot = freshBot(chatState.bot) || chatState.bot;
+  const { store: next, changed } = markBotSeen(
+    roster2.unread.get(),
+    bot,
+    roster.sources,
+    { visible: true, fresh: true, nonEmpty: Boolean(fresh.nonEmpty), emptyChat, sessionId: fresh.sessionId, count: fresh.count, lastAt: fresh.lastAt },
+    { ownership }
+  );
+  if (changed) {
+    roster2.unread.set(next);
+    storageSet2(UNREAD_STORE_KEY, next);
+  }
+}
+function recheckAllChatsSeen() {
+  if (controller) checkChatSeen(MAIN_PANE_ID, controller.get());
+  for (const [id, tab] of tabs) checkChatSeen(`plugin-workspace:${id}`, tab.controller.get());
+}
+function botIsUnread(bot, unread, sources) {
+  return isBotUnread(unread, bot, sources, ownership);
+}
 function trackActivity() {
   if (!app.enabled.get()) return;
+  const roster = app.roster.get();
+  const { store: nextUnread, changed } = observeRoster(roster2.unread.get(), roster.rows, roster.sources, { ownership });
+  if (changed) {
+    roster2.unread.set(nextUnread);
+    storageSet2(UNREAD_STORE_KEY, nextUnread);
+  }
+  recheckAllChatsSeen();
   if (stock?.isPeeking?.()) {
     activityPaused = true;
     return;
@@ -51925,22 +52539,7 @@ function trackActivity() {
     activityPaused = false;
     activity.reseed();
   }
-  activity.track(app.roster.get().rows);
-}
-function ackBot(bot) {
-  const id = botCanonicalSessionId(bot);
-  if (!id) return;
-  try {
-    ;
-    sdk.ackStoredSessionId?.(id, bot.name);
-  } catch {
-  }
-  const ids = [...new Set([id, bot?.canonical_session?.id].filter(Boolean).map(String))];
-  try {
-    ;
-    sdk.forgetSessionUnread?.(ids, bot.name);
-  } catch {
-  }
+  activity.track(roster.rows);
 }
 function refreshRoster() {
   const side = readSideData();
@@ -51948,10 +52547,12 @@ function refreshRoster() {
   const own2 = app.roster.get();
   if (cached2 && cached2.profiles.length && !(own2.origin === "own" && Math.max(own2.updatedAt, lastOwnRead) > cached2.updatedAt)) {
     const sources = cached2.sources.length ? cached2.sources : own2.sources;
+    ownership.sync(sources);
+    const rows = withRemoteSessions(dropDeadRows(annotateSources(cached2.profiles, sources), liveNames), remoteActivity?.lists());
     app.roster.set(
       (s) => mergeRosterState(s, {
         ...side,
-        rows: dropDeadRows(annotateSources(cached2.profiles, sources), liveNames),
+        rows,
         sources,
         origin: "stock",
         error: null,
@@ -51961,6 +52562,7 @@ function refreshRoster() {
   } else {
     app.roster.set((s) => mergeRosterState(s, side));
   }
+  remoteActivity?.sync(remoteActivityCarriers(app.roster.get().rows).keys());
   ownReadWanted = !cached2 || !cached2.fresh;
   noteVisibility();
   trackActivity();
@@ -51985,6 +52587,17 @@ function pumpPolls() {
   if (ownReadWanted) after(polls.run(lane, "roster", OWN_FETCH_MIN_MS, (live) => readRich(live), { resumeMinMs: OWN_FETCH_MIN_MS }));
   after(polls.run(UNION_LANE, "union", OWN_VERIFY_MS, (live) => readUnion(live), { global: { except: sshLanes() } }));
   after(polls.run(lane, "rooms", ROOM_LIST_MS, (live) => listRoomsNow(live, true)));
+  for (const [connectionId, carrier] of remoteActivityCarriers(app.roster.get().rows)) {
+    after(
+      polls.run(
+        connectionId,
+        "remote-activity",
+        REMOTE_ACTIVITY_MS,
+        (live) => remoteActivity ? remoteActivity.read(connectionId, carrier, live) : Promise.resolve(true),
+        { resumeMinMs: REMOTE_ACTIVITY_MS }
+      )
+    );
+  }
   for (const [chatLane, chats] of idleChatsByLane()) {
     after(polls.run(chatLane, "idle", IDLE_REFRESH_MS, (live) => idleRotation.pass(chatLane, chats, live, isVisible)));
   }
@@ -52174,8 +52787,13 @@ function disposeController({ hard = false } = {}) {
 function adopt(next, key) {
   controllerKey = key;
   controller = next;
-  offController = next.subscribe((state) => app.chat.set(state));
-  app.chat.set(next.get());
+  offController = next.subscribe((state2) => {
+    app.chat.set(state2);
+    checkChatSeen(MAIN_PANE_ID, state2);
+  });
+  const state = next.get();
+  app.chat.set(state);
+  checkChatSeen(MAIN_PANE_ID, state);
 }
 function holdsOtherChat(chat, storedId) {
   if (!storedId) return false;
@@ -52189,7 +52807,6 @@ function selectBot(bot, { openWorkspace = true, session = "" } = {}) {
   app.selectedKey.set(key);
   storageSet2("selected", key);
   resetNewLine(key);
-  ackBot(bot);
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot));
   else retitleWorkspace(chatTabTitle(bot));
   if (controllerKey === key && controller && !holdsOtherChat(controller, session)) {
@@ -52385,9 +53002,24 @@ function openBotInNewTab(bot) {
     return false;
   }
   const id = `${WORKSPACE_ID}-tab-${tabSeq += 1}`;
+  const paneId = `plugin-workspace:${id}`;
   const chat = createStore(null);
   const next = createChatController(bot, chatDeps(), { createIfMissing: true });
-  const off = next.subscribe((state) => chat.set(state));
+  const off = next.subscribe((state) => {
+    chat.set(state);
+    checkChatSeen(paneId, state);
+  });
+  let offVis = () => void 0;
+  try {
+    const atom = typeof host2?.paneVisibility === "function" ? host2.paneVisibility(paneId) : null;
+    if (atom && typeof atom.subscribe === "function") {
+      const unsub = atom.subscribe((shown) => {
+        if (shown) checkChatSeen(paneId, next.get());
+      });
+      if (typeof unsub === "function") offVis = unsub;
+    }
+  } catch {
+  }
   chat.set(next.get());
   const slot = { id, chat, controller: () => next, extra: true };
   const render = renderers.tab;
@@ -52401,11 +53033,12 @@ function openBotInNewTab(bot) {
       if (closed) return;
       closed = true;
       off();
+      offVis();
       next.retire();
       tabs.delete(id);
     }
   });
-  tabs.set(id, { controller: next, off, close });
+  tabs.set(id, { controller: next, off, offVis, close });
   void next.open();
   return true;
 }
@@ -52542,6 +53175,7 @@ function closeTabs() {
   for (const [id, tab] of [...tabs.entries()]) {
     tabs.delete(id);
     tab.off();
+    tab.offVis();
     tab.controller.dispose();
     try {
       tab.close();
@@ -52745,8 +53379,10 @@ function watchMainPane() {
   const pane = (id) => typeof host2?.paneVisibility === "function" ? host2.paneVisibility(id) : null;
   watch(pane("workspace"), (shown) => shown && scheduleClaim());
   watch(pane(MAIN_PANE_ID), (shown) => {
-    if (shown) hermesView = null;
-    else scheduleClaim();
+    if (shown) {
+      hermesView = null;
+      recheckAllChatsSeen();
+    } else scheduleClaim();
   });
   const focused = host2?.state?.focusedStoredSessionId;
   lastFocused = void 0;
@@ -52816,6 +53452,7 @@ var unwatchDocument = null;
 function onDocumentVisible() {
   noteVisibility();
   if (!app.enabled.get() || !isVisible()) return;
+  recheckAllChatsSeen();
   refreshRoster();
 }
 function watchDocumentVisibility() {
@@ -52872,6 +53509,7 @@ function enable() {
   stock.setOn(true);
   startObserver();
   watchVisibility();
+  startRemoteActivity();
   startRemoteAvatars();
   watchGatewayNames();
   refreshRoster();
@@ -52910,6 +53548,7 @@ function disable() {
   activityPaused = false;
   lastLocal = null;
   roomSeq += 1;
+  stopRemoteActivity();
   stopRemoteAvatars();
   unwatchGatewayNames();
   unwatchPane?.();
@@ -52992,6 +53631,7 @@ function toggleTopPin(bot) {
 }
 function start(ctx) {
   app.ctx = ctx;
+  roster2.unread.set(loadUnreadStore(storageGet(UNREAD_STORE_KEY, {})));
   app.pinnedBots.set(pinsFrom(storageGet(PINS_KEY, [])));
   startSections();
   startShowWork();
@@ -63287,7 +63927,7 @@ function footerPerson(name) {
 // src/ui/Unread.tsx
 import * as React27 from "react";
 import { jsx as jsx29 } from "react/jsx-runtime";
-var UNREAD_STATE_SELECTOR = '[role="status"][class*="ui-success"]';
+var UNREAD_STATE_SELECTOR = '[role="status"][data-gbo-unread="true"]';
 var UNREAD_DOT_SELECTOR = `.gbo-unread-dot ${UNREAD_STATE_SELECTOR}`;
 function StatusDot({ bot, className }) {
   const Dot = sdk.SessionStatusDot;
@@ -63296,7 +63936,10 @@ function StatusDot({ bot, className }) {
   return /* @__PURE__ */ jsx29("span", { className, children: React27.createElement(Dot, { storedSessionId: id }) });
 }
 function UnreadDot({ bot }) {
-  return /* @__PURE__ */ jsx29(StatusDot, { bot, className: "gbo-unread-dot" });
+  const unread = useStore(roster2.unread);
+  const roster = useStore(app.roster);
+  if (!botIsUnread(bot, unread, roster.sources)) return null;
+  return /* @__PURE__ */ jsx29("span", { className: "gbo-unread-dot", children: /* @__PURE__ */ jsx29("span", { role: "status", "data-gbo-unread": "true", className: "gbo-unread-dot-inner", "aria-label": "Unread" }) });
 }
 function RunningDot({ bot }) {
   return /* @__PURE__ */ jsx29(StatusDot, { bot, className: "gbo-run-dot" });

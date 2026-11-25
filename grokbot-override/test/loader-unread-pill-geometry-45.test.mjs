@@ -1,18 +1,7 @@
-// Loader-faithful (unread look), review of `unread-look` (each written
-// before its fix):
-// L-1a the roster shrinks (600 -> 200 px) and a jump puts an unread row
-//      entirely below the view: the pill says "below";
-// L-1b an observer entry computed before a scroll jump and delivered after
-//      it does not misplace the row: the pill points where the row is;
-// L-2  the pills are real buttons with directional names, and they come
-//      before the rows in tab (DOM) order;
-// L-4  selecting a row (an ordinary state change) re-registers nothing with
-//      the observer;
-// L-5  with Reduce Motion on, the jump is instant (one scroll, to the row,
-//      then focus there);
-// L2-1 at 150 % UI scale (CSS zoom), the pill lands the row in view;
-// L2-3 an avatar's contents being replaced re-measures no row.
-// Fakes: test/fixtures/pill-env.mjs.
+// Loader-faithful (unread look, Spec 106), pill geometry:
+// L-1a resize + jump; L-1b late observer entry; L-2 button semantics & tab order;
+// L-4 selection re-registers nothing; L-5 Reduce Motion; L2-1 150% UI scale;
+// L2-3 avatar swap re-measures nothing.
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -31,31 +20,39 @@ const row = (name, i) => ({
   route: { connectionId: 'local', mode: 'local', profile: name, targetProfile: name },
   canonical_session: { id: `${name}-root`, preview: `${name} preview`, last_active: 1762560000 - i }
 })
+const unreadEntry = name => ({
+  seenCount: 1,
+  seenTipId: `${name}-root`,
+  latestCount: 2,
+  latestTipId: `${name}-root`,
+  seenAt: 1762550000000,
+  latestAt: 1762560000000,
+  updatedAt: 1762560000000
+})
 
 test('loader-faithful unread look: pill geometry after resizes and late entries, button semantics and tab order, no re-registration, Reduce Motion', { skip: !READY && 'dev dependencies not installed' }, async t => {
-  const unread = new Set(['bot07-root'])
-  const listeners = new Set()
-  const emit = () => listeners.forEach(fn => fn())
   const view = { height: 600 }
   const motion = { reduce: false }
   let io = null
   let ro = null
-  const { panes, mount, errors, React } = await bootPlugin(t, {
+  const { panes, mount, errors, internals } = await bootPlugin(t, {
+    smoke: true,
     rows: NAMES.map(row),
-    tweak: sdk => {
+    storage: { unreadStore: { 'local::bot07': unreadEntry('bot07') } },
+    tweak: () => {
       io = installObserver()
       ro = installResizeObserver()
-      sdk.markSessionUnreadFinished = id => (unread.add(id), emit())
-      sdk.ackStoredSessionId = id => (unread.delete(id), emit())
-      sdk.SessionStatusDot = props => globalThis.__fakeDot(props)
     }
   })
-  globalThis.__fakeDot = ({ storedSessionId }) => {
-    const on = React.useSyncExternalStore(fn => (listeners.add(fn), () => listeners.delete(fn)), () => unread.has(storedSessionId))
-    return React.createElement('span', { className: 'flex' }, on ? React.createElement('span', { role: 'status', className: 'size-1.5 rounded-full bg-(--ui-success)' }) : React.createElement('span', { 'aria-hidden': 'true', className: 'size-1 rounded-full' }))
+  const setUnread = (names, on) => {
+    const cur = { ...internals.roster2.unread.get() }
+    for (const name of Array.isArray(names) ? names : [names]) {
+      if (on) cur[`local::${name}`] = unreadEntry(name)
+      else cur[`local::${name}`] = { ...unreadEntry(name), seenCount: 2, seenAt: 1762560000000 }
+    }
+    internals.roster2.unread.set(cur)
   }
   t.after(() => {
-    delete globalThis.__fakeDot
     delete globalThis.IntersectionObserver
     delete globalThis.ResizeObserver
   })
@@ -74,13 +71,11 @@ test('loader-faithful unread look: pill geometry after resizes and late entries,
 
   await waitFor(() => rosterEl.querySelectorAll('.gbo-row-wrap').length === NAMES.length, 'every row')
   await waitFor(() => io.observed().includes(rowEl('Bot 07')), 'the unread row observed')
-  // Bot 07 sits at y 420-480: in the 600 px view.
   io.report()
   await settle()
   assert.equal(sides(), '-/-')
 
-  // L-1a: jump far down (Bot 07 above, a crossing), shrink the roster to
-  // 200 px, then jump so Bot 07 sits at y 250-310: entirely below.
+  // L-1a: jump far down (Bot 07 above), shrink roster to 200 px, jump so Bot 07 is below.
   scrollTo(900)
   io.report()
   await waitFor(() => pill('up'), 'above after the jump')
@@ -98,24 +93,19 @@ test('loader-faithful unread look: pill geometry after resizes and late entries,
   scrollTo(0)
   io.report()
   await settle()
-  unread.delete('bot07-root') // Bot 12 alone, so the pill can only be its
-  unread.add('bot12-root') // y 720-780
-  emit()
+  setUnread('bot07', false)
+  setUnread('bot12', true)
   await waitFor(() => io.observed().includes(rowEl('Bot 12')), 'Bot 12 observed')
-  io.report({ before: () => (scroller().scrollTop = 400) }) // computed at 0, delivered at 400
-  scrollTo(900) // Bot 12 at y -180..-120: above, no crossing since the entry
+  io.report({ before: () => (scroller().scrollTop = 400) })
+  scrollTo(900)
   io.report()
   await settle()
   assert.ok(pill('up'), `L-1b: the late entry did not misplace Bot 12 (${sides()})`)
-  unread.delete('bot12-root')
-  emit()
+  setUnread('bot12', false)
   await settle()
 
   // L-2: one pill each way: real buttons, directional names, before the rows.
-  unread.add('bot07-root')
-  unread.add('bot00-root') // y 0-60
-  unread.add('bot19-root') // y 1140-1200
-  emit()
+  setUnread(['bot07', 'bot00', 'bot19'], true)
   await waitFor(() => io.observed().length === 3, 'three unread rows observed')
   scrollTo(600)
   io.report()
@@ -139,9 +129,7 @@ test('loader-faithful unread look: pill geometry after resizes and late entries,
   await settle()
   assert.deepEqual(io.calls(), before, 'L-4: no observe / unobserve on a selection')
 
-  // L-5: Reduce Motion on: activation scrolls once, instantly, to the
-  // nearest unread row below (Bot 19 at 1140: centred, 1140 - 120), and
-  // moves focus there.
+  // L-5: Reduce Motion on.
   const jumps = []
   scroller().scrollTo = options => {
     jumps.push(options)
@@ -161,8 +149,7 @@ test('loader-faithful unread look: pill geometry after resizes and late entries,
   assert.equal(jumps.length, 2)
   assert.deepEqual(jumps[1], { top: 1140 - (300 - ROW_H) / 2, behavior: 'smooth' }, 'smooth otherwise')
 
-  // L2-3: an avatar's contents are replaced (a picture loads): the rows did
-  // not move, so no unread row is measured again.
+  // L2-3: an avatar swap re-measures nothing.
   const proto = window.Element.prototype
   const layoutRead = proto.getBoundingClientRect
   let reads = 0
@@ -178,18 +165,14 @@ test('loader-faithful unread look: pill geometry after resizes and late entries,
   proto.getBoundingClientRect = layoutRead
   assert.equal(reads, 0, `L2-3: an avatar swap re-measures nothing (${reads} rect reads)`)
 
-  // L2-1: at 150 % UI scale (CSS zoom) the pill scrolls to the row in the
-  // scroller's own units, and the focused row ends up in view.
+  // L2-1: at 150 % UI scale (CSS zoom) the pill scrolls to the row in CSS px.
   view.zoom = 1.5
   ro.resize()
   scrollTo(0)
   io.report()
   await settle()
-  unread.delete('bot00-root')
-  unread.delete('bot07-root')
-  unread.delete('bot19-root')
-  unread.add('bot15-root') // CSS y 900-960, the only unread row
-  emit()
+  setUnread(['bot00', 'bot07', 'bot19'], false)
+  setUnread('bot15', true)
   await waitFor(() => io.observed().length === 1 && io.observed()[0] === rowEl('Bot 15'), 'only Bot 15 watched')
   await waitFor(() => pill('down'), 'the pill at 150 %')
   jumps.length = 0

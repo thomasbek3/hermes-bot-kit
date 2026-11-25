@@ -51,12 +51,16 @@ test('unread look: the pill\'s white text reads at 4.5:1 or more, hovered too; t
   assert.ok(onWhite(pill) >= 4.5, `pill ${pill}: ${onWhite(pill).toFixed(2)}:1`)
   assert.ok(onWhite(hover) >= 4.5, `hover ${hover}: ${onWhite(hover).toFixed(2)}:1`)
   assert.ok(!/\.gbo-unread-pill:hover \{[^}]*filter/.test(css), 'no brightening filter on hover')
-  assert.match(css, /\.gbo-unread-dot \[role="status"\]\[class\*="ui-success"\] \{ background: var\(--color-bot-blue\); \}/)
+  assert.match(css, /\.gbo-unread-dot \[role="status"\]\[data-gbo-unread="true"\] \{ background: var\(--color-bot-blue\); \}/)
 })
 
-test('unread look: the unread dot draws only unread and needs-input; the running cue only working, stalled and background', () => {
-  assert.match(css, /\.gbo-unread-dot \{ display: none;/)
-  assert.match(css, /\.gbo-unread-dot:has\(\[role="status"\]\[class\*="ui-success"\]\), \.gbo-unread-dot:has\(\[role="status"\]\[class\*="amber"\]\) \{ display: inline-flex; \}/)
+test('unread look: the unread dot draws only the plugin dot; the running cue only working, stalled, background and needs-input', () => {
+  assert.match(css, /\.gbo-unread-dot \{ display: inline-flex;/)
+  assert.match(css, /\.gbo-unread-dot \[role="status"\]\[data-gbo-unread="true"\] \{ background: var\(--color-bot-blue\); \}/)
   assert.match(css, /\.gbo-run-dot \{ display: none;/)
-  assert.match(css, /\.gbo-run-dot:has\(\[role="status"\]\[class\*="ui-accent"\]\), \.gbo-run-dot:has\(\[role="status"\]\[class\*="ui-text-tertiary"\]\) \{ display: inline-flex; \}/)
+  // Needs-input (Hermes's amber) moved from the unread slot to the avatar cue
+  // when the unread slot became the plugin's own dot (spec 106); Hermes's
+  // native unread state (ui-success) never draws anywhere in a bot row.
+  assert.match(css, /\.gbo-run-dot:has\(\[role="status"\]\[class\*="ui-accent"\]\), \.gbo-run-dot:has\(\[role="status"\]\[class\*="ui-text-tertiary"\]\), \.gbo-run-dot:has\(\[role="status"\]\[class\*="amber"\]\) \{ display: inline-flex; \}/)
+  assert.ok(!/gbo-run-dot:has\(\[role="status"\]\[class\*="ui-success"\]\)/.test(css), 'native unread never drawn')
 })
