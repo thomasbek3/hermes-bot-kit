@@ -46410,15 +46410,18 @@ function createActivityTracker(deps) {
   const lastToasted = /* @__PURE__ */ new Map();
   let seeded = false;
   function track(roster) {
+    const list = Array.isArray(roster) ? roster : [];
+    if (!list.length) return;
     const seeding = !seeded;
     seeded = true;
-    for (const bot of Array.isArray(roster) ? roster : []) {
+    for (const bot of list) {
       const key = rowKey(bot);
       const activity2 = botActivitySession(bot);
       const ts = Number(activity2?.last_active || 0);
-      const prev = watermarks.get(key) || 0;
+      const seen = watermarks.has(key);
+      const prev = seen ? watermarks.get(key) : 0;
       watermarks.set(key, Math.max(prev, ts));
-      if (seeding || ts <= prev) {
+      if (seeding || !seen || ts <= prev) {
         lastToasted.set(key, String(activity2?.preview || "").trim());
         continue;
       }
@@ -52903,6 +52906,8 @@ function disable() {
   polls.reset();
   idleRotation.reset();
   supersedeReads();
+  activity.reseed();
+  activityPaused = false;
   lastLocal = null;
   roomSeq += 1;
   stopRemoteAvatars();
