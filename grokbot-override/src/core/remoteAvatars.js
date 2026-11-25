@@ -225,7 +225,7 @@ export function createRemoteAvatars({ request, hasOwnImage = () => false, onChan
 
 /** The row whose route carries a connection's profiles.list: its `default`
  *  profile when listed, else the first by name (a stable choice). */
-function carrierFor(bots) {
+export function carrierFor(bots) {
   const sorted = [...bots].sort((a, b) => String(a.name).localeCompare(String(b.name)))
   return sorted.find(bot => (bot.targetProfile || bot.name) === 'default') || sorted[0]
 }

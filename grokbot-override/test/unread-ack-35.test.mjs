@@ -1,12 +1,6 @@
-// PARITY R16 (#35): opening a bot clears its unread dot. Hermes's unread
-// store has two layers (store/session-unread.ts): the persisted per-profile
-// markers, and the transient $unreadFinishedSessionIds the SessionStatusDot
-// paints from. markSessionUnreadFinished writes both; ackStoredSessionId
-// retires only the persisted marker (stock leaves the transient dot to core's
-// selection path, store/session.ts setSelectedStoredSessionId ->
-// markSessionRead, which the override's own chat never takes);
-// forgetSessionUnread drops both. The fake below keeps the two layers apart,
-// as core does, so an ack alone leaves the dot lit.
+// PARITY R16 (#35, Spec 106): opening an unread bot clears the plugin's own
+// unread dot once fresh history is presented in a visible pane, without
+// touching Hermes's native bare-id unread store.
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -14,42 +8,6 @@ import test from 'node:test'
 import { createActivityTracker } from '../src/core/activity.js'
 import { rowKey } from '../src/core/roster.js'
 import { bootPlugin, LOCAL, READY, waitFor } from './loader-boot.mjs'
-
-/** Core's unread store, two layers. */
-function fakeStore() {
-  const markers = new Map() // profile -> Set(durable id)
-  const transient = new Set()
-  const listeners = new Set()
-  const emit = () => listeners.forEach(fn => fn())
-  const calls = []
-  return {
-    calls,
-    listeners,
-    transient,
-    markers,
-    mark(id, profile) {
-      calls.push(['mark', id, profile])
-      transient.add(id)
-      if (!markers.has(profile)) markers.set(profile, new Set())
-      markers.get(profile).add(id)
-      emit()
-    },
-    ack(id, profile) {
-      calls.push(['ack', id, profile])
-      markers.get(profile)?.delete(id)
-      emit()
-    },
-    forget(ids, profile) {
-      calls.push(['forget', [...ids], profile])
-      for (const id of ids) {
-        if (!id) continue
-        transient.delete(id)
-        markers.get(profile)?.delete(id)
-      }
-      emit()
-    }
-  }
-}
 
 test('R16 #35 the open bot is read, not marked: the tracker reads it on moved activity', () => {
   const read = []
@@ -67,47 +25,41 @@ test('R16 #35 the open bot is read, not marked: the tracker reads it on moved ac
   assert.deepEqual(read, ['a'])
 })
 
-test('loader-faithful R16 #35: clicking an unread row clears the dot core paints (transient layer), not only the persisted marker', { skip: !READY && 'dev dependencies not installed' }, async t => {
-  const store = fakeStore()
-  const rows = [{ ...LOCAL, canonical_session: { ...LOCAL.canonical_session, resolved_id: 's-tip' } }]
-  const { panes, mount, errors, React } = await bootPlugin(t, {
+test('loader-faithful R16 #35 (Spec 106): clicking an unread row clears the plugin dot on fresh history, never touches native store', { skip: !READY && 'dev dependencies not installed' }, async t => {
+  const nativeCalls = []
+  const rows = [{ ...LOCAL, canonical_session: { ...LOCAL.canonical_session, resolved_id: 's-tip', message_count: 4 } }]
+  const { panes, mount, errors } = await bootPlugin(t, {
     rows,
     tweak: sdk => {
-      sdk.markSessionUnreadFinished = (id, profile) => store.mark(id, profile)
-      sdk.ackStoredSessionId = (id, profile) => store.ack(id, profile)
-      sdk.forgetSessionUnread = (ids, profile) => store.forget(ids, profile)
-      sdk.SessionStatusDot = props => globalThis.__ackDot(props)
+      sdk.markSessionUnreadFinished = (id, profile) => nativeCalls.push(['mark', id, profile])
+      sdk.ackStoredSessionId = (id, profile) => nativeCalls.push(['ack', id, profile])
+      sdk.forgetSessionUnread = (ids, profile) => nativeCalls.push(['forget', [...ids], profile])
     }
   })
-  globalThis.__ackDot = ({ storedSessionId }) => {
-    const on = React.useSyncExternalStore(fn => (store.listeners.add(fn), () => store.listeners.delete(fn)), () => store.transient.has(storedSessionId))
-    return React.createElement('span', { className: 'flex' }, on ? React.createElement('span', { role: 'status', className: 'size-1.5 rounded-full bg-(--ui-success)' }) : React.createElement('span', { 'aria-hidden': 'true', className: 'size-1 rounded-full' }))
-  }
-  t.after(() => delete globalThis.__ackDot)
   const rosterEl = mount(panes.find(p => p.id === 'roster').render)
   const rowOf = name => [...rosterEl.querySelectorAll('button.gbo-row')].find(b => b.textContent.includes(name))
-  const dotOf = el => el?.querySelector('.gbo-unread-dot [role="status"]')
+  const dotOf = el => el?.querySelector('.gbo-unread-dot [role="status"][data-gbo-unread="true"]')
   await waitFor(() => rowOf('Security'), 'the row')
 
-  // Activity while another chat (none) is on screen: marked on the tip.
-  rows[0] = { ...rows[0], canonical_session: { ...rows[0].canonical_session, last_active: rows[0].canonical_session.last_active + 60, preview: 'Message from cron: done' } }
+  // Activity while another chat (none) is on screen: plugin dot lights up.
+  rows[0] = { ...rows[0], canonical_session: { ...rows[0].canonical_session, last_active: rows[0].canonical_session.last_active + 60, message_count: 5, preview: 'Message from cron: done' } }
   await waitFor(() => dotOf(rowOf('Security')), 'the dot after the next roster refresh', 6000)
-  assert.deepEqual(store.calls.find(c => c[0] === 'mark'), ['mark', 's-tip', 'security'])
+  assert.deepEqual(nativeCalls, [], 'native unread store is never touched')
 
-  // Opening it: the persisted marker AND the painted (transient) dot go.
+  // Opening it clears the dot, always: the page shows 4 rows while the roster
+  // counts 5 (roster and history count differently: folded rows, tool rows),
+  // and a count "coverage" test would leave the dot lit forever (spec 106).
   rowOf('Security').click()
   await waitFor(() => !dotOf(rowOf('Security')), 'the dot cleared on open')
-  assert.ok(!store.transient.has('s-tip'), 'transient dot retired')
-  assert.ok(!store.markers.get('security')?.has('s-tip'), 'persisted marker retired')
-  const forget = store.calls.find(c => c[0] === 'forget')
-  assert.ok(forget && forget[1].includes('s-tip') && forget[1].includes('s-root') && forget[2] === 'security', 'forgets the tip and root under the bot\'s profile')
 
-  // Activity on the bot whose chat is on screen: never re-marked, read again.
-  const marksBefore = store.calls.filter(c => c[0] === 'mark').length
-  const forgetsBefore = store.calls.filter(c => c[0] === 'forget').length
-  rows[0] = { ...rows[0], canonical_session: { ...rows[0].canonical_session, last_active: rows[0].canonical_session.last_active + 60, preview: 'next reply' } }
-  await waitFor(() => store.calls.filter(c => c[0] === 'forget').length > forgetsBefore, 'the open bot read on its next activity', 6000)
-  assert.equal(store.calls.filter(c => c[0] === 'mark').length, marksBefore, 'not re-marked while on screen')
-  assert.ok(!dotOf(rowOf('Security')), 'no dot')
+  // The next roster poll reports the same activity: the dot stays off.
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  assert.ok(!dotOf(rowOf('Security')), 'not re-lit by the same activity')
+
+  // A new report on this bot while its chat is open and visible is read at once: no dot.
+  rows[0] = { ...rows[0], canonical_session: { ...rows[0].canonical_session, last_active: rows[0].canonical_session.last_active + 60, message_count: 6, preview: 'next report' } }
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  assert.ok(!dotOf(rowOf('Security')), 'activity on the open, visible chat is read, not marked')
+  assert.deepEqual(nativeCalls, [])
   assert.deepEqual(errors.map(e => `${e.kind}: ${e.error?.message}`), [])
 })

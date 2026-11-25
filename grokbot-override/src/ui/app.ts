@@ -40,7 +40,10 @@ import {
   toggleSectionCollapsed
 } from '../core/sections.js'
 import { LEGACY_SHOW_WORK_KEY, LEGACY_SHOW_WORK_PLUGIN, loadShowWork, SHOW_WORK_KEY } from '../core/workRows.js'
-import { botCanonicalSessionId, createActivityTracker } from '../core/activity.js'
+import { createActivityTracker } from '../core/activity.js'
+import { createOwnership } from '../core/ownership.js'
+import { createRemoteActivity, REMOTE_ACTIVITY_MS, remoteActivityCarriers, withRemoteSessions } from '../core/remoteActivity.js'
+import { isBotUnread, loadUnreadStore, markBotSeen, observeRoster, UNREAD_STORE_KEY } from '../core/unreadStore.js'
 import { looksUnsupported } from '../core/outcomes.js'
 import { resetMarker, SEEN_KEY, seenFrom, stepMarker } from '../core/newMarker.js'
 import { createRoom, createRoomController, createRoomRequester, listRooms, ROOM_LIST_MS, roomRoute } from '../core/rooms.js'
@@ -281,12 +284,15 @@ let lastUnion: any = null
 function paintOwn(local: any, union: any, active: null | string) {
   // No union answer yet: keep the sources already known (never forget them).
   const sources = union ? (Array.isArray(union.sources) ? union.sources : []) : app.roster.get().sources || []
-  const rows = dropDeadRows(annotateSources(mergeRoster(local, union, active), sources), liveNames)
+  ownership.sync(sources)
+  const merged = dropDeadRows(annotateSources(mergeRoster(local, union, active), sources), liveNames)
+  const rows = withRemoteSessions(merged, remoteActivity?.lists())
   lastOwnRead = Date.now()
   app.roster.set(s => {
     // updatedAt moves only with a real change; lastOwnRead says how fresh it is.
     return mergeRosterState(s, { rows, sources, origin: 'own', error: null, updatedAt: lastOwnRead, protocolInjected: Boolean(local?.bot_mode_protocol) })
   })
+  remoteActivity?.sync(remoteActivityCarriers(app.roster.get().rows).keys())
   trackActivity()
 }
 
@@ -446,35 +452,115 @@ async function fetchOwnRoster({ foreground = false, live = () => true }: { foreg
   }
 }
 
-// ── unread marks and activity toasts (PARITY R16, R17) ───────────────────
-// Bot Mode runs this tracker in its own roster pane, which is not on screen
-// while the override is; so the override runs the same one (core/
-// activity.js) on its own roster refresh. While stock Bot Mode is fronted
-// (a peek) the override pauses and re-seeds afterwards, so the two never
-// mark or toast the same activity twice.
+// ── unread own store + remote activity + toasts (Spec 106, PARITY R17) ───
+// The plugin keeps its own unread store in plugin storage (`unreadStore`,
+// core/unreadStore.js) driving every bot row (local and remote) and the "More
+// unreads" pill. Hermes's native bare-id unread store is never read or written
+// for bot rows. `activity` (core/activity.js) handles inbound activity toasts
+// and open-chat refresh only.
+const ownership = createOwnership({
+  onRetire: (connectionId: string) => remoteActivity?.drop(connectionId)
+})
+let remoteActivity: null | ReturnType<typeof createRemoteActivity> = null
+
+function startRemoteActivity() {
+  stopRemoteActivity()
+  remoteActivity = createRemoteActivity({
+    request: (bot: any, method: string, params: any, options: any) => {
+      if (!requestForBot) return Promise.reject(new Error('not started'))
+      return requestForBot(bot, method, params, options)
+    },
+    ownership,
+    onChange: () => {
+      const lists = remoteActivity?.lists()
+      app.roster.set(s => {
+        const rows = withRemoteSessions(s.rows, lists)
+        return rows === s.rows ? s : mergeRosterState(s, { rows })
+      })
+      trackActivity()
+    },
+    onProfiles: (connectionId: string, profiles: any[]) => noteGatewayProfiles(connectionId, profiles),
+    setTimer
+  })
+}
+
+function stopRemoteActivity() {
+  remoteActivity?.stop()
+  remoteActivity = null
+}
+
 const activity = createActivityTracker({
   selectedKey: () => (controller ? controllerKey : ''),
   isHidden: (bot: any) => Boolean(metaFor(bot)?.hidden),
   label: (bot: any) => String(metaFor(bot)?.title || bot.display_name || bot.title || bot.name),
-  markUnread: (sessionId: string, profile: string) => {
-    try {
-      ;(sdk as any).markSessionUnreadFinished?.(sessionId, profile)
-    } catch {
-      /* older desktop */
-    }
-  },
   toastsEnabled: () => readPluginStorage<boolean>('hermes-bots', 'activity-toasts', false) === true,
   notify: (n: any) => host?.notify?.(n),
   // Activity on the open chat: a background re-read (coalesced, on its
   // connection's lane, never while hidden), not a direct read.
-  refreshOpen: () => requestOpenRefresh(),
-  // The bot on screen: read, never marked (#35).
-  readOpen: (bot: any) => ackBot(bot)
+  refreshOpen: () => requestOpenRefresh()
 })
 let activityPaused = false
 
+function paneVisibleOrUnknown(paneId: string): boolean {
+  try {
+    if (typeof host?.paneVisibility !== 'function') return true
+    return host.paneVisibility(paneId)?.get?.() !== false
+  } catch {
+    return true
+  }
+}
+
+/** Opening a bot reads it (Spec 106): its chat is in a VISIBLE pane and a
+ *  fresh read of it is on screen (not only the remembered seed) -> seen =
+ *  that bot's latest Bot Chat activity (spec 106b). A fresh read
+ *  that found no messages counts only while nothing cached is on screen, and
+ *  "no Bot Chat yet" counts too: the user opened the bot and there is nothing
+ *  else to read in it. */
+function checkChatSeen(paneId: string, chatState: any) {
+  if (!app.enabled.get() || !chatState || chatState.checking) return
+  const phase = chatState.phase
+  if (phase !== 'ready' && phase !== 'no-chat') return
+  const fresh = chatState.freshHistory
+  if (!fresh) return
+  const emptyChat = !fresh.nonEmpty && (phase === 'no-chat' || !(Array.isArray(chatState.rows) && chatState.rows.length))
+  if (!fresh.nonEmpty && !emptyChat) return
+  if (!isVisible() || !paneVisibleOrUnknown(paneId)) return
+  const roster = app.roster.get()
+  const bot = freshBot(chatState.bot) || chatState.bot
+  const { store: next, changed } = markBotSeen(
+    roster2.unread.get(),
+    bot,
+    roster.sources,
+    { visible: true, fresh: true, nonEmpty: Boolean(fresh.nonEmpty), emptyChat, sessionId: fresh.sessionId, count: fresh.count, lastAt: fresh.lastAt },
+    { ownership }
+  )
+  if (changed) {
+    roster2.unread.set(next)
+    storageSet(UNREAD_STORE_KEY, next)
+  }
+}
+
+function recheckAllChatsSeen() {
+  if (controller) checkChatSeen(MAIN_PANE_ID, controller.get())
+  for (const [id, tab] of tabs) checkChatSeen(`plugin-workspace:${id}`, tab.controller.get())
+}
+
+/** Whether a bot row paints the plugin's unread dot: the same key resolution
+ *  (sources + the ownership table) the observer and the seen mark use, so a
+ *  dot is never painted from (or looked up under) a different key. */
+export function botIsUnread(bot: any, unread: Record<string, any>, sources: any[]): boolean {
+  return isBotUnread(unread, bot, sources, ownership)
+}
+
 function trackActivity() {
   if (!app.enabled.get()) return
+  const roster = app.roster.get()
+  const { store: nextUnread, changed } = observeRoster(roster2.unread.get(), roster.rows, roster.sources, { ownership })
+  if (changed) {
+    roster2.unread.set(nextUnread)
+    storageSet(UNREAD_STORE_KEY, nextUnread)
+  }
+  recheckAllChatsSeen()
   if (stock?.isPeeking?.()) {
     activityPaused = true
     return
@@ -483,33 +569,7 @@ function trackActivity() {
     activityPaused = false
     activity.reseed()
   }
-  activity.track(app.roster.get().rows)
-}
-
-/** Opening a bot reads its activity. Core's unread store has two layers
- *  (store/session-unread.ts): the persisted per-profile marker, which
- *  `ackStoredSessionId` retires (roster-actions.ts:286, as stock), and the
- *  transient $unreadFinishedSessionIds the SessionStatusDot paints, which
- *  stock leaves to core's selection path (store/session.ts
- *  setSelectedStoredSessionId -> markSessionRead) once the Bot Chat lands in
- *  core's chat pane. The override's chat is its own, so that path never runs
- *  and the ack alone leaves the dot lit (#35): `forgetSessionUnread` drops the
- *  transient dot (and marker) for the Bot Chat's ids, under the bot's profile
- *  as the mark was filed. */
-function ackBot(bot: any) {
-  const id = botCanonicalSessionId(bot)
-  if (!id) return
-  try {
-    ;(sdk as any).ackStoredSessionId?.(id, bot.name)
-  } catch {
-    /* older desktop */
-  }
-  const ids = [...new Set([id, bot?.canonical_session?.id].filter(Boolean).map(String))]
-  try {
-    ;(sdk as any).forgetSessionUnread?.(ids, bot.name)
-  } catch {
-    /* older desktop */
-  }
+  activity.track(roster.rows)
 }
 
 export function refreshRoster() {
@@ -523,10 +583,12 @@ export function refreshRoster() {
     // (data.ts keeps its rows painted as unreachable and the pane falls back
     // to its remembered sources): annotate with the last sources known here.
     const sources = cached.sources.length ? cached.sources : own.sources
+    ownership.sync(sources)
+    const rows = withRemoteSessions(dropDeadRows(annotateSources(cached.profiles, sources), liveNames), remoteActivity?.lists())
     app.roster.set(s =>
       mergeRosterState(s, {
         ...side,
-        rows: dropDeadRows(annotateSources(cached.profiles, sources), liveNames),
+        rows,
         sources,
         origin: 'stock',
         error: null,
@@ -536,7 +598,8 @@ export function refreshRoster() {
   } else {
     app.roster.set(s => mergeRosterState(s, side))
   }
-  // Local bookkeeping (unread marks, toasts) runs even while hidden; the
+  remoteActivity?.sync(remoteActivityCarriers(app.roster.get().rows).keys())
+  // Local bookkeeping (own unread store, toasts) runs even while hidden; the
   // network polls below do not.
   ownReadWanted = !cached || !cached.fresh
   noteVisibility()
@@ -581,6 +644,17 @@ function pumpPolls() {
   if (ownReadWanted) after(polls.run(lane, 'roster', OWN_FETCH_MIN_MS, live => readRich(live), { resumeMinMs: OWN_FETCH_MIN_MS }))
   after(polls.run(UNION_LANE, 'union', OWN_VERIFY_MS, live => readUnion(live), { global: { except: sshLanes() } }))
   after(polls.run(lane, 'rooms', ROOM_LIST_MS, live => listRoomsNow(live, true)))
+  for (const [connectionId, carrier] of remoteActivityCarriers(app.roster.get().rows)) {
+    after(
+      polls.run(
+        connectionId,
+        'remote-activity',
+        REMOTE_ACTIVITY_MS,
+        live => (remoteActivity ? remoteActivity.read(connectionId, carrier, live) : Promise.resolve(true)),
+        { resumeMinMs: REMOTE_ACTIVITY_MS }
+      )
+    )
+  }
   for (const [chatLane, chats] of idleChatsByLane()) {
     after(polls.run(chatLane, 'idle', IDLE_REFRESH_MS, live => idleRotation.pass(chatLane, chats, live, isVisible)))
   }
@@ -839,8 +913,13 @@ function disposeController({ hard = false } = {}) {
 function adopt(next: any, key: string) {
   controllerKey = key
   controller = next
-  offController = next.subscribe((state: any) => app.chat.set(state))
-  app.chat.set(next.get())
+  offController = next.subscribe((state: any) => {
+    app.chat.set(state)
+    checkChatSeen(MAIN_PANE_ID, state)
+  })
+  const state = next.get()
+  app.chat.set(state)
+  checkChatSeen(MAIN_PANE_ID, state)
 }
 
 /** Whether a chat controller holds another Bot Chat than `storedId` (a
@@ -862,7 +941,6 @@ export function selectBot(bot: any, { openWorkspace = true, session = '' }: { op
   app.selectedKey.set(key)
   storageSet('selected', key)
   resetNewLine(key)
-  ackBot(bot)
   if (openWorkspace) ensureWorkspace(chatTabTitle(bot))
   else retitleWorkspace(chatTabTitle(bot))
   if (controllerKey === key && controller && !holdsOtherChat(controller, session)) {
@@ -1127,7 +1205,7 @@ export interface ChatSlot {
 
 export const mainSlot: ChatSlot = { id: 'main', chat: app.chat, controller: () => controller, extra: false }
 
-const tabs = new Map<string, { controller: any; off: () => void; close: () => void }>()
+const tabs = new Map<string, { controller: any; off: () => void; offVis: () => void; close: () => void }>()
 let tabSeq = 0
 
 export function openBotInNewTab(bot: any): boolean {
@@ -1136,9 +1214,25 @@ export function openBotInNewTab(bot: any): boolean {
     return false
   }
   const id = `${WORKSPACE_ID}-tab-${(tabSeq += 1)}`
+  const paneId = `plugin-workspace:${id}`
   const chat = createStore<any>(null)
   const next = createChatController(bot, chatDeps(), { createIfMissing: true })
-  const off = next.subscribe((state: any) => chat.set(state))
+  const off = next.subscribe((state: any) => {
+    chat.set(state)
+    checkChatSeen(paneId, state)
+  })
+  let offVis = () => undefined
+  try {
+    const atom = typeof host?.paneVisibility === 'function' ? host.paneVisibility(paneId) : null
+    if (atom && typeof atom.subscribe === 'function') {
+      const unsub = atom.subscribe((shown: boolean) => {
+        if (shown) checkChatSeen(paneId, next.get())
+      })
+      if (typeof unsub === 'function') offVis = unsub
+    }
+  } catch {
+    /* older desktop */
+  }
   chat.set(next.get())
   const slot: ChatSlot = { id, chat, controller: () => next, extra: true }
   const render = renderers.tab
@@ -1152,11 +1246,12 @@ export function openBotInNewTab(bot: any): boolean {
       if (closed) return
       closed = true
       off()
+      offVis()
       next.retire()
       tabs.delete(id)
     }
   })
-  tabs.set(id, { controller: next, off, close })
+  tabs.set(id, { controller: next, off, offVis, close })
   void next.open()
   return true
 }
@@ -1324,6 +1419,7 @@ function closeTabs() {
   for (const [id, tab] of [...tabs.entries()]) {
     tabs.delete(id)
     tab.off()
+    tab.offVis()
     tab.controller.dispose()
     try {
       tab.close()
@@ -1607,8 +1703,10 @@ function watchMainPane() {
   watch(pane('workspace'), (shown: boolean) => shown && scheduleClaim())
   watch(pane(MAIN_PANE_ID), (shown: boolean) => {
     // Back on the override's tab: it owns the main pane again.
-    if (shown) hermesView = null
-    else scheduleClaim()
+    if (shown) {
+      hermesView = null
+      recheckAllChatsSeen()
+    } else scheduleClaim()
   })
   // A restored or opened session (a session tile fronted): routed (T3).
   const focused = host?.state?.focusedStoredSessionId
@@ -1699,6 +1797,7 @@ let unwatchDocument: null | (() => void) = null
 export function onDocumentVisible() {
   noteVisibility()
   if (!app.enabled.get() || !isVisible()) return
+  recheckAllChatsSeen()
   refreshRoster()
 }
 
@@ -1770,6 +1869,7 @@ function enable() {
   stock.setOn(true)
   startObserver()
   watchVisibility()
+  startRemoteActivity()
   startRemoteAvatars()
   watchGatewayNames()
   refreshRoster()
@@ -1816,6 +1916,7 @@ function disable() {
   activityPaused = false
   lastLocal = null
   roomSeq += 1
+  stopRemoteActivity()
   stopRemoteAvatars()
   unwatchGatewayNames()
   unwatchPane?.()
@@ -1922,6 +2023,7 @@ export function toggleTopPin(bot: any): boolean {
 
 export function start(ctx: any) {
   app.ctx = ctx
+  roster2.unread.set(loadUnreadStore(storageGet(UNREAD_STORE_KEY, {})))
   app.pinnedBots.set(pinsFrom(storageGet(PINS_KEY, [])))
   startSections()
   startShowWork()

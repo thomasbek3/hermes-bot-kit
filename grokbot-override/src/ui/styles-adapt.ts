@@ -103,22 +103,19 @@ const ADAPT_SRC = /* css */ `
 .gbo-row-line > svg, .gbo-row-line .gbo-attn, .gbo-row-line .gbo-row-flag { width: 12px; height: 12px; flex: none; color: var(--color-text-tertiary); }
 .gbo-row-line .gbo-attn { color: var(--color-warn); }
 .gbo-row-line .gbo-attn svg, .gbo-row-line .gbo-row-flag svg { width: 100%; height: 100%; display: block; }
-/* The unread dot, Grok Bot's look: Hermes's own status dot (Unread.tsx) at
-   the row's right edge, vertically centred, as a small blue dot. Only its
-   unread state (painted blue) and its needs-input state (Hermes's amber)
-   draw (working, idle and draft are the running cue's, below). A pinned tile has no
-   right edge: the same dot sits on its avatar, ringed in the sidebar colour.
-   The hover ⋯ button covers the row's dot while it shows. */
-.gbo-unread-dot { display: none; flex: none; align-items: center; justify-content: center; width: 8px; height: 8px; margin: 0 4px 0 2px; line-height: 0; }
-.gbo-unread-dot:has([role="status"][class*="ui-success"]), .gbo-unread-dot:has([role="status"][class*="amber"]) { display: inline-flex; }
+/* The unread dot, Grok Bot's look: the plugin's own unread dot (Unread.tsx,
+   Spec 106) at the row's right edge, vertically centred, as a small blue dot.
+   A pinned tile has no right edge: the same dot sits on its avatar, ringed in
+   the sidebar colour. The hover ⋯ button covers the row's dot while it shows. */
+.gbo-unread-dot { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 8px; height: 8px; margin: 0 4px 0 2px; line-height: 0; }
 .gbo-unread-dot > span { display: inline-flex; line-height: 0; }
 .gbo-unread-dot [role="status"] { display: block; width: 8px; height: 8px; border-radius: 50%; border-width: 0; }
-.gbo-unread-dot [role="status"][class*="ui-success"] { background: var(--color-bot-blue); }
+.gbo-unread-dot [role="status"][data-gbo-unread="true"] { background: var(--color-bot-blue); }
 /* Hermes's running cue (RunningDot): the same status dot in its working,
    stalled or background state, on the avatar's top right, ringed in the
    sidebar colour; independent of the unread dot. */
 .gbo-run-dot { display: none; position: absolute; right: -1px; top: -1px; line-height: 0; }
-.gbo-run-dot:has([role="status"][class*="ui-accent"]), .gbo-run-dot:has([role="status"][class*="ui-text-tertiary"]) { display: inline-flex; }
+.gbo-run-dot:has([role="status"][class*="ui-accent"]), .gbo-run-dot:has([role="status"][class*="ui-text-tertiary"]), .gbo-run-dot:has([role="status"][class*="amber"]) { display: inline-flex; }
 .gbo-run-dot > span { display: inline-flex; line-height: 0; }
 .pinned__avatar .gbo-run-dot { right: auto; left: 4px; top: 4px; }
 .gbo-run-dot [role="status"] { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2.5px var(--color-bg-sidebar); }

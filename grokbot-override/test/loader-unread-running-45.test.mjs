@@ -1,6 +1,7 @@
-// Loader-faithful (unread look): Hermes's own running-state cue (its status
-// dot in the working / stalled / background states) still shows on a row,
-// independent of the unread dot, which shows only unread and needs-input.
+// Loader-faithful (unread look, Spec 106): Hermes's own running-state cue (its
+// status dot in the working / stalled / background states) still shows on a
+// row's avatar, independent of the plugin's own unread dot at the right edge.
+// Hermes's native unread / needs-input states never paint a row unread dot.
 
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -21,10 +22,17 @@ const FINCH = bot('finch', 'Finch', 'f-root')
 const GULL = bot('gull', 'Gull', 'g-root')
 const HAWK = bot('hawk', 'Hawk', 'h-root')
 
-test('loader-faithful unread look: a running bot keeps Hermes\'s running cue on its avatar, apart from the unread dot', { skip: !READY && 'dev dependencies not installed' }, async t => {
-  const states = { 's-root': 'working', 'o-root': 'unread', 'f-root': 'stalled', 'g-root': 'background', 'h-root': 'needs-input' }
+test('loader-faithful unread look: a running bot keeps Hermes\'s running cue on its avatar, apart from the plugin unread dot', { skip: !READY && 'dev dependencies not installed' }, async t => {
+  const states = { 's-root': 'working', 'o-root': 'unread', 'f-root': 'stalled', 'g-root': 'background', 'h-root': 'unread' }
   const { panes, mount, errors, React } = await bootPlugin(t, {
     rows: [LOCAL, OWL, FINCH, GULL, HAWK],
+    storage: {
+      // Only Owl is unread in the plugin's own store; Hawk has a stuck native
+      // unread state in Hermes's SessionStatusDot that MUST be ignored.
+      unreadStore: {
+        'local::owl': { seenCount: 1, seenTipId: 'o-root', latestCount: 2, latestTipId: 'o-root', seenAt: 1000, latestAt: 2000, updatedAt: 2000 }
+      }
+    },
     tweak: sdk => {
       sdk.SessionStatusDot = props => globalThis.__fakeDot(props)
       sdk.markSessionUnreadFinished = () => undefined
@@ -39,22 +47,16 @@ test('loader-faithful unread look: a running bot keeps Hermes\'s running cue on 
   const cue = rowOf('Security').querySelector('.gbo-row-face .gbo-run-dot [role="status"]')
   assert.ok(cue, 'the running cue sits on the avatar')
   assert.match(cue.className, /ui-accent/)
-  assert.ok(rowOf('Owl').querySelector('.gbo-unread-dot [role="status"][class*="ui-success"]'), 'the unread dot stays at the right edge')
+  assert.ok(rowOf('Owl').querySelector('.gbo-unread-dot [role="status"][data-gbo-unread="true"]'), 'the plugin unread dot stays at the right edge')
+  assert.ok(!rowOf('Hawk').querySelector('.gbo-unread-dot'), 'stuck native Hermes unread dot is ignored')
 
-  // Computed, with the plugin's own injected stylesheet: the running cue
-  // shows for a working bot and not for an unread one; the unread dot the
-  // other way round.
   const shown = el => (el ? getComputedStyle(el).display !== 'none' : false)
   assert.ok(document.getElementById('grokbot-override-style') || document.querySelector('style'), 'the plugin stylesheet is in the page')
   assert.equal(shown(rowOf('Security').querySelector('.gbo-run-dot')), true, 'running: the cue is visible')
   assert.equal(shown(rowOf('Owl').querySelector('.gbo-run-dot')), false, 'unread: no running cue')
-  assert.equal(shown(rowOf('Owl').querySelector('.gbo-unread-dot')), true, 'unread: the dot is visible')
+  assert.equal(shown(rowOf('Owl').querySelector('.gbo-unread-dot')), true, 'unread: the plugin dot is visible')
   assert.equal(shown(rowOf('Security').querySelector('.gbo-unread-dot')), false, 'running: no unread dot')
 
-  // Every native variant: the dot that should show is visible down to its
-  // inner element (no hidden wrapper or inner span, a real size), and the
-  // other one is hidden. The cue sits on the avatar; the unread dot is the
-  // row's last item in normal flex order.
   const visibleChain = el => {
     for (let node = el; node && node.tagName !== 'BUTTON'; node = node.parentElement) {
       const cs = getComputedStyle(node)
@@ -66,8 +68,6 @@ test('loader-faithful unread look: a running bot keeps Hermes\'s running cue on 
     const cs = getComputedStyle(el)
     return cs.width !== '0px' && cs.height !== '0px' && cs.width !== '' && cs.height !== ''
   }
-  // Hermes's own utility classes for the dot (Tailwind in the app): the
-  // hollow states are drawn by their 1px border alone.
   const tw = rosterEl.ownerDocument.createElement('style')
   tw.textContent = '.border{border-width:1px;border-style:solid}.rounded-full{border-radius:9999px}'
   rosterEl.ownerDocument.head.appendChild(tw)
@@ -81,14 +81,10 @@ test('loader-faithful unread look: a running bot keeps Hermes\'s running cue on 
     }
     assert.ok(!shown(rowOf(name).querySelector('.gbo-unread-dot')), `${state}: no unread dot`)
   }
-  for (const [name, state] of [['Owl', 'unread'], ['Hawk', 'needs-input']]) {
-    const inner = rowOf(name).querySelector('.gbo-unread-dot [role="status"]')
-    assert.ok(inner && visibleChain(inner) && sized(inner), `${state}: the unread dot's inner dot is visible and sized`)
-    assert.ok(!shown(rowOf(name).querySelector('.gbo-run-dot')), `${state}: no running cue`)
-  }
+  const owlInner = rowOf('Owl').querySelector('.gbo-unread-dot [role="status"][data-gbo-unread="true"]')
+  assert.ok(owlInner && visibleChain(owlInner) && sized(owlInner), 'unread: the plugin unread dot is visible and sized')
+  assert.ok(!shown(rowOf('Owl').querySelector('.gbo-run-dot')), 'unread: no running cue')
 
-  // The CSS draws the cue for the running states only, and the unread dot
-  // for unread / needs-input only.
   const css = readFileSync(new URL('../src/ui/styles-adapt.ts', import.meta.url), 'utf8')
   assert.match(css, /\.gbo-run-dot:has\(\[role="status"\]\[class\*="ui-accent"\]\)/)
   assert.match(css, /\.gbo-run-dot:has\(\[role="status"\]\[class\*="ui-text-tertiary"\]\)/)

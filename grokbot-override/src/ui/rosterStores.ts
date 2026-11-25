@@ -76,7 +76,12 @@ export const roster2 = {
   /** Bot Mode meta of bots whose row carries none (SSH sources), as their own
    *  gateway reported it (core/gatewayMeta.js): `fresh` = read this app
    *  session, `cache` = plugin storage `botMetaCache`. Route key -> entry. */
-  gatewayMeta: createStore<{ fresh: Record<string, any>; cache: Record<string, any> }>({ fresh: {}, cache: {} })
+  gatewayMeta: createStore<{ fresh: Record<string, any>; cache: Record<string, any> }>({ fresh: {}, cache: {} }),
+  /** Plugin's own unread store (Spec 106, core/unreadStore.js):
+   *  `<stableConnection>::<profile>` -> { seenCount, seenTipId, latestCount,
+   *  latestTipId, updatedAt, seenAt?, latestAt? }. Drives every bot row's blue
+   *  dot and "More unreads" pill. */
+  unread: createStore<Record<string, any>>({})
 }
 
 export function openDialog(state: DialogState) {

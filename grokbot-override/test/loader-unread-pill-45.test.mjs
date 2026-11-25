@@ -1,15 +1,8 @@
-// Loader-faithful (unread look): the roster's "More unreads" pill. It shows only
-// while an unread row (Hermes's dot in its unread state) is scrolled out of
-// view, on the side it lies (top: arrow up; bottom: arrow down), and a click
+// Loader-faithful (unread look, Spec 106): the roster's "More unreads" pill.
+// It shows only while an unread row (plugin's own unread dot) is scrolled out
+// of view, on the side it lies (top: arrow up; bottom: arrow down), and a click
 // (or a key) scrolls the roster to the nearest such row and focuses it.
-// Scrolling itself reads no layout and scans nothing: the side comes from
-// offsets measured on structure / layout changes. jsdom has no layout and no
-// IntersectionObserver (test/fixtures/pill-env.mjs): rows get rects from
-// their order and the scroller's scrollTop, and the observer is a fake the
-// test reports through, as Chromium would after a scroll: a target is
-// reported when first observed and then only when it crosses a threshold.
-// One visibility rule: a row less than half in view gets a pill that can
-// reach it; a jump past the view (no crossing) still turns the pill.
+// Scrolling itself reads no layout and scans nothing.
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -29,30 +22,35 @@ const row = (name, i) => ({
   route: { connectionId: 'local', mode: 'local', profile: name, targetProfile: name },
   canonical_session: { id: `${name}-root`, preview: `${name} preview`, last_active: 1762560000 - i }
 })
+const unreadEntry = name => ({
+  seenCount: 1,
+  seenTipId: `${name}-root`,
+  latestCount: 2,
+  latestTipId: `${name}-root`,
+  seenAt: 1762550000000,
+  latestAt: 1762560000000,
+  updatedAt: 1762560000000
+})
 
 test('loader-faithful unread look: "More unreads" shows only while an unread row is off screen, on its side, and scrolls to it', { skip: !READY && 'dev dependencies not installed' }, async t => {
-  const unread = new Set(['hotel-root'])
-  const listeners = new Set()
-  const emit = () => listeners.forEach(fn => fn())
   let io = null
-  const { panes, mount, errors, React } = await bootPlugin(t, {
+  const { panes, mount, errors, internals } = await bootPlugin(t, {
+    smoke: true,
     rows: NAMES.map(row),
-    tweak: sdk => {
+    storage: { unreadStore: { 'local::hotel': unreadEntry('hotel') } },
+    tweak: () => {
       io = installObserver()
-      sdk.markSessionUnreadFinished = id => (unread.add(id), emit())
-      sdk.ackStoredSessionId = id => (unread.delete(id), emit())
-      sdk.SessionStatusDot = props => globalThis.__fakeDot(props)
     }
   })
-  globalThis.__fakeDot = ({ storedSessionId }) => {
-    const on = React.useSyncExternalStore(fn => (listeners.add(fn), () => listeners.delete(fn)), () => unread.has(storedSessionId))
-    return React.createElement('span', { className: 'flex' }, on ? React.createElement('span', { role: 'status', className: 'size-1.5 rounded-full bg-(--ui-success)' }) : React.createElement('span', { 'aria-hidden': 'true', className: 'size-1 rounded-full' }))
+  const setUnread = (name, on) => {
+    const cur = { ...internals.roster2.unread.get() }
+    if (on) cur[`local::${name}`] = unreadEntry(name)
+    else cur[`local::${name}`] = { ...unreadEntry(name), seenCount: 2, seenAt: 1762560000000 }
+    internals.roster2.unread.set(cur)
   }
   t.after(() => {
-    delete globalThis.__fakeDot
     delete globalThis.IntersectionObserver
   })
-  // The layout exists before the roster mounts, as in the app.
   t.after(installLayout({ view: { height: VIEW_H }, rowHeight: ROW_H }))
   const rosterEl = mount(panes.find(p => p.id === 'roster').render)
   const scroller = () => rosterEl.querySelector('.gbo-roster-list')
@@ -63,8 +61,6 @@ test('loader-faithful unread look: "More unreads" shows only while an unread row
   await waitFor(() => rosterEl.querySelectorAll('.gbo-row-wrap').length === NAMES.length, 'every row')
   await waitFor(() => io.observed().includes(rowEl('Hotel')), 'the unread row under the observer')
   assert.ok(io.observed().length === 1 && io.observed()[0] === rowEl('Hotel'), 'only unread rows are observed')
-  // Hotel (the 8th row, y 420-480) is below the 300px view: measured when
-  // it joined, so the pill shows without waiting for an observer entry.
   await waitFor(() => pill('down'), 'the pill at the bottom')
   io.report()
   await settle()
@@ -109,7 +105,7 @@ test('loader-faithful unread look: "More unreads" shows only while an unread row
   }
   t.after(() => (window.HTMLElement.prototype.focus = focus))
   pill('down').focus()
-  pill('down').click() // Enter / Space on a focused button
+  pill('down').click()
   assert.deepEqual(targets, [7 * ROW_H - (VIEW_H - ROW_H) / 2], 'scrolled to the nearest unread row, centred')
   const hotelButton = rowEl('Hotel').querySelector('button.gbo-row')
   assert.ok(Boolean(hotelButton) && rosterEl.ownerDocument.activeElement === hotelButton, 'focus lands on the destination row')
@@ -120,8 +116,7 @@ test('loader-faithful unread look: "More unreads" shows only while an unread row
   assert.ok(!(pill('up')))
 
   // Scrolled further down, an unread row above the view puts the pill on top.
-  unread.add('alpha-root')
-  emit()
+  setUnread('alpha', true)
   await waitFor(() => io.observed().includes(rowEl('Alpha')), 'a second unread row observed')
   scroller().scrollTop = 6 * ROW_H
   io.report()
@@ -136,8 +131,7 @@ test('loader-faithful unread look: "More unreads" shows only while an unread row
   scroller().scrollTop = 6 * ROW_H
   io.report()
   await waitFor(() => pill('up'), 'the pill for Alpha')
-  unread.delete('alpha-root')
-  emit()
+  setUnread('alpha', false)
   await waitFor(() => !pill('up'), 'read: the pill goes')
   assert.ok(!io.observed().includes(rowEl('Alpha')))
 
