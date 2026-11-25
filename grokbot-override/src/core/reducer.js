@@ -18,6 +18,7 @@ import { approvalFromPayload, upsertApproval, cancelApprovals, settleApprovals }
 import { applyConnectionUpdate, inputRequestFrom, keepCardProgress } from './prompts.js'
 import { completeDetail, startDetail } from './tools.js'
 import { isSilenceReply } from './silence.js'
+import { END_KINDS, startsTurn } from './workTime.js'
 
 export function emptyLive() {
   return { turnId: '', cursor: undefined, bubbleId: null, toolsId: null, reasoning: '', streamed: false, sealed: '' }
@@ -118,12 +119,14 @@ function dropSilentBubble(state) {
 }
 
 /** When the turn finished (core/workTime.js "Worked for …"): on this turn's
- *  last reply, or its last tool group when it has no reply. */
+ *  latest reply (or error) row, looking back only as far as the turn's start
+ *  (workTime.js startsTurn: a user message or a background-work notice). A
+ *  turn with no reply row of its own (a silent one) stamps nothing. */
 function stampCompleted(state, now) {
   for (let i = state.items.length - 1; i >= 0; i -= 1) {
     const item = state.items[i]
-    if (item.kind === 'user') break
-    if (item.kind === 'assistant' || item.kind === 'error' || item.kind === 'tools') {
+    if (startsTurn(item)) break
+    if (END_KINDS.has(item.kind)) {
       return { ...state, items: state.items.map((it, j) => (j === i ? { ...it, completedAt: now } : it)) }
     }
   }

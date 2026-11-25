@@ -12,10 +12,12 @@
 
 import { BACKGROUND_NOTICE_KINDS } from './history.js'
 
-const END_KINDS = new Set(['assistant', 'error', 'turn-error'])
+/** The rows that end a turn (its reply, or its error). */
+export const END_KINDS = new Set(['assistant', 'error', 'turn-error'])
 
-/** A user message, or a synthetic prompt Hermes ran a turn for. */
-const startsTurn = item => item?.kind === 'user' || (item?.kind === 'notice' && BACKGROUND_NOTICE_KINDS.has(item.system))
+/** Where a turn starts: a user message, or a synthetic prompt Hermes ran a
+ *  turn for. Shared with the reducer's completion stamp (reducer.js). */
+export const startsTurn = item => item?.kind === 'user' || (item?.kind === 'notice' && BACKGROUND_NOTICE_KINDS.has(item.system))
 
 /** 41s, 3m 12s, 1h 4m (under a second reads 1s). */
 export function formatWorked(ms) {

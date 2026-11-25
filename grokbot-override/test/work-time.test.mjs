@@ -137,13 +137,34 @@ test('live: message.complete stamps the reply\'s completion; the time runs to it
   assert.equal(reply.at, T0 + 5000)
   assert.equal(reply.completedAt, T0 + 72_000)
   assert.equal(withWorkTimes(s.items, { busy: s.busy }).find(i => i.kind === 'tools').workedMs, 72_000)
-  // A silent turn (tools, no reply): its fold carries the completion.
+  // A silent turn (tools, no reply row): nothing is stamped, so no time.
   let q = initialChatState([{ kind: 'user', id: 'u', text: 'go', at: T0 }])
   q = applyEvent(q, { type: 'message.start', payload: { turn_id: 't2' } }, T0 + 100)
   q = applyEvent(q, { type: 'tool.start', payload: { tool_id: 'y', name: 'terminal' } }, T0 + 1000)
   q = applyEvent(q, { type: 'message.complete', payload: { text: '[SILENT]' } }, T0 + 9000)
-  assert.equal(withWorkTimes(q.items).find(i => i.kind === 'tools').workedMs, 9000)
+  assert.ok(q.items.every(i => i.completedAt === undefined))
+  assert.equal(withWorkTimes(q.items).find(i => i.kind === 'tools').workedMs, undefined)
 })
+
+for (const kind of ['process_complete', 'async_delegation_complete']) {
+  test(`(review round 2) a silent completion of a ${kind} turn stamps nothing in the earlier turn`, () => {
+    // A user turn with tools and a reply...
+    let s = initialChatState([{ kind: 'user', id: 'u', text: 'build it', at: T0 }])
+    s = applyEvent(s, { type: 'message.start', payload: { turn_id: 't1' } }, T0 + 100)
+    s = applyEvent(s, { type: 'tool.start', payload: { tool_id: 'x', name: 'terminal' } }, T0 + 1000)
+    s = applyEvent(s, { type: 'tool.complete', payload: { tool_id: 'x' } }, T0 + 2000)
+    s = applyEvent(s, { type: 'message.complete', payload: { text: 'Started.' } }, T0 + 3000)
+    const reply = s.items.find(i => i.kind === 'assistant')
+    assert.equal(reply.completedAt, T0 + 3000)
+    // ...an hour later Hermes runs a background turn that ends silently.
+    const card = kind === 'process_complete' ? 'Background Process Finished: make' : 'Agent work finished: report'
+    s = applyEvent(s, { type: 'message.start', payload: { turn_id: 't2', display_text: card, display_kind: kind } }, T0 + 3_600_000)
+    s = applyEvent(s, { type: 'message.complete', payload: { text: '[SILENT]' } }, T0 + 3_605_000)
+    assert.equal(s.items.find(i => i.id === reply.id).completedAt, T0 + 3000, 'the earlier reply keeps its own completion')
+    assert.ok(s.items.filter(i => i.kind !== 'assistant').every(i => i.completedAt === undefined), 'nothing else stamped')
+    assert.equal(withWorkTimes(s.items).find(i => i.kind === 'tools').workedMs, 3000, 'the first turn stays 3s, never 3603s')
+  })
+}
 
 test('the chat draws "Worked for … · N tools" on a finished turn\'s fold, and the old line while it runs', { skip }, async t => {
   const { bundlePreview } = await import('../dev/bundle.mjs')

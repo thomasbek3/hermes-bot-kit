@@ -11,7 +11,9 @@
   user message on an earlier page, the fold keeps its old line. Hermes's own
   turns for finished background work (process / delegation notices) start
   their own turn; the end is the turn's latest reply (none without its
-  time, never before the last tools ran). One line,
+  time, never before the last tools ran). The live completion stamp uses the
+  same turn boundaries, and a turn with no reply row of its own (a silent
+  one) stamps nothing. One line,
   never wrapped on a phone. `src/core/workTime.js`; test
   `grokbot-override/test/work-time.test.mjs`.
 
@@ -60,8 +62,20 @@
   `<home>/.hermes-bot-kit-update.flock`, no longer inside the folder uninstall
   moves): uninstall never runs under an update, and an update that read its
   settings before an uninstall re-checks them under the lock and installs
-  nothing. The UNINSTALLED marker is written before the last record moves,
-  and a rerun finishes an uninstall that stopped part-way. Agent plugins and
+  nothing. An older updater still installed as `update.sh` (v2026.11.22 and
+  before) locks `<home>/hermes-bot-kit/update.flock`; uninstall and new
+  runs take that lock too while it exists (uninstall holds it until the
+  folder is moved), so an older updater that is running makes uninstall stop
+  with nothing changed. One tiny window remains: an older updater that had
+  already read its settings but not yet taken its lock (two consecutive
+  steps of a run that had already started) when the uninstall finished does
+  not re-check and can still install. That is acceptable: uninstall turns
+  auto-update off first, so no new run of the old updater can start, and the
+  first update replaces the old updater with one that re-checks. The
+  UNINSTALLED marker is written before the last record moves, and a rerun
+  finishes an uninstall that stopped part-way. Also fixed: `au_unlock` ran
+  `exec 9>&- 2>/dev/null`, which sent every later error message of that
+  shell to /dev/null. Agent plugins and
   `config.yaml` are never touched: it lists where each kit agent plugin was
   found with its README's removal steps. AGENTS.md's uninstall block uses it;
   the manual fallback block now turns auto-update off first. Tests in

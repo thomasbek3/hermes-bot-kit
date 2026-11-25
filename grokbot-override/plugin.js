@@ -43718,6 +43718,70 @@ function valueResult(kind, input) {
   return { value: str(typeof input === "string" ? input : input?.value) };
 }
 
+// src/core/workTime.js
+var END_KINDS = /* @__PURE__ */ new Set(["assistant", "error", "turn-error"]);
+var startsTurn = (item) => item?.kind === "user" || item?.kind === "notice" && BACKGROUND_NOTICE_KINDS.has(item.system);
+function formatWorked(ms) {
+  const secs = Math.max(1, Math.round(Number(ms) / 1e3));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+var time = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+function withWorkTimes(items, { busy = false } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const patches = /* @__PURE__ */ new Map();
+  let start2 = -1;
+  const close = (from, to, last) => {
+    if (from < 0) return;
+    const began = time(list[from].at);
+    if (began === null) return;
+    let tools = -1;
+    let end = null;
+    for (let i = from + 1; i < to; i += 1) {
+      const item = list[i];
+      if (item?.kind === "tools") {
+        tools = i;
+        if (time(item.completedAt) !== null) end = time(item.completedAt);
+      } else if (END_KINDS.has(item?.kind)) {
+        end = time(item.completedAt) ?? time(item.at);
+      }
+    }
+    if (tools < 0 || end === null || last && busy || end < began) return;
+    const toolsAt = time(list[tools].at);
+    if (toolsAt !== null && end < toolsAt) return;
+    patches.set(tools, end - began);
+  };
+  for (let i = 0; i < list.length; i += 1) {
+    if (!startsTurn(list[i])) continue;
+    close(start2, i, false);
+    start2 = i;
+  }
+  close(start2, list.length, true);
+  if (!patches.size && !list.some((item) => item?.kind === "tools" && "workedMs" in item)) return items;
+  let changed = false;
+  const out = list.map((item, i) => {
+    if (patches.has(i)) {
+      if (item.workedMs === patches.get(i)) return item;
+      changed = true;
+      return { ...item, workedMs: patches.get(i) };
+    }
+    if (item?.kind === "tools" && "workedMs" in item) {
+      changed = true;
+      const { workedMs: _drop, ...rest } = item;
+      return rest;
+    }
+    return item;
+  });
+  return changed ? out : items;
+}
+function foldLabel({ done, workedMs, toolSecs = 0 }) {
+  const count = done === 1 ? "1 tool" : `${done} tools`;
+  if (typeof workedMs === "number" && Number.isFinite(workedMs) && workedMs >= 0) return `Worked for ${formatWorked(workedMs)} · ${count}`;
+  return toolSecs >= 1 ? `${count} · ${Math.round(toolSecs)}s` : count;
+}
+
 // src/core/reducer.js
 function emptyLive() {
   return { turnId: "", cursor: void 0, bubbleId: null, toolsId: null, reasoning: "", streamed: false, sealed: "" };
@@ -43797,8 +43861,8 @@ function dropSilentBubble(state) {
 function stampCompleted(state, now) {
   for (let i = state.items.length - 1; i >= 0; i -= 1) {
     const item = state.items[i];
-    if (item.kind === "user") break;
-    if (item.kind === "assistant" || item.kind === "error" || item.kind === "tools") {
+    if (startsTurn(item)) break;
+    if (END_KINDS.has(item.kind)) {
       return { ...state, items: state.items.map((it, j) => j === i ? { ...it, completedAt: now } : it) };
     }
   }
@@ -53464,70 +53528,6 @@ function withDividers(items, nowMs = Date.now(), locale) {
     out.push(item);
   }
   return out;
-}
-
-// src/core/workTime.js
-var END_KINDS = /* @__PURE__ */ new Set(["assistant", "error", "turn-error"]);
-var startsTurn = (item) => item?.kind === "user" || item?.kind === "notice" && BACKGROUND_NOTICE_KINDS.has(item.system);
-function formatWorked(ms) {
-  const secs = Math.max(1, Math.round(Number(ms) / 1e3));
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-}
-var time = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
-function withWorkTimes(items, { busy = false } = {}) {
-  const list = Array.isArray(items) ? items : [];
-  const patches = /* @__PURE__ */ new Map();
-  let start2 = -1;
-  const close = (from, to, last) => {
-    if (from < 0) return;
-    const began = time(list[from].at);
-    if (began === null) return;
-    let tools = -1;
-    let end = null;
-    for (let i = from + 1; i < to; i += 1) {
-      const item = list[i];
-      if (item?.kind === "tools") {
-        tools = i;
-        if (time(item.completedAt) !== null) end = time(item.completedAt);
-      } else if (END_KINDS.has(item?.kind)) {
-        end = time(item.completedAt) ?? time(item.at);
-      }
-    }
-    if (tools < 0 || end === null || last && busy || end < began) return;
-    const toolsAt = time(list[tools].at);
-    if (toolsAt !== null && end < toolsAt) return;
-    patches.set(tools, end - began);
-  };
-  for (let i = 0; i < list.length; i += 1) {
-    if (!startsTurn(list[i])) continue;
-    close(start2, i, false);
-    start2 = i;
-  }
-  close(start2, list.length, true);
-  if (!patches.size && !list.some((item) => item?.kind === "tools" && "workedMs" in item)) return items;
-  let changed = false;
-  const out = list.map((item, i) => {
-    if (patches.has(i)) {
-      if (item.workedMs === patches.get(i)) return item;
-      changed = true;
-      return { ...item, workedMs: patches.get(i) };
-    }
-    if (item?.kind === "tools" && "workedMs" in item) {
-      changed = true;
-      const { workedMs: _drop, ...rest } = item;
-      return rest;
-    }
-    return item;
-  });
-  return changed ? out : items;
-}
-function foldLabel({ done, workedMs, toolSecs = 0 }) {
-  const count = done === 1 ? "1 tool" : `${done} tools`;
-  if (typeof workedMs === "number" && Number.isFinite(workedMs) && workedMs >= 0) return `Worked for ${formatWorked(workedMs)} · ${count}`;
-  return toolSecs >= 1 ? `${count} · ${Math.round(toolSecs)}s` : count;
 }
 
 // src/core/streamSafe.js
