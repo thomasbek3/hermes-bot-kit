@@ -53468,6 +53468,7 @@ function withDividers(items, nowMs = Date.now(), locale) {
 
 // src/core/workTime.js
 var END_KINDS = /* @__PURE__ */ new Set(["assistant", "error", "turn-error"]);
+var startsTurn = (item) => item?.kind === "user" || item?.kind === "notice" && BACKGROUND_NOTICE_KINDS.has(item.system);
 function formatWorked(ms) {
   const secs = Math.max(1, Math.round(Number(ms) / 1e3));
   if (secs < 60) return `${secs}s`;
@@ -53492,15 +53493,16 @@ function withWorkTimes(items, { busy = false } = {}) {
         tools = i;
         if (time(item.completedAt) !== null) end = time(item.completedAt);
       } else if (END_KINDS.has(item?.kind)) {
-        const at = time(item.completedAt) ?? time(item.at);
-        if (at !== null) end = at;
+        end = time(item.completedAt) ?? time(item.at);
       }
     }
     if (tools < 0 || end === null || last && busy || end < began) return;
+    const toolsAt = time(list[tools].at);
+    if (toolsAt !== null && end < toolsAt) return;
     patches.set(tools, end - began);
   };
   for (let i = 0; i < list.length; i += 1) {
-    if (list[i]?.kind !== "user") continue;
+    if (!startsTurn(list[i])) continue;
     close(start2, i, false);
     start2 = i;
   }

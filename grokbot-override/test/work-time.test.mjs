@@ -66,6 +66,50 @@ test('never guessed: a running turn, no user message on screen, a missing or bac
   assert.equal(withWorkTimes(stamped, { busy: true })[1].workedMs, undefined)
 })
 
+test('(review P2) a synthetic background turn starts its own turn: its fold never counts from the earlier user message', () => {
+  const items = [
+    { kind: 'user', id: 'u', text: 'start the build', at: T0 },
+    { kind: 'assistant', id: 'a', text: 'Started.', at: T0 + 5000 },
+    // An hour later Hermes runs a turn for the finished background process.
+    { kind: 'notice', id: 'n', text: 'Background task finished', system: 'process_complete', at: T0 + 3_600_000 },
+    tools('g', 1),
+    { kind: 'assistant', id: 'b', text: 'Build passed.', at: T0 + 3_603_000 }
+  ]
+  const fold = withWorkTimes(items).find(i => i.id === 'g')
+  assert.notEqual(fold.workedMs, 3_603_000, 'never an hour for a 3 s background turn')
+  assert.equal(fold.workedMs, 3000)
+  // The same from history rows (display_kind async_delegation_complete).
+  const rows = [
+    { role: 'user', content: 'delegate it', timestamp: T0 / 1000 },
+    { role: 'assistant', content: 'Delegated.', timestamp: T0 / 1000 + 2 },
+    { role: 'user', display_kind: 'async_delegation_complete', content: 'Agent work finished: report ready', timestamp: T0 / 1000 + 3600 },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'c9', function: { name: 'read_file', arguments: '{}' } }], timestamp: T0 / 1000 + 3601 },
+    { role: 'tool', tool_call_id: 'c9', name: 'read_file', content: 'ok', timestamp: T0 / 1000 + 3602 },
+    { role: 'assistant', content: 'Here is the report.', timestamp: T0 / 1000 + 3604 }
+  ]
+  const hfold = withWorkTimes(historyToItems(rows)).find(i => i.kind === 'tools')
+  assert.equal(hfold.workedMs, 4000)
+  // A background turn whose notice has no time: no time at all.
+  const noStart = items.map(i => (i.id === 'n' ? { ...i, at: null } : i))
+  assert.equal(withWorkTimes(noStart).find(i => i.id === 'g').workedMs, undefined)
+})
+
+test('(review P2) the end is the latest reply: one without a timestamp, or an end before the last tools, gives no time', () => {
+  const items = [
+    { kind: 'user', id: 'u', text: 'go', at: T0 },
+    { kind: 'assistant', id: 'a1', text: 'Looking…', at: T0 + 10_000 },
+    { ...tools('g', 2), at: T0 + 20_000 },
+    { kind: 'assistant', id: 'a2', text: 'Done.', at: null }
+  ]
+  assert.equal(withWorkTimes(items).find(i => i.id === 'g').workedMs, undefined, 'never the interim reply\'s 10 s')
+  const early = [
+    { kind: 'user', id: 'u', text: 'go', at: T0 },
+    { ...tools('g', 2), at: T0 + 20_000 },
+    { kind: 'assistant', id: 'a', text: 'Done.', at: T0 + 10_000 }
+  ]
+  assert.equal(withWorkTimes(early).find(i => i.id === 'g').workedMs, undefined, 'an end before the tools ran is wrong')
+})
+
 test('history: the stored rows\' timestamps (user row to the last reply row)', () => {
   const rows = [
     { role: 'user', content: 'build it', timestamp: (T0 / 1000) },

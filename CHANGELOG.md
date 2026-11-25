@@ -8,7 +8,10 @@
   reply's completion, from timestamps the items already carry (the stored
   rows' for history; live turns are stamped when `message.complete` arrives,
   so a running turn shows no time). Without a timestamp, or with the turn's
-  user message on an earlier page, the fold keeps its old line. One line,
+  user message on an earlier page, the fold keeps its old line. Hermes's own
+  turns for finished background work (process / delegation notices) start
+  their own turn; the end is the turn's latest reply (none without its
+  time, never before the last tools ran). One line,
   never wrapped on a phone. `src/core/workTime.js`; test
   `grokbot-override/test/work-time.test.mjs`.
 
@@ -52,7 +55,13 @@
   the `hermes-bot-kit/` folder with `installed-release`) to
   `<home>/hermes-bot-kit-removed-<ts>/`; nothing is deleted or restarted. A
   second run says nothing is installed and exits 0, and the doctor then reports
-  "not installed" (INFO, exit 0) instead of a FIX per plugin. Agent plugins and
+  "not installed" (INFO, exit 0) instead of a FIX per plugin. Uninstall and
+  the daily run share one lock beside `hermes-bot-kit/` (now
+  `<home>/.hermes-bot-kit-update.flock`, no longer inside the folder uninstall
+  moves): uninstall never runs under an update, and an update that read its
+  settings before an uninstall re-checks them under the lock and installs
+  nothing. The UNINSTALLED marker is written before the last record moves,
+  and a rerun finishes an uninstall that stopped part-way. Agent plugins and
   `config.yaml` are never touched: it lists where each kit agent plugin was
   found with its README's removal steps. AGENTS.md's uninstall block uses it;
   the manual fallback block now turns auto-update off first. Tests in
