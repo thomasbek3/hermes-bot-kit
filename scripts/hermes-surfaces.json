@@ -116,9 +116,6 @@
    "ToolsetConfigPanel": [
     "Grokbot Override"
    ],
-   "ackStoredSessionId": [
-    "Grokbot Override"
-   ],
    "atom": [
     "Computer viewer"
    ],
@@ -131,18 +128,12 @@
    "createPortal": [
     "Computer viewer"
    ],
-   "forgetSessionUnread": [
-    "Grokbot Override"
-   ],
    "host": [
     "Computer viewer",
     "Grokbot Override"
    ],
    "icons": [
     "Computer viewer"
-   ],
-   "markSessionUnreadFinished": [
-    "Grokbot Override"
    ],
    "profileColor": [
     "Grokbot Override"
