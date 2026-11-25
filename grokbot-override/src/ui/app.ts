@@ -1812,6 +1812,8 @@ function disable() {
   polls.reset()
   idleRotation.reset()
   supersedeReads()
+  activity.reseed()
+  activityPaused = false
   lastLocal = null
   roomSeq += 1
   stopRemoteAvatars()

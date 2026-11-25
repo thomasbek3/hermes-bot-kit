@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Grokbot Override: read bots no longer come back with blue unread dots after
+  a Hermes restart.** On a cold start, `refreshRoster()` ran the activity
+  tracker before the stock cache or `profiles.list` had answered, so
+  `createActivityTracker.track([])` consumed its one-shot `seeded` flag on an
+  empty roster; when the real rows arrived moments later, every bot with
+  historical `last_active > 0` was falsely marked unread (and late-arriving
+  bots had the same `prev = 0` bug). Empty rosters now return without seeding,
+  each bot seeds on first sight (a brand-new bot first seen at `last_active = 0`
+  still marks unread on its first message), and disabling the override re-seeds
+  the tracker. `src/core/activity.js`, `src/ui/app.ts`; PARITY.md R16; test
+  `grokbot-override/test/unread-restart-39.test.mjs`.
+
 - **Grokbot Override: the work fold says how long the turn took.** A finished
   turn's last "N tools" fold now reads "Worked for 3m 12s · 12 tools" ("41s"
   under a minute, "1h 4m" past an hour): from the user's message to the

@@ -37,15 +37,21 @@ export function createActivityTracker(deps) {
   let seeded = false
 
   function track(roster) {
+    const list = Array.isArray(roster) ? roster : []
+    // An empty roster on cold start (before the stock cache or profiles.list
+    // answers) has nothing to seed; consuming `seeded` here would make the
+    // first real roster mark every historical bot unread (#39).
+    if (!list.length) return
     const seeding = !seeded
     seeded = true
-    for (const bot of Array.isArray(roster) ? roster : []) {
+    for (const bot of list) {
       const key = rowKey(bot)
       const activity = botActivitySession(bot)
       const ts = Number(activity?.last_active || 0)
-      const prev = watermarks.get(key) || 0
+      const seen = watermarks.has(key)
+      const prev = seen ? watermarks.get(key) : 0
       watermarks.set(key, Math.max(prev, ts))
-      if (seeding || ts <= prev) {
+      if (seeding || !seen || ts <= prev) {
         lastToasted.set(key, String(activity?.preview || '').trim())
         continue
       }
