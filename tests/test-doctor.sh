@@ -126,6 +126,60 @@ hasnt "not installed" "reinstall after uninstall"
 has "OK    grokbot-override: plugin.js matches MANIFEST.sha256" "reinstall after uninstall"
 ok "after --uninstall: 'not installed' with no FIX (exit 0); a reinstall is checked as usual"
 
+# 2c. The person's own Hermes source (scripts/check-hermes-compat.py against a
+# fake tree from tests/fake-hermes-source.py): pass, missing, absent, no python.
+FAKE_PY=$(command -v python3 || true)
+[ -n "${FAKE_PY}" ] || fail "python3 is needed to write the fake Hermes source"
+fake_src() { PYTHONDONTWRITEBYTECODE=1 "${FAKE_PY}" -I "${ROOT}/tests/fake-hermes-source.py" "$@" >/dev/null; }
+U=$(new_user)
+install_into "${U}/.hermes"
+fake_src "${U}/.hermes/hermes-agent" --tag v0.23.3
+before=$(snap "${U}")
+doctor "${U}" KIT_PYTHON="${FAKE_PY}"
+[ "${RC}" -eq 0 ] || fail "hermes source (pass): exit ${RC}:
+${OUT}"
+has "OK    Hermes source v0.23.3 (commit c0ffee000): every surface the kit uses is there" "hermes source (pass)"
+summary | grep -qx 'check hermes-source OK' || fail "hermes source (pass): not in the summary"
+[ "$(snap "${U}")" = "${before}" ] || fail "hermes source: the check changed files (a __pycache__?)"
+rm -rf "${U}/.hermes/hermes-agent"
+fake_src "${U}/.hermes/hermes-agent" --tag v0.23.9 --drop sdk:Button --drop gateway:session.create --drop agent:pre_llm_call
+doctor "${U}" KIT_PYTHON="${FAKE_PY}"
+[ "${RC}" -eq 0 ] || fail "hermes source (missing): exit ${RC}, want 0 (a WARN is never fatal):
+${OUT}"
+has "WARN  Hermes v0.23.9 (commit c0ffee000) at ${U}/.hermes/hermes-agent lacks 3 surface(s) the kit uses; the kit may misbehave on this Hermes; check docs/COMPATIBILITY.md / update the kit" "hermes source (missing)"
+has "      - sdk: Button (affects: Computer viewer)" "hermes source (missing)"
+has "      - gateway: session.create (affects: Grokbot Override)" "hermes source (missing)"
+has "      - agent: pre_llm_call in hermes_cli/plugins.py (affects: texting-style)" "hermes source (missing)"
+has "OK    grokbot-override: plugin.js matches MANIFEST.sha256" "hermes source (missing): the rest of the doctor still ran"
+summary | grep -qx 'check hermes-source WARN' || fail "hermes source (missing): no WARN in the summary"
+summary | grep -q / && fail "hermes source (missing): a path in the summary"
+summary | grep -qiE "Button|session\\.create" && fail "hermes source (missing): an item in the summary"
+# KIT_HERMES_SOURCE points elsewhere; an incomplete tree is a skip, not a WARN.
+mv "${U}/.hermes/hermes-agent" "${WORK}/elsewhere-src"
+doctor "${U}" KIT_PYTHON="${FAKE_PY}" KIT_HERMES_SOURCE="${WORK}/elsewhere-src"
+has "WARN  Hermes v0.23.9" "KIT_HERMES_SOURCE"
+rm -rf "${WORK}/elsewhere-src/hermes_cli/web_routers"
+doctor "${U}" KIT_PYTHON="${FAKE_PY}" KIT_HERMES_SOURCE="${WORK}/elsewhere-src"
+has "INFO  Hermes source check: skipped (the Hermes source at ${WORK}/elsewhere-src, v0.23.9 (commit c0ffee000), has no hermes_cli/web_routers)" "incomplete source"
+rm -rf "${WORK}/elsewhere-src"
+doctor "${U}" KIT_PYTHON="${FAKE_PY}"
+[ "${RC}" -eq 0 ] || fail "hermes source (absent): exit ${RC}"
+has "INFO  Hermes source check: skipped (no Hermes Agent source at ${U}/.hermes/hermes-agent)" "hermes source (absent)"
+fake_src "${U}/.hermes/hermes-agent"
+doctor "${U}" KIT_PYTHON=none
+has "INFO  Hermes source check: skipped (no python3; KIT_PYTHON=none)" "no python"
+printf '#!/bin/sh\nexit 3\n' > "${WORK}/old-python"
+chmod +x "${WORK}/old-python"
+doctor "${U}" KIT_PYTHON="${WORK}/old-python"
+has "INFO  Hermes source check: skipped (${WORK}/old-python is older than Python 3.8)" "old python"
+[ "${RC}" -eq 0 ] || fail "old python: exit ${RC}"
+# macOS's own Python 3.9 (when it is a real Python, not the Command Line Tools stub).
+if [ -x /usr/bin/python3 ] && { ! command -v xcode-select >/dev/null 2>&1 || xcode-select -p >/dev/null 2>&1; }; then
+  doctor "${U}" KIT_PYTHON=/usr/bin/python3
+  has "OK    Hermes source v0.23.3 (commit c0ffee000): every surface the kit uses is there" "/usr/bin/python3 ($(/usr/bin/python3 --version 2>&1))"
+fi
+ok "hermes source: OK with the version, WARN per missing item and kit part (exit 0), skipped when absent, incomplete, no python or too old"
+
 # 3. A wrong folder name (a GitHub zip's -main folder).
 U=$(new_user)
 install_into "${U}/.hermes"
@@ -214,7 +268,7 @@ ok "old app and Dock-home mismatch: FIX"
 # 8. The summary holds only closed-set values: no path, no name, no token, no
 # text from any file, even with token-shaped folder names, a token-shaped
 # release in the install record and a Windows path with a username in it.
-SUMMARY_LINE='^(--- doctor summary ---|os: (mac|linux|wsl|windows|other) [A-Za-z0-9_.-]+ [A-Za-z0-9_.+-]+ ([0-9]+(\.[0-9]+){0,3}|[a-z0-9._-]{1,32} [A-Za-z0-9._-]{0,32}|unknown|none)|hermes desktop: ([0-9]+(\.[0-9]+){1,3}|not-found|unknown)|kit release: (v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{1,3})?|local|none|unknown)|kit plugins: (none|(computer-viewer|grokbot-override)( (computer-viewer|grokbot-override))*)|hermes home: (default-home|HERMES_HOME|profile-scoped|wsl|windows-localappdata|windows-legacy|other)|check [a-z0-9-]{1,40} (OK|FIX|INFO))$'
+SUMMARY_LINE='^(--- doctor summary ---|os: (mac|linux|wsl|windows|other) [A-Za-z0-9_.-]+ [A-Za-z0-9_.+-]+ ([0-9]+(\.[0-9]+){0,3}|[a-z0-9._-]{1,32} [A-Za-z0-9._-]{0,32}|unknown|none)|hermes desktop: ([0-9]+(\.[0-9]+){1,3}|not-found|unknown)|kit release: (v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{1,3})?|local|none|unknown)|kit plugins: (none|(computer-viewer|grokbot-override)( (computer-viewer|grokbot-override))*)|hermes home: (default-home|HERMES_HOME|profile-scoped|wsl|windows-localappdata|windows-legacy|other)|check [a-z0-9-]{1,40} (OK|FIX|INFO|WARN))$'
 PLANTED="xoxb-1234.5678-FAKE xoxe.xoxp-1-FAKE sk-FAKEFAKEFAKEFAKE SomeName doctortest"
 check_summary() {
   # check_summary <label>: the summary is fenced, every line is allowlisted,
@@ -310,6 +364,13 @@ ${OUT}"
 [ "$(strip "${OUT}")" = "$(strip "${GOOD_OUT}")" ] || fail "install.sh --doctor (alone) ran different checks:
 ${OUT}"
 fallback=$(sed -n 's/^KIT_FALLBACK_REF="\(.*\)"/\1/p' "${INSTALLER}")
+# The Hermes source check comes with it (downloaded, checked against the manifest).
+fake_src "${U}/.hermes/hermes-agent"
+remote_doctor "${ROOT}" "${U}"
+printf '%s\n' "${OUT}" | grep -q '^OK    Hermes source v0.23.3 (commit c0ffee000): every surface the kit uses is there' ||
+  fail "install.sh --doctor (alone): the Hermes source check did not run:
+${OUT}"
+rm -rf "${U}/.hermes/hermes-agent"
 [ "$(sort -u "${WORK}/fake.log")" = "${fallback}" ] || fail "install.sh --doctor (alone) fetched another ref: $(sort -u "${WORK}/fake.log" | tr '\n' ' ')"
 # Remove the plugin: the fix line is the release's one-liner, not a local path.
 mv "${U}/.hermes/desktop-plugins/grokbot-override" "${WORK}/gone-alone"

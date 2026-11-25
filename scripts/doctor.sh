@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Hermes Bot Kit doctor: says why the kit's desktop plugins are not showing up.
 # Read-only: it changes nothing, reads no .env, no tokens and no settings
-# values. One line per check (OK, FIX or INFO); every FIX is followed by the
+# values. One line per check (OK, FIX, WARN or INFO); every FIX is followed by the
 # exact fix. It ends with a summary you can paste into an issue, built only
 # from closed-set values: OS name and version, Hermes Desktop version, kit
-# release, kit plugin names, a fixed check ID with OK/FIX/INFO per check, and
+# release, kit plugin names, a fixed check ID with OK/FIX/WARN/INFO per check, and
 # a path category for the home. No path, no free text, nothing read from files.
 #
 #   bash scripts/doctor.sh            (from a clone)
@@ -50,6 +50,9 @@
 #   DOCTOR_WIN_REG_HOME    the HKCU\Environment HERMES_HOME (Windows and WSL)
 #                          instead of asking reg ("" = not set)
 #   DOCTOR_OS              mac, linux, wsl or windows instead of asking uname
+#   KIT_HERMES_SOURCE      the Hermes Agent source to check (default
+#                          <home>/hermes-agent); read as text, never run
+#   KIT_PYTHON             the python3 for that check ("none" = skip it)
 set -uo pipefail
 
 # The oldest Hermes Desktop this release supports.
@@ -88,6 +91,14 @@ vis() {
 # is a fixed word (letters, digits, -) and the only part that reaches the summary.
 ok()   { printf 'OK    %s\n' "$(vis "$2")"; LINES+=("check $1 OK"); }
 info() { printf 'INFO  %s\n' "$(vis "$2")"; LINES+=("check $1 INFO"); }
+# warn <check id> <message> [<detail> ...]: something to know, never a FIX
+# (the exit code stays as it is); each detail on its own "- " line.
+warn() {
+  local d
+  printf 'WARN  %s\n' "$(vis "$2")"
+  for d in "${@:3}"; do printf '      - %s\n' "$(vis "${d}")"; done
+  LINES+=("check $1 WARN")
+}
 fix()  {
   local f
   printf 'FIX   %s\n' "$(vis "$2")"
@@ -732,6 +743,87 @@ else
   fi
 fi
 
+# --- The person's own Hermes source ---------------------------------------------------------
+# scripts/check-hermes-compat.py (beside this script; install.sh --doctor
+# downloads it and scripts/hermes-surfaces.json with this script, checked
+# against the release's manifest) reads the local Hermes Agent source as text
+# and says whether every Hermes surface the kit uses is there. Read-only, never
+# fetches, never imports or runs Hermes, never fatal: a WARN at most.
+HC_TIMEOUT=60
+# hc_limited <command...>: at most HC_TIMEOUT seconds (macOS has no timeout(1)).
+hc_limited() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${HC_TIMEOUT}" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift @ARGV; exec { $ARGV[0] } @ARGV or exit 127' "${HC_TIMEOUT}" "$@"
+  else
+    "$@"
+  fi
+}
+hc_check() {
+  local src="${KIT_HERMES_SOURCE:-${H}/hermes-agent}" script="${SELF_DIR}/check-hermes-compat.py"
+  local surf="${SELF_DIR}/hermes-surfaces.json" py out rc line version="" counts="" incomplete=""
+  local -a items=()
+  if [ ! -d "${src}/apps/desktop" ] && [ ! -d "${src}/tui_gateway" ]; then
+    info hermes-source "Hermes source check: skipped (no Hermes Agent source at ${src})"
+    return 0
+  fi
+  if [ ! -f "${script}" ] || [ ! -f "${surf}" ] || [ ! -O "${script}" ] || [ ! -O "${surf}" ]; then
+    info hermes-source "Hermes source check: skipped (this copy of the doctor came without check-hermes-compat.py and hermes-surfaces.json)"
+    return 0
+  fi
+  case "${KIT_PYTHON:-}" in
+    none) info hermes-source "Hermes source check: skipped (no python3; KIT_PYTHON=none)"; return 0 ;;
+    '')
+      py=$(command -v python3 2>/dev/null) || { info hermes-source "Hermes source check: skipped (no python3 on PATH)"; return 0; }
+      # Apple's /usr/bin/python3 is a stub until the Command Line Tools are
+      # installed: running it would pop an install dialog.
+      if [ "${py}" = /usr/bin/python3 ] && command -v xcode-select >/dev/null 2>&1 && ! xcode-select -p >/dev/null 2>&1; then
+        info hermes-source "Hermes source check: skipped (python3 is Apple's stub until the Command Line Tools are installed: xcode-select --install)"
+        return 0
+      fi
+      ;;
+    *) py="${KIT_PYTHON}" ;;
+  esac
+  rc=0
+  PYTHONDONTWRITEBYTECODE=1 hc_limited "${py}" -I -B -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 3)' </dev/null >/dev/null 2>&1 || rc=$?
+  if [ "${rc}" = 3 ]; then
+    info hermes-source "Hermes source check: skipped (${py} is older than Python 3.8)"
+    return 0
+  elif [ "${rc}" != 0 ]; then
+    info hermes-source "Hermes source check: skipped (${py} does not run)"
+    return 0
+  fi
+  rc=0
+  out=$(PYTHONDONTWRITEBYTECODE=1 hc_limited "${py}" -I -B "${script}" --doctor --surfaces "${surf}" "${src}" </dev/null 2>&1) || rc=$?
+  if [ "${rc}" != 0 ]; then
+    info hermes-source "Hermes source check: skipped (the check stopped, exit ${rc}: $(printf '%s\n' "${out}" | tail -n 1))"
+    return 0
+  fi
+  while IFS= read -r line; do
+    case "${line}" in
+      'VERSION '*) version="${line#VERSION }" ;;
+      'OK '*) counts="${line#OK }" ;;
+      'INCOMPLETE '*) incomplete="${line#INCOMPLETE }" ;;
+      'MISSING '*)
+        line="${line#MISSING }"
+        items+=("${line%%$'\t'*} (affects: ${line#*$'\t'})")
+        ;;
+    esac
+  done <<< "${out}"
+  if [ -n "${incomplete}" ]; then
+    info hermes-source "Hermes source check: skipped (the Hermes source at ${src}, ${version:-version unknown}, has no ${incomplete})"
+  elif [ "${#items[@]}" -gt 0 ]; then
+    warn hermes-source "Hermes ${version:-version unknown} at ${src} lacks ${#items[@]} surface(s) the kit uses; the kit may misbehave on this Hermes; check docs/COMPATIBILITY.md / update the kit" "${items[@]}"
+  elif [ -n "${counts}" ]; then
+    ok hermes-source "Hermes source ${version:-version unknown}: every surface the kit uses is there (${src})"
+  else
+    info hermes-source "Hermes source check: skipped (no answer from the check)"
+  fi
+  return 0
+}
+hc_check
+
 # --- Settings this script can't read -----------------------------------------------------
 info switches "On/off switches: Hermes keeps them in the app's own storage, which a script can't read. Check Capabilities -> Plugins (in the sidebar): Grokbot Override and Computer should be on"
 info override-switch "Grokbot Override has its own switch: if the Bots tab looks stock, press Cmd+K (Ctrl+K on Linux/Windows) -> 'Grokbot Override: toggle'"
@@ -778,7 +870,7 @@ echo "kit release: $(only 'v[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{1,3})?|local|no
 echo "kit plugins:${sum_plugins:- none}"
 echo "hermes home: ${sum_home}"
 for l in "${LINES[@]}"; do
-  only 'check [a-z0-9-]{1,40} (OK|FIX|INFO)' "${l}"
+  only 'check [a-z0-9-]{1,40} (OK|FIX|INFO|WARN)' "${l}"
 done
 echo "--- doctor summary ---"
 

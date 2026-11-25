@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **The doctor checks your own Hermes.** `install.sh --doctor` (and the end of
+  every install) runs `scripts/check-hermes-compat.py`, CI-only until now,
+  against the local Hermes Agent source (`<home>/hermes-agent`, or
+  `KIT_HERMES_SOURCE`): one `OK` line with the Hermes version and commit
+  (read from its `.git` files), a `WARN` listing each missing surface and the
+  kit part it affects ("the kit may misbehave on this Hermes; check
+  COMPATIBILITY.md / update the kit"), or one `skipped (why)` line without a
+  source, a python3 3.8+ (macOS `/usr/bin/python3` 3.9 works; the Command Line
+  Tools stub is never run) or a whole tree. Read-only, never fetches Hermes,
+  never a FIX, never fatal. The checker now also runs from
+  `scripts/hermes-surfaces.json` (what the kit uses, written ahead with
+  `--write-surfaces`; CI checks it is current), which `install.sh --doctor`
+  downloads with the doctor and checks against the release manifest. Its CI
+  output is unchanged. Tests: a fake Hermes tree (`tests/fake-hermes-source.py`)
+  in `tests/test-doctor.sh` (2c) and `tests/test-install.sh`.
+
 - **`install.sh --uninstall` (fixes: an uninstall was undone by the next
   auto-update).** The old runbook moved the two desktop plugins out but left
   the daily job and `<home>/hermes-bot-kit/installed-release`, so the next

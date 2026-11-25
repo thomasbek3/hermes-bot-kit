@@ -575,4 +575,43 @@ grep -q -- '-m py_compile .*hiperf-agent.py' "${WORK}/py.log" || fail "working p
 if printf '%s\n' "${out}" | grep -q '^INFO: no working Python'; then fail "working python3: the check was reported skipped"; fi
 echo "OK  a working python3 still runs the compile check"
 
+# End of install: the person's own Hermes source is checked (the same check as
+# the doctor's) and reported in one non-fatal line; never fatal, never fetched.
+fake_src() { PYTHONDONTWRITEBYTECODE=1 "${real_py}" -I "${ROOT}/tests/fake-hermes-source.py" "$@" >/dev/null; }
+hhome=$(new_home)
+fake_src "${hhome}/hermes-agent" --tag v0.23.3
+out=$(env HERMES_HOME="${hhome}" KIT_SOURCE_DIR="${ROOT}" KIT_PYTHON="${real_py}" bash "${INSTALLER}" 2>&1) || fail "hermes check (pass): install failed:
+${out}"
+printf '%s\n' "${out}" | grep -qx 'Hermes check     -> OK: Hermes source v0.23.3 (commit c0ffee000) has every surface the kit uses' ||
+  fail "hermes check (pass): ${out}"
+[ ! -e "${hhome}/hermes-agent/__pycache__" ] && [ ! -e "${ROOT}/scripts/__pycache__" ] || fail "hermes check wrote a __pycache__"
+rm -rf "${hhome}/hermes-agent"
+fake_src "${hhome}/hermes-agent" --drop ctx:files
+out=$(env HERMES_HOME="${hhome}" KIT_SOURCE_DIR="${ROOT}" KIT_PYTHON="${real_py}" bash "${INSTALLER}" 2>&1) || fail "hermes check (missing): install failed (a WARN must not be fatal):
+${out}"
+printf '%s\n' "${out}" | grep -q '^Hermes check     -- WARN: Hermes v0.23.3 (commit c0ffee000) at .* lacks 1 surface(s) the kit uses:$' || fail "hermes check (missing): ${out}"
+printf '%s\n' "${out}" | grep -q '^                    - ctx: files (affects: ' || fail "hermes check (missing): no item: ${out}"
+printf '%s\n' "${out}" | grep -q 'The kit may misbehave on this Hermes; check docs/COMPATIBILITY.md / update the kit' || fail "hermes check (missing): no advice"
+assert_plugin "${hhome}" "grokbot-override/plugin.js"
+rm -rf "${hhome}/hermes-agent"
+out=$(env HERMES_HOME="${hhome}" KIT_SOURCE_DIR="${ROOT}" bash "${INSTALLER}" 2>&1) || fail "hermes check (absent): install failed"
+printf '%s\n' "${out}" | grep -qx "Hermes check     -- skipped (no Hermes Agent source at ${hhome}/hermes-agent)" || fail "hermes check (absent): ${out}"
+fake_src "${hhome}/hermes-agent"
+out=$(env HERMES_HOME="${hhome}" KIT_SOURCE_DIR="${ROOT}" KIT_PYTHON=none bash "${INSTALLER}" 2>&1) || fail "hermes check (no python): install failed"
+printf '%s\n' "${out}" | grep -qx 'Hermes check     -- skipped (no python3; KIT_PYTHON=none)' || fail "hermes check (no python): ${out}"
+# Downloaded alone (fake curl): the checker and its list come from the release, checked against its manifest.
+log=$(mktemp)
+CLEANUP+=("${log}")
+out=$(env -i PATH="${fake}:/usr/bin:/bin" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR}" FAKE_API=down FAKE_LOG="${log}" FAKE_ROOT="${ROOT}" \
+  HERMES_HOME="${hhome}" KIT_PYTHON="${real_py}" bash "${remote_dir}/install.sh" 2>&1) || fail "hermes check (remote): install failed: ${out}"
+printf '%s\n' "${out}" | grep -qx 'Hermes check     -> OK: Hermes source v0.23.3 (commit c0ffee000) has every surface the kit uses' || fail "hermes check (remote): ${out}"
+tampered=$(mktemp -d)
+CLEANUP+=("${tampered}")
+copy_tree "${tampered}"
+printf '\n# tampered\n' >> "${tampered}/scripts/check-hermes-compat.py"
+out=$(env -i PATH="${fake}:/usr/bin:/bin" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR}" FAKE_API=down FAKE_LOG="${log}" FAKE_ROOT="${tampered}" \
+  HERMES_HOME="${hhome}" KIT_PYTHON="${real_py}" bash "${remote_dir}/install.sh" 2>&1) || fail "hermes check (tampered): install failed: ${out}"
+printf '%s\n' "${out}" | grep -q '^Hermes check     -- skipped (could not download scripts/check-hermes-compat.py for .*, or it does not match the manifest)$' || fail "hermes check (tampered): ${out}"
+echo "OK  end of install: Hermes source OK / WARN per item (never fatal) / skipped (absent, no python, tampered download)"
+
 echo "test-install.sh: all passed"

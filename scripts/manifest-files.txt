@@ -37,3 +37,5 @@ remote-cua/dashboard/dist/index.js
 remote-cua/install.sh
 scripts/doctor.sh
 install.sh
+scripts/check-hermes-compat.py
+scripts/hermes-surfaces.json

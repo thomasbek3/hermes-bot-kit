@@ -41,3 +41,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 kit/scripts/check-hermes-compat.py upstream
+      # The list the doctor and the installer check a person's own Hermes
+      # against (scripts/hermes-surfaces.json) must match the kit's sources.
+      # Written with v0.23.3's gateway namespaces.
+      - if: matrix.ref == 'v0.23.3'
+        run: python3 kit/scripts/check-hermes-compat.py --check-surfaces kit/scripts/hermes-surfaces.json upstream

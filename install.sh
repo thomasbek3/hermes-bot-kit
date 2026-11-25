@@ -25,6 +25,9 @@
 #   KIT_CARDS_SKILL=1      also install the agent-cards skill (off by default)
 #   KIT_CARDS_SKILL=remove remove the agent-cards skill this kit installed, then stop
 #   KIT_CARDS_PROFILES     comma-separated profiles for the skill (default: all)
+#   KIT_HERMES_SOURCE      Hermes Agent source the end-of-install check reads
+#                          (default <home>/hermes-agent; read as text only)
+#   KIT_PYTHON             python3 for that check ("none" skips it)
 #
 # Daily auto-update (macOS and Linux):  bash install.sh --auto-update on|off|status|run
 #   `on` remembers HERMES_HOME, KIT_SKIP_GROKBOT, KIT_SKIP_COMPUTER,
@@ -152,6 +155,20 @@ if [ "${1:-}" = "--doctor" ]; then
     echo "install.sh: sha256 mismatch for scripts/doctor.sh (${doc_ref}); not running it" >&2
     exit 1
   fi
+  # The Hermes source check beside it (releases from v2026.11.23 on): each file
+  # only when the manifest lists it and it matches; otherwise the doctor says
+  # that check was skipped.
+  for doc_f in check-hermes-compat.py hermes-surfaces.json; do
+    doc_want=$(awk -v p="scripts/${doc_f}" '$2 == p { print $1; exit }' "${doc_tmp}/MANIFEST.sha256")
+    [ -n "${doc_want}" ] || continue
+    if curl -fsSL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 2 --max-filesize 1048576 \
+      "${doc_base}/scripts/${doc_f}" -o "${doc_tmp}/${doc_f}" 2>/dev/null &&
+      [ "$(sha256_of "${doc_tmp}/${doc_f}")" = "${doc_want}" ]; then
+      :
+    else
+      rm -f "${doc_tmp}/${doc_f}"
+    fi
+  done
   doc_rc=0
   bash "${doc_tmp}/doctor.sh" "$@" || doc_rc=$?
   exit "${doc_rc}"
@@ -1778,8 +1795,86 @@ else
   fi
 fi
 
+# The person's own Hermes source against what the kit uses
+# (scripts/check-hermes-compat.py with scripts/hermes-surfaces.json, the same
+# check as the doctor's). One line; never fatal, never fetches Hermes.
+hermes_source_report() {
+  local src="${KIT_HERMES_SOURCE:-${HERMES_ROOT}/hermes-agent}" dir="" f out rc=0 line version="" counts="" incomplete="" n=0 items=""
+  [ -d "${src}/apps/desktop" ] || [ -d "${src}/tui_gateway" ] || {
+    echo "Hermes check     -- skipped (no Hermes Agent source at ${src})"
+    return 0
+  }
+  if [ -n "${SOURCE_DIR}" ]; then
+    dir="${SOURCE_DIR}/scripts"
+  elif [ -s "${MANIFEST}" ]; then
+    dir="${TMP_DIR}/hermes-check"
+    mkdir -p "${dir}"
+    for f in check-hermes-compat.py hermes-surfaces.json; do
+      if ! manifest_has "scripts/${f}"; then
+        echo "Hermes check     -- skipped (release ${KIT_REF} has no Hermes source check)"
+        return 0
+      fi
+      if ! "${CURL_MANIFEST[@]}" "${RAW_BASE}/scripts/${f}" -o "${dir}/${f}" 2>/dev/null ||
+        { [ "${KIT_SKIP_VERIFY:-0}" != 1 ] && [ "$(file_sha256 "${dir}/${f}")" != "$(manifest_hash "scripts/${f}")" ]; }; then
+        echo "Hermes check     -- skipped (could not download scripts/${f} for ${KIT_REF}, or it does not match the manifest)"
+        return 0
+      fi
+    done
+  else
+    echo "Hermes check     -- skipped (nothing was installed)"
+    return 0
+  fi
+  [ -f "${dir}/check-hermes-compat.py" ] && [ -f "${dir}/hermes-surfaces.json" ] || {
+    echo "Hermes check     -- skipped (no scripts/check-hermes-compat.py and scripts/hermes-surfaces.json in ${SOURCE_DIR})"
+    return 0
+  }
+  case "${KIT_PYTHON:-}" in
+    none) echo "Hermes check     -- skipped (no python3; KIT_PYTHON=none)"; return 0 ;;
+    '') find_python
+      [ -n "${PYTHON}" ] || { echo "Hermes check     -- skipped (no working python3 here)"; return 0; } ;;
+    *) PYTHON="${KIT_PYTHON}" ;;
+  esac
+  rc=0
+  PYTHONDONTWRITEBYTECODE=1 limited "${PYTHON}" -I -B -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 3)' </dev/null >/dev/null 2>&1 || rc=$?
+  if [ "${rc}" != 0 ]; then
+    echo "Hermes check     -- skipped (${PYTHON} does not run or is older than Python 3.8)"
+    return 0
+  fi
+  rc=0
+  out=$(KIT_PYTHON_TIMEOUT=60 PYTHONDONTWRITEBYTECODE=1 limited "${PYTHON}" -I -B "${dir}/check-hermes-compat.py" --doctor --surfaces "${dir}/hermes-surfaces.json" "${src}" </dev/null 2>&1) || rc=$?
+  if [ "${rc}" != 0 ]; then
+    echo "Hermes check     -- skipped (the check stopped, exit ${rc})"
+    return 0
+  fi
+  while IFS= read -r line; do
+    case "${line}" in
+      'VERSION '*) version="${line#VERSION }" ;;
+      'OK '*) counts="${line#OK }" ;;
+      'INCOMPLETE '*) incomplete="${line#INCOMPLETE }" ;;
+      'MISSING '*)
+        line="${line#MISSING }"
+        n=$((n + 1))
+        items="${items}                    - ${line%%$'\t'*} (affects: ${line#*$'\t'})"$'\n'
+        ;;
+    esac
+  done <<< "${out}"
+  if [ -n "${incomplete}" ]; then
+    echo "Hermes check     -- skipped (the Hermes source at ${src} has no ${incomplete})"
+  elif [ "${n}" -gt 0 ]; then
+    echo "Hermes check     -- WARN: Hermes ${version:-version unknown} at ${src} lacks ${n} surface(s) the kit uses:"
+    printf '%s' "${items}"
+    echo "                    The kit may misbehave on this Hermes; check docs/COMPATIBILITY.md / update the kit."
+  elif [ -n "${counts}" ]; then
+    echo "Hermes check     -> OK: Hermes source ${version:-version unknown} has every surface the kit uses"
+  else
+    echo "Hermes check     -- skipped (no answer from the check)"
+  fi
+  return 0
+}
+
 retired_report
 retired_agent_report
+hermes_source_report || true
 
 echo
 echo "Finish: in Hermes Desktop press Cmd+K (Ctrl+K on Linux) -> 'Reload desktop plugins', or quit and reopen the app."
