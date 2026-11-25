@@ -512,7 +512,7 @@ function paneVisibleOrUnknown(paneId: string): boolean {
 
 /** Opening a bot reads it (Spec 106): its chat is in a VISIBLE pane and a
  *  fresh read of it is on screen (not only the remembered seed) -> seen =
- *  that bot's latest activity, whichever session it was in. A fresh read
+ *  that bot's latest Bot Chat activity (spec 106b). A fresh read
  *  that found no messages counts only while nothing cached is on screen, and
  *  "no Bot Chat yet" counts too: the user opened the bot and there is nothing
  *  else to read in it. */

@@ -1,16 +1,16 @@
 // Spec 106, Problem 2 (owner, 2026-11-25): local bots like GANDALF YO stayed
-// unread forever. Their newest activity is in a regular (non-Bot-Chat)
-// session and their Bot Chat itself is empty, so the fresh read of the Bot
-// Chat returns no messages. Opening the bot must still clear the dot (and the
-// same activity must not re-light it). Re-lighting on a later report is
-// covered by spec106-own-unread.test.mjs (cron-run-43).
+// unread forever. The fresh read of the Bot Chat returns no messages (the
+// history page and the roster count differently), so a coverage test never
+// passed. Opening the bot must still clear the dot (and the same activity
+// must not re-light it). Spec 106b: only Bot Chat activity lights the dot, so
+// activity in another session (a cron run) must not light it at all.
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { bootPlugin, LOCAL, READY, waitFor } from './loader-boot.mjs'
 
-test('Spec 106 loader-faithful: a bot with an empty Bot Chat and activity elsewhere clears on open, and stays clear while it is open', { skip: !READY && 'dev dependencies not installed' }, async t => {
+test('Spec 106 loader-faithful: a Bot Chat whose fresh read is empty still clears on open, stays clear while open; activity elsewhere never lights it', { skip: !READY && 'dev dependencies not installed' }, async t => {
   const t0 = 1762560000
   const gandalf = {
     ...LOCAL,
@@ -36,18 +36,23 @@ test('Spec 106 loader-faithful: a bot with an empty Bot Chat and activity elsewh
   await new Promise(resolve => setTimeout(resolve, 300))
   assert.ok(!dotOf(rowOf('GANDALF YO')), 'first observation seeds no dot')
 
-  // A report lands in the non-Bot-Chat session: dot.
-  rows[0] = { ...rows[0], last_session: { id: 'g-other', preview: 'Message from cron: report', message_count: 8, last_active: t0 + 100 } }
-  await waitFor(() => dotOf(rowOf('GANDALF YO')), 'the dot after a report in another session', 6000)
+  // A cron run in another session (spec 106b): no dot.
+  rows[0] = { ...rows[0], last_session: { id: 'g-cron-1', preview: 'Message from cron: working', message_count: 8, last_active: t0 + 100 } }
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  assert.ok(!dotOf(rowOf('GANDALF YO')), 'activity outside the Bot Chat does not light the dot')
 
-  // Opening the bot (its Bot Chat is empty) clears it.
+  // A report lands in the Bot Chat: dot.
+  rows[0] = { ...rows[0], canonical_session: { ...rows[0].canonical_session, preview: 'Message from cron: report', message_count: 1, last_active: t0 + 110 } }
+  await waitFor(() => dotOf(rowOf('GANDALF YO')), 'the dot after a report in the Bot Chat', 6000)
+
+  // Opening the bot (its fresh Bot Chat read comes back empty) clears it.
   rowOf('GANDALF YO').click()
   await waitFor(() => !dotOf(rowOf('GANDALF YO')), 'the dot cleared on open of an empty Bot Chat')
   await new Promise(resolve => setTimeout(resolve, 1500))
   assert.ok(!dotOf(rowOf('GANDALF YO')), 'the same activity does not re-light it')
 
   // The next report while the chat is open and visible is read at once.
-  rows[0] = { ...rows[0], last_session: { id: 'g-cron-2', preview: 'Message from cron: next', message_count: 2, last_active: t0 + 200 } }
+  rows[0] = { ...rows[0], canonical_session: { ...rows[0].canonical_session, preview: 'Message from cron: next', message_count: 2, last_active: t0 + 200 } }
   await new Promise(resolve => setTimeout(resolve, 1500))
   assert.ok(!dotOf(rowOf('GANDALF YO')), 'activity while the bot is open and visible is read')
   assert.deepEqual(errors.map(e => `${e.kind}: ${e.error?.message}`), [])

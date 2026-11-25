@@ -13,18 +13,29 @@
 //     `<connectionId>::<profile>`.
 // - Value shape:
 //     { seenCount, seenTipId, latestCount, latestTipId, updatedAt,
-//       seenAt?, latestAt? }
+//       seenAt?, latestAt?, latestSource? }
+//   `latestSource` is 'canonical' when latest came from the Bot Chat
+//   (canonical_session) and 'last' when it came from the last_session
+//   fallback. Entries stored before spec 106b have none.
 // - First time a bot is ever observed with readable session fields:
 //   seed `seen = latest` (no flood of dots on install; clears previously stuck
 //   native dots).
 // - Null / unreadable session fields: no change (neither mark nor seed).
-// - Unread = latest activity (newest of canonical_session and last_session,
-//   including cron-delivered and non-Bot-Chat sessions) is newer than seen.
+// - Unread = new activity in the bot's Bot Chat (canonical_session) ONLY is
+//   newer than seen. Every user-visible message lands there: a cron job that
+//   delivers (deliver=bot-chat) appends its report to the Bot Chat. A cron
+//   run's own session (last_session, e.g. "Upwork job scout · Nov 25 10:53",
+//   new every run, mostly ending [SILENT]) never lights the dot, not even when
+//   a poll catches it mid-run with a non-silent preview (spec 106b).
+//   last_session is used only when the bot has no readable canonical_session.
+// - Re-baseline (spec 106b): an entry whose latest came from a non-canonical
+//   tip (stored by the old "newest of canonical and last" rule, or by the
+//   last_session fallback) is reset to seen = latest = Bot Chat on the next
+//   observation of a readable Bot Chat, so a false cron dot clears by itself.
 // - Seen = set ONLY when the bot's chat is open in a VISIBLE pane and fresh,
 //   non-empty history covering the latest message is presented. Hidden tabs,
-//   failed/empty/cached reads do not mark seen. Opening a bot with fresh
-//   history covering the Bot Chat's latest message always clears it, including
-//   when the newest activity was in a non-Bot-Chat / cron session.
+//   failed/empty/cached reads do not mark seen. Opening a bot with a fresh
+//   visible read always clears it (no count-coverage test, Problem 2).
 
 import { sourceHostId } from './ownership.js'
 import { resolveBotConnectionRoute } from './routing.js'
@@ -107,21 +118,16 @@ export function rawConnectionKey(bot) {
   return `${connectionId}::${profile}`
 }
 
-/** Extract the newest readable session activity for a bot across both
- *  `canonical_session` and `last_session` (which covers cron-delivered and
- *  other non-Bot-Chat sessions). Returns null when session fields are null or
- *  unreadable (so callers neither mark nor seed). */
+/** Extract a bot's unread activity: its Bot Chat (`canonical_session`) only.
+ *  `last_session` (cron runs, other conversations) is used only when the bot
+ *  has no readable canonical_session at all. Returns null when session fields
+ *  are null or unreadable (so callers neither mark nor seed). */
 export function extractBotActivity(bot) {
   if (!bot || typeof bot !== 'object') return null
   const canonical = sessionReadable(bot.canonical_session) ? bot.canonical_session : null
-  const last = sessionReadable(bot.last_session) ? bot.last_session : null
-  if (!canonical && !last) return null
-  let active = canonical || last
-  if (canonical && last) {
-    const canAt = toMillis(canonical.last_active)
-    const lastAt = toMillis(last.last_active)
-    active = lastAt > canAt ? last : canonical
-  }
+  const last = canonical ? null : sessionReadable(bot.last_session) ? bot.last_session : null
+  const active = canonical || last
+  if (!active) return null
   const tipId = sessionTipId(active)
   const count = sessionCount(active)
   const at = toMillis(active.last_active)
@@ -132,7 +138,7 @@ export function extractBotActivity(bot) {
     at,
     preview,
     silent: isSilenceReply(preview),
-    isCanonical: active === canonical
+    isCanonical: Boolean(canonical)
   }
 }
 
@@ -146,7 +152,17 @@ function normalizeEntry(raw) {
   const seenAt = storedMs(raw.seenAt)
   const latestAt = storedMs(raw.latestAt)
   const updatedAt = storedMs(raw.updatedAt)
-  return { seenCount, seenTipId, latestCount, latestTipId, updatedAt, ...(seenAt ? { seenAt } : {}), ...(latestAt ? { latestAt } : {}) }
+  const latestSource = raw.latestSource === 'canonical' || raw.latestSource === 'last' ? raw.latestSource : ''
+  return {
+    seenCount,
+    seenTipId,
+    latestCount,
+    latestTipId,
+    updatedAt,
+    ...(seenAt ? { seenAt } : {}),
+    ...(latestAt ? { latestAt } : {}),
+    ...(latestSource ? { latestSource } : {})
+  }
 }
 
 /** Read a persisted unread store from plugin storage. */
@@ -183,8 +199,8 @@ export function isEntryUnread(entry) {
 
   if (!latestTip && latestCount === null && !latestAt) return false
 
-  // Different tip (e.g. a new cron session, a non-Bot-Chat session, or a
-  // compression lineage tip rotation with activity): unread if the new tip has
+  // Different tip (e.g. a Bot Chat compression lineage tip rotation with
+  // activity): unread if the new tip has
   // messages or a newer timestamp than what was seen.
   if (latestTip && seenTip && latestTip !== seenTip) {
     if (latestCount !== null && latestCount > 0) return true
@@ -225,7 +241,8 @@ function sameEntry(a, b) {
     a.latestCount === b.latestCount &&
     a.latestTipId === b.latestTipId &&
     (a.seenAt || 0) === (b.seenAt || 0) &&
-    (a.latestAt || 0) === (b.latestAt || 0)
+    (a.latestAt || 0) === (b.latestAt || 0) &&
+    (a.latestSource || '') === (b.latestSource || '')
   )
 }
 
@@ -240,16 +257,32 @@ export function observeBot(store, key, activity, { now = Date.now(), migrateFrom
     migrated = true
   }
 
+  const source = activity.isCanonical ? 'canonical' : 'last'
+  const baseline = () => ({
+    seenCount: activity.count,
+    seenTipId: activity.tipId,
+    latestCount: activity.count,
+    latestTipId: activity.tipId,
+    updatedAt: now,
+    ...(activity.at ? { seenAt: activity.at, latestAt: activity.at } : {}),
+    latestSource: source
+  })
+
   let entry
   if (!prev) {
     // First time this bot is ever observed: seed seen = latest (no dot flood).
-    entry = {
-      seenCount: activity.count,
-      seenTipId: activity.tipId,
-      latestCount: activity.count,
-      latestTipId: activity.tipId,
-      updatedAt: now,
-      ...(activity.at ? { seenAt: activity.at, latestAt: activity.at } : {})
+    entry = baseline()
+  } else if (activity.isCanonical && prev.latestSource !== 'canonical' && activity.tipId && prev.latestTipId && activity.tipId !== prev.latestTipId) {
+    // Spec 106b re-baseline: latest was recorded from a non-Bot-Chat tip (a
+    // cron run's session under the old rule, or the last_session fallback).
+    // Reset to the Bot Chat so that false dot clears without opening the bot.
+    // Exception: the user had already seen this very Bot Chat tip and it has
+    // grown since; that is a real unread, so keep what was seen.
+    const prevSeenCount = finiteCount(prev.seenCount)
+    if (prev.seenTipId === activity.tipId && prevSeenCount !== null && activity.count !== null && activity.count > prevSeenCount) {
+      entry = { ...baseline(), seenCount: prevSeenCount, ...(storedMs(prev.seenAt) ? { seenAt: storedMs(prev.seenAt) } : {}) }
+    } else {
+      entry = baseline()
     }
   } else {
     const prevLatestAt = storedMs(prev.latestAt)
@@ -288,8 +321,8 @@ export function observeBot(store, key, activity, { now = Date.now(), migrateFrom
         }
       }
     } else {
-      // Tip changed (e.g. cron-delivered session, non-Bot-Chat session, or
-      // compression lineage rotation). Only adopt if not older than what we
+      // Tip changed (e.g. a Bot Chat compression lineage rotation, or the
+      // Bot Chat appearing for a bot that had only last_session). Only adopt if not older than what we
       // already observed.
       const notOlder = activity.at >= prevLatestAt || (prevLatestAt === 0 && (activity.count || 0) > 0)
       if (notOlder) {
@@ -311,7 +344,9 @@ export function observeBot(store, key, activity, { now = Date.now(), migrateFrom
       latestTipId: nextLatestTip,
       updatedAt: now,
       ...(nextSeenAt ? { seenAt: nextSeenAt } : {}),
-      ...(nextLatestAt ? { latestAt: nextLatestAt } : {})
+      ...(nextLatestAt ? { latestAt: nextLatestAt } : {}),
+      // Which session latest now comes from (unchanged if this poll was ignored).
+      ...(nextLatestTip === activity.tipId ? { latestSource: source } : prev.latestSource ? { latestSource: prev.latestSource } : {})
     }
     if (!migrated && sameEntry(prev, entry) && !(migrateFrom && base[migrateFrom])) return { store, changed: false }
   }
@@ -343,8 +378,7 @@ export function observeRoster(store, rows, sources = [], { now = Date.now(), own
 /**
  * Mark a bot as seen: its chat is open in a VISIBLE pane and a fresh read of
  * it has been presented. Then seen = the latest activity recorded for that
- * bot, whichever session it was in (the Bot Chat, a cron-delivered session,
- * any other conversation), so opening a bot always clears its dot and the
+ * bot (its Bot Chat, or last_session for a bot without one), so opening a bot always clears its dot and the
  * next roster poll reporting the same activity does not re-light it. Only
  * activity newer than this lights it again.
  *
@@ -402,7 +436,8 @@ export function markBotSeen(store, bot, sources = [], presentation = null, { now
     latestCount: count,
     latestTipId: tip,
     updatedAt: now,
-    ...(at ? { seenAt: at, latestAt: at } : {})
+    ...(at ? { seenAt: at, latestAt: at } : {}),
+    ...(prev.latestSource ? { latestSource: prev.latestSource } : {})
   }
 
   if (!migrateFrom && sameEntry(prev, entry)) return { store, changed: false }

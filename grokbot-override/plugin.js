@@ -46941,14 +46941,9 @@ function rawConnectionKey(bot) {
 function extractBotActivity(bot) {
   if (!bot || typeof bot !== "object") return null;
   const canonical2 = sessionReadable(bot.canonical_session) ? bot.canonical_session : null;
-  const last = sessionReadable(bot.last_session) ? bot.last_session : null;
-  if (!canonical2 && !last) return null;
-  let active = canonical2 || last;
-  if (canonical2 && last) {
-    const canAt = toMillis2(canonical2.last_active);
-    const lastAt = toMillis2(last.last_active);
-    active = lastAt > canAt ? last : canonical2;
-  }
+  const last = canonical2 ? null : sessionReadable(bot.last_session) ? bot.last_session : null;
+  const active = canonical2 || last;
+  if (!active) return null;
   const tipId = sessionTipId(active);
   const count = sessionCount(active);
   const at = toMillis2(active.last_active);
@@ -46959,7 +46954,7 @@ function extractBotActivity(bot) {
     at,
     preview,
     silent: isSilenceReply(preview),
-    isCanonical: active === canonical2
+    isCanonical: Boolean(canonical2)
   };
 }
 function normalizeEntry(raw) {
@@ -46971,7 +46966,17 @@ function normalizeEntry(raw) {
   const seenAt = storedMs(raw.seenAt);
   const latestAt = storedMs(raw.latestAt);
   const updatedAt = storedMs(raw.updatedAt);
-  return { seenCount, seenTipId, latestCount, latestTipId, updatedAt, ...seenAt ? { seenAt } : {}, ...latestAt ? { latestAt } : {} };
+  const latestSource = raw.latestSource === "canonical" || raw.latestSource === "last" ? raw.latestSource : "";
+  return {
+    seenCount,
+    seenTipId,
+    latestCount,
+    latestTipId,
+    updatedAt,
+    ...seenAt ? { seenAt } : {},
+    ...latestAt ? { latestAt } : {},
+    ...latestSource ? { latestSource } : {}
+  };
 }
 function loadUnreadStore(saved) {
   const out = {};
@@ -47023,7 +47028,7 @@ function isBotUnread(store, bot, sources = [], ownership2 = null) {
 function sameEntry(a2, b2) {
   if (a2 === b2) return true;
   if (!a2 || !b2) return false;
-  return a2.seenCount === b2.seenCount && a2.seenTipId === b2.seenTipId && a2.latestCount === b2.latestCount && a2.latestTipId === b2.latestTipId && (a2.seenAt || 0) === (b2.seenAt || 0) && (a2.latestAt || 0) === (b2.latestAt || 0);
+  return a2.seenCount === b2.seenCount && a2.seenTipId === b2.seenTipId && a2.latestCount === b2.latestCount && a2.latestTipId === b2.latestTipId && (a2.seenAt || 0) === (b2.seenAt || 0) && (a2.latestAt || 0) === (b2.latestAt || 0) && (a2.latestSource || "") === (b2.latestSource || "");
 }
 function observeBot(store, key, activity2, { now = Date.now(), migrateFrom = "" } = {}) {
   if (!key || !activity2) return { store, changed: false };
@@ -47034,16 +47039,26 @@ function observeBot(store, key, activity2, { now = Date.now(), migrateFrom = "" 
     prev = base4[migrateFrom];
     migrated = true;
   }
+  const source = activity2.isCanonical ? "canonical" : "last";
+  const baseline = () => ({
+    seenCount: activity2.count,
+    seenTipId: activity2.tipId,
+    latestCount: activity2.count,
+    latestTipId: activity2.tipId,
+    updatedAt: now,
+    ...activity2.at ? { seenAt: activity2.at, latestAt: activity2.at } : {},
+    latestSource: source
+  });
   let entry;
   if (!prev) {
-    entry = {
-      seenCount: activity2.count,
-      seenTipId: activity2.tipId,
-      latestCount: activity2.count,
-      latestTipId: activity2.tipId,
-      updatedAt: now,
-      ...activity2.at ? { seenAt: activity2.at, latestAt: activity2.at } : {}
-    };
+    entry = baseline();
+  } else if (activity2.isCanonical && prev.latestSource !== "canonical" && activity2.tipId && prev.latestTipId && activity2.tipId !== prev.latestTipId) {
+    const prevSeenCount = finiteCount(prev.seenCount);
+    if (prev.seenTipId === activity2.tipId && prevSeenCount !== null && activity2.count !== null && activity2.count > prevSeenCount) {
+      entry = { ...baseline(), seenCount: prevSeenCount, ...storedMs(prev.seenAt) ? { seenAt: storedMs(prev.seenAt) } : {} };
+    } else {
+      entry = baseline();
+    }
   } else {
     const prevLatestAt = storedMs(prev.latestAt);
     const prevSeenAt = storedMs(prev.seenAt);
@@ -47095,7 +47110,9 @@ function observeBot(store, key, activity2, { now = Date.now(), migrateFrom = "" 
       latestTipId: nextLatestTip,
       updatedAt: now,
       ...nextSeenAt ? { seenAt: nextSeenAt } : {},
-      ...nextLatestAt ? { latestAt: nextLatestAt } : {}
+      ...nextLatestAt ? { latestAt: nextLatestAt } : {},
+      // Which session latest now comes from (unchanged if this poll was ignored).
+      ...nextLatestTip === activity2.tipId ? { latestSource: source } : prev.latestSource ? { latestSource: prev.latestSource } : {}
     };
     if (!migrated && sameEntry(prev, entry) && !(migrateFrom && base4[migrateFrom])) return { store, changed: false };
   }
@@ -47146,7 +47163,8 @@ function markBotSeen(store, bot, sources = [], presentation = null, { now = Date
     latestCount: count,
     latestTipId: tip,
     updatedAt: now,
-    ...at ? { seenAt: at, latestAt: at } : {}
+    ...at ? { seenAt: at, latestAt: at } : {},
+    ...prev.latestSource ? { latestSource: prev.latestSource } : {}
   };
   if (!migrateFrom && sameEntry(prev, entry)) return { store, changed: false };
   const next = { ...store, [key]: entry };
