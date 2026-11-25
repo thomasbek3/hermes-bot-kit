@@ -38,13 +38,13 @@ It is written to be run unattended on **macOS and Linux**.
 
 <!-- runbook:install -->
 ```bash
-( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/install.sh -o "$f"; test -s "$f"; bash "$f" )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24.1/install.sh -o "$f"; test -s "$f"; bash "$f" )
 ```
 
 The script is downloaded to a file first and run only if the download
 succeeded, so a failed or empty download stops here with a non-zero exit. The
 first output line names the release it installs, for example
-`Release -> v2026.11.24 (newest GitHub release)`.
+`Release -> v2026.11.24.1 (newest GitHub release)`.
 
 Variants (same command, with a variable in front of `bash "$f"`, for example
 `KIT_SKIP_COMPUTER=1 bash "$f"`):
@@ -53,7 +53,7 @@ Variants (same command, with a variable in front of `bash "$f"`, for example
 |---|---|
 | Grokbot Override only | `KIT_SKIP_COMPUTER=1` |
 | Computer viewer only | `KIT_SKIP_GROKBOT=1` |
-| A specific release | `KIT_REF=v2026.11.24` |
+| A specific release | `KIT_REF=v2026.11.24.1` |
 | Another Hermes home (a second install) | `HERMES_HOME=/path/to/.hermes` |
 | Move retired kit plugins (Bubble Mode, Task Dock, Bot Sections) out of the way | `KIT_REMOVE_RETIRED=1` |
 
@@ -113,7 +113,7 @@ Offer these; install only what the person wants.
   chat; question cards work without it):
 
   ```bash
-  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/install.sh -o "$f"; test -s "$f"; KIT_CARDS_SKILL=1 bash "$f" )
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24.1/install.sh -o "$f"; test -s "$f"; KIT_CARDS_SKILL=1 bash "$f" )
   ```
 
   It goes to `<profile home>/skills/agent-cards/SKILL.md` for the root home and
@@ -125,7 +125,7 @@ Offer these; install only what the person wants.
 - **texting-style** (bots reply in a short texting register, only in Bot Chat):
 
   ```bash
-  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/texting-style/install.sh -o "$f"; test -s "$f"; bash "$f" )
+  ( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24.1/texting-style/install.sh -o "$f"; test -s "$f"; bash "$f" )
   ```
 
   To limit it to some profiles, pass them to the script:
@@ -155,7 +155,7 @@ Offer these; install only what the person wants.
 
 <!-- runbook:uninstall -->
 ```bash
-( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/install.sh -o "$f"; test -s "$f"; bash "$f" --uninstall )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24.1/install.sh -o "$f"; test -s "$f"; bash "$f" --uninstall )
 ```
 
 `--uninstall` first turns the daily auto-update off (a job left behind would
@@ -167,7 +167,7 @@ non-zero and changes nothing else. Then it moves the `computer-viewer` and
 the `hermes-bot-kit/` folder with `installed-release`) to
 `hermes-bot-kit-removed-<timestamp>/`. Nothing is deleted and nothing is
 restarted; the person then reloads plugins (step 4). If an update is running
-at that moment (including an older updater from v2026.11.24 or before), it
+at that moment (including an older updater from v2026.11.24.1 or before), it
 stops with "an update is running right now", changes nothing, and can simply
 be run again a minute later. (One tiny window remains with such an older
 updater: one that had already read its settings, but not yet taken its lock,
