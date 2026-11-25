@@ -953,7 +953,9 @@ test('no Orgo strings are left in the kit (history and the remover excepted)', a
     'tests/test-install.sh',
     // The doctor reports a retired orgo-computer still installed, as install.sh does.
     'scripts/doctor.sh',
-    'tests/test-doctor.sh'
+    'tests/test-doctor.sh',
+    // A frozen copy of a released install.sh (auto-update legacy-lock test).
+    'tests/fixtures/legacy-install-v2026.11.22.sh'
   ])
   const hits = []
   for (const rel of files) {
