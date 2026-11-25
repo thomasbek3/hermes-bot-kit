@@ -24,7 +24,7 @@ A chat-app Bot Mode screen + a live window into your bots' computers.
 
 > **Quick start**
 > 1. Tell your AI agent: **"Install https://github.com/thomasbek3/hermes-bot-kit (follow its AGENTS.md)."**
-> 2. Or yourself: `( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" )`
+> 2. Or yourself: `( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/install.sh -o "$f"; test -s "$f"; bash "$f" )`
 > 3. Then **⌘K → Reload desktop plugins** in Hermes Desktop (Ctrl+K on Windows and Linux): the Bots tab becomes the chat-app screen.
 > 4. Not working? `bash install.sh --doctor` (or the one-liner with `--doctor` after `bash "$f"`) tells you why. See [Troubleshooting](#troubleshooting).
 
@@ -33,7 +33,7 @@ A chat-app Bot Mode screen + a live window into your bots' computers.
 1. **Install.** Run the one-liner above (or `bash install.sh` in a clone).
    **You should see** the release on the first line and, near the end:
    ```
-   Release          -> v2026.11.22 (newest GitHub release)
+   Release          -> v2026.11.24 (newest GitHub release)
    ...
    Computer viewer  -> ~/.hermes/desktop-plugins/computer-viewer/plugin.js (+ helper scripts)
    Grokbot Override -> ~/.hermes/desktop-plugins/grokbot-override/plugin.js (switched on unless you turned it off before)
@@ -71,7 +71,7 @@ line per check (`OK`, `FIX`, `WARN` or `INFO`), each `FIX` with the exact comman
 that fixes it:
 
 ```bash
-( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" --doctor )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/install.sh -o "$f"; test -s "$f"; bash "$f" --doctor )
 ```
 
 From a clone: `bash install.sh --doctor` (or `bash scripts/doctor.sh`). It
@@ -161,7 +161,7 @@ Desktop plugins plus an optional agent plugin, one install:
 One command, the desktop plugins (idempotent, no sudo, agents can run it unattended):
 
 ```bash
-( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/install.sh -o "$f"; test -s "$f"; bash "$f" )
 ```
 
 (It downloads the script to a file and runs it only if the download worked, so
@@ -203,7 +203,7 @@ left their folders in `desktop-plugins/`, the installer says so; run it with
 profile), so it has its own one-liner:
 
 ```bash
-( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/texting-style/install.sh -o "$f"; test -s "$f"; bash "$f" )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/texting-style/install.sh -o "$f"; test -s "$f"; bash "$f" )
 ```
 
 **remote-cua** is an *agent* plugin too (per bot profile, on the gateway host):
@@ -229,7 +229,7 @@ Hermes's own plugin auto-update doesn't reach the kit, so the kit has its own.
 One command turns on a daily check (macOS and Linux):
 
 ```bash
-( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" --auto-update on )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/install.sh -o "$f"; test -s "$f"; bash "$f" --auto-update on )
 ```
 
 Every day at 04:20 it asks GitHub for the newest release. When it is newer
@@ -262,7 +262,7 @@ restarts Hermes: after an update, **⌘K → Reload desktop plugins**.
 One command takes the desktop plugins out again (macOS and Linux):
 
 ```bash
-( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" --uninstall )
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.24/install.sh -o "$f"; test -s "$f"; bash "$f" --uninstall )
 ```
 
 From a clone: `bash install.sh --uninstall`. It turns the daily auto-update
