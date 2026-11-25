@@ -33,17 +33,17 @@ const mkBot = (conn, name, extra = {}) => ({
 })
 
 test('Spec 106 core: first observation seeds seen = latest (no dot); new message lights dot; visible fresh history clears', () => {
-  const bot = mkBot('brain', 'paverturf', {
+  const bot = mkBot('brain', 'ads-bot', {
     canonical_session: { id: 'p-root', resolved_id: 'p-tip', message_count: 10, last_active: 1762560000, preview: 'old' }
   })
   let { store, changed } = observeRoster({}, [bot], [], { now: 1000 })
   assert.equal(changed, true)
   assert.equal(isBotUnread(store, bot), false, 'first observation seeds no dot')
-  assert.equal(store['brain::paverturf'].seenCount, 10)
-  assert.equal(store['brain::paverturf'].latestCount, 10)
+  assert.equal(store['brain::ads-bot'].seenCount, 10)
+  assert.equal(store['brain::ads-bot'].latestCount, 10)
 
   // New message arrives on remote bot.
-  const moved = mkBot('brain', 'paverturf', {
+  const moved = mkBot('brain', 'ads-bot', {
     canonical_session: { id: 'p-root', resolved_id: 'p-tip', message_count: 11, last_active: 1762560060, preview: 'Cron report ready' }
   })
   ;({ store, changed } = observeRoster(store, [moved], [], { now: 2000 }))
@@ -127,15 +127,15 @@ test('Spec 106 core: null / unreadable session fields make no change (neither ma
 })
 
 test('Spec 106b core: a new cron session (last_session newer, Bot Chat unchanged) does NOT light the dot', () => {
-  const upwork = mkBot('brain', 'upwork-bot', {
+  const scout = mkBot('brain', 'scout-bot', {
     canonical_session: { id: 'u-botchat', message_count: 10, last_active: 1000, preview: 'hi' },
     last_session: { id: 'u-botchat', message_count: 10, last_active: 1000, preview: 'hi' }
   })
-  let { store } = observeRoster({}, [upwork], [])
-  assert.equal(isBotUnread(store, upwork), false)
+  let { store } = observeRoster({}, [scout], [])
+  assert.equal(isBotUnread(store, scout), false)
 
-  // "Upwork job scout · Nov 25 10:53": a brand-new cron session, ended [SILENT].
-  const silentRun = mkBot('brain', 'upwork-bot', {
+  // "Job scout · Nov 25 10:53": a brand-new cron session, ended [SILENT].
+  const silentRun = mkBot('brain', 'scout-bot', {
     canonical_session: { id: 'u-botchat', message_count: 10, last_active: 1000, preview: 'hi' },
     last_session: { id: 'cron-scout-1053', message_count: 3, last_active: 2000, preview: '[SILENT]' }
   })
@@ -144,24 +144,24 @@ test('Spec 106b core: a new cron session (last_session newer, Bot Chat unchanged
 
   // The next run's session with a non-silent preview (a finished run that did
   // not deliver) still does not light it: only the Bot Chat counts.
-  const loudRun = mkBot('brain', 'upwork-bot', {
+  const loudRun = mkBot('brain', 'scout-bot', {
     canonical_session: { id: 'u-botchat', message_count: 10, last_active: 1000, preview: 'hi' },
     last_session: { id: 'cron-scout-1055', message_count: 4, last_active: 3000, preview: 'Scanned 12 jobs, none matched' }
   })
   ;({ store } = observeRoster(store, [loudRun], []))
   assert.equal(isBotUnread(store, loudRun), false, 'a new cron session never lights the dot while the Bot Chat is unchanged')
-  assert.equal(store['brain::upwork-bot'].latestTipId, 'u-botchat', 'latest stays the Bot Chat')
+  assert.equal(store['brain::scout-bot'].latestTipId, 'u-botchat', 'latest stays the Bot Chat')
 })
 
 test('Spec 106b core: a mid-run last_session preview (not yet [SILENT]) does not light the dot', () => {
   const base = { canonical_session: { id: 'u-botchat', message_count: 10, last_active: 1000, preview: 'hi' } }
-  let { store } = observeRoster({}, [mkBot('brain', 'upwork-bot', base)], [])
+  let { store } = observeRoster({}, [mkBot('brain', 'scout-bot', base)], [])
   // Poll catches the run mid-flight: tool output preview, not [SILENT] yet.
-  const midRun = mkBot('brain', 'upwork-bot', { ...base, last_session: { id: 'cron-scout-1057', message_count: 2, last_active: 2000, preview: 'Searching Upwork for n8n jobs...' } })
+  const midRun = mkBot('brain', 'scout-bot', { ...base, last_session: { id: 'cron-scout-1057', message_count: 2, last_active: 2000, preview: 'Searching for new jobs...' } })
   ;({ store } = observeRoster(store, [midRun], []))
   assert.equal(isBotUnread(store, midRun), false, 'mid-run preview does not light the dot')
   // Then the run finishes [SILENT].
-  const done = mkBot('brain', 'upwork-bot', { ...base, last_session: { id: 'cron-scout-1057', message_count: 3, last_active: 2010, preview: '[SILENT]' } })
+  const done = mkBot('brain', 'scout-bot', { ...base, last_session: { id: 'cron-scout-1057', message_count: 3, last_active: 2010, preview: '[SILENT]' } })
   ;({ store } = observeRoster(store, [done], []))
   assert.equal(isBotUnread(store, done), false, 'and stays unlit after the run ends')
 })
@@ -195,21 +195,21 @@ test('Spec 106b core: a delivered cron report (new message in the Bot Chat) DOES
 })
 
 test('Spec 106b core: last_session is used only when the bot has no readable Bot Chat', () => {
-  const noChat = mkBot('local', 'gandalf', {
+  const noChat = mkBot('local', 'owl2', {
     canonical_session: null,
     last_session: { id: 'g-other', message_count: 6, last_active: 1000, preview: 'older talk' }
   })
   assert.equal(extractBotActivity(noChat).tipId, 'g-other')
   assert.equal(extractBotActivity(noChat).isCanonical, false)
   let { store } = observeRoster({}, [noChat], [])
-  const moved = mkBot('local', 'gandalf', { canonical_session: null, last_session: { id: 'g-other', message_count: 8, last_active: 2000, preview: 'new talk' } })
+  const moved = mkBot('local', 'owl2', { canonical_session: null, last_session: { id: 'g-other', message_count: 8, last_active: 2000, preview: 'new talk' } })
   ;({ store } = observeRoster(store, [moved], []))
   assert.equal(isBotUnread(store, moved), true, 'without a Bot Chat, last_session activity lights the dot')
   ;({ store } = markBotSeen(store, moved, [], { visible: true, fresh: true, nonEmpty: false, emptyChat: true, sessionId: '', count: 0, lastAt: 0 }))
   assert.equal(isBotUnread(store, moved), false, 'opening clears it (Problem 2: empty Bot Chat, activity elsewhere)')
 
   // With a readable Bot Chat, last_session is ignored even if newer.
-  const both = mkBot('local', 'gandalf', {
+  const both = mkBot('local', 'owl2', {
     canonical_session: { id: 'g-botchat', message_count: 0, last_active: 500 },
     last_session: { id: 'g-other', message_count: 9, last_active: 9000, preview: 'x' }
   })
@@ -218,12 +218,12 @@ test('Spec 106b core: last_session is used only when the bot has no readable Bot
 })
 
 test('Spec 106b core: a stored entry whose latest is a cron tip (old rule) re-baselines to the Bot Chat on next observation, clearing the false dot', () => {
-  // What the 106 build left in storage for Upwork Bot: latest = a cron run's
+  // What the 106 build left in storage for Scout Bot: latest = a cron run's
   // session, seen = the Bot Chat -> permanently unread.
   const legacy = loadUnreadStore({
-    'brain::upwork-bot': { seenCount: 10, seenTipId: 'u-botchat', latestCount: 2, latestTipId: 'cron-scout-1053', updatedAt: 5, seenAt: 1000000, latestAt: 2000000 }
+    'brain::scout-bot': { seenCount: 10, seenTipId: 'u-botchat', latestCount: 2, latestTipId: 'cron-scout-1053', updatedAt: 5, seenAt: 1000000, latestAt: 2000000 }
   })
-  const bot = mkBot('brain', 'upwork-bot', {
+  const bot = mkBot('brain', 'scout-bot', {
     canonical_session: { id: 'u-botchat', message_count: 10, last_active: 1000, preview: 'hi' },
     last_session: { id: 'cron-scout-1055', message_count: 2, last_active: 2100, preview: 'Searching...' }
   })
@@ -231,7 +231,7 @@ test('Spec 106b core: a stored entry whose latest is a cron tip (old rule) re-ba
   let { store, changed } = observeRoster(legacy, [bot], [], { now: 10 })
   assert.equal(changed, true)
   assert.equal(isBotUnread(store, bot), false, 'false cron dot clears without opening the bot')
-  const e = store['brain::upwork-bot']
+  const e = store['brain::scout-bot']
   assert.equal(e.latestTipId, 'u-botchat')
   assert.equal(e.seenTipId, 'u-botchat')
   assert.equal(e.latestCount, 10)
@@ -241,53 +241,53 @@ test('Spec 106b core: a stored entry whose latest is a cron tip (old rule) re-ba
   // Survives a reload, and a later delivered report still lights it.
   store = loadUnreadStore(JSON.parse(JSON.stringify(store)))
   assert.equal(observeRoster(store, [bot], []).changed, false, 'stable on the next poll')
-  const delivered = mkBot('brain', 'upwork-bot', { canonical_session: { id: 'u-botchat', message_count: 11, last_active: 3000, preview: 'New match: n8n job' } })
+  const delivered = mkBot('brain', 'scout-bot', { canonical_session: { id: 'u-botchat', message_count: 11, last_active: 3000, preview: 'New match: n8n job' } })
   ;({ store } = observeRoster(store, [delivered], []))
   assert.equal(isBotUnread(store, delivered), true, 'a real Bot Chat message after re-baseline lights the dot')
 
   // A legacy entry with a REAL Bot Chat unread (seen tip = Bot Chat, it grew)
   // keeps that unread through re-baseline.
   const realUnread = loadUnreadStore({
-    'brain::upwork-bot': { seenCount: 10, seenTipId: 'u-botchat', latestCount: 2, latestTipId: 'cron-scout-1053', updatedAt: 5, seenAt: 1000000, latestAt: 2000000 }
+    'brain::scout-bot': { seenCount: 10, seenTipId: 'u-botchat', latestCount: 2, latestTipId: 'cron-scout-1053', updatedAt: 5, seenAt: 1000000, latestAt: 2000000 }
   })
   ;({ store } = observeRoster(realUnread, [delivered], []))
   assert.equal(isBotUnread(store, delivered), true, 'a Bot Chat that grew since it was seen stays unread')
 })
 
 test('Spec 106 core: re-created connection for the same host keeps host+profile key so old connectionId does not linger', () => {
-  const sources1 = [{ connectionId: 'ssh-conn-old', kind: 'ssh', host: 'brain.tailnet', reachable: true }]
-  const botOld = mkBot('ssh-conn-old', 'reviewsy', { canonical_session: { id: 'r-1', message_count: 2, last_active: 1000 } })
-  assert.equal(unreadBotKey(botOld, sources1), 'brain.tailnet::reviewsy')
+  const sources1 = [{ connectionId: 'ssh-conn-old', kind: 'ssh', host: 'host-b.tailnet', reachable: true }]
+  const botOld = mkBot('ssh-conn-old', 'review-bot', { canonical_session: { id: 'r-1', message_count: 2, last_active: 1000 } })
+  assert.equal(unreadBotKey(botOld, sources1), 'host-b.tailnet::review-bot')
 
   let { store } = observeRoster({}, [botOld], sources1)
-  const botOldMoved = mkBot('ssh-conn-old', 'reviewsy', { canonical_session: { id: 'r-1', message_count: 3, last_active: 2000 } })
+  const botOldMoved = mkBot('ssh-conn-old', 'review-bot', { canonical_session: { id: 'r-1', message_count: 3, last_active: 2000 } })
   ;({ store } = observeRoster(store, [botOldMoved], sources1))
   assert.equal(isBotUnread(store, botOldMoved, sources1), true)
 
   // Connection is re-created with a brand-new connectionId for the same host.
-  const sources2 = [{ connectionId: 'ssh-conn-new', kind: 'ssh', host: 'brain.tailnet', reachable: true }]
-  const botNew = mkBot('ssh-conn-new', 'reviewsy', { canonical_session: { id: 'r-1', message_count: 3, last_active: 2000 } })
-  assert.equal(unreadBotKey(botNew, sources2), 'brain.tailnet::reviewsy')
+  const sources2 = [{ connectionId: 'ssh-conn-new', kind: 'ssh', host: 'host-b.tailnet', reachable: true }]
+  const botNew = mkBot('ssh-conn-new', 'review-bot', { canonical_session: { id: 'r-1', message_count: 3, last_active: 2000 } })
+  assert.equal(unreadBotKey(botNew, sources2), 'host-b.tailnet::review-bot')
   assert.equal(isBotUnread(store, botNew, sources2), true, 'unread state follows host+profile across recreated connection')
-  assert.equal(store['ssh-conn-old::reviewsy'], undefined, 'old connectionId does not linger')
+  assert.equal(store['ssh-conn-old::review-bot'], undefined, 'old connectionId does not linger')
 })
 
 test('Spec 106 core: persisted store round-trip keeps unread and read states', () => {
-  const botA = mkBot('brain', 'paverturf', { canonical_session: { id: 'p-1', message_count: 5, last_active: 1000 } })
-  const botB = mkBot('brain', 'reviewsy', { canonical_session: { id: 'r-1', message_count: 5, last_active: 1000 } })
+  const botA = mkBot('brain', 'ads-bot', { canonical_session: { id: 'p-1', message_count: 5, last_active: 1000 } })
+  const botB = mkBot('brain', 'review-bot', { canonical_session: { id: 'r-1', message_count: 5, last_active: 1000 } })
   let { store } = observeRoster({}, [botA, botB], [])
-  const botA2 = mkBot('brain', 'paverturf', { canonical_session: { id: 'p-1', message_count: 6, last_active: 2000 } })
+  const botA2 = mkBot('brain', 'ads-bot', { canonical_session: { id: 'p-1', message_count: 6, last_active: 2000 } })
   ;({ store } = observeRoster(store, [botA2, botB], []))
 
   const rehydrated = loadUnreadStore(JSON.parse(JSON.stringify(store)))
-  assert.equal(isEntryUnread(rehydrated['brain::paverturf']), true, 'reload keeps unread')
-  assert.equal(isEntryUnread(rehydrated['brain::reviewsy']), false, 'reload keeps read')
+  assert.equal(isEntryUnread(rehydrated['brain::ads-bot']), true, 'reload keeps unread')
+  assert.equal(isEntryUnread(rehydrated['brain::review-bot']), false, 'reload keeps read')
 })
 
 test('Spec 106 core: remoteActivity polls SSH connect-on-demand rows and overlays session fields', async () => {
-  const sshRow = mkBot('brain', 'paverturf', { sourceError: 'connect-on-demand', sourceReachable: false })
+  const sshRow = mkBot('brain', 'ads-bot', { sourceError: 'connect-on-demand', sourceReachable: false })
   const carriers = remoteActivityCarriers([sshRow])
-  assert.equal(carriers.get('brain')?.name, 'paverturf', 'SSH connect-on-demand row is eligible for remote activity poll')
+  assert.equal(carriers.get('brain')?.name, 'ads-bot', 'SSH connect-on-demand row is eligible for remote activity poll')
 
   let changes = 0
   const ownership = createOwnership()
@@ -297,7 +297,7 @@ test('Spec 106 core: remoteActivity polls SSH connect-on-demand rows and overlay
     request: async () => ({
       install_id: 'brain-install-1',
       profiles: [
-        { name: 'paverturf', canonical_session: { id: 'pt-1', message_count: 7, last_active: 5000, preview: 'Cron done' } }
+        { name: 'ads-bot', canonical_session: { id: 'pt-1', message_count: 7, last_active: 5000, preview: 'Cron done' } }
       ]
     })
   })
@@ -313,8 +313,8 @@ test('Spec 106 core: remoteActivity polls SSH connect-on-demand rows and overlay
 test('Spec 106 loader-faithful: remote SSH bot gets dot on cron report, hidden tab does not clear, visible fresh history clears, survives reload', { skip: !READY && 'dev dependencies not installed' }, async t => {
   const brainSource = { connectionId: 'brain', kind: 'ssh', label: 'brain', host: 'brain.local', reachable: false, error: 'connect-on-demand' }
   const sshBot = {
-    name: 'paverturf',
-    display_name: 'PaverTurf',
+    name: 'ads-bot',
+    display_name: 'Ads Bot',
     remoteSource: true,
     sourceScoped: true,
     connectionId: 'brain',
@@ -322,11 +322,11 @@ test('Spec 106 loader-faithful: remote SSH bot gets dot on cron report, hidden t
     connectionLabel: 'brain',
     sourceReachable: false,
     sourceError: 'connect-on-demand',
-    route: { connectionId: 'brain', mode: 'remote', profile: 'paverturf', targetProfile: 'paverturf' }
+    route: { connectionId: 'brain', mode: 'remote', profile: 'ads-bot', targetProfile: 'ads-bot' }
   }
 
   let brainProfiles = [
-    { name: 'paverturf', canonical_session: { id: 'pt-root', message_count: 4, last_active: 1762560000, preview: 'initial' } }
+    { name: 'ads-bot', canonical_session: { id: 'pt-root', message_count: 4, last_active: 1762560000, preview: 'initial' } }
   ]
   let paneShown = false
   const visListeners = new Set()
@@ -340,11 +340,11 @@ test('Spec 106 loader-faithful: remote SSH bot gets dot on cron report, hidden t
     sources: [brainSource],
     answers: {
       'profiles.list': (params, profile) => {
-        if (profile === 'paverturf') return { install_id: 'brain-host-1', profiles: brainProfiles }
+        if (profile === 'ads-bot') return { install_id: 'brain-host-1', profiles: brainProfiles }
         return { profiles: [LOCAL] }
       },
       'session.list': (params, profile) => {
-        if (profile === 'paverturf') return { sessions: [{ id: 'pt-root', title: 'Bot Chat', message_count: 4 }] }
+        if (profile === 'ads-bot') return { sessions: [{ id: 'pt-root', title: 'Bot Chat', message_count: 4 }] }
         return { sessions: [{ ...LOCAL.canonical_session, title: 'Bot Chat', message_count: 4 }] }
       }
     },
@@ -360,15 +360,15 @@ test('Spec 106 loader-faithful: remote SSH bot gets dot on cron report, hidden t
   const rowOf = name => [...rosterEl.querySelectorAll('button.gbo-row')].find(b => b.textContent.includes(name))
   const dotOf = el => el?.querySelector('.gbo-unread-dot [role="status"][data-gbo-unread="true"]')
 
-  await waitFor(() => rowOf('PaverTurf'), 'remote SSH row')
-  // Wait for first remote activity poll to seed PaverTurf (no dot on first observation).
-  await waitFor(() => rowOf('PaverTurf').textContent.includes('initial'), 'initial remote preview overlaid', 6000)
-  assert.ok(!dotOf(rowOf('PaverTurf')), 'first observation seeds no dot')
+  await waitFor(() => rowOf('Ads Bot'), 'remote SSH row')
+  // Wait for first remote activity poll to seed Ads Bot (no dot on first observation).
+  await waitFor(() => rowOf('Ads Bot').textContent.includes('initial'), 'initial remote preview overlaid', 6000)
+  assert.ok(!dotOf(rowOf('Ads Bot')), 'first observation seeds no dot')
 
   // A cron run (own session) delivers its report into the Bot Chat (spec 106b).
   brainProfiles = [
     {
-      name: 'paverturf',
+      name: 'ads-bot',
       canonical_session: { id: 'pt-root', message_count: 5, last_active: 1762560125, preview: 'Morning cron report' },
       last_session: { id: 'pt-cron-1', message_count: 2, last_active: 1762560120, preview: 'Morning cron report' }
     }
@@ -377,22 +377,22 @@ test('Spec 106 loader-faithful: remote SSH bot gets dot on cron report, hidden t
   // so reloading resets the poll cadence and immediately runs the remote poll against persisted unreadStore!
   await reload()
   rosterEl = mount(panes.find(p => p.id === 'roster').render)
-  await waitFor(() => dotOf(rowOf('PaverTurf')), 'PaverTurf lights up with blue dot on cron report', 6000)
+  await waitFor(() => dotOf(rowOf('Ads Bot')), 'Ads Bot lights up with blue dot on cron report', 6000)
 
-  // Click PaverTurf while its pane is HIDDEN (paneShown === false): must NOT clear!
-  rowOf('PaverTurf').click()
+  // Click Ads Bot while its pane is HIDDEN (paneShown === false): must NOT clear!
+  rowOf('Ads Bot').click()
   await new Promise(resolve => setTimeout(resolve, 250))
-  assert.ok(dotOf(rowOf('PaverTurf')), 'hidden tab must NOT clear the unread dot')
+  assert.ok(dotOf(rowOf('Ads Bot')), 'hidden tab must NOT clear the unread dot')
 
   // Make the pane VISIBLE: now the fresh history clears the dot!
   setPaneShown(true)
-  await waitFor(() => !dotOf(rowOf('PaverTurf')), 'becoming visible with fresh history clears the dot')
+  await waitFor(() => !dotOf(rowOf('Ads Bot')), 'becoming visible with fresh history clears the dot')
 
-  // Reload again: PaverTurf must STAY read!
+  // Reload again: Ads Bot must STAY read!
   await reload()
   rosterEl = mount(panes.find(p => p.id === 'roster').render)
-  await waitFor(() => rowOf('PaverTurf'), 'PaverTurf after reload')
+  await waitFor(() => rowOf('Ads Bot'), 'Ads Bot after reload')
   await new Promise(resolve => setTimeout(resolve, 250))
-  assert.ok(!dotOf(rowOf('PaverTurf')), 'stays read after reload')
+  assert.ok(!dotOf(rowOf('Ads Bot')), 'stays read after reload')
   assert.deepEqual(errors.map(e => `${e.kind}: ${e.error?.message}`), [])
 })

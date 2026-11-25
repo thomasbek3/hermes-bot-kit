@@ -24,7 +24,7 @@
 // - Unread = new activity in the bot's Bot Chat (canonical_session) ONLY is
 //   newer than seen. Every user-visible message lands there: a cron job that
 //   delivers (deliver=bot-chat) appends its report to the Bot Chat. A cron
-//   run's own session (last_session, e.g. "Upwork job scout · Nov 25 10:53",
+//   run's own session (last_session, e.g. "Job scout · Nov 25 10:53",
 //   new every run, mostly ending [SILENT]) never lights the dot, not even when
 //   a poll catches it mid-run with a non-silent preview (spec 106b).
 //   last_session is used only when the bot has no readable canonical_session.
