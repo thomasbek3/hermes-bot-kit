@@ -99,13 +99,13 @@ kit() {
 job() { kit "$@" bash "${STATE}/update.sh" --auto-update run; }
 # hold_lock: a background process holds the updater's flock until killed.
 hold_lock() {
-  mkdir -p "${STATE}"
   rm -f "${M}/held"
+  # The lock sits beside the state folder (uninstall moves that folder).
   perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; open(my $r, ">", $ARGV[1]) or die; close $r; sleep 300' \
-    "${STATE}/update.flock" "${M}/held" &
+    "${HH}/.hermes-bot-kit-update.flock" "${M}/held" &
   SLEEPER=$!
   until [ -e "${M}/held" ]; do sleep 0.05; done
-  printf '%s\n' "${SLEEPER}" > "${STATE}/update.flock.pid"
+  printf '%s\n' "${SLEEPER}" > "${HH}/.hermes-bot-kit-update.flock.pid"
 }
 drop_lock() {
   kill -9 "${SLEEPER}" 2>/dev/null || true
@@ -762,6 +762,50 @@ OS=linux kit bash "${DL}/install.sh" --uninstall >/dev/null || fail "linux unins
 [ ! -e "${UNITS}/hermes-bot-kit-update.timer" ] && [ ! -e "${LOGS}/systemctl.enabled" ] || fail "linux uninstall left the timer"
 [ ! -e "${HH}/desktop-plugins/grokbot-override" ] && [ ! -e "${STATE}" ] || fail "linux uninstall left state"
 ok "uninstall (systemd): timer disabled and removed, then plugins and records moved out"
+
+# 5. (review P1) An update that read its settings before an uninstall, then
+# resumes, installs nothing: run and uninstall share a lock outside the folder
+# uninstall moves, and run re-checks auto-update after taking it.
+uninstall_machine
+mkdir -p "${M}/gate"
+job KIT_TEST_RUN_GATE="${M}/gate/go" > "${M}/job.out" 2>&1 &
+jobpid=$!
+for _ in $(seq 1 200); do [ -e "${M}/gate/go.waiting" ] && break; sleep 0.05; done
+[ -e "${M}/gate/go.waiting" ] || fail "uninstall race: the update never reached its gate"
+kit bash "${DL}/install.sh" --uninstall >/dev/null || fail "uninstall race: uninstall failed while an update was paused"
+touch "${M}/gate/go"
+wait "${jobpid}" || fail "uninstall race: the paused update exited non-zero: $(cat "${M}/job.out")"
+[ ! -e "${HH}/desktop-plugins/grokbot-override" ] && [ ! -e "${HH}/desktop-plugins/computer-viewer" ] || fail "uninstall race: the paused update reinstalled the plugins"
+[ ! -e "${STATE}" ] || fail "uninstall race: the paused update recreated ${STATE}"
+tail -n 1 "${ULOG}" | grep -q 'skipped: auto-update was turned off' || fail "uninstall race log: $(tail -n 1 "${ULOG}")"
+# While an update holds the lock, uninstall changes nothing (exit 1).
+uninstall_machine
+hold_lock
+tree_sum "${HH}" > "${M}/all.before"
+if kit bash "${DL}/install.sh" --uninstall >/dev/null 2>&1; then drop_lock; fail "uninstall ran while an update held the lock"; fi
+drop_lock
+tree_sum "${HH}" | grep -v 'hermes-bot-kit-update.flock' > "${M}/all.after" || true
+grep -v 'hermes-bot-kit-update.flock' "${M}/all.before" | cmp -s - "${M}/all.after" || fail "uninstall changed something while an update held the lock"
+[ -f "${PLIST}" ] && [ -f "${STATE}/auto-update.env" ] || fail "uninstall turned auto-update off while an update held the lock"
+ok "uninstall vs a running update: one lock outside the moved folder; a resumed update re-checks and installs nothing"
+
+# 6. (review P2) A record move that fails part-way is finished by a rerun,
+# which writes the UNINSTALLED marker.
+uninstall_machine
+mkdir -p "${M}/failmv"
+cat > "${M}/failmv/mv" <<'EOF'
+#!/bin/sh
+for a in "$@"; do case "$a" in *desktop-plugins/MANIFEST.sha256) [ -n "${FAKE_MV_FAIL:-}" ] && exit 1 ;; esac; done
+exec /bin/mv "$@"
+EOF
+chmod +x "${M}/failmv/mv"
+if XPATH="${M}/failmv" kit FAKE_MV_FAIL=1 bash "${DL}/install.sh" --uninstall >/dev/null 2>&1; then fail "partial uninstall: a failed record move exited 0"; fi
+[ -f "${HH}/desktop-plugins/MANIFEST.sha256" ] || fail "partial uninstall: test setup, the manifest moved"
+out=$(kit bash "${DL}/install.sh" --uninstall) || fail "partial uninstall: the rerun failed: ${out}"
+printf '%s\n' "${out}" | grep -q 'nothing is installed' && fail "partial uninstall: the rerun said nothing is installed: ${out}"
+[ ! -e "${HH}/desktop-plugins/MANIFEST.sha256" ] || fail "partial uninstall: the rerun left the manifest"
+ls "${HH}"/hermes-bot-kit-removed-*/UNINSTALLED >/dev/null 2>&1 || fail "partial uninstall: no UNINSTALLED marker after the rerun"
+ok "uninstall: a record move that failed part-way is finished by a rerun, which writes the marker"
 
 for r in ${REGRESSIONS}; do "${r}"; done
 

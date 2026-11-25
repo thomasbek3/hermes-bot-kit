@@ -480,18 +480,19 @@ au_last_line() {
   return 0
 }
 
-# Single instance: an exclusive flock(2) on <home>/hermes-bot-kit/update.flock,
-# held on file descriptor 9 for the whole run. The kernel drops it when the
+# Single instance: an exclusive flock(2) on <home>/.hermes-bot-kit-update.flock,
+# held on file descriptor 9 for the whole run. It sits beside, not inside,
+# <home>/hermes-bot-kit/: --uninstall moves that folder and takes the same
+# lock, so a run and an uninstall never overlap. The kernel drops it when the
 # run exits, however it exits, so there is no stale lock to detect, take over
 # or race on. flock(1) takes it on Linux; elsewhere (macOS has no flock(1))
 # perl locks the same open file (flock locks belong to the open file, which
 # this shell keeps, so the lock outlives the perl process). Children never
-# inherit descriptor 9. update.flock.pid only names the holder for the log.
+# inherit descriptor 9. The .pid file beside it only names the holder for the log.
 au_lock() {
   local rc
-  AU_LOCK_FILE="${KIT_STATE_DIR}/update.flock"
+  AU_LOCK_FILE="${HERMES_ROOT}/.hermes-bot-kit-update.flock"
   AU_LOCK_PID="unknown"
-  mkdir -p "${KIT_STATE_DIR}"
   if [ -L "${AU_LOCK_FILE}" ] || ! : >> "${AU_LOCK_FILE}" 2>/dev/null; then
     AU_LOCK_ERR="cannot open ${AU_LOCK_FILE}"
     return 2
@@ -628,6 +629,13 @@ au_run() {
     return 0
   fi
   au_load || { au_log "FAILED: bad settings in ${AU_ENV}"; return 1; }
+  # Test seam (KIT_TEST_RUN_GATE=<file>): wait here, settings read and lock
+  # not yet taken, until <file> exists; the uninstall race test uses it.
+  if [ -n "${KIT_TEST_RUN_GATE:-}" ]; then
+    : > "${KIT_TEST_RUN_GATE}.waiting"
+    local waited=0
+    while [ ! -e "${KIT_TEST_RUN_GATE}" ] && [ "${waited}" -lt 600 ]; do sleep 0.05; waited=$((waited + 1)); done
+  fi
   rc=0
   au_lock || rc=$?
   if [ "${rc}" = 1 ]; then
@@ -637,6 +645,14 @@ au_run() {
     au_log "FAILED: ${AU_LOCK_ERR:-could not take the update lock}; nothing done"
     return 1
   fi
+  # Under the lock: auto-update may have been turned off (or the kit
+  # uninstalled) since the settings were read. Read them again.
+  if [ ! -f "${AU_ENV}" ]; then
+    au_unlock
+    au_log "skipped: auto-update was turned off (or the kit uninstalled) while this run started; nothing installed"
+    return 0
+  fi
+  au_load || { au_unlock; au_log "FAILED: bad settings in ${AU_ENV}"; return 1; }
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064 # expand now: these paths are fixed for the run
   trap "rm -rf '${tmp}'; au_unlock" EXIT
@@ -1117,7 +1133,7 @@ EOF
 }
 
 kit_uninstall() {
-  local ts p dest n moved="" rc removed="" installed=0
+  local p installed=0 rc
   au_norm_home
   if [ ! -d "${HERMES_ROOT}" ]; then
     echo "Uninstall        -- nothing is installed: there is no Hermes home at ${HERMES_ROOT}. Nothing changed."
@@ -1127,30 +1143,40 @@ kit_uninstall() {
   for p in ${KIT_DESKTOP_PLUGINS}; do
     if [ -e "${PLUGIN_ROOT}/${p}" ] || [ -L "${PLUGIN_ROOT}/${p}" ]; then installed=1; fi
   done
+  # Any kit record left (also what an earlier --uninstall that stopped
+  # part-way did not move yet): this run finishes the job.
   [ -f "${PLUGIN_ROOT}/.hermes-bot-kit-install" ] && installed=1
+  [ -f "${PLUGIN_ROOT}/MANIFEST.sha256" ] && installed=1
   [ -d "${KIT_STATE_DIR}" ] && installed=1
   if [ "${installed}" = 0 ]; then
     echo "Uninstall        -- nothing is installed in ${HERMES_ROOT} (no kit desktop plugins, install records or auto-update). Nothing changed."
     un_agent_report
     return 0
   fi
+  # 1. The update lock (beside hermes-bot-kit/, the same one a run takes),
+  # held to the end: never while an update runs, and an update that started
+  # before this re-checks auto-update under the lock and installs nothing.
+  rc=0
+  au_lock || rc=$?
+  if [ "${rc}" = 1 ]; then
+    echo "install.sh: --uninstall stopped: an update is running right now (pid ${AU_LOCK_PID:-unknown}). Nothing was changed. Run --uninstall again in a minute." >&2
+    return 1
+  elif [ "${rc}" != 0 ]; then
+    echo "install.sh: --uninstall stopped: ${AU_LOCK_ERR:-could not take the update lock}. Nothing was changed." >&2
+    return 1
+  fi
+  rc=0
+  un_locked || rc=$?
+  au_unlock
+  return "${rc}"
+}
 
-  # 1. The daily job first: left behind, it would install the plugins again.
+un_locked() {
+  local ts p dest n moved="" removed
+  # 2. The daily job first: left behind, it would install the plugins again.
   if un_au_present; then
     if ! au_off; then
       echo "install.sh: --uninstall stopped: auto-update could not be turned off (see above), so nothing else was changed. Fix that, then run --uninstall again." >&2
-      return 1
-    fi
-  fi
-  # 2. Never under an update that is running now.
-  if [ -d "${KIT_STATE_DIR}" ]; then
-    rc=0
-    au_lock || rc=$?
-    if [ "${rc}" = 1 ]; then
-      echo "install.sh: --uninstall stopped: an update is running right now (pid ${AU_LOCK_PID:-unknown}). Auto-update is off; nothing else was changed. Run --uninstall again in a minute." >&2
-      return 1
-    elif [ "${rc}" != 0 ]; then
-      echo "install.sh: --uninstall stopped: ${AU_LOCK_ERR:-could not take the update lock}. Auto-update is off; nothing else was changed." >&2
       return 1
     fi
   fi
@@ -1166,7 +1192,6 @@ kit_uninstall() {
       dest="${HERMES_ROOT}/desktop-plugins-removed-${ts}-${p}.${n}"
     done
     if ! mv -- "${PLUGIN_ROOT}/${p}" "${dest}" 2>/dev/null; then
-      au_unlock
       echo "install.sh: --uninstall stopped: could not move ${PLUGIN_ROOT}/${p} out (permissions?)${moved:+; already moved:${moved}}. Auto-update is off. Fix that, then run --uninstall again." >&2
       return 1
     fi
@@ -1175,6 +1200,8 @@ kit_uninstall() {
   done
 
   # 4. The kit's records, moved to one hermes-bot-kit-removed-<ts> folder.
+  # Its UNINSTALLED marker is written before the last moves, so a stop
+  # part-way still reads as an uninstall; a rerun moves what is left.
   removed="${HERMES_ROOT}/hermes-bot-kit-removed-${ts}"
   n=1
   while [ -e "${removed}" ] || [ -L "${removed}" ]; do
@@ -1183,23 +1210,22 @@ kit_uninstall() {
   done
   if [ -d "${KIT_STATE_DIR}" ]; then
     if ! mv -- "${KIT_STATE_DIR}" "${removed}" 2>/dev/null; then
-      au_unlock
       echo "install.sh: --uninstall stopped: could not move ${KIT_STATE_DIR} out. Auto-update is off${moved:+ and the plugins are moved out}. Fix that, then run --uninstall again." >&2
       return 1
     fi
-  else
-    mkdir -p "${removed}"
+  elif ! mkdir -p "${removed}" 2>/dev/null; then
+    echo "install.sh: --uninstall stopped: could not create ${removed}. Fix that, then run --uninstall again." >&2
+    return 1
   fi
-  au_unlock
   rm -f "${removed}/update.flock" "${removed}/update.flock.pid"
+  printf 'removed=%s\nplugins=%s\n' "${ts}" "${moved# }" > "${removed}/UNINSTALLED"
   for p in .hermes-bot-kit-install MANIFEST.sha256; do
     [ -f "${PLUGIN_ROOT}/${p}" ] || continue
     if ! mv -- "${PLUGIN_ROOT}/${p}" "${removed}/${p#.}" 2>/dev/null; then
-      echo "install.sh: --uninstall: could not move ${PLUGIN_ROOT}/${p} out; remove it by hand." >&2
+      echo "install.sh: --uninstall stopped part-way: could not move ${PLUGIN_ROOT}/${p} out. Fix that, then run --uninstall again to finish." >&2
       return 1
     fi
   done
-  printf 'removed=%s\nplugins=%s\n' "${ts}" "${moved# }" > "${removed}/UNINSTALLED"
   echo "Uninstall        -- install records (installed-release, the install record, the manifest) moved to ${removed}"
   un_agent_report
   echo
