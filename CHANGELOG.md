@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Grokbot Override: the work fold says how long the turn took.** A finished
+  turn's last "N tools" fold now reads "Worked for 3m 12s · 12 tools" ("41s"
+  under a minute, "1h 4m" past an hour): from the user's message to the
+  reply's completion, from timestamps the items already carry (the stored
+  rows' for history; live turns are stamped when `message.complete` arrives,
+  so a running turn shows no time). Without a timestamp, or with the turn's
+  user message on an earlier page, the fold keeps its old line. One line,
+  never wrapped on a phone. `src/core/workTime.js`; test
+  `grokbot-override/test/work-time.test.mjs`.
+
 - **Grokbot Override: a bot's approval mode in its profile panel.** Stock
   Hermes keeps Manual / Smart / Off in the bottom status bar, which the
   override hides. The panel now has an **Approval mode** row under **Model**

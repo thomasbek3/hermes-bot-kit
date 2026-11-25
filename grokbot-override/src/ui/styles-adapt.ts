@@ -478,6 +478,7 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
   list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; margin-left: 4px; border-radius: var(--radius-full);
   font-size: 12px; line-height: 16px; letter-spacing: 0.12px; font-weight: 400; color: var(--color-text-tertiary); cursor: pointer; user-select: none;
 }
+.gbo-tools > summary { max-width: calc(100% - 4px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-think > summary:hover, .gbo-tools > summary:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
 .gbo-think > summary svg, .gbo-tools > summary svg { order: 1; width: 10px; height: 10px; opacity: 0.66; transform: rotate(90deg); transition: transform 160ms var(--ease-out); }
 .gbo-think[open] > summary svg, .gbo-tools[open] > summary svg { transform: rotate(-90deg); }

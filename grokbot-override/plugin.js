@@ -680,15 +680,15 @@ function SSF_normalize_xl_unsafe(v) {
 function SSF_parse_date_code(v, opts, b2) {
   if (v > 2958465 || v < 0) return null;
   v = SSF_normalize_xl_unsafe(v);
-  var date = v | 0, time = Math.floor(86400 * (v - date)), dow = 0;
+  var date = v | 0, time2 = Math.floor(86400 * (v - date)), dow = 0;
   var dout = [];
-  var out = { D: date, T: time, u: 86400 * (v - date) - time, y: 0, m: 0, d: 0, H: 0, M: 0, S: 0, q: 0 };
+  var out = { D: date, T: time2, u: 86400 * (v - date) - time2, y: 0, m: 0, d: 0, H: 0, M: 0, S: 0, q: 0 };
   if (Math.abs(out.u) < 1e-6) out.u = 0;
   if (opts && opts.date1904) date += 1462;
   if (out.u > 0.9999) {
     out.u = 0;
-    if (++time == 86400) {
-      out.T = time = 0;
+    if (++time2 == 86400) {
+      out.T = time2 = 0;
       ++date;
       ++out.D;
     }
@@ -711,11 +711,11 @@ function SSF_parse_date_code(v, opts, b2) {
   out.y = dout[0];
   out.m = dout[1];
   out.d = dout[2];
-  out.S = time % 60;
-  time = Math.floor(time / 60);
-  out.M = time % 60;
-  time = Math.floor(time / 60);
-  out.H = time;
+  out.S = time2 % 60;
+  time2 = Math.floor(time2 / 60);
+  out.M = time2 % 60;
+  time2 = Math.floor(time2 / 60);
+  out.H = time2;
   out.q = dow;
   return out;
 }
@@ -1925,13 +1925,13 @@ function numdate(v) {
   return out;
 }
 function parse_isodur(s) {
-  var sec = 0, mt = 0, time = false;
+  var sec = 0, mt = 0, time2 = false;
   var m = s.match(/P([0-9\.]+Y)?([0-9\.]+M)?([0-9\.]+D)?T([0-9\.]+H)?([0-9\.]+M)?([0-9\.]+S)?/);
   if (!m) throw new Error("|" + s + "| is not an ISO8601 Duration");
   for (var i = 1; i != m.length; ++i) {
     if (!m[i]) continue;
     mt = 1;
-    if (i > 3) time = true;
+    if (i > 3) time2 = true;
     switch (m[i].slice(m[i].length - 1)) {
       case "Y":
         throw new Error("Unsupported ISO Duration Field: " + m[i].slice(m[i].length - 1));
@@ -1942,7 +1942,7 @@ function parse_isodur(s) {
         mt *= 60;
       /* falls through */
       case "M":
-        if (!time) throw new Error("Unsupported ISO Duration Field: M");
+        if (!time2) throw new Error("Unsupported ISO Duration Field: M");
         else mt *= 60;
       /* falls through */
       case "S":
@@ -43794,6 +43794,16 @@ function dropSilentBubble(state) {
   const items = bubble.reasoning ? replaceItem(state.items, bubble.id, { text: "", streaming: false }) : state.items.filter((item) => item.id !== bubble.id);
   return { ...state, items, live: { ...state.live, bubbleId: null } };
 }
+function stampCompleted(state, now) {
+  for (let i = state.items.length - 1; i >= 0; i -= 1) {
+    const item = state.items[i];
+    if (item.kind === "user") break;
+    if (item.kind === "assistant" || item.kind === "error" || item.kind === "tools") {
+      return { ...state, items: state.items.map((it, j) => j === i ? { ...it, completedAt: now } : it) };
+    }
+  }
+  return state;
+}
 function finishTurn(state) {
   const closed = closeBubble(state);
   const items = closed.items.map(
@@ -43944,7 +43954,7 @@ function applyEvent(state, event, now = Date.now()) {
         const message = String(payload.error || payload.failure_reason || "The reply failed.");
         next = { ...next, items: [...next.items, { kind: "error", id: liveId("e"), text: message, at: now }] };
       }
-      return finishTurn(next);
+      return finishTurn(stampCompleted(next, now));
     }
     case "error": {
       const message = String(payload.message || payload.error || "").trim();
@@ -50496,6 +50506,7 @@ pre.gbo-file-preview.is-mono { font-family: var(--font-mono-stack); font-size: 1
   list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; margin-left: 4px; border-radius: var(--radius-full);
   font-size: 12px; line-height: 16px; letter-spacing: 0.12px; font-weight: 400; color: var(--color-text-tertiary); cursor: pointer; user-select: none;
 }
+.gbo-tools > summary { max-width: calc(100% - 4px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gbo-think > summary:hover, .gbo-tools > summary:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
 .gbo-think > summary svg, .gbo-tools > summary svg { order: 1; width: 10px; height: 10px; opacity: 0.66; transform: rotate(90deg); transition: transform 160ms var(--ease-out); }
 .gbo-think[open] > summary svg, .gbo-tools[open] > summary svg { transform: rotate(-90deg); }
@@ -53453,6 +53464,68 @@ function withDividers(items, nowMs = Date.now(), locale) {
     out.push(item);
   }
   return out;
+}
+
+// src/core/workTime.js
+var END_KINDS = /* @__PURE__ */ new Set(["assistant", "error", "turn-error"]);
+function formatWorked(ms) {
+  const secs = Math.max(1, Math.round(Number(ms) / 1e3));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+var time = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+function withWorkTimes(items, { busy = false } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const patches = /* @__PURE__ */ new Map();
+  let start2 = -1;
+  const close = (from, to, last) => {
+    if (from < 0) return;
+    const began = time(list[from].at);
+    if (began === null) return;
+    let tools = -1;
+    let end = null;
+    for (let i = from + 1; i < to; i += 1) {
+      const item = list[i];
+      if (item?.kind === "tools") {
+        tools = i;
+        if (time(item.completedAt) !== null) end = time(item.completedAt);
+      } else if (END_KINDS.has(item?.kind)) {
+        const at = time(item.completedAt) ?? time(item.at);
+        if (at !== null) end = at;
+      }
+    }
+    if (tools < 0 || end === null || last && busy || end < began) return;
+    patches.set(tools, end - began);
+  };
+  for (let i = 0; i < list.length; i += 1) {
+    if (list[i]?.kind !== "user") continue;
+    close(start2, i, false);
+    start2 = i;
+  }
+  close(start2, list.length, true);
+  if (!patches.size && !list.some((item) => item?.kind === "tools" && "workedMs" in item)) return items;
+  let changed = false;
+  const out = list.map((item, i) => {
+    if (patches.has(i)) {
+      if (item.workedMs === patches.get(i)) return item;
+      changed = true;
+      return { ...item, workedMs: patches.get(i) };
+    }
+    if (item?.kind === "tools" && "workedMs" in item) {
+      changed = true;
+      const { workedMs: _drop, ...rest } = item;
+      return rest;
+    }
+    return item;
+  });
+  return changed ? out : items;
+}
+function foldLabel({ done, workedMs, toolSecs = 0 }) {
+  const count = done === 1 ? "1 tool" : `${done} tools`;
+  if (typeof workedMs === "number" && Number.isFinite(workedMs) && workedMs >= 0) return `Worked for ${formatWorked(workedMs)} · ${count}`;
+  return toolSecs >= 1 ? `${count} · ${Math.round(toolSecs)}s` : count;
 }
 
 // src/core/streamSafe.js
@@ -58099,7 +58172,7 @@ function sameNode(a2, b2) {
     return x === y || (typeof x !== "object" || x === null) && (typeof y !== "object" || y === null) && Object.is(x, y) || key === "children" && sameNode(x, y);
   });
 }
-function BotProseView({ bot, text: text3, pos, time, streaming = false }) {
+function BotProseView({ bot, text: text3, pos, time: time2, streaming = false }) {
   const { text: clean, media } = React12.useMemo(() => extractMedia(text3), [text3]);
   const files = media.filter((item) => item.kind === "file");
   const bubble = Boolean(clean) || media.length > files.length;
@@ -58108,7 +58181,7 @@ function BotProseView({ bot, text: text3, pos, time, streaming = false }) {
   return /* @__PURE__ */ jsxs13(Fragment8, { children: [
     bubble ? /* @__PURE__ */ jsxs13("div", { className: "bubble-wrap is-left", children: [
       /* @__PURE__ */ jsx14("div", { className: `bubble is-agent${pos}${streaming ? " is-streaming" : ""}`, children: /* @__PURE__ */ jsx14("div", { className: "md", ref: prose, onClickCapture: onSourceClickCapture, onAuxClickCapture: onSourceClickCapture, children: /* @__PURE__ */ jsx14(BotText, { bot, text: text3 }) }) }),
-      time
+      time2
     ] }) : null,
     /* @__PURE__ */ jsx14(FileCards, { bot, files })
   ] });
@@ -62616,8 +62689,7 @@ function ToolGroup({ item, bot }) {
     done > 0 ? /* @__PURE__ */ jsxs25("details", { className: "gbo-tools", children: [
       /* @__PURE__ */ jsxs25("summary", { children: [
         /* @__PURE__ */ jsx27(IconChevron, {}),
-        done === 1 ? "1 tool" : `${done} tools`,
-        secs >= 1 ? ` · ${Math.round(secs)}s` : ""
+        foldLabel({ done, workedMs: item.workedMs, toolSecs: secs })
       ] }),
       /* @__PURE__ */ jsx27("ul", { children: item.tools.filter((tool) => tool.status !== "running").map((tool) => /* @__PURE__ */ jsx27(ToolRow, { tool, bot }, tool.id)) })
     ] }) : null,
@@ -62733,7 +62805,7 @@ function AssistantBody({ item, bot, pos }) {
   const text3 = safe ? safe.text : item.text;
   const { segments: found, scope } = useDirectiveSegments(text3);
   const segments = React26.useMemo(() => found && scope ? found : [{ kind: "prose", text: text3 }], [found, scope, text3]);
-  const time = React26.useMemo(() => item.at ? /* @__PURE__ */ jsx28("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
+  const time2 = React26.useMemo(() => item.at ? /* @__PURE__ */ jsx28("span", { className: "bubble__time", children: clock(item.at) }) : null, [item.at]);
   const poll = Boolean(scope?.recent.has(item.id));
   const body = React26.useMemo(() => {
     const lastProse = segments.map((segment) => segment.kind).lastIndexOf("prose");
@@ -62746,13 +62818,13 @@ function AssistantBody({ item, bot, pos }) {
           bot,
           text: segment.text,
           pos,
-          time: index === lastProse ? time : null,
+          time: index === lastProse ? time2 : null,
           streaming: streaming && index === lastProse
         },
         `p${prose++}`
       ) : /* @__PURE__ */ jsx28(DirectiveBlock, { segment, poll, scope }, `d${directives++}`)
     );
-  }, [segments, bot, pos, time, streaming, poll, scope]);
+  }, [segments, bot, pos, time2, streaming, poll, scope]);
   const placeholder = React26.useMemo(() => safe?.pending && scope ? /* @__PURE__ */ jsx28(DirectivePlaceholder, { pending: safe.pending }) : null, [safe, scope]);
   return /* @__PURE__ */ jsxs26(Fragment15, { children: [
     body,
@@ -62901,7 +62973,7 @@ function Transcript({ state, bot, meta, onPrefill }) {
   };
   const decorated = React26.useMemo(
     () => groupMessages(
-      withNewMarker(withDividers(withTurnCards(visibleItems(withEmailDrafts(items), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
+      withNewMarker(withDividers(withTurnCards(visibleItems(withWorkTimes(withEmailDrafts(items), { busy: Boolean(state.chat.busy) }), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
     ),
     [items, showWork, newLine.id, state.chat.busy, state.turnRetry]
   );

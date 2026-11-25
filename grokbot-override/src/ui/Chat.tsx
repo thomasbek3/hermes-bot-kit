@@ -15,6 +15,7 @@ import { cornerClass, groupMessages } from '../core/groups.js'
 import { clock, withDividers } from '../core/time.js'
 import { withNewMarker } from '../core/newMarker.js'
 import { activityLabel, visibleItems } from '../core/workRows.js'
+import { withWorkTimes } from '../core/workTime.js'
 import { streamSafeParts } from '../core/streamSafe.js'
 import { previewStartHeight } from '../core/directives.js'
 import { withEmailDrafts } from '../core/emailDrafts.js'
@@ -500,7 +501,7 @@ function Transcript({ state, bot, meta, onPrefill }: { state: any; bot: any; met
   const decorated = React.useMemo(
     () =>
       groupMessages(
-        withNewMarker(withDividers(withTurnCards(visibleItems(withEmailDrafts(items), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
+        withNewMarker(withDividers(withTurnCards(visibleItems(withWorkTimes(withEmailDrafts(items), { busy: Boolean(state.chat.busy) }), showWork), { busy: Boolean(state.chat.busy), retry: state.turnRetry })), newLine.id)
       ),
     [items, showWork, newLine.id, state.chat.busy, state.turnRetry]
   )

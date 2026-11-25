@@ -1,5 +1,6 @@
 // Tool activity with full detail (PARITY C13): finished tools fold into
-// "N tools"; each one opens to its arguments, result, inline diff and any
+// "N tools" (a finished turn's last fold: "Worked for 3m 12s · N tools",
+// core/workTime.js); each one opens to its arguments, result, inline diff and any
 // image it produced (read from the bot's own backend, C15). Mirrors the app's
 // tool row (components/assistant-ui/tool/fallback.tsx: Arguments / Result
 // trace, FileDiffPanel, MarkdownImage), in the override's own look.
@@ -7,6 +8,7 @@
 import * as React from 'react'
 
 import { diffLines, hasDetail } from '../core/tools.js'
+import { foldLabel } from '../core/workTime.js'
 import { IconChevron } from './icons'
 import { OwnerMedia } from './Media'
 import { mediaKind, mediaName } from '../core/media.js'
@@ -93,8 +95,7 @@ export function ToolGroup({ item, bot }: { item: any; bot: any }) {
         <details className="gbo-tools">
           <summary>
             <IconChevron />
-            {done === 1 ? '1 tool' : `${done} tools`}
-            {secs >= 1 ? ` · ${Math.round(secs)}s` : ''}
+            {foldLabel({ done, workedMs: item.workedMs, toolSecs: secs })}
           </summary>
           <ul>
             {item.tools

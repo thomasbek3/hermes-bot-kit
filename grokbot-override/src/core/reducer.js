@@ -117,6 +117,19 @@ function dropSilentBubble(state) {
   return { ...state, items, live: { ...state.live, bubbleId: null } }
 }
 
+/** When the turn finished (core/workTime.js "Worked for …"): on this turn's
+ *  last reply, or its last tool group when it has no reply. */
+function stampCompleted(state, now) {
+  for (let i = state.items.length - 1; i >= 0; i -= 1) {
+    const item = state.items[i]
+    if (item.kind === 'user') break
+    if (item.kind === 'assistant' || item.kind === 'error' || item.kind === 'tools') {
+      return { ...state, items: state.items.map((it, j) => (j === i ? { ...it, completedAt: now } : it)) }
+    }
+  }
+  return state
+}
+
 export function finishTurn(state) {
   const closed = closeBubble(state)
   const items = closed.items.map(item =>
@@ -293,7 +306,7 @@ export function applyEvent(state, event, now = Date.now()) {
         const message = String(payload.error || payload.failure_reason || 'The reply failed.')
         next = { ...next, items: [...next.items, { kind: 'error', id: liveId('e'), text: message, at: now }] }
       }
-      return finishTurn(next)
+      return finishTurn(stampCompleted(next, now))
     }
 
     case 'error': {
