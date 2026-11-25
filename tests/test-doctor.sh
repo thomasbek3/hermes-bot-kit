@@ -104,6 +104,28 @@ has "install.sh" "missing folder (the fix names the installer)"
 hasnt "FIX   computer-viewer" "missing folder"
 ok "missing plugin folder: FIX naming it"
 
+# 2b. After install.sh --uninstall: "not installed", cleanly (no FIX, exit 0).
+U=$(new_user)
+install_into "${U}/.hermes"
+env -i PATH=/usr/bin:/bin HOME="${U}" HERMES_HOME="${U}/.hermes" TMPDIR="${WORK}" bash "${INSTALLER}" --uninstall >/dev/null ||
+  fail "uninstall before the doctor failed"
+doctor "${U}"
+[ "${RC}" -eq 0 ] || fail "after uninstall: exit ${RC}:
+${OUT}"
+has "INFO  Bot Kit: not installed (removed with install.sh --uninstall)" "after uninstall"
+hasnt "FIX" "after uninstall"
+hasnt "No install record" "after uninstall"
+has "Nothing to fix: the kit is not installed" "after uninstall"
+summary | grep -qx 'check kit-installed INFO' || fail "after uninstall: no kit-installed check in the summary"
+summary | grep -qx 'kit plugins: none' || fail "after uninstall: plugins in the summary"
+# Installed again: the usual checks are back.
+install_into "${U}/.hermes"
+doctor "${U}"
+[ "${RC}" -eq 0 ] || fail "reinstall after uninstall: exit ${RC}"
+hasnt "not installed" "reinstall after uninstall"
+has "OK    grokbot-override: plugin.js matches MANIFEST.sha256" "reinstall after uninstall"
+ok "after --uninstall: 'not installed' with no FIX (exit 0); a reinstall is checked as usual"
+
 # 3. A wrong folder name (a GitHub zip's -main folder).
 U=$(new_user)
 install_into "${U}/.hermes"

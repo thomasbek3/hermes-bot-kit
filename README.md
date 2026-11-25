@@ -246,6 +246,32 @@ restarts Hermes: after an update, **⌘K → Reload desktop plugins**.
   folders nobody else can write to; a private copy of it is what runs. The
   kit ships no hook.
 
+## Uninstall
+
+One command takes the desktop plugins out again (macOS and Linux):
+
+```bash
+( set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl -fsSL https://raw.githubusercontent.com/thomasbek3/hermes-bot-kit/v2026.11.22/install.sh -o "$f"; test -s "$f"; bash "$f" --uninstall )
+```
+
+From a clone: `bash install.sh --uninstall`. It turns the daily auto-update
+off first (otherwise the next run would put the plugins back) and stops,
+changing nothing, if that fails. Then it moves `grokbot-override` and
+`computer-viewer` out of `desktop-plugins/` to
+`desktop-plugins-removed-<timestamp>-<name>`, and the kit's records
+(`installed-release`, the install record, the installed manifest) to
+`hermes-bot-kit-removed-<timestamp>/`, both in the Hermes home. Nothing is
+deleted and nothing is restarted: **⌘K → Reload desktop plugins**, or restart
+Hermes Desktop. Running it again says nothing is installed.
+
+Agent plugins (texting-style, email-drafts, remote-cua, the Slack plugins) are
+per profile and may be enabled in `config.yaml`, so `--uninstall` leaves them
+and every `config.yaml` alone. It lists where it found each one, with the
+removal steps from that plugin's README (for example
+[texting-style](texting-style/README.md), [remote-cua](remote-cua/README.md#uninstall),
+[slack-connect](slack-connect/README.md#uninstall)). The agent-cards skill:
+`KIT_CARDS_SKILL=remove` (see [Install](#install)).
+
 ## New: Grokbot Override
 
 <p align="center">

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **`install.sh --uninstall` (fixes: an uninstall was undone by the next
+  auto-update).** The old runbook moved the two desktop plugins out but left
+  the daily job and `<home>/hermes-bot-kit/installed-release`, so the next
+  release put them back. `--uninstall` (also through the curl one-liner) first
+  turns auto-update off through the `--auto-update off` code path and stops
+  with a non-zero exit, changing nothing, if that fails. Then it moves
+  `computer-viewer` and `grokbot-override` to
+  `<home>/desktop-plugins-removed-<ts>-<name>` and the records
+  (`desktop-plugins/.hermes-bot-kit-install`, the installed `MANIFEST.sha256`,
+  the `hermes-bot-kit/` folder with `installed-release`) to
+  `<home>/hermes-bot-kit-removed-<ts>/`; nothing is deleted or restarted. A
+  second run says nothing is installed and exits 0, and the doctor then reports
+  "not installed" (INFO, exit 0) instead of a FIX per plugin. Agent plugins and
+  `config.yaml` are never touched: it lists where each kit agent plugin was
+  found with its README's removal steps. AGENTS.md's uninstall block uses it;
+  the manual fallback block now turns auto-update off first. Tests in
+  `tests/test-auto-update.sh` (`uninstall: …`), `tests/test-doctor.sh` (2b) and
+  `tests/test-agents-runbook.sh`.
+
 - **Computer Viewer: per-bot computers are scoped to the connection, not just
   the profile name (#26).** Two Desktop connections that both had a `default`
   profile shared one endpoint override. Bindings are now stored under the

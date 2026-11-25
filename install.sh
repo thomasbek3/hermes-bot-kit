@@ -30,6 +30,9 @@
 #   `on` remembers HERMES_HOME, KIT_SKIP_GROKBOT, KIT_SKIP_COMPUTER,
 #   KIT_TEXTING_STYLE=1 (also refresh texting-style copies) and
 #   KIT_POST_UPDATE_HOOK=/abs/path (your own script, run after each update).
+#
+# Uninstall:  bash install.sh --uninstall   (auto-update off first, then the
+#   desktop plugins and the kit's records moved aside; nothing is deleted)
 set -euo pipefail
 
 # The tag this script was released with (scripts/release.sh rewrites it).
@@ -60,6 +63,8 @@ or from a clone:  bash install.sh
 Not working?  bash install.sh --doctor   (read-only checks; changes nothing)
 Keep it updated:  bash install.sh --auto-update on   (daily, newest release;
                   also off, status, run; macOS and Linux)
+Uninstall:        bash install.sh --uninstall   (auto-update off, then the desktop
+                  plugins and records moved aside; agent plugins are listed, not touched)
 
 Installs the newest GitHub release (falls back to v2026.11.22 when the
 GitHub API cannot be reached) and checks every file against that release's
@@ -1028,6 +1033,171 @@ if [ "${1:-}" = "--auto-update" ]; then
       exit 2
       ;;
   esac
+fi
+
+# --- Uninstall: install.sh --uninstall -------------------------------------------
+# Order matters: the daily job is turned off FIRST (the --auto-update off code
+# path), because a job left behind reinstalls the plugins at its next run. If
+# that fails nothing else is changed. Then the kit's desktop plugin folders
+# move out of desktop-plugins/ to <home>/desktop-plugins-removed-<ts>-<name>,
+# and the kit's records (desktop-plugins/.hermes-bot-kit-install and
+# MANIFEST.sha256, and the <home>/hermes-bot-kit/ folder with installed-release)
+# move to <home>/hermes-bot-kit-removed-<ts>/. Nothing is deleted. Agent
+# plugins (per profile, maybe enabled in config.yaml) and config.yaml are never
+# touched: they are listed with how to remove each. Never restarts anything.
+KIT_DESKTOP_PLUGINS="computer-viewer grokbot-override"
+KIT_DOCS="https://github.com/${KIT_REPO}/blob/${KIT_FALLBACK_REF}"
+
+# Something of this home's auto-update is still there (settings, the updater
+# copy, or a job file that runs this home's updater).
+un_au_present() {
+  [ -f "${AU_ENV}" ] && return 0
+  [ -f "${AU_SCRIPT}" ] && return 0
+  if [ -f "${AU_PLIST}" ] && grep -qF "<string>${AU_SCRIPT}</string>" "${AU_PLIST}"; then return 0; fi
+  if [ -f "${AU_UNIT_DIR}/${AU_UNIT}.service" ] && grep -qF "\"${AU_SCRIPT}\"" "${AU_UNIT_DIR}/${AU_UNIT}.service"; then return 0; fi
+  return 1
+}
+
+# The kit's agent plugins found in this Hermes home and its profiles, each with
+# the removal steps its README documents. Only reads.
+un_agent_report() {
+  local dir name how home where any=0
+  while IFS='|' read -r dir name how; do
+    [ -n "${dir}" ] || continue
+    where=""
+    for home in "${HERMES_ROOT}" "${HERMES_ROOT}"/profiles/*; do
+      [ -d "${home}" ] || continue
+      case "${dir}" in
+        platforms/slack) [ -f "${home}/plugins/platforms/slack/http_adapter.py" ] || continue ;;
+        *) [ -e "${home}/plugins/${dir}" ] || [ -L "${home}/plugins/${dir}" ] || continue ;;
+      esac
+      where="${where:+${where}, }${home}"
+    done
+    [ -n "${where}" ] || continue
+    if [ "${any}" = 0 ]; then
+      echo
+      echo "Agent plugins from the kit are still installed. They live per profile and may be enabled in"
+      echo "config.yaml, so --uninstall leaves them (and every config.yaml) alone. To remove one:"
+      any=1
+    fi
+    echo "  ${name} (plugins/${dir} in ${where})"
+    echo "    ${how}"
+  done <<EOF
+texting-style|texting-style|move plugins/texting-style out of that Hermes home and take texting-style out of plugins.enabled in its config.yaml (${KIT_DOCS}/texting-style/README.md)
+email-drafts|email-drafts|move plugins/email-drafts out of that Hermes home and take email-drafts out of plugins.enabled in its config.yaml (${KIT_DOCS}/email-drafts/README.md)
+remote-cua|remote-cua|move plugins/remote-cua out, take remote-cua out of plugins.enabled and remove the computer_use.backend / remote_cua lines in its config.yaml (${KIT_DOCS}/remote-cua/README.md#uninstall)
+slack-check|slack-check|move plugins/slack-check out and take slack-check out of plugins.enabled in its config.yaml (${KIT_DOCS}/slack-check/README.md)
+slack-connect|slack-connect|from a clone: bash slack-connect/install.sh --uninstall --dry-run, then without --dry-run (${KIT_DOCS}/slack-connect/README.md#uninstall)
+platforms/slack|slack-http (the Slack platform shadow)|move plugins/platforms/slack out of that Hermes home (${KIT_DOCS}/slack-http/README.md)
+EOF
+  for home in "${HERMES_ROOT}" "${HERMES_ROOT}"/profiles/*; do
+    [ -f "${home}/skills/agent-cards/SKILL.md" ] && grep -qF "${CARDS_MARKER}" "${home}/skills/agent-cards/SKILL.md" || continue
+    echo
+    echo "The kit's agent-cards skill is still installed: run the installer again with KIT_CARDS_SKILL=remove in front of bash."
+    break
+  done
+  return 0
+}
+
+kit_uninstall() {
+  local ts p dest n moved="" rc removed="" installed=0
+  au_norm_home
+  if [ ! -d "${HERMES_ROOT}" ]; then
+    echo "Uninstall        -- nothing is installed: there is no Hermes home at ${HERMES_ROOT}. Nothing changed."
+    return 0
+  fi
+  un_au_present && installed=1
+  for p in ${KIT_DESKTOP_PLUGINS}; do
+    if [ -e "${PLUGIN_ROOT}/${p}" ] || [ -L "${PLUGIN_ROOT}/${p}" ]; then installed=1; fi
+  done
+  [ -f "${PLUGIN_ROOT}/.hermes-bot-kit-install" ] && installed=1
+  [ -d "${KIT_STATE_DIR}" ] && installed=1
+  if [ "${installed}" = 0 ]; then
+    echo "Uninstall        -- nothing is installed in ${HERMES_ROOT} (no kit desktop plugins, install records or auto-update). Nothing changed."
+    un_agent_report
+    return 0
+  fi
+
+  # 1. The daily job first: left behind, it would install the plugins again.
+  if un_au_present; then
+    if ! au_off; then
+      echo "install.sh: --uninstall stopped: auto-update could not be turned off (see above), so nothing else was changed. Fix that, then run --uninstall again." >&2
+      return 1
+    fi
+  fi
+  # 2. Never under an update that is running now.
+  if [ -d "${KIT_STATE_DIR}" ]; then
+    rc=0
+    au_lock || rc=$?
+    if [ "${rc}" = 1 ]; then
+      echo "install.sh: --uninstall stopped: an update is running right now (pid ${AU_LOCK_PID:-unknown}). Auto-update is off; nothing else was changed. Run --uninstall again in a minute." >&2
+      return 1
+    elif [ "${rc}" != 0 ]; then
+      echo "install.sh: --uninstall stopped: ${AU_LOCK_ERR:-could not take the update lock}. Auto-update is off; nothing else was changed." >&2
+      return 1
+    fi
+  fi
+
+  # 3. The desktop plugins, moved out (nothing deleted).
+  ts=$(date +%Y%m%d%H%M%S)
+  for p in ${KIT_DESKTOP_PLUGINS}; do
+    [ -e "${PLUGIN_ROOT}/${p}" ] || [ -L "${PLUGIN_ROOT}/${p}" ] || continue
+    dest="${HERMES_ROOT}/desktop-plugins-removed-${ts}-${p}"
+    n=1
+    while [ -e "${dest}" ] || [ -L "${dest}" ]; do
+      n=$((n + 1))
+      dest="${HERMES_ROOT}/desktop-plugins-removed-${ts}-${p}.${n}"
+    done
+    if ! mv -- "${PLUGIN_ROOT}/${p}" "${dest}" 2>/dev/null; then
+      au_unlock
+      echo "install.sh: --uninstall stopped: could not move ${PLUGIN_ROOT}/${p} out (permissions?)${moved:+; already moved:${moved}}. Auto-update is off. Fix that, then run --uninstall again." >&2
+      return 1
+    fi
+    moved="${moved} ${p}"
+    echo "Uninstall        -- moved ${p} to ${dest}"
+  done
+
+  # 4. The kit's records, moved to one hermes-bot-kit-removed-<ts> folder.
+  removed="${HERMES_ROOT}/hermes-bot-kit-removed-${ts}"
+  n=1
+  while [ -e "${removed}" ] || [ -L "${removed}" ]; do
+    n=$((n + 1))
+    removed="${HERMES_ROOT}/hermes-bot-kit-removed-${ts}.${n}"
+  done
+  if [ -d "${KIT_STATE_DIR}" ]; then
+    if ! mv -- "${KIT_STATE_DIR}" "${removed}" 2>/dev/null; then
+      au_unlock
+      echo "install.sh: --uninstall stopped: could not move ${KIT_STATE_DIR} out. Auto-update is off${moved:+ and the plugins are moved out}. Fix that, then run --uninstall again." >&2
+      return 1
+    fi
+  else
+    mkdir -p "${removed}"
+  fi
+  au_unlock
+  rm -f "${removed}/update.flock" "${removed}/update.flock.pid"
+  for p in .hermes-bot-kit-install MANIFEST.sha256; do
+    [ -f "${PLUGIN_ROOT}/${p}" ] || continue
+    if ! mv -- "${PLUGIN_ROOT}/${p}" "${removed}/${p#.}" 2>/dev/null; then
+      echo "install.sh: --uninstall: could not move ${PLUGIN_ROOT}/${p} out; remove it by hand." >&2
+      return 1
+    fi
+  done
+  printf 'removed=%s\nplugins=%s\n' "${ts}" "${moved# }" > "${removed}/UNINSTALLED"
+  echo "Uninstall        -- install records (installed-release, the install record, the manifest) moved to ${removed}"
+  un_agent_report
+  echo
+  echo "Done: the kit's desktop plugins are uninstalled and auto-update is off (nothing was deleted; nothing was restarted)."
+  echo "Reload desktop plugins (Cmd+K) or restart Hermes Desktop"
+  return 0
+}
+
+if [ "${1:-}" = "--uninstall" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "Usage: install.sh --uninstall" >&2
+    exit 2
+  fi
+  kit_uninstall
+  exit $?
 fi
 
 case "${KIT_CARDS_SKILL:-0}" in

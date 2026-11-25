@@ -526,12 +526,24 @@ RECORD="${D}/.hermes-bot-kit-install"
 MANIFEST="${D}/MANIFEST.sha256"
 RELEASE="none"
 EXPECTED="${KIT_PLUGINS}"
+# Removed on purpose (install.sh --uninstall leaves <home>/hermes-bot-kit-removed-<ts>/UNINSTALLED):
+# no install record and no kit plugin folder means "not installed", not a FIX per plugin.
+UNINSTALLED=0
+if [ ! -f "${RECORD}" ] && [ ! -e "${D}/computer-viewer" ] && [ ! -e "${D}/grokbot-override" ]; then
+  for u in "${H}"/hermes-bot-kit-removed-*/UNINSTALLED; do
+    [ -f "${u}" ] || continue
+    UNINSTALLED=1
+    EXPECTED=""
+    info kit-installed "Bot Kit: not installed (removed with install.sh --uninstall). To install it again: $(installer_cmd)"
+    break
+  done
+fi
 if [ -f "${RECORD}" ]; then
   RELEASE=$(sed -n 's/^release=//p' "${RECORD}" | head -n 1)
   rec_plugins=$(sed -n 's/^plugins=//p' "${RECORD}" | head -n 1)
   [ -n "${rec_plugins}" ] && EXPECTED="${rec_plugins}"
   ok install-record "Install record: release ${RELEASE:-?}, plugins ${rec_plugins:-?}"
-elif [ -d "${D}" ]; then
+elif [ -d "${D}" ] && [ "${UNINSTALLED}" = 0 ]; then
   info install-record "No install record (${RECORD}): the kit was copied by hand or by a release older than v2026.11.16"
 fi
 
@@ -605,6 +617,7 @@ for p in ${KIT_PLUGINS}; do
 
   if [ "${found_right}" = 0 ]; then
     case "${PROFILE_SCOPED}" in *" ${p} "*) continue ;; esac
+    [ "${UNINSTALLED}" = 1 ] && continue
     if expected "${p}"; then
       fix "${p}-installed" "${p}: not installed (no ${want})" "$(installer_cmd)"
     else
@@ -745,6 +758,8 @@ if [ "${NFIX}" -eq 0 ] && [ "${HOME_VERIFIED}" = 0 ] && [ "${WIN_TARGET}" = 1 ];
   echo "Nothing to fix in ${H}, but Hermes Desktop for Windows may read another home (a HERMES_HOME in the registry): run the README's PowerShell check on Windows (README: Troubleshooting, Hermes Desktop on Windows). Exit code 2."
 elif [ "${NFIX}" -eq 0 ] && [ "${HOME_VERIFIED}" = 0 ]; then
   echo "Nothing to fix in WSL's home, but that is not the home Hermes Desktop for Windows reads: check %LOCALAPPDATA%\\hermes\\desktop-plugins on Windows (README: Troubleshooting, Hermes Desktop on Windows). Exit code 2."
+elif [ "${NFIX}" -eq 0 ] && [ "${UNINSTALLED}" = 1 ]; then
+  echo "Nothing to fix: the kit is not installed (it was removed with install.sh --uninstall)."
 elif [ "${NFIX}" -eq 0 ]; then
   echo "Nothing to fix. If the plugins still don't show, reload them (above) and check Capabilities -> Plugins."
 else
